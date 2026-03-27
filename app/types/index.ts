@@ -1,0 +1,44 @@
+export interface Segment {
+  id: string;
+  songId: string;
+  order: number;
+  label: string;
+  lyricText: string;
+  startMs: number;
+  endMs: number;
+}
+
+export interface Song {
+  id: string;
+  title: string;
+  composer: string;
+  description?: string;
+  audioUrl: string;
+  segments: Segment[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MemoryRating = 1 | 2 | 3 | 4 | 5;
+
+export interface SegmentRating {
+  id: string;
+  segmentId: string;
+  rating: MemoryRating;
+  ratedAt: string;
+}
+
+export interface PracticeSession {
+  id: string;
+  songId: string;
+  currentSegmentIndex: number;
+  isLocked: boolean;
+  ratings: SegmentRating[];
+  startedAt: string;
+  completedAt?: string;
+}
+
+export interface KnowledgeScore {
+  overall: number;
+  bySegment: Record<string, number>;
+}
