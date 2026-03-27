@@ -1,0 +1,34 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import RatingBar from './RatingBar';
+
+describe('RatingBar', () => {
+  it('renders 5 rating buttons', () => {
+    render(<RatingBar onRate={vi.fn()} />);
+    expect(screen.getAllByRole('button')).toHaveLength(5);
+  });
+
+  it('clicking a button calls onRate with the correct value', async () => {
+    const onRate = vi.fn();
+    render(<RatingBar onRate={onRate} />);
+    await userEvent.click(screen.getByTestId('rating-button-3'));
+    expect(onRate).toHaveBeenCalledWith(3);
+  });
+
+  it('button matching currentRating has aria-pressed=true', () => {
+    render(<RatingBar currentRating={4} onRate={vi.fn()} />);
+    const btn4 = screen.getByTestId('rating-button-4');
+    const btn2 = screen.getByTestId('rating-button-2');
+    expect(btn4).toHaveAttribute('aria-pressed', 'true');
+    expect(btn2).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('disabled prop propagates to all buttons', () => {
+    render(<RatingBar onRate={vi.fn()} disabled={true} />);
+    const buttons = screen.getAllByRole('button');
+    buttons.forEach((btn) => {
+      expect(btn).toBeDisabled();
+    });
+  });
+});
