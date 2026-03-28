@@ -1,8 +1,10 @@
+"use client";
 
-import { MemoryRating, Segment } from '../types/index';
-import { getSegmentKnowledgePercent } from '../lib/knowledgeUtils';
-import RatingBar from './RatingBar';
-import KnowledgeBar from './KnowledgeBar';
+import React from "react";
+import { Segment, MemoryRating } from "../types/index";
+import RatingBar from "./RatingBar";
+import KnowledgeBar from "./KnowledgeBar";
+import { getSegmentKnowledgePercent } from "../lib/knowledgeUtils";
 
 interface SegmentCardProps {
   segment: Segment;
@@ -12,26 +14,34 @@ interface SegmentCardProps {
   onToggleLock: () => void;
 }
 
-export default function SegmentCard({
+const SegmentCard: React.FC<SegmentCardProps> = ({
   segment,
   currentRating,
   onRate,
   isLocked,
   onToggleLock,
-}: SegmentCardProps) {
-  const knowledgePercent = currentRating ? getSegmentKnowledgePercent(currentRating) : 0;
+}) => {
   return (
     <div className="bg-white rounded-xl shadow p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">{segment.label}</h2>
-        <button aria-label="Toggle lock" data-testid="lock-toggle" onClick={onToggleLock} className="text-sm px-3 py-1 rounded-full border border-gray-300">
-          {isLocked ? 'Locked' : 'Unlocked'}
-        </button>
-      </div>
-      <RatingBar currentRating={currentRating} onRate={onRate} disabled={isLocked} />
-      <div className="mt-4">
-        <KnowledgeBar percent={knowledgePercent} label="Knowledge" />
-      </div>
+      <h2 className="text-xl font-semibold">{segment.label}</h2>
+      <button
+        aria-label="Toggle lock"
+        data-testid="lock-toggle"
+        onClick={onToggleLock}
+      >
+        {isLocked ? "Locked" : "Unlocked"}
+      </button>
+      <RatingBar
+        currentRating={currentRating}
+        onRate={onRate}
+        disabled={isLocked}
+      />
+      <KnowledgeBar
+        percent={currentRating ? getSegmentKnowledgePercent(currentRating) : 0}
+        label="Knowledge"
+      />
     </div>
   );
-}
+};
+
+export default SegmentCard;

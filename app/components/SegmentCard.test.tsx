@@ -1,43 +1,82 @@
+import React from "react";
+import { render, screen, fireEvent } from "@testing-library/react";
+import "@testing-library/jest-dom";
+import { vi } from "vitest";
+import SegmentCard from "./SegmentCard";
+import { Segment } from "../types/index";
 
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import SegmentCard from './SegmentCard';
+vi.mock("./RatingBar", () => ({
+  default: ({ currentRating, onRate, disabled }: { currentRating?: number; onRate: (r: number) => void; disabled: boolean }) => (
+    <div
+      data-testid="mock-rating-bar"
+      data-disabled={String(disabled)}
+      data-current-rating={currentRating ?? ""}
+    >
+      <button onClick={() => onRate(3)}>Rate</button>
+    </div>
+  ),
+}));
 
-const seg = { id: 'seg1', label: 'Verse 1', order: 0 };
+vi.mock("./KnowledgeBar", () => ({
+  default: ({ percent, label }: { percent: number; label?: string }) => (
+    <div data-testid="mock-knowledge-bar" data-percent={percent}>
+      {label}
+    </div>
+  ),
+}));
 
-describe('SegmentCard', () => {
-  it('renders segment label', () => {
-    render(<SegmentCard segment={seg} onRate={vi.fn()} isLocked={false} onToggleLock={vi.fn()} />);
-    expect(screen.getByText('Verse 1')).toBeInTheDocument();
+vi.mock("../lib/knowledgeUtils", () => ({
+  getSegmentKnowledgePercent: (rating: number) => rating * 20,
+}));
+
+const mockSegment: Segment = {
+  id: "seg-1",
+  songId: "song-1",
+  order: 1,
+  label: "Verse 1",
+  lyricText: "Some lyrics here",
+  startMs: 0,
+  endMs: 4000,
+};
+
+const defaultProps = {
+  segment: mockSegment,
+  onRate: vi.fn(),
+  isLocked: false,
+  onToggleLock: vi.fn(),
+};
+
+describe("SegmentCard", () => {
+  it("renders the segment label", () => {
+    render(<SegmentCard {...defaultProps} />);
+    expect(screen.getByRole("heading", { name: "Verse 1" })).toBeInTheDocument();
   });
 
-  it('renders RatingBar and KnowledgeBar', () => {
-    render(<SegmentCard segment={seg} onRate={vi.fn()} isLocked={false} onToggleLock={vi.fn()} />);
-    expect(screen.getAllByRole('button').length).toBeGreaterThanOrEqual(5);
-    expect(screen.getByRole('progressbar')).toBeInTheDocument();
+  it("renders RatingBar and KnowledgeBar", () => {
+    render(<SegmentCard {...defaultProps} />);
+    expect(screen.getByTestId("mock-rating-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-knowledge-bar")).toBeInTheDocument();
   });
 
-  it('clicking lock toggle calls onToggleLock', async () => {
+  it("clicking lock toggle calls onToggleLock", () => {
     const onToggleLock = vi.fn();
-    render(<SegmentCard segment={seg} onRate={vi.fn()} isLocked={false} onToggleLock={onToggleLock} />);
-    await userEvent.click(screen.getByTestId('lock-toggle'));
-    expect(onToggleLock).toHaveBeenCalledOnce();
+    render(<SegmentCard {...defaultProps} onToggleLock={onToggleLock} />);
+    fireEvent.click(screen.getByTestId("lock-toggle"));
+    expect(onToggleLock).toHaveBeenCalledTimes(1);
   });
 
-  it('RatingBar is disabled when isLocked=true', () => {
-    render(<SegmentCard segment={seg} onRate={vi.fn()} isLocked={true} onToggleLock={vi.fn()} />);
-    const ratingBtns = screen.getAllByTestId(/rating-button/);
-    ratingBtns.forEach(btn => expect(btn).toBeDisabled());
+  it("RatingBar is disabled when isLocked=true", () => {
+    render(<SegmentCard {...defaultProps} isLocked={true} />);
+    expect(screen.getByTestId("mock-rating-bar")).toHaveAttribute("data-disabled", "true");
   });
 
-  it('KnowledgeBar shows 0 when no currentRating', () => {
-    render(<SegmentCard segment={seg} onRate={vi.fn()} isLocked={false} onToggleLock={vi.fn()} />);
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+  it("KnowledgeBar shows 0 when no currentRating", () => {
+    render(<SegmentCard {...defaultProps} />);
+    expect(screen.getByTestId("mock-knowledge-bar")).toHaveAttribute("data-percent", "0");
   });
 
-  it('KnowledgeBar shows 80 when currentRating=4', () => {
-    render(<SegmentCard segment={seg} currentRating={4} onRate={vi.fn()} isLocked={false} onToggleLock={vi.fn()} />);
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '80');
+  it("KnowledgeBar shows 80 when currentRating=4", () => {
+    render(<SegmentCard {...defaultProps} currentRating={4} />);
+    expect(screen.getByTestId("mock-knowledge-bar")).toHaveAttribute("data-percent", "80");
   });
 });

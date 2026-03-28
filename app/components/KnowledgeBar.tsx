@@ -1,27 +1,40 @@
+"use client";
+
+import React from "react";
+
 interface KnowledgeBarProps {
   percent: number;
   label?: string;
 }
 
-export default function KnowledgeBar({ percent, label }: KnowledgeBarProps) {
+const KnowledgeBar: React.FC<KnowledgeBarProps> = ({ percent, label }) => {
+  const clampedPercent = Math.min(100, Math.max(0, percent));
+
   return (
-    <div>
+    <div className="w-full">
       {label && (
-        <p className="text-xs text-gray-500 mb-1">{label}</p>
+        <p
+          className="mb-1 text-xs text-gray-700"
+          data-testid="knowledge-bar-label"
+        >
+          {label}
+        </p>
       )}
       <div
+        className="w-full bg-gray-200 rounded h-3"
         role="progressbar"
-        aria-valuenow={percent}
+        aria-valuenow={clampedPercent}
         aria-valuemin={0}
         aria-valuemax={100}
-        className="w-full bg-gray-200 rounded h-3"
       >
         <div
-          data-testid="knowledge-bar-fill"
           className="bg-indigo-500 rounded h-3 transition-all"
-          style={{ width: `${percent}%` }}
+          style={{ width: `${clampedPercent}%` }}
+          data-testid="knowledge-bar-fill"
         />
       </div>
     </div>
   );
-}
+};
+
+export default KnowledgeBar;
