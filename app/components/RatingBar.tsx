@@ -1,5 +1,7 @@
-import { MemoryRating } from '../types/index';
-import RatingButton from './RatingButton';
+"use client";
+
+import React from "react";
+import { MemoryRating } from "../types/index";
 
 interface RatingBarProps {
   currentRating?: MemoryRating;
@@ -9,18 +11,36 @@ interface RatingBarProps {
 
 const RATINGS: MemoryRating[] = [1, 2, 3, 4, 5];
 
-export default function RatingBar({ currentRating, onRate, disabled }: RatingBarProps) {
+const RatingBar: React.FC<RatingBarProps> = ({
+  currentRating,
+  onRate,
+  disabled = false,
+}) => {
   return (
-    <div className="flex gap-2">
-      {RATINGS.map((r) => (
-        <RatingButton
-          key={r}
-          rating={r}
-          selected={currentRating === r}
-          onClick={onRate}
+    <div className="flex gap-2 justify-center">
+      {RATINGS.map((rating) => (
+        <button
+          key={rating}
+          data-testid={`rating-button-${rating}`}
+          onClick={() => onRate(rating)}
           disabled={disabled}
-        />
+          aria-label={`Rate ${rating}`}
+          aria-pressed={currentRating === rating ? "true" : "false"}
+          className={[
+            "w-10 h-10 rounded-full text-sm font-semibold transition-colors",
+            currentRating === rating
+              ? "bg-indigo-600 text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-indigo-100",
+            disabled ? "opacity-40 cursor-not-allowed" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {rating}
+        </button>
       ))}
     </div>
   );
-}
+};
+
+export default RatingBar;

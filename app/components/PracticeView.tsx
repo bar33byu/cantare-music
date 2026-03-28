@@ -30,11 +30,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
   const isFirst = session.currentSegmentIndex === 0;
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold" data-testid="song-title">
+    <div className="max-w-lg mx-auto w-full flex flex-col gap-6 p-4">
+      <h1 className="text-3xl font-bold text-center text-gray-900" data-testid="song-title">
         {song.title}
       </h1>
-      <p data-testid="segment-counter">
+      <p className="text-center text-sm text-gray-500" data-testid="segment-counter">
         {session.currentSegmentIndex + 1} / {song.segments.length}
       </p>
       <SegmentCard
@@ -46,11 +46,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
         isLocked={session.isLocked}
         onToggleLock={() => dispatch({ type: "TOGGLE_LOCK" })}
       />
-      <div className="flex gap-4 mt-4">
+      <div className="flex justify-between">
         <button
           data-testid="prev-btn"
           disabled={isFirst}
           onClick={() => dispatch({ type: "PREV_SEGMENT" })}
+          className="px-6 py-2 rounded-full bg-indigo-600 text-white disabled:opacity-40"
         >
           Previous
         </button>
@@ -58,6 +59,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
           data-testid="next-btn"
           disabled={isLast}
           onClick={() => dispatch({ type: "NEXT_SEGMENT" })}
+          className="px-6 py-2 rounded-full bg-indigo-600 text-white disabled:opacity-40"
         >
           Next
         </button>
