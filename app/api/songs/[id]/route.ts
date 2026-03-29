@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSongById, deleteSong, updateSong } from '../../../../db/queries';
 import { deleteObject } from '../../../../lib/r2';
-import type { SongRow } from '../../../db/schema';
+import type { SongRow } from '../../../../db/schema';
 
 export async function GET(
   request: NextRequest,
