@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSegmentsBySongId, upsertSegments } from '../../../../../db/queries';
-import type { SegmentRow } from '../../../../db/schema';
+import type { SegmentRow } from '../../../../../db/schema';
 
 export async function GET(
   request: NextRequest,
