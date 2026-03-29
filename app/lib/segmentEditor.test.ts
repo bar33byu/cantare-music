@@ -214,5 +214,25 @@ describe('segmentEditor', () => {
         { id: '1', label: 'A', order: 0, startMs: 1000, endMs: 2000, lyricText: 'test' },
       ]);
     });
+
+    it('converts null lyricText to empty string', () => {
+      const rows = [
+        {
+          id: '1',
+          songId: 'song-123',
+          label: 'A',
+          order: 0,
+          startMs: 1000,
+          endMs: 2000,
+          lyricText: null,
+        },
+      ];
+
+      const segments = rowsToEditorSegments(rows);
+
+      expect(segments).toEqual([
+        { id: '1', label: 'A', order: 0, startMs: 1000, endMs: 2000, lyricText: '' },
+      ]);
+    });
   });
 });

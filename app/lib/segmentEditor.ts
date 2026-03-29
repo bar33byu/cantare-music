@@ -153,6 +153,6 @@ export function rowsToEditorSegments(rows: SegmentRow[]): EditorSegment[] {
     order: row.order,
     startMs: row.startMs,
     endMs: row.endMs,
-    lyricText: row.lyricText,
+    lyricText: row.lyricText ?? '',
   }));
 }
