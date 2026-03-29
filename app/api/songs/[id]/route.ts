@@ -5,10 +5,11 @@ import type { SongRow } from '../../../db/schema';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const song = await getSongById(params.id);
+    const { id } = await params;
+    const song = await getSongById(id);
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
@@ -21,10 +22,11 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const song = await getSongById(params.id);
+    const { id } = await params;
+    const song = await getSongById(id);
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
@@ -33,7 +35,7 @@ export async function DELETE(
       await deleteObject(song.audioKey);
     }
 
-    await deleteSong(params.id);
+    await deleteSong(id);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error deleting song:', error);
@@ -43,9 +45,10 @@ export async function DELETE(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const body = await request.json();
     const { audioKey, title, artist } = body;
 
@@ -58,7 +61,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    await updateSong(params.id, updates);
+    await updateSong(id, updates);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error updating song:', error);

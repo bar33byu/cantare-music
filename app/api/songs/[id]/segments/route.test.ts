@@ -23,7 +23,7 @@ describe('GET /api/songs/[id]/segments', () => {
     vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
 
     const request = new Request('http://localhost/api/songs/123/segments');
-    const response = await GET(request as any, { params: { id: '123' } });
+    const response = await GET(request as any, { params: Promise.resolve({ id: '123' }) });
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -55,7 +55,7 @@ describe('PUT /api/songs/[id]/segments', () => {
       body: JSON.stringify({ segments }),
     });
 
-    const response = await PUT(request as any, { params: { id: '123' } });
+    const response = await PUT(request as any, { params: Promise.resolve({ id: '123' }) });
 
     expect(response.status).toBe(200);
     expect(upsertSegments).toHaveBeenCalledWith('123', segments);
@@ -68,7 +68,7 @@ describe('PUT /api/songs/[id]/segments', () => {
       body: JSON.stringify({ segments: 'not-an-array' }),
     });
 
-    const response = await PUT(request as any, { params: { id: '123' } });
+    const response = await PUT(request as any, { params: Promise.resolve({ id: '123' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);

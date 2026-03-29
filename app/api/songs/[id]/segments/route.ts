@@ -4,10 +4,11 @@ import type { SegmentRow } from '../../../../db/schema';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const segments = await getSegmentsBySongId(params.id);
+    const { id } = await params;
+    const segments = await getSegmentsBySongId(id);
     return NextResponse.json(segments);
   } catch (error) {
     console.error('Error fetching segments:', error);
@@ -17,9 +18,10 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const body = await request.json();
     const { segments } = body;
 
@@ -41,7 +43,7 @@ export async function PUT(
       }
     }
 
-    await upsertSegments(params.id, segments);
+    await upsertSegments(id, segments);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error upserting segments:', error);

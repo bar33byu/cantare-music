@@ -29,7 +29,7 @@ describe('GET /api/songs/[id]', () => {
     vi.mocked(getSongById).mockResolvedValue(mockSong);
 
     const request = new Request('http://localhost/api/songs/123');
-    const response = await GET(request as any, { params: { id: '123' } });
+    const response = await GET(request as any, { params: Promise.resolve({ id: '123' }) });
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -41,7 +41,7 @@ describe('GET /api/songs/[id]', () => {
     vi.mocked(getSongById).mockResolvedValue(undefined);
 
     const request = new Request('http://localhost/api/songs/123');
-    const response = await GET(request as any, { params: { id: '123' } });
+    const response = await GET(request as any, { params: Promise.resolve({ id: '123' }) });
     const data = await response.json();
 
     expect(response.status).toBe(404);
@@ -102,7 +102,7 @@ describe('PATCH /api/songs/[id]', () => {
       body: JSON.stringify({ audioKey: 'new-key' }),
     });
 
-    const response = await PATCH(request as any, { params: { id: '123' } });
+    const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
 
     expect(response.status).toBe(200);
     expect(updateSong).toHaveBeenCalledWith('123', { audioKey: 'new-key' });
@@ -115,7 +115,7 @@ describe('PATCH /api/songs/[id]', () => {
       body: JSON.stringify({ invalidField: 'value' }),
     });
 
-    const response = await PATCH(request as any, { params: { id: '123' } });
+    const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);
