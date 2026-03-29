@@ -48,6 +48,16 @@ export async function updateSongAudioKey(
     .where(eq(songs.id, id));
 }
 
+export async function updateSong(
+  id: string,
+  updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist'>>
+): Promise<void> {
+  await db
+    .update(songs)
+    .set(updates)
+    .where(eq(songs.id, id));
+}
+
 export async function deleteSong(id: string): Promise<void> {
   await db.delete(songs).where(eq(songs.id, id));
 }

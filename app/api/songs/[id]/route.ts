@@ -1,0 +1,67 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getSongById, deleteSong, updateSong } from '../../../../db/queries';
+import { deleteObject } from '../../../../lib/r2';
+import type { SongRow } from '../../../db/schema';
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const song = await getSongById(params.id);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
+    return NextResponse.json(song);
+  } catch (error) {
+    console.error('Error fetching song:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const song = await getSongById(params.id);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
+
+    if (song.audioKey) {
+      await deleteObject(song.audioKey);
+    }
+
+    await deleteSong(params.id);
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    console.error('Error deleting song:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const body = await request.json();
+    const { audioKey, title, artist } = body;
+
+    const updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist'>> = {};
+    if (audioKey !== undefined) updates.audioKey = audioKey;
+    if (title !== undefined) updates.title = title;
+    if (artist !== undefined) updates.artist = artist;
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
+    }
+
+    await updateSong(params.id, updates);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error updating song:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
