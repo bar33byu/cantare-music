@@ -10,8 +10,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
   const [artist, setArtist] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [songId, setSongId] = useState<string | null>(null);
-  const { upload, uploading, progress, error: uploadError } = useUploadAudio(songId || '');
+  const { upload, uploading, progress, error: uploadError } = useUploadAudio();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -37,11 +36,10 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
       const song = await createResponse.json();
       const newSongId = song.id;
-      setSongId(newSongId);
 
       // Upload file if selected
       if (selectedFile) {
-        const audioKey = await upload(selectedFile);
+        const audioKey = await upload(newSongId, selectedFile);
 
         // Update song with audioKey
         const updateResponse = await fetch(`/api/songs/${newSongId}`, {

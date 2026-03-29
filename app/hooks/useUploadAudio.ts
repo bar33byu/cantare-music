@@ -7,12 +7,12 @@ interface UseUploadAudioReturn {
   error: string | null;
 }
 
-export function useUploadAudio(songId: string): UseUploadAudioReturn {
+export function useUploadAudio(): UseUploadAudioReturn {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  const upload = async (file: File): Promise<string> => {
+  const upload = async (songId: string, file: File): Promise<string> => {
     setError(null);
     setProgress(0);
 
@@ -25,6 +25,12 @@ export function useUploadAudio(songId: string): UseUploadAudioReturn {
 
     if (!['audio/mpeg', 'audio/mp3'].includes(file.type)) {
       const errorMsg = 'File must be MP3 format';
+      setError(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    if (!songId) {
+      const errorMsg = 'Song ID is required for upload';
       setError(errorMsg);
       throw new Error(errorMsg);
     }

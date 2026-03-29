@@ -40,18 +40,18 @@ describe('useUploadAudio', () => {
   });
 
   it('starts with uploading false', () => {
-    const { result } = renderHook(() => useUploadAudio('song-123'));
+    const { result } = renderHook(() => useUploadAudio());
     expect(result.current.uploading).toBe(false);
   });
 
   it('upload() with oversized file sets error without calling fetch', async () => {
-    const { result } = renderHook(() => useUploadAudio('song-123'));
+    const { result } = renderHook(() => useUploadAudio());
 
     const largeFile = new File(['x'.repeat(16_000_000)], 'large.mp3', { type: 'audio/mpeg' });
 
     await act(async () => {
       try {
-        await result.current.upload(largeFile);
+        await result.current.upload('song-123', largeFile);
       } catch (err) {
         // Expected to throw
       }
@@ -62,13 +62,13 @@ describe('useUploadAudio', () => {
   });
 
   it('successful upload sets uploading=false and returns key', async () => {
-    const { result } = renderHook(() => useUploadAudio('song-123'));
+    const { result } = renderHook(() => useUploadAudio());
 
     const file = new File(['test'], 'test.mp3', { type: 'audio/mpeg' });
 
     let returnedKey: string;
     await act(async () => {
-      returnedKey = await result.current.upload(file);
+      returnedKey = await result.current.upload('song-123', file);
     });
 
     expect(returnedKey).toBe('test-key');
@@ -92,13 +92,13 @@ describe('useUploadAudio', () => {
       json: () => Promise.resolve({ error: 'API Error' }),
     });
 
-    const { result } = renderHook(() => useUploadAudio('song-123'));
+    const { result } = renderHook(() => useUploadAudio());
 
     const file = new File(['test'], 'test.mp3', { type: 'audio/mpeg' });
 
     await act(async () => {
       try {
-        await result.current.upload(file);
+        await result.current.upload('song-123', file);
       } catch (err) {
         // Expected to throw
       }
