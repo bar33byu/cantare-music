@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllSongs, createSong } from '../../../db/queries';
 
+function formatError(error: unknown) {
+  const message = error instanceof Error ? error.message : 'Unknown server error';
+  const shouldExpose =
+    process.env.NODE_ENV === 'development' ||
+    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === 'true';
+
+  return shouldExpose ? { error: message } : { error: 'Internal server error' };
+}
+
 export async function GET() {
   try {
     const songs = await getAllSongs();
     return NextResponse.json(songs);
   } catch (error) {
     console.error('Error fetching songs:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json(formatError(error), { status: 500 });
   }
 }
 
@@ -30,6 +39,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(song, { status: 201 });
   } catch (error) {
     console.error('Error creating song:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json(formatError(error), { status: 500 });
   }
 }

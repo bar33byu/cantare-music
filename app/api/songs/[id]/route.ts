@@ -3,6 +3,15 @@ import { getSongById, deleteSong, updateSong, getSegmentsBySongId } from '../../
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
 
+function formatError(error: unknown) {
+  const message = error instanceof Error ? error.message : 'Unknown server error';
+  const shouldExpose =
+    process.env.NODE_ENV === 'development' ||
+    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === 'true';
+
+  return shouldExpose ? { error: message } : { error: 'Internal server error' };
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -38,7 +47,7 @@ export async function GET(
     return NextResponse.json(fullSong);
   } catch (error) {
     console.error('Error fetching song:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json(formatError(error), { status: 500 });
   }
 }
 
@@ -61,7 +70,7 @@ export async function DELETE(
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error deleting song:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json(formatError(error), { status: 500 });
   }
 }
 
@@ -87,6 +96,6 @@ export async function PATCH(
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error updating song:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json(formatError(error), { status: 500 });
   }
 }
