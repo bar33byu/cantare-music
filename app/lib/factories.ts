@@ -17,7 +17,7 @@ export function makeSong(overrides?: Partial<Song>): Song {
   return {
     id: crypto.randomUUID(),
     title: "Untitled",
-    composer: "Unknown",
+    artist: "Unknown",
     audioUrl: "/audio/placeholder.mp3",
     segments: [],
     createdAt: new Date().toISOString(),

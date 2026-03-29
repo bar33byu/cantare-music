@@ -26,7 +26,7 @@ describe("Core types", () => {
     const song = {
       id: "song-1",
       title: "Amazing Grace",
-      composer: "John Newton",
+      artist: "John Newton",
       audioUrl: "/audio/amazing-grace.mp3",
       segments: [
         {

@@ -16,7 +16,7 @@ describe("factories", () => {
   it("makeSong with title override applies correctly", () => {
     const song = makeSong({ title: "My Custom Song" });
     expect(song.title).toBe("My Custom Song");
-    expect(song.composer).toBe("Unknown");
+    expect(song.artist).toBe("Unknown");
   });
 
   it("makeSession defaults to isLocked: false", () => {

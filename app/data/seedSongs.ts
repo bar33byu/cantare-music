@@ -4,7 +4,7 @@ export const SEED_SONGS: Song[] = [
   {
     id: "seed-1",
     title: "Awake and Arise",
-    composer: "Public Domain",
+    artist: "Public Domain",
     audioUrl: "/audio/placeholder.mp3",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
