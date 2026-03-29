@@ -4,31 +4,20 @@ import { useState, useEffect } from "react";
 import PracticeView from "./components/PracticeView";
 import { SongForm } from "./components/SongForm";
 import { makeSession } from "./lib/factories";
+import type { Song, Segment } from "./types";
 
-interface Song {
+interface SongListItem {
   id: string;
   title: string;
   artist?: string;
-  audioUrl: string;
-  segments: Segment[];
+  audioKey?: string;
   createdAt: string;
-  updatedAt: string;
-}
-
-interface Segment {
-  id: string;
-  songId: string;
-  order: number;
-  label: string;
-  lyricText: string;
-  startMs: number;
-  endMs: number;
 }
 
 type ViewMode = "list" | "practice" | "add";
 
 export default function Home() {
-  const [songs, setSongs] = useState<Song[]>([]);
+  const [songs, setSongs] = useState<SongListItem[]>([]);
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [loading, setLoading] = useState(true);
@@ -57,9 +46,19 @@ export default function Home() {
     setViewMode("list");
   };
 
-  const handleSelectSong = (song: Song) => {
-    setSelectedSong(song);
-    setViewMode("practice");
+  const handleSelectSong = async (song: SongListItem) => {
+    try {
+      setLoading(true);
+      const response = await fetch(`/api/songs/${song.id}`);
+      if (!response.ok) throw new Error("Failed to fetch song details");
+      const fullSong: Song = await response.json();
+      setSelectedSong(fullSong);
+      setViewMode("practice");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load song");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleBackToList = () => {
@@ -136,9 +135,6 @@ export default function Home() {
                 {song.artist && (
                   <p className="text-gray-600 mb-2">{song.artist}</p>
                 )}
-                <p className="text-sm text-gray-500">
-                  {song.segments.length} segments
-                </p>
                 <p className="text-xs text-gray-400 mt-2">
                   Created {new Date(song.createdAt).toLocaleDateString()}
                 </p>

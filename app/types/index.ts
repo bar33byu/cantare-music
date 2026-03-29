@@ -11,12 +11,12 @@ export interface Segment {
 export interface Song {
   id: string;
   title: string;
-  composer: string;
+  artist?: string;
   description?: string;
   audioUrl: string;
   segments: Segment[];
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
 
 export type MemoryRating = 1 | 2 | 3 | 4 | 5;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSongById, deleteSong, updateSong } from '../../../../db/queries';
-import { deleteObject } from '../../../../lib/r2';
+import { getSongById, deleteSong, updateSong, getSegmentsBySongId } from '../../../../db/queries';
+import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
 
 export async function GET(
@@ -13,7 +13,29 @@ export async function GET(
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
-    return NextResponse.json(song);
+
+    const segments = await getSegmentsBySongId(id);
+
+    // Construct full song object with segments
+    const fullSong = {
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      audioUrl: song.audioKey ? getPublicUrl(song.audioKey) : '',
+      segments: segments.map(segment => ({
+        id: segment.id,
+        songId: segment.songId,
+        order: segment.order,
+        label: segment.label,
+        lyricText: segment.lyricText,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+      })),
+      createdAt: song.createdAt,
+      updatedAt: song.createdAt, // No updatedAt in schema, using createdAt
+    };
+
+    return NextResponse.json(fullSong);
   } catch (error) {
     console.error('Error fetching song:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

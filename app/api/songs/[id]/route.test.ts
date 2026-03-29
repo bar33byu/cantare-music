@@ -13,28 +13,50 @@ vi.mock('../../../../db/queries', () => ({
   getSongById: vi.fn(),
   deleteSong: vi.fn(),
   updateSong: vi.fn(),
+  getSegmentsBySongId: vi.fn(),
 }));
 
 vi.mock('../../../../lib/r2', () => ({
   deleteObject: vi.fn(),
+  getPublicUrl: vi.fn(),
 }));
 
 import { GET, DELETE, PATCH } from './route';
-import { getSongById, deleteSong, updateSong } from '../../../../db/queries';
-import { deleteObject } from '../../../../lib/r2';
+import { getSongById, deleteSong, updateSong, getSegmentsBySongId } from '../../../../db/queries';
+import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 
 describe('GET /api/songs/[id]', () => {
   it('returns song by id', async () => {
-    const mockSong = { id: '123', title: 'Song 1' };
+    const mockSong = { id: '123', title: 'Song 1', artist: 'Artist', audioKey: 'key.mp3', createdAt: '2023-01-01' };
+    const mockSegments = [{ id: 'seg1', songId: '123', label: 'Verse', order: 0, startMs: 0, endMs: 1000, lyricText: 'lyrics' }];
     vi.mocked(getSongById).mockResolvedValue(mockSong);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getPublicUrl).mockReturnValue('https://example.com/key.mp3');
 
     const request = new Request('http://localhost/api/songs/123');
     const response = await GET(request as any, { params: Promise.resolve({ id: '123' }) });
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(data).toEqual(mockSong);
+    expect(data).toEqual({
+      id: '123',
+      title: 'Song 1',
+      artist: 'Artist',
+      audioUrl: 'https://example.com/key.mp3',
+      segments: [{
+        id: 'seg1',
+        songId: '123',
+        order: 0,
+        label: 'Verse',
+        lyricText: 'lyrics',
+        startMs: 0,
+        endMs: 1000,
+      }],
+      createdAt: '2023-01-01',
+      updatedAt: '2023-01-01',
+    });
     expect(getSongById).toHaveBeenCalledWith('123');
+    expect(getSegmentsBySongId).toHaveBeenCalledWith('123');
   });
 
   it('returns 404 if song not found', async () => {
