@@ -10,7 +10,13 @@ export function SongForm({ onSuccess }: SongFormProps) {
   const [artist, setArtist] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
   const { upload, uploading, progress, error: uploadError } = useUploadAudio();
+
+  const appendDebug = (message: string) => {
+    setDebugLog((prev) => [...prev, `${new Date().toISOString()} - ${message}`]);
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -22,12 +28,15 @@ export function SongForm({ onSuccess }: SongFormProps) {
     }
 
     try {
+      appendDebug(`POST /api/songs payload: ${JSON.stringify({ title: title.trim(), artist: artist.trim() || undefined })}`);
       // Create song record
       const createResponse = await fetch('/api/songs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: title.trim(), artist: artist.trim() || undefined }),
       });
+
+      appendDebug(`Received status ${createResponse.status} from /api/songs`);
 
       if (!createResponse.ok) {
         const errorData = await createResponse.json().catch(() => ({ error: 'Failed to create song' }));
@@ -36,10 +45,13 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
       const song = await createResponse.json();
       const newSongId = song.id;
+      appendDebug(`Created song id=${newSongId}`);
 
       // Upload file if selected
       if (selectedFile) {
+        appendDebug(`Uploading audio file ${selectedFile.name} for song ${newSongId}`);
         const audioKey = await upload(newSongId, selectedFile);
+        appendDebug(`Upload result key=${audioKey}`);
 
         // Update song with audioKey
         const updateResponse = await fetch(`/api/songs/${newSongId}`, {
@@ -48,14 +60,19 @@ export function SongForm({ onSuccess }: SongFormProps) {
           body: JSON.stringify({ audioKey }),
         });
 
+        appendDebug(`PATCH /api/songs/${newSongId} status=${updateResponse.status}`);
+
         if (!updateResponse.ok) {
-          throw new Error('Failed to update song with audio key');
+          const updateError = await updateResponse.json().catch(() => null);
+          const msg = (updateError && (updateError as any).error) || 'Failed to update song with audio key';
+          throw new Error(msg);
         }
       }
 
       onSuccess(newSongId);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      appendDebug(`Error: ${errorMsg}`);
       setError(errorMsg);
     }
   };
@@ -138,6 +155,30 @@ export function SongForm({ onSuccess }: SongFormProps) {
       >
         {uploading ? 'Creating Song...' : 'Create Song'}
       </button>
+
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={() => setDebugMode((prev) => !prev)}
+          className="px-3 py-1 text-xs font-medium text-white bg-gray-700 rounded hover:bg-gray-800"
+        >
+          {debugMode ? 'Hide Debug Info' : 'Show Debug Info'}
+        </button>
+      </div>
+
+      {debugMode && (
+        <div className="mt-3 p-3 bg-gray-100 border border-gray-300 rounded text-xs font-mono text-gray-700 max-h-48 overflow-y-auto">
+          <p className="font-semibold mb-1">Debug log</p>
+          {debugLog.length === 0 && <p className="text-gray-500">No debug entries yet</p>}
+          <ul>
+            {debugLog.map((entry, idx) => (
+              <li key={idx} className="leading-5 whitespace-pre-wrap">
+                {entry}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </form>
   );
 }
