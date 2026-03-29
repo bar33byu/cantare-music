@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 interface UseUploadAudioReturn {
-  upload: (file: File) => Promise<string>;
+  upload: (songId: string, file: File) => Promise<string>;
   uploading: boolean;
   progress: number;
   error: string | null;
