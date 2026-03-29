@@ -30,12 +30,23 @@ export default function Home() {
   const fetchSongs = async () => {
     try {
       setLoading(true);
+      setError(null);
       const response = await fetch("/api/songs");
-      if (!response.ok) throw new Error("Failed to fetch songs");
+      if (!response.ok) {
+        const serverError = await response
+          .json()
+          .catch(() => ({ error: response.statusText || "Unknown error" }));
+        console.error("Song fetch failed", response.status, serverError);
+        setSongs([]);
+        setError("Unable to load song list right now. You can still add a song.");
+        return;
+      }
       const data = await response.json();
       setSongs(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load songs");
+      console.error("Song fetch error", err);
+      setSongs([]);
+      setError("Unable to load song list right now. You can still add a song.");
     } finally {
       setLoading(false);
     }
@@ -118,12 +129,12 @@ export default function Home() {
         {loading && <div className="text-center py-8">Loading songs...</div>}
 
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded mb-4">
             {error}
           </div>
         )}
 
-        {!loading && !error && (
+        {!loading && (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {songs.map((song) => (
               <div
