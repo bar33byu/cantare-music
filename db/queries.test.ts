@@ -29,12 +29,12 @@ const updateSpy = vi.fn();
 const deleteSpy = vi.fn();
 
 vi.mock("./index", () => ({
-  db: {
+  db: vi.fn(() => ({
     select: selectSpy,
     insert: insertSpy,
     update: updateSpy,
     delete: deleteSpy,
-  },
+  })),
 }));
 
 beforeEach(() => {
