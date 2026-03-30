@@ -11,6 +11,7 @@ describe("AudioPlayer", () => {
     segmentEndMs: 5000,
     isPlaying: false,
     isReady: true,
+    playbackError: null,
     onPlayPause: vi.fn(),
     onRestartSegment: vi.fn(),
     onSeekSong: vi.fn(),
@@ -50,10 +51,18 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-segment-window")).toBeInTheDocument();
   });
 
+  it("shows playback diagnostics", () => {
+    render(<AudioPlayer {...defaultProps} playbackError="Playback failed" restartLabel="Restart Piece" />);
+    expect(screen.getByTestId("audio-cache-status")).toHaveTextContent("browser HTTP cache");
+    expect(screen.getByTestId("audio-status-message")).toHaveTextContent("Playback failed");
+    expect(screen.getByTestId("audio-restart")).toHaveTextContent("Restart Piece");
+  });
+
   it("disables controls while audio is loading", () => {
     render(<AudioPlayer {...defaultProps} isReady={false} />);
     expect(screen.getByTestId("audio-play-pause")).toBeDisabled();
     expect(screen.getByTestId("audio-restart")).toBeDisabled();
     expect(screen.getByTestId("audio-play-pause")).toHaveTextContent("Loading Audio...");
+    expect(screen.getByTestId("audio-slider")).toBeDisabled();
   });
 });

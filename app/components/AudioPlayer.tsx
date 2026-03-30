@@ -8,6 +8,8 @@ interface AudioPlayerProps {
   segmentEndMs: number;
   isPlaying: boolean;
   isReady: boolean;
+  playbackError?: string | null;
+  restartLabel?: string;
   onPlayPause: () => void;
   onRestartSegment: () => void;
   onSeekSong: (ms: number) => void;
@@ -28,6 +30,8 @@ export function AudioPlayer({
   segmentEndMs,
   isPlaying,
   isReady,
+  playbackError,
+  restartLabel = "Restart Segment",
   onPlayPause,
   onRestartSegment,
   onSeekSong,
@@ -58,7 +62,7 @@ export function AudioPlayer({
           disabled={!isReady}
           className="rounded-full border border-indigo-300 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
         >
-          Restart Segment
+          {restartLabel}
         </button>
         <button
           type="button"
@@ -77,6 +81,13 @@ export function AudioPlayer({
           <span data-testid="audio-current-time">{formatMs(currentMs)}</span>
         </div>
 
+        <div className="mb-3 flex items-center justify-between text-xs text-gray-500">
+          <span data-testid="audio-cache-status">Caching uses the browser HTTP cache for this file.</span>
+          <span data-testid="audio-status-message">
+            {playbackError ? playbackError : isReady ? "Ready to play" : "Loading audio source..."}
+          </span>
+        </div>
+
         <div className="relative mb-2 h-3 rounded-full bg-indigo-100">
           <div
             data-testid="audio-segment-window"
@@ -92,6 +103,7 @@ export function AudioPlayer({
           value={Math.min(currentMs, safeDurationMs)}
           onChange={(event) => onSeekSong(Number(event.target.value))}
           data-testid="audio-slider"
+          disabled={!isReady}
           className="w-full"
         />
 

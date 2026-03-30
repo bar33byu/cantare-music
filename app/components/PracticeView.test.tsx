@@ -57,6 +57,8 @@ vi.mock("./AudioPlayer", () => ({
     durationMs,
     segmentStartMs,
     segmentEndMs,
+    playbackError,
+    restartLabel,
     onPlayPause,
     onRestartSegment,
     onSeekSong,
@@ -66,6 +68,8 @@ vi.mock("./AudioPlayer", () => ({
     durationMs: number;
     segmentStartMs: number;
     segmentEndMs: number;
+    playbackError?: string | null;
+    restartLabel?: string;
     onPlayPause: () => void;
     onRestartSegment: () => void;
     onSeekSong: (ms: number) => void;
@@ -77,6 +81,8 @@ vi.mock("./AudioPlayer", () => ({
       data-duration-ms={durationMs}
       data-start-ms={segmentStartMs}
       data-end-ms={segmentEndMs}
+      data-playback-error={playbackError ?? ""}
+      data-restart-label={restartLabel ?? ""}
     >
       <button data-testid="mock-play-toggle" onClick={onPlayPause}>toggle</button>
       <button data-testid="mock-restart" onClick={onRestartSegment}>restart</button>
@@ -119,8 +125,10 @@ describe("PracticeView", () => {
     vi.clearAllMocks();
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
+      isReady: true,
       currentMs: 0,
       durationMs: 12000,
+      playbackError: null,
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
@@ -229,8 +237,10 @@ describe("PracticeView", () => {
 
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
+      isReady: true,
       currentMs: 6000,
       durationMs: 12000,
+      playbackError: null,
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
@@ -268,5 +278,16 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByTestId("mock-seek-song"));
     expect(mockSeek).toHaveBeenCalledWith(6000);
+  });
+
+  it("keeps full-piece transport available when there are no segments", () => {
+    const song = makeSong(0);
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Full piece playback");
+    expect(screen.getByTestId("no-segments")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-start-ms", "0");
+    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-end-ms", "12000");
+    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-restart-label", "Restart Piece");
   });
 });

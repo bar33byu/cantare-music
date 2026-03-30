@@ -42,7 +42,7 @@ export default function Home() {
       if (!response.ok) throw new Error("Failed to fetch song details");
       const fullSong: Song = await response.json();
       setSelectedSong(fullSong);
-      setViewMode(fullSong.segments.length > 0 ? "practice" : "segment_editor");
+      setViewMode("practice");
     } catch (err) {
       console.error("Failed to load song:", err);
     }
