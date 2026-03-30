@@ -34,10 +34,9 @@ export default function Home() {
       if (!response.ok) throw new Error("Failed to fetch song details");
       const fullSong: Song = await response.json();
       setSelectedSong(fullSong);
-      setViewMode("practice");
+      setViewMode(fullSong.segments.length > 0 ? "practice" : "segment_editor");
     } catch (err) {
       console.error("Failed to load song:", err);
-      // For now, just log the error. In a real app, you'd show a toast or error message
     }
   };
 

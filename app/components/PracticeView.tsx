@@ -15,6 +15,14 @@ interface PracticeViewProps {
 const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => {
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
 
+  if (song.segments.length === 0) {
+    return (
+      <div className="text-center py-12 text-gray-500" data-testid="no-segments">
+        This song has no segments yet. Add some to start practicing!
+      </div>
+    );
+  }
+
   const currentSegment = song.segments[session.currentSegmentIndex];
 
   const currentRating: MemoryRating | undefined = (() => {
