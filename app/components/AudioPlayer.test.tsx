@@ -12,6 +12,21 @@ describe("AudioPlayer", () => {
     isPlaying: false,
     isReady: true,
     playbackError: null,
+    debugInfo: {
+      src: "/song.mp3",
+      currentSrc: "",
+      readyState: 0,
+      networkState: 0,
+      preload: "none",
+      hasUserPlayIntent: false,
+      pendingSeekMs: null,
+      pendingEndMs: 0,
+      lastEvent: "init",
+      lastEventAt: "2026-03-30T00:00:00.000Z",
+      playAttempts: 0,
+      errorCode: null,
+      errorMessage: null,
+    },
     onPlayPause: vi.fn(),
     onRestartSegment: vi.fn(),
     onSeekSong: vi.fn(),
@@ -56,6 +71,8 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-cache-status")).toHaveTextContent("browser HTTP cache");
     expect(screen.getByTestId("audio-status-message")).toHaveTextContent("Playback failed");
     expect(screen.getByTestId("audio-restart")).toHaveTextContent("Restart Piece");
+    expect(screen.getByTestId("audio-debug-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("audio-debug-last-event")).toHaveTextContent("init");
   });
 
   it("disables controls while audio is loading", () => {

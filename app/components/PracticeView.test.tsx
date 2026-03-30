@@ -58,6 +58,7 @@ vi.mock("./AudioPlayer", () => ({
     segmentStartMs,
     segmentEndMs,
     playbackError,
+    debugInfo,
     restartLabel,
     onPlayPause,
     onRestartSegment,
@@ -69,6 +70,7 @@ vi.mock("./AudioPlayer", () => ({
     segmentStartMs: number;
     segmentEndMs: number;
     playbackError?: string | null;
+    debugInfo?: { lastEvent?: string; src?: string };
     restartLabel?: string;
     onPlayPause: () => void;
     onRestartSegment: () => void;
@@ -82,6 +84,8 @@ vi.mock("./AudioPlayer", () => ({
       data-start-ms={segmentStartMs}
       data-end-ms={segmentEndMs}
       data-playback-error={playbackError ?? ""}
+      data-debug-last-event={debugInfo?.lastEvent ?? ""}
+      data-debug-src={debugInfo?.src ?? ""}
       data-restart-label={restartLabel ?? ""}
     >
       <button data-testid="mock-play-toggle" onClick={onPlayPause}>toggle</button>
@@ -129,6 +133,21 @@ describe("PracticeView", () => {
       currentMs: 0,
       durationMs: 12000,
       playbackError: null,
+      debugInfo: {
+        src: "http://example.com/audio.mp3",
+        currentSrc: "",
+        readyState: 0,
+        networkState: 0,
+        preload: "none",
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: "init",
+        lastEventAt: "2026-03-30T00:00:00.000Z",
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
@@ -241,6 +260,21 @@ describe("PracticeView", () => {
       currentMs: 6000,
       durationMs: 12000,
       playbackError: null,
+      debugInfo: {
+        src: "http://example.com/audio.mp3",
+        currentSrc: "",
+        readyState: 3,
+        networkState: 1,
+        preload: "none",
+        hasUserPlayIntent: true,
+        pendingSeekMs: 6000,
+        pendingEndMs: 0,
+        lastEvent: "timeupdate",
+        lastEventAt: "2026-03-30T00:00:00.000Z",
+        playAttempts: 1,
+        errorCode: null,
+        errorMessage: null,
+      },
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,

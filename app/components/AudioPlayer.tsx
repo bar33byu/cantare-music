@@ -1,5 +1,7 @@
 "use client";
 
+import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
+
 interface AudioPlayerProps {
   audioUrl: string;
   currentMs: number;
@@ -9,6 +11,7 @@ interface AudioPlayerProps {
   isPlaying: boolean;
   isReady: boolean;
   playbackError?: string | null;
+  debugInfo?: AudioDebugInfo;
   restartLabel?: string;
   onPlayPause: () => void;
   onRestartSegment: () => void;
@@ -31,6 +34,7 @@ export function AudioPlayer({
   isPlaying,
   isReady,
   playbackError,
+  debugInfo,
   restartLabel = "Restart Segment",
   onPlayPause,
   onRestartSegment,
@@ -110,6 +114,24 @@ export function AudioPlayer({
           <span>00:00</span>
           <span data-testid="audio-duration">{formatMs(safeDurationMs)}</span>
         </div>
+
+        <details data-testid="audio-debug-panel" className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+          <summary className="cursor-pointer font-semibold text-slate-800">Audio Debug</summary>
+          <div className="mt-2 space-y-1" data-testid="audio-debug-content">
+            <p data-testid="audio-debug-ready-state">readyState: {debugInfo?.readyState ?? -1}</p>
+            <p data-testid="audio-debug-network-state">networkState: {debugInfo?.networkState ?? -1}</p>
+            <p data-testid="audio-debug-last-event">lastEvent: {debugInfo?.lastEvent ?? "n/a"}</p>
+            <p data-testid="audio-debug-last-event-at">lastEventAt: {debugInfo?.lastEventAt ?? "n/a"}</p>
+            <p data-testid="audio-debug-play-attempts">playAttempts: {debugInfo?.playAttempts ?? 0}</p>
+            <p data-testid="audio-debug-user-intent">hasUserPlayIntent: {String(debugInfo?.hasUserPlayIntent ?? false)}</p>
+            <p data-testid="audio-debug-pending-seek">pendingSeekMs: {debugInfo?.pendingSeekMs ?? "null"}</p>
+            <p data-testid="audio-debug-pending-end">pendingEndMs: {debugInfo?.pendingEndMs ?? 0}</p>
+            <p data-testid="audio-debug-error-code">errorCode: {debugInfo?.errorCode ?? "null"}</p>
+            <p data-testid="audio-debug-error-message">errorMessage: {debugInfo?.errorMessage ?? "null"}</p>
+            <p data-testid="audio-debug-src" className="break-all">src: {debugInfo?.src ?? audioUrl}</p>
+            <p data-testid="audio-debug-current-src" className="break-all">currentSrc: {debugInfo?.currentSrc ?? ""}</p>
+          </div>
+        </details>
       </div>
     </div>
   );

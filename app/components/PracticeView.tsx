@@ -16,7 +16,7 @@ interface PracticeViewProps {
 
 const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => {
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
-  const { isPlaying, isReady, currentMs, durationMs, playbackError, play, pause, seek } = useAudioPlayer(song.audioUrl);
+  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(song.audioUrl);
   const hasSegments = song.segments.length > 0;
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
@@ -246,6 +246,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
             isPlaying={isPlaying}
             isReady={isReady}
             playbackError={playbackError}
+            debugInfo={debugInfo}
             restartLabel={hasSegments ? "Restart Segment" : "Restart Piece"}
             onPlayPause={handleTogglePlay}
             onRestartSegment={handleRestartSegment}

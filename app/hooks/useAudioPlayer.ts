@@ -6,14 +6,49 @@ export interface AudioPlayerControls {
   currentMs: number;
   durationMs: number;
   playbackError: string | null;
+  debugInfo: AudioDebugInfo;
   play: (startMs: number, endMs: number) => void;
   pause: () => void;
   seek: (ms: number) => void;
 }
 
+export interface AudioDebugInfo {
+  src: string;
+  currentSrc: string;
+  readyState: number;
+  networkState: number;
+  preload: string;
+  hasUserPlayIntent: boolean;
+  pendingSeekMs: number | null;
+  pendingEndMs: number;
+  lastEvent: string;
+  lastEventAt: string;
+  playAttempts: number;
+  errorCode: number | null;
+  errorMessage: string | null;
+}
+
 type AudioFactory = (url: string) => HTMLAudioElement;
 
 const defaultFactory: AudioFactory = (url) => new Audio(url);
+
+function makeDefaultDebugInfo(audioUrl: string): AudioDebugInfo {
+  return {
+    src: audioUrl,
+    currentSrc: '',
+    readyState: 0,
+    networkState: 0,
+    preload: 'none',
+    hasUserPlayIntent: false,
+    pendingSeekMs: null,
+    pendingEndMs: 0,
+    lastEvent: 'init',
+    lastEventAt: new Date().toISOString(),
+    playAttempts: 0,
+    errorCode: null,
+    errorMessage: null,
+  };
+}
 
 export function useAudioPlayer(
   audioUrl: string,
@@ -30,6 +65,28 @@ export function useAudioPlayer(
   const [currentMs, setCurrentMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<AudioDebugInfo>(() => makeDefaultDebugInfo(audioUrl));
+
+  const updateDebugInfo = useCallback((audio: HTMLAudioElement | null, eventName: string) => {
+    const now = new Date().toISOString();
+
+    setDebugInfo((previous) => ({
+      ...previous,
+      src: audioUrl,
+      currentSrc: audio?.currentSrc ?? previous.currentSrc,
+      readyState: audio?.readyState ?? previous.readyState,
+      networkState: audio?.networkState ?? previous.networkState,
+      preload: audio?.preload ?? previous.preload,
+      hasUserPlayIntent: hasUserPlayIntentRef.current,
+      pendingSeekMs: pendingSeekMsRef.current,
+      pendingEndMs: endMsRef.current,
+      lastEvent: eventName,
+      lastEventAt: now,
+      playAttempts: eventName === 'play-attempt' ? previous.playAttempts + 1 : previous.playAttempts,
+      errorCode: audio?.error?.code ?? previous.errorCode,
+      errorMessage: audio?.error?.message ?? previous.errorMessage,
+    }));
+  }, [audioUrl]);
 
   const startPlayback = useCallback((audio: HTMLAudioElement, startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;
@@ -39,9 +96,11 @@ export function useAudioPlayer(
     endMsRef.current = Number.isFinite(endMs) ? endMs : 0;
     if (audio.readyState === 0) {
       audio.load?.();
+      updateDebugInfo(audio, 'load');
     }
     audio.currentTime = startMs / 1000;
     setCurrentMs(startMs);
+    updateDebugInfo(audio, 'play-attempt');
 
     try {
       const result = audio.play();
@@ -50,14 +109,16 @@ export function useAudioPlayer(
           const message = error instanceof Error ? error.message : 'Playback failed';
           setPlaybackError(message);
           setIsPlaying(false);
+          updateDebugInfo(audio, 'play-rejected');
         });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Playback failed';
       setPlaybackError(message);
       setIsPlaying(false);
+      updateDebugInfo(audio, 'play-throw');
     }
-  }, []);
+  }, [updateDebugInfo]);
 
   useEffect(() => {
     setIsReady(false);
@@ -65,6 +126,7 @@ export function useAudioPlayer(
     setCurrentMs(0);
     setDurationMs(0);
     setPlaybackError(null);
+    setDebugInfo(makeDefaultDebugInfo(audioUrl));
     endMsRef.current = 0;
     pendingPlayRangeRef.current = null;
 
@@ -75,6 +137,7 @@ export function useAudioPlayer(
 
     const audio = audioFactory(audioUrl);
     audioRef.current = audio;
+    updateDebugInfo(audio, 'audio-created');
 
     if ('preload' in audio) {
       // Avoid eager decode/network churn before user interaction.
@@ -106,6 +169,7 @@ export function useAudioPlayer(
     const handleEnded = () => setIsPlaying(false);
     const handleCanPlay = () => {
       setIsReady(true);
+      updateDebugInfo(audio, 'canplay');
       flushPendingPlay();
     };
     const handleLoadedMetadata = () => {
@@ -114,6 +178,7 @@ export function useAudioPlayer(
       }
       // Metadata availability is enough to allow user-triggered playback.
       setIsReady(true);
+      updateDebugInfo(audio, 'loadedmetadata');
       if (pendingSeekMsRef.current !== null) {
         audio.currentTime = pendingSeekMsRef.current / 1000;
       }
@@ -139,7 +204,14 @@ export function useAudioPlayer(
 
       setIsReady(false);
       setIsPlaying(false);
+      updateDebugInfo(audio, 'error');
     };
+    const handleLoadStart = () => updateDebugInfo(audio, 'loadstart');
+    const handleStalled = () => updateDebugInfo(audio, 'stalled');
+    const handleWaiting = () => updateDebugInfo(audio, 'waiting');
+    const handleSuspend = () => updateDebugInfo(audio, 'suspend');
+    const handlePlaying = () => updateDebugInfo(audio, 'playing');
+    const handlePauseDebug = () => updateDebugInfo(audio, 'pause');
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('play', handlePlay);
@@ -148,13 +220,21 @@ export function useAudioPlayer(
     audio.addEventListener('canplay', handleCanPlay);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('error', handleError);
+    audio.addEventListener('loadstart', handleLoadStart);
+    audio.addEventListener('stalled', handleStalled);
+    audio.addEventListener('waiting', handleWaiting);
+    audio.addEventListener('suspend', handleSuspend);
+    audio.addEventListener('playing', handlePlaying);
+    audio.addEventListener('pause', handlePauseDebug);
 
     if (pendingSeekMsRef.current !== null) {
       audio.currentTime = pendingSeekMsRef.current / 1000;
+      updateDebugInfo(audio, 'apply-pending-seek');
     }
 
     if (audio.readyState >= 2) {
       setIsReady(true);
+      updateDebugInfo(audio, 'already-ready');
       flushPendingPlay();
     }
 
@@ -166,9 +246,15 @@ export function useAudioPlayer(
       audio.removeEventListener('canplay', handleCanPlay);
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('error', handleError);
+      audio.removeEventListener('loadstart', handleLoadStart);
+      audio.removeEventListener('stalled', handleStalled);
+      audio.removeEventListener('waiting', handleWaiting);
+      audio.removeEventListener('suspend', handleSuspend);
+      audio.removeEventListener('playing', handlePlaying);
+      audio.removeEventListener('pause', handlePauseDebug);
       audio.pause();
     };
-  }, [audioUrl, audioFactory, startPlayback]);
+  }, [audioUrl, audioFactory, startPlayback, updateDebugInfo]);
 
   const play = useCallback((startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;
@@ -177,26 +263,29 @@ export function useAudioPlayer(
       pendingSeekMsRef.current = startMs;
       pendingPlayRangeRef.current = { startMs, endMs };
       setCurrentMs(startMs);
+      updateDebugInfo(null, 'play-queued-no-audio');
       return;
     }
     startPlayback(audio, startMs, endMs);
-  }, [startPlayback]);
+  }, [startPlayback, updateDebugInfo]);
 
   const pause = useCallback(() => {
     const audio = audioRef.current;
     pendingPlayRangeRef.current = null;
     if (!audio) return;
     audio.pause();
-  }, []);
+    updateDebugInfo(audio, 'pause-call');
+  }, [updateDebugInfo]);
 
   const seek = useCallback((ms: number) => {
     const audio = audioRef.current;
     pendingSeekMsRef.current = ms;
     if (audio) {
       audio.currentTime = ms / 1000;
+      updateDebugInfo(audio, 'seek');
     }
     setCurrentMs(ms);
-  }, []);
+  }, [updateDebugInfo]);
 
-  return { isPlaying, isReady, currentMs, durationMs, playbackError, play, pause, seek };
+  return { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek };
 }
