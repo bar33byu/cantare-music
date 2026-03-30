@@ -303,7 +303,8 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("mock-play-toggle"));
     fireEvent.click(screen.getByTestId("mock-restart"));
 
-    expect(mockPlay).toHaveBeenCalledWith(0, 4000);
+    expect(mockPlay).toHaveBeenNthCalledWith(1, 0, 12000);
+    expect(mockPlay).toHaveBeenNthCalledWith(2, 0, 4000);
   });
 
   it("whole-song transport seeks the playhead", () => {
