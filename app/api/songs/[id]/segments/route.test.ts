@@ -12,10 +12,11 @@ vi.mock('../../../../../db/index', () => ({
 vi.mock('../../../../../db/queries', () => ({
   getSegmentsBySongId: vi.fn(),
   upsertSegments: vi.fn(),
+  createSegment: vi.fn(),
 }));
 
-import { GET, PUT } from './route';
-import { getSegmentsBySongId, upsertSegments } from '../../../../../db/queries';
+import { GET, PUT, POST } from './route';
+import { getSegmentsBySongId, upsertSegments, createSegment } from '../../../../../db/queries';
 
 describe('GET /api/songs/[id]/segments', () => {
   it('returns segments array', async () => {
@@ -29,6 +30,81 @@ describe('GET /api/songs/[id]/segments', () => {
     expect(response.status).toBe(200);
     expect(data).toEqual(mockSegments);
     expect(getSegmentsBySongId).toHaveBeenCalledWith('123');
+  });
+});
+
+describe('POST /api/songs/[id]/segments', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('creates segment successfully', async () => {
+    const newSegment = {
+      id: 'seg-1',
+      label: 'Verse 1',
+      order: 1,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: 'Lyrics here',
+    };
+    const createdSegment = { ...newSegment, songId: 'song-1' };
+    vi.mocked(createSegment).mockResolvedValue(createdSegment);
+
+    const request = new Request('http://localhost/api/songs/song-1/segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSegment),
+    });
+
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'song-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(data).toEqual(createdSegment);
+    expect(createSegment).toHaveBeenCalledWith({
+      id: 'seg-1',
+      songId: 'song-1',
+      label: 'Verse 1',
+      order: 1,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: 'Lyrics here',
+    });
+  });
+
+  it('returns 400 for missing id', async () => {
+    const request = new Request('http://localhost/api/songs/song-1/segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'Verse 1', order: 1 }),
+    });
+
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'song-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toBe('Segment ID is required and must be a string');
+  });
+
+  it('returns 400 for invalid order type', async () => {
+    const request = new Request('http://localhost/api/songs/song-1/segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'seg-1',
+        label: 'Verse 1',
+        order: 'invalid',
+        startMs: 0,
+        endMs: 1000,
+        lyricText: 'Lyrics here',
+      }),
+    });
+
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'song-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toBe('Order is required and must be a number');
   });
 });
 

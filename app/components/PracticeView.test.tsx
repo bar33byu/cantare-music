@@ -4,6 +4,7 @@ import "@testing-library/jest-dom";
 import { vi } from "vitest";
 import PracticeView from "./PracticeView";
 import { Song, PracticeSession, MemoryRating } from "../types/index";
+import { SessionState } from "../lib/sessionReducer";
 
 // Mock SegmentCard to expose onRate so we can trigger ratings
 vi.mock("./SegmentCard", () => ({
@@ -58,7 +59,7 @@ const makeSong = (numSegments = 3): Song => ({
   updatedAt: new Date().toISOString(),
 });
 
-const makeSession = (song: Song): PracticeSession => ({
+const makeSession = (song: Song): SessionState => ({
   id: "session-1",
   songId: song.id,
   currentSegmentIndex: 0,
@@ -66,6 +67,7 @@ const makeSession = (song: Song): PracticeSession => ({
   ratings: [],
   startedAt: new Date().toISOString(),
   completedAt: undefined,
+  currentSongId: song.id,
 });
 
 describe("PracticeView", () => {

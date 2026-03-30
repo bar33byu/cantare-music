@@ -2,14 +2,14 @@
 
 import React, { useReducer } from "react";
 import { Song, PracticeSession, MemoryRating } from "../types/index";
-import { sessionReducer } from "../lib/sessionReducer";
+import { sessionReducer, SessionState } from "../lib/sessionReducer";
 import { computeKnowledgeScore } from "../lib/knowledgeUtils";
 import SegmentCard from "./SegmentCard";
 import KnowledgeBar from "./KnowledgeBar";
 
 interface PracticeViewProps {
   song: Song;
-  initialSession: PracticeSession;
+  initialSession: SessionState;
 }
 
 const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => {

@@ -93,6 +93,32 @@ export async function upsertSegments(
   }
 }
 
+export async function createSegment(data: {
+  id: string;
+  songId: string;
+  label: string;
+  order: number;
+  startMs: number;
+  endMs: number;
+  lyricText: string;
+}): Promise<SegmentRow> {
+  const rows = await db()
+    .insert(segments)
+    .values(data)
+    .returning();
+  return rows[0];
+}
+
+export async function updateSegment(
+  id: string,
+  updates: Partial<Pick<SegmentRow, 'label' | 'order' | 'startMs' | 'endMs' | 'lyricText'>>
+): Promise<void> {
+  await db()
+    .update(segments)
+    .set(updates)
+    .where(eq(segments.id, id));
+}
+
 export async function deleteSegment(id: string): Promise<void> {
   await db().delete(segments).where(eq(segments.id, id));
 }

@@ -133,3 +133,59 @@ describe("updateSongAudioKey", () => {
     expect(whereSpy).toHaveBeenCalledWith(eq(songs.id, "song-1"));
   });
 });
+
+describe("createSegment", () => {
+  it("inserts segment and returns it", async () => {
+    const mockSegment = {
+      id: "seg-1",
+      songId: "song-1",
+      label: "Verse 1",
+      order: 1,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: "Lyrics here",
+    };
+    const chain = makeChain([mockSegment]);
+    insertSpy.mockReturnValue(chain);
+
+    const { createSegment } = await getQueries();
+    const result = await createSegment(mockSegment);
+
+    expect(insertSpy).toHaveBeenCalledWith(segments);
+    const valuesSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
+    expect(valuesSpy).toHaveBeenCalledWith(mockSegment);
+    const returningSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["returning"];
+    expect(returningSpy).toHaveBeenCalled();
+    expect(result).toEqual(mockSegment);
+  });
+});
+
+describe("updateSegment", () => {
+  it("updates segment fields", async () => {
+    const chain = makeChain();
+    updateSpy.mockReturnValue(chain);
+
+    const { updateSegment } = await getQueries();
+    await updateSegment("seg-1", { label: "Chorus", startMs: 500 });
+
+    expect(updateSpy).toHaveBeenCalledWith(segments);
+    const setSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
+    expect(setSpy).toHaveBeenCalledWith({ label: "Chorus", startMs: 500 });
+    const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).toHaveBeenCalledWith(eq(segments.id, "seg-1"));
+  });
+});
+
+describe("deleteSegment", () => {
+  it("deletes segment by id", async () => {
+    const chain = makeChain();
+    deleteSpy.mockReturnValue(chain);
+
+    const { deleteSegment } = await getQueries();
+    await deleteSegment("seg-1");
+
+    expect(deleteSpy).toHaveBeenCalledWith(segments);
+    const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).toHaveBeenCalledWith(eq(segments.id, "seg-1"));
+  });
+});
