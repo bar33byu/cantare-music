@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSegmentsBySongId, upsertSegments, createSegment } from '../../../../../db/queries';
-import type { SegmentRow } from '../../../../../db/schema';
+import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments } from '../../../../../db/queries';
 
 export async function GET(
   request: NextRequest,
@@ -30,7 +29,6 @@ export async function POST(
     const body = await request.json();
     const { id, label, order, startMs, endMs, lyricText } = body;
 
-    // Validate required fields
     if (!id || typeof id !== 'string') {
       return NextResponse.json({ error: 'Segment ID is required and must be a string' }, { status: 400 });
     }
@@ -85,7 +83,6 @@ export async function PUT(
       return NextResponse.json({ error: 'Segments must be an array' }, { status: 400 });
     }
 
-    // Basic validation for segment structure
     for (const segment of segments) {
       if (
         typeof segment.id !== 'string' ||
@@ -104,6 +101,43 @@ export async function PUT(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown server error';
     console.error('Error upserting segments:', error);
+    const errorResponse =
+      process.env.NODE_ENV === 'development'
+        ? { error: message }
+        : { error: 'Internal server error' };
+    return NextResponse.json(errorResponse, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    await params;
+    const body = await request.json();
+
+    if (!Array.isArray(body)) {
+      return NextResponse.json({ error: 'Body must be an array' }, { status: 400 });
+    }
+
+    for (const item of body) {
+      if (!item.id || typeof item.id !== 'string') {
+        return NextResponse.json({ error: 'Each item must have a string id' }, { status: 400 });
+      }
+      if (typeof item.order !== 'number' || !Number.isInteger(item.order) || item.order < 0) {
+        return NextResponse.json(
+          { error: 'Each item must have a non-negative integer order' },
+          { status: 400 }
+        );
+      }
+    }
+
+    await reorderSegments(body.map(({ id, order }: { id: string; order: number }) => ({ id, order })));
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown server error';
+    console.error('Error reordering segments:', error);
     const errorResponse =
       process.env.NODE_ENV === 'development'
         ? { error: message }

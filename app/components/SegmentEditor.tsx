@@ -4,13 +4,15 @@ import { useState } from 'react';
 import { Segment } from '../types/index';
 import { SegmentList } from './SegmentList';
 import { SegmentForm } from './SegmentForm';
+import { ReplaceAudioForm } from './ReplaceAudioForm';
 
 interface SegmentEditorProps {
   songId: string;
   onBack?: () => void;
+  onSongUpdated?: () => void;
 }
 
-export function SegmentEditor({ songId, onBack }: SegmentEditorProps) {
+export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorProps) {
   const [editingSegment, setEditingSegment] = useState<Segment | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -71,6 +73,8 @@ export function SegmentEditor({ songId, onBack }: SegmentEditorProps) {
           {deleteError}
         </div>
       )}
+
+      <ReplaceAudioForm songId={songId} onReplaced={onSongUpdated} />
 
       {showForm ? (
         <div className="bg-white rounded-lg shadow p-6">

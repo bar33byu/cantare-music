@@ -126,27 +126,27 @@ describe('SegmentList', () => {
       const items = screen.getAllByRole('listitem');
       expect(items).toHaveLength(2);
       // First item should be seg1 (order 0)
-      expect(items[0]).toHaveAttribute('data-testid', 'segment-item-seg-1');
-      expect(items[1]).toHaveAttribute('data-testid', 'segment-item-seg-2');
+      expect(items[0]).toHaveAttribute('data-testid', 'draggable-card-seg-1');
+      expect(items[1]).toHaveAttribute('data-testid', 'draggable-card-seg-2');
     });
 
     it('displays segment label, order badge, and time range', async () => {
       render(<SegmentList songId={songId} />);
 
       await waitFor(() => {
-        expect(screen.getByTestId(`segment-label-${seg1.id}`)).toHaveTextContent('Verse 1');
+        expect(screen.getByTestId(`card-label-${seg1.id}`)).toHaveTextContent('Verse 1');
       });
 
-      expect(screen.getByTestId(`segment-order-${seg1.id}`)).toHaveTextContent('0');
+      expect(screen.getByTestId(`card-order-${seg1.id}`)).toHaveTextContent('0');
       // 0ms–15000ms → 00:00.00 – 00:15.00
-      expect(screen.getByTestId(`segment-time-${seg1.id}`)).toHaveTextContent('00:00.00 – 00:15.00');
+      expect(screen.getByTestId(`card-time-${seg1.id}`)).toHaveTextContent('00:00.00 – 00:15.00');
     });
 
     it('displays lyric text when present', async () => {
       render(<SegmentList songId={songId} />);
 
       await waitFor(() => {
-        expect(screen.getByTestId(`segment-lyrics-${seg1.id}`)).toHaveTextContent(
+        expect(screen.getByTestId(`card-lyrics-${seg1.id}`)).toHaveTextContent(
           'Amazing grace how sweet the sound'
         );
       });
@@ -160,7 +160,7 @@ describe('SegmentList', () => {
       });
 
       // seg2 has empty lyricText
-      expect(screen.queryByTestId(`segment-lyrics-${seg2.id}`)).not.toBeInTheDocument();
+      expect(screen.queryByTestId(`card-lyrics-${seg2.id}`)).not.toBeInTheDocument();
     });
 
     it('shows add segment button when onAddNew is provided and list is non-empty', async () => {
@@ -194,10 +194,10 @@ describe('SegmentList', () => {
       render(<SegmentList songId={songId} onEdit={onEdit} />);
 
       await waitFor(() => {
-        expect(screen.getByTestId(`segment-edit-${seg1.id}`)).toBeInTheDocument();
+        expect(screen.getByTestId(`card-edit-${seg1.id}`)).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByTestId(`segment-edit-${seg1.id}`));
+      fireEvent.click(screen.getByTestId(`card-edit-${seg1.id}`));
       expect(onEdit).toHaveBeenCalledWith(seg1);
     });
 
@@ -210,7 +210,7 @@ describe('SegmentList', () => {
         expect(screen.getByTestId('segment-list')).toBeInTheDocument();
       });
 
-      expect(screen.queryByTestId(`segment-edit-${seg1.id}`)).not.toBeInTheDocument();
+      expect(screen.queryByTestId(`card-edit-${seg1.id}`)).not.toBeInTheDocument();
     });
   });
 
@@ -222,10 +222,10 @@ describe('SegmentList', () => {
       render(<SegmentList songId={songId} onDelete={onDelete} />);
 
       await waitFor(() => {
-        expect(screen.getByTestId(`segment-delete-${seg1.id}`)).toBeInTheDocument();
+        expect(screen.getByTestId(`card-delete-${seg1.id}`)).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByTestId(`segment-delete-${seg1.id}`));
+      fireEvent.click(screen.getByTestId(`card-delete-${seg1.id}`));
       expect(onDelete).toHaveBeenCalledWith(seg1);
     });
 
@@ -238,7 +238,7 @@ describe('SegmentList', () => {
         expect(screen.getByTestId('segment-list')).toBeInTheDocument();
       });
 
-      expect(screen.queryByTestId(`segment-delete-${seg1.id}`)).not.toBeInTheDocument();
+      expect(screen.queryByTestId(`card-delete-${seg1.id}`)).not.toBeInTheDocument();
     });
   });
 
@@ -266,6 +266,63 @@ describe('SegmentList', () => {
 
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${songId}/segments`);
+      });
+    });
+  });
+  describe('Drag-drop reordering', () => {
+    it('renders drag handles for each segment', async () => {
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve([seg1, seg2]) });
+      render(<SegmentList songId={songId} />);
+      await waitFor(() => {
+        expect(screen.getByTestId(`drag-handle-${seg1.id}`)).toBeInTheDocument();
+        expect(screen.getByTestId(`drag-handle-${seg2.id}`)).toBeInTheDocument();
+      });
+    });
+
+    it('calls PATCH API with new orders after drop', async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([seg1, seg2]) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ok: true }) });
+
+      render(<SegmentList songId={songId} />);
+      await waitFor(() => {
+        expect(screen.getByTestId(`draggable-card-${seg1.id}`)).toBeInTheDocument();
+      });
+
+      fireEvent.dragStart(screen.getByTestId(`draggable-card-${seg1.id}`));
+      fireEvent.dragOver(screen.getByTestId(`draggable-card-${seg2.id}`));
+      fireEvent.drop(screen.getByTestId(`draggable-card-${seg2.id}`));
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          `/api/songs/${songId}/segments`,
+          expect.objectContaining({
+            method: 'PATCH',
+            body: JSON.stringify([
+              { id: seg2.id, order: 0 },
+              { id: seg1.id, order: 1 },
+            ]),
+          })
+        );
+      });
+    });
+
+    it('shows reorder error when PATCH API fails', async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([seg1, seg2]) })
+        .mockResolvedValueOnce({ ok: false });
+
+      render(<SegmentList songId={songId} />);
+      await waitFor(() => {
+        expect(screen.getByTestId(`draggable-card-${seg1.id}`)).toBeInTheDocument();
+      });
+
+      fireEvent.dragStart(screen.getByTestId(`draggable-card-${seg1.id}`));
+      fireEvent.dragOver(screen.getByTestId(`draggable-card-${seg2.id}`));
+      fireEvent.drop(screen.getByTestId(`draggable-card-${seg2.id}`));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('reorder-error')).toBeInTheDocument();
       });
     });
   });

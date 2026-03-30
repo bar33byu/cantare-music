@@ -13,10 +13,11 @@ vi.mock('../../../../../db/queries', () => ({
   getSegmentsBySongId: vi.fn(),
   upsertSegments: vi.fn(),
   createSegment: vi.fn(),
+  reorderSegments: vi.fn(),
 }));
 
-import { GET, PUT, POST } from './route';
-import { getSegmentsBySongId, upsertSegments, createSegment } from '../../../../../db/queries';
+import { GET, PUT, POST, PATCH } from './route';
+import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments } from '../../../../../db/queries';
 
 describe('GET /api/songs/[id]/segments', () => {
   it('returns segments array', async () => {
@@ -149,5 +150,105 @@ describe('PUT /api/songs/[id]/segments', () => {
 
     expect(response.status).toBe(400);
     expect(data.error).toBe('Segments must be an array');
+  });
+
+  describe('PATCH /api/songs/[id]/segments', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('calls reorderSegments and returns 200 for valid body', async () => {
+      vi.mocked(reorderSegments).mockResolvedValue(undefined);
+
+      const body = [
+        { id: 'seg-1', order: 0 },
+        { id: 'seg-2', order: 1 },
+      ];
+      const request = new Request('http://localhost/api/songs/123/segments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data).toEqual({ ok: true });
+      expect(reorderSegments).toHaveBeenCalledWith([
+        { id: 'seg-1', order: 0 },
+        { id: 'seg-2', order: 1 },
+      ]);
+    });
+
+    it('returns 400 when body is not an array', async () => {
+      const request = new Request('http://localhost/api/songs/123/segments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'seg-1', order: 0 }),
+      });
+
+      const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error).toBe('Body must be an array');
+    });
+
+    it('returns 400 when an item is missing id', async () => {
+      const request = new Request('http://localhost/api/songs/123/segments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ order: 0 }]),
+      });
+
+      const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error).toBe('Each item must have a string id');
+    });
+
+    it('returns 400 when order is negative', async () => {
+      const request = new Request('http://localhost/api/songs/123/segments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ id: 'seg-1', order: -1 }]),
+      });
+
+      const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error).toBe('Each item must have a non-negative integer order');
+    });
+
+    it('returns 400 when order is not an integer', async () => {
+      const request = new Request('http://localhost/api/songs/123/segments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ id: 'seg-1', order: 1.5 }]),
+      });
+
+      const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error).toBe('Each item must have a non-negative integer order');
+    });
+
+    it('returns 500 when reorderSegments throws', async () => {
+      vi.mocked(reorderSegments).mockRejectedValue(new Error('DB error'));
+
+      const request = new Request('http://localhost/api/songs/123/segments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ id: 'seg-1', order: 0 }]),
+      });
+
+      const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
+
+      expect(response.status).toBe(500);
+    });
   });
 });

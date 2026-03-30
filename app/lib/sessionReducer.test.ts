@@ -21,6 +21,18 @@ describe('sessionReducer', () => {
     expect(next.currentSegmentIndex).toBe(1);
   });
 
+  it('SET_SEGMENT_INDEX sets the exact index', () => {
+    const state = makeSession({ currentSegmentIndex: 0 });
+    const next = sessionReducer(state, { type: 'SET_SEGMENT_INDEX', index: 3 });
+    expect(next.currentSegmentIndex).toBe(3);
+  });
+
+  it('SET_SEGMENT_INDEX clamps negative values to 0', () => {
+    const state = makeSession({ currentSegmentIndex: 2 });
+    const next = sessionReducer(state, { type: 'SET_SEGMENT_INDEX', index: -5 });
+    expect(next.currentSegmentIndex).toBe(0);
+  });
+
   it('TOGGLE_LOCK flips isLocked', () => {
     const state = makeSession({ isLocked: false });
     const locked = sessionReducer(state, { type: 'TOGGLE_LOCK' });

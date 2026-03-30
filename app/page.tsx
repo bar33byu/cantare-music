@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import PracticeView from "./components/PracticeView";
 import { SongForm } from "./components/SongForm";
 import { SongBrowser } from "./components/SongBrowser";
 import { SegmentEditor } from "./components/SegmentEditor";
 import { makeSession } from "./lib/factories";
-import type { Song, Segment } from "./types";
+import type { Song } from "./types";
 
 interface SongListItem {
   id: string;
@@ -28,6 +28,14 @@ export default function Home() {
     setViewMode("list");
   };
 
+  const handleSongDeleted = (songId: string) => {
+    setRefreshTrigger((prev) => prev + 1);
+    if (selectedSong?.id === songId) {
+      setSelectedSong(null);
+      setViewMode("list");
+    }
+  };
+
   const handleSelectSong = async (song: SongListItem) => {
     try {
       const response = await fetch(`/api/songs/${song.id}`);
@@ -43,6 +51,18 @@ export default function Home() {
   const handleBackToList = () => {
     setSelectedSong(null);
     setViewMode("list");
+  };
+
+  const refreshSelectedSong = async () => {
+    if (!selectedSong) return;
+    try {
+      const response = await fetch(`/api/songs/${selectedSong.id}`);
+      if (!response.ok) throw new Error("Failed to refresh song");
+      const fullSong: Song = await response.json();
+      setSelectedSong(fullSong);
+    } catch (err) {
+      console.error("Failed to refresh selected song:", err);
+    }
   };
 
   if (viewMode === "practice" && selectedSong) {
@@ -83,6 +103,7 @@ export default function Home() {
           <SegmentEditor
             songId={selectedSong.id}
             onBack={() => setViewMode("practice")}
+            onSongUpdated={refreshSelectedSong}
           />
         </div>
       </div>
@@ -123,6 +144,7 @@ export default function Home() {
 
         <SongBrowser
           onSelectSong={handleSelectSong}
+          onDeleteSong={handleSongDeleted}
           selectedSongId={selectedSong?.id || null}
           refreshTrigger={refreshTrigger}
         />

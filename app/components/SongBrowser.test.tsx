@@ -8,6 +8,7 @@ global.fetch = mockFetch;
 
 describe('SongBrowser', () => {
   const mockOnSelectSong = vi.fn();
+  const mockOnDeleteSong = vi.fn();
 
   const mockSongs = [
     {
@@ -28,6 +29,7 @@ describe('SongBrowser', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (window as any).confirm = vi.fn(() => true);
   });
 
   it('shows loading state initially', () => {
@@ -159,5 +161,48 @@ describe('SongBrowser', () => {
     });
 
     expect(screen.getByTestId('song-browser-error')).toHaveTextContent('Unable to load song list right now.');
+  });
+
+  it('deletes a song and calls onDeleteSong callback', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockSongs),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 204 });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} onDeleteSong={mockOnDeleteSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-delete-song-1'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-1', { method: 'DELETE' });
+    });
+
+    expect(mockOnDeleteSong).toHaveBeenCalledWith('song-1');
+    expect(screen.queryByTestId('song-item-song-1')).not.toBeInTheDocument();
+  });
+
+  it('does not delete when confirmation is cancelled', async () => {
+    (window as any).confirm = vi.fn(() => false);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} onDeleteSong={mockOnDeleteSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-delete-song-1'));
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockOnDeleteSong).not.toHaveBeenCalled();
   });
 });

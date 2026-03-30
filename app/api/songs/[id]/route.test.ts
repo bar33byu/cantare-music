@@ -118,6 +118,8 @@ describe('PATCH /api/songs/[id]', () => {
   });
 
   it('with audioKey updates only audioKey', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 1', audioKey: 'old-key' } as any);
+
     const request = new Request('http://localhost/api/songs/123', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -128,9 +130,43 @@ describe('PATCH /api/songs/[id]', () => {
 
     expect(response.status).toBe(200);
     expect(updateSong).toHaveBeenCalledWith('123', { audioKey: 'new-key' });
+    expect(deleteObject).toHaveBeenCalledWith('old-key');
+  });
+
+  it('does not delete object when audioKey does not change', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 1', audioKey: 'same-key' } as any);
+
+    const request = new Request('http://localhost/api/songs/123', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioKey: 'same-key' }),
+    });
+
+    const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
+
+    expect(response.status).toBe(200);
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for unknown song', async () => {
+    vi.mocked(getSongById).mockResolvedValue(undefined);
+
+    const request = new Request('http://localhost/api/songs/unknown', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioKey: 'new-key' }),
+    });
+
+    const response = await PATCH(request as any, { params: Promise.resolve({ id: 'unknown' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data.error).toBe('Song not found');
   });
 
   it('returns 400 for no valid fields', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 1', audioKey: 'old-key' } as any);
+
     const request = new Request('http://localhost/api/songs/123', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

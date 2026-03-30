@@ -83,6 +83,11 @@ export async function PATCH(
     const body = await request.json();
     const { audioKey, title, artist } = body;
 
+    const existingSong = await getSongById(id);
+    if (!existingSong) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
+
     const updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist'>> = {};
     if (audioKey !== undefined) updates.audioKey = audioKey;
     if (title !== undefined) updates.title = title;
@@ -90,6 +95,14 @@ export async function PATCH(
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
+    }
+
+    if (
+      updates.audioKey !== undefined &&
+      existingSong.audioKey &&
+      existingSong.audioKey !== updates.audioKey
+    ) {
+      await deleteObject(existingSong.audioKey);
     }
 
     await updateSong(id, updates);

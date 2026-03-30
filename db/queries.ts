@@ -119,6 +119,12 @@ export async function updateSegment(
     .where(eq(segments.id, id));
 }
 
+export async function reorderSegments(
+  orders: Array<{ id: string; order: number }>
+): Promise<void> {
+  await Promise.all(orders.map(({ id, order }) => updateSegment(id, { order })));
+}
+
 export async function deleteSegment(id: string): Promise<void> {
   await db().delete(segments).where(eq(segments.id, id));
 }

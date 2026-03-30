@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, DragEvent } from 'react';
 import { Segment } from '../types/index';
+import { DraggableSegmentCard } from './DraggableSegmentCard';
 
 interface SegmentListProps {
   songId: string;
@@ -12,18 +13,13 @@ interface SegmentListProps {
   refreshKey?: number;
 }
 
-function formatMs(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  const centiseconds = Math.floor((ms % 1000) / 10);
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(centiseconds).padStart(2, '0')}`;
-}
-
 export function SegmentList({ songId, onEdit, onDelete, onAddNew, refreshKey }: SegmentListProps) {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
 
   const fetchSegments = useCallback(async () => {
     setLoading(true);
@@ -35,7 +31,6 @@ export function SegmentList({ songId, onEdit, onDelete, onAddNew, refreshKey }: 
         throw new Error(data.error || 'Failed to load segments');
       }
       const data: Segment[] = await response.json();
-      // Sort by order
       setSegments(data.sort((a, b) => a.order - b.order));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -48,9 +43,54 @@ export function SegmentList({ songId, onEdit, onDelete, onAddNew, refreshKey }: 
     fetchSegments();
   }, [fetchSegments, refreshKey]);
 
-  const handleDelete = async (segment: Segment) => {
-    if (!onDelete) return;
-    onDelete(segment);
+  const handleDragStart = (_e: DragEvent<HTMLLIElement>, segment: Segment) => {
+    setDraggedId(segment.id);
+    setReorderError(null);
+  };
+
+  const handleDragOver = (_e: DragEvent<HTMLLIElement>, segment: Segment) => {
+    if (segment.id !== draggedId) {
+      setDragOverId(segment.id);
+    }
+  };
+
+  const handleDragEnd = (_e: DragEvent<HTMLLIElement>) => {
+    setDraggedId(null);
+    setDragOverId(null);
+  };
+
+  const handleDrop = async (_e: DragEvent<HTMLLIElement>, targetSegment: Segment) => {
+    if (!draggedId || draggedId === targetSegment.id) {
+      setDraggedId(null);
+      setDragOverId(null);
+      return;
+    }
+    const fromIndex = segments.findIndex(s => s.id === draggedId);
+    const toIndex = segments.findIndex(s => s.id === targetSegment.id);
+    if (fromIndex === -1 || toIndex === -1) {
+      setDraggedId(null);
+      setDragOverId(null);
+      return;
+    }
+    const prevSegments = [...segments];
+    const reordered = [...segments];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+    const withNewOrders = reordered.map((s, i) => ({ ...s, order: i }));
+    setSegments(withNewOrders);
+    setDraggedId(null);
+    setDragOverId(null);
+    try {
+      const response = await fetch(`/api/songs/${songId}/segments`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(withNewOrders.map(s => ({ id: s.id, order: s.order }))),
+      });
+      if (!response.ok) throw new Error('Failed to save order');
+    } catch {
+      setReorderError('Failed to save new order. Please try again.');
+      setSegments(prevSegments);
+    }
   };
 
   if (loading) {
@@ -71,6 +111,11 @@ export function SegmentList({ songId, onEdit, onDelete, onAddNew, refreshKey }: 
 
   return (
     <div data-testid="segment-list">
+      {reorderError && (
+        <div role="alert" data-testid="reorder-error" className="mb-3 bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded text-sm">
+          {reorderError}
+        </div>
+      )}
       {segments.length === 0 ? (
         <div data-testid="segment-list-empty" className="py-8 text-center text-gray-500">
           <p>No segments yet.</p>
@@ -87,66 +132,21 @@ export function SegmentList({ songId, onEdit, onDelete, onAddNew, refreshKey }: 
       ) : (
         <ul className="space-y-3">
           {segments.map((segment) => (
-            <li
+            <DraggableSegmentCard
               key={segment.id}
-              data-testid={`segment-item-${segment.id}`}
-              className="flex items-start justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-3">
-                  <span
-                    data-testid={`segment-order-${segment.id}`}
-                    className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-100 text-blue-700 text-sm font-bold flex items-center justify-center"
-                  >
-                    {segment.order}
-                  </span>
-                  <span
-                    data-testid={`segment-label-${segment.id}`}
-                    className="font-semibold text-gray-800 truncate"
-                  >
-                    {segment.label}
-                  </span>
-                </div>
-                <div className="mt-1 ml-10 text-sm text-gray-500">
-                  <span data-testid={`segment-time-${segment.id}`}>
-                    {formatMs(segment.startMs)} – {formatMs(segment.endMs)}
-                  </span>
-                </div>
-                {segment.lyricText && (
-                  <p
-                    data-testid={`segment-lyrics-${segment.id}`}
-                    className="mt-2 ml-10 text-sm text-gray-600 line-clamp-2"
-                  >
-                    {segment.lyricText}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                {onEdit && (
-                  <button
-                    onClick={() => onEdit(segment)}
-                    data-testid={`segment-edit-${segment.id}`}
-                    className="px-3 py-1 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
-                  >
-                    Edit
-                  </button>
-                )}
-                {onDelete && (
-                  <button
-                    onClick={() => handleDelete(segment)}
-                    data-testid={`segment-delete-${segment.id}`}
-                    className="px-3 py-1 text-sm border border-red-300 rounded text-red-600 hover:bg-red-50"
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            </li>
+              segment={segment}
+              isDragging={draggedId === segment.id}
+              isDragOver={dragOverId === segment.id}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
+            />
           ))}
         </ul>
       )}
-
       {onAddNew && segments.length > 0 && (
         <div className="mt-4 text-right">
           <button

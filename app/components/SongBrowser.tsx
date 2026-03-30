@@ -12,14 +12,16 @@ interface SongListItem {
 
 interface SongBrowserProps {
   onSelectSong: (song: SongListItem) => void;
+  onDeleteSong?: (songId: string) => void;
   selectedSongId?: string | null;
   refreshTrigger?: number; // Increment this to trigger refresh
 }
 
-export function SongBrowser({ onSelectSong, selectedSongId, refreshTrigger }: SongBrowserProps) {
+export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refreshTrigger }: SongBrowserProps) {
   const [songs, setSongs] = useState<SongListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSongs();
@@ -47,6 +49,33 @@ export function SongBrowser({ onSelectSong, selectedSongId, refreshTrigger }: So
       setError('Unable to load song list right now.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteSong = async (song: SongListItem) => {
+    const shouldDelete = window.confirm(`Delete \"${song.title}\"? This cannot be undone.`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeletingSongId(song.id);
+    try {
+      const response = await fetch(`/api/songs/${song.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ error: 'Failed to delete song' }));
+        throw new Error(data.error || 'Failed to delete song');
+      }
+
+      setSongs((prev) => prev.filter((s) => s.id !== song.id));
+      onDeleteSong?.(song.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete song';
+      setError(message);
+    } finally {
+      setDeletingSongId(null);
     }
   };
 
@@ -101,6 +130,20 @@ export function SongBrowser({ onSelectSong, selectedSongId, refreshTrigger }: So
               Currently Selected
             </div>
           )}
+          <div className="mt-4">
+            <button
+              type="button"
+              data-testid={`song-delete-${song.id}`}
+              disabled={deletingSongId === song.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleDeleteSong(song);
+              }}
+              className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+            >
+              {deletingSongId === song.id ? 'Deleting...' : 'Delete Song'}
+            </button>
+          </div>
         </div>
       ))}
     </div>

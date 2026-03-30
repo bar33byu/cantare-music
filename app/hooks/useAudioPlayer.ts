@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface AudioPlayerControls {
   isPlaying: boolean;
@@ -53,7 +53,7 @@ export function useAudioPlayer(
     };
   }, [audioUrl, audioFactory]);
 
-  const play = (startMs: number, endMs: number) => {
+  const play = useCallback((startMs: number, endMs: number) => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.currentTime = startMs / 1000;
@@ -64,20 +64,20 @@ export function useAudioPlayer(
     } catch {
       // jsdom does not implement audio.play()
     }
-  };
+  }, []);
 
-  const pause = () => {
+  const pause = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.pause();
-  };
+  }, []);
 
-  const seek = (ms: number) => {
+  const seek = useCallback((ms: number) => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.currentTime = ms / 1000;
     setCurrentMs(ms);
-  };
+  }, []);
 
   return { isPlaying, currentMs, play, pause, seek };
 }

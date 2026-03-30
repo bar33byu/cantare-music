@@ -7,6 +7,7 @@ export interface SessionState extends PracticeSession {
 export type SessionAction =
   | { type: 'NEXT_SEGMENT' }
   | { type: 'PREV_SEGMENT' }
+  | { type: 'SET_SEGMENT_INDEX'; index: number }
   | { type: 'TOGGLE_LOCK' }
   | { type: 'RATE_SEGMENT'; segmentId: string; rating: MemoryRating }
   | { type: 'COMPLETE' }
@@ -25,6 +26,12 @@ export function sessionReducer(
       return {
         ...state,
         currentSegmentIndex: Math.max(0, state.currentSegmentIndex - 1),
+      };
+
+    case 'SET_SEGMENT_INDEX':
+      return {
+        ...state,
+        currentSegmentIndex: Math.max(0, action.index),
       };
 
     case 'TOGGLE_LOCK':
