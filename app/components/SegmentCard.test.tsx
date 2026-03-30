@@ -44,6 +44,8 @@ const defaultProps = {
   onRate: vi.fn(),
   isLocked: false,
   onToggleLock: vi.fn(),
+  playbackMs: 2000,
+  onSeek: vi.fn(),
 };
 
 describe("SegmentCard", () => {
@@ -78,5 +80,19 @@ describe("SegmentCard", () => {
   it("KnowledgeBar shows 80 when currentRating=4", () => {
     render(<SegmentCard {...defaultProps} currentRating={4} />);
     expect(screen.getByTestId("mock-knowledge-bar")).toHaveAttribute("data-percent", "80");
+  });
+
+  it("renders lyric text and segment scrubber", () => {
+    render(<SegmentCard {...defaultProps} />);
+    expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("Some lyrics here");
+    expect(screen.getByTestId("segment-scrubber")).toBeInTheDocument();
+    expect(screen.getByTestId("segment-current-time")).toHaveTextContent("00:02");
+  });
+
+  it("segment scrubber seeks within the segment", () => {
+    const onSeek = vi.fn();
+    render(<SegmentCard {...defaultProps} onSeek={onSeek} />);
+    fireEvent.change(screen.getByTestId("segment-scrubber"), { target: { value: "3000" } });
+    expect(onSeek).toHaveBeenCalledWith(3000);
   });
 });

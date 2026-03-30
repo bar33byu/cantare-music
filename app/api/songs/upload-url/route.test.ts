@@ -44,6 +44,9 @@ describe('POST /api/songs/upload-url', () => {
     });
     expect(generateUploadKey).toHaveBeenCalledWith('song-123', 'test.mp3');
     expect(getSignedUrl).toHaveBeenCalled();
+    expect((vi.mocked(getSignedUrl).mock.calls[0][1] as any).input.CacheControl).toBe(
+      'public, max-age=31536000, immutable'
+    );
   });
 
   it('returns 400 when size is greater than 15 MB', async () => {

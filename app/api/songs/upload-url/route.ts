@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
       Bucket: BUCKET,
       Key: key,
       ContentType: body.contentType,
+      CacheControl: 'public, max-age=31536000, immutable',
     });
 
     const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 3600 });

@@ -6,6 +6,11 @@ import PracticeView from "./PracticeView";
 import { Song, MemoryRating } from "../types/index";
 import { SessionState } from "../lib/sessionReducer";
 
+const mockPlay = vi.fn();
+const mockPause = vi.fn();
+const mockSeek = vi.fn();
+const mockUseAudioPlayer = vi.fn();
+
 // Mock SegmentCard to expose onRate so we can trigger ratings
 vi.mock("./SegmentCard", () => ({
   default: ({
@@ -41,30 +46,41 @@ vi.mock("./KnowledgeBar", () => ({
   ),
 }));
 
+vi.mock("../hooks/useAudioPlayer", () => ({
+  useAudioPlayer: () => mockUseAudioPlayer(),
+}));
+
 vi.mock("./AudioPlayer", () => ({
   AudioPlayer: ({
     audioUrl,
-    startMs,
-    endMs,
-    onTimeChange,
+    currentMs,
+    durationMs,
+    segmentStartMs,
+    segmentEndMs,
+    onPlayPause,
+    onRestartSegment,
+    onSeekSong,
   }: {
     audioUrl: string;
-    startMs: number;
-    endMs: number;
-    onTimeChange?: (ms: number) => void;
+    currentMs: number;
+    durationMs: number;
+    segmentStartMs: number;
+    segmentEndMs: number;
+    onPlayPause: () => void;
+    onRestartSegment: () => void;
+    onSeekSong: (ms: number) => void;
   }) => (
     <div
       data-testid="mock-audio-player"
       data-audio-url={audioUrl}
-      data-start-ms={startMs}
-      data-end-ms={endMs}
+      data-current-ms={currentMs}
+      data-duration-ms={durationMs}
+      data-start-ms={segmentStartMs}
+      data-end-ms={segmentEndMs}
     >
-      <button data-testid="mock-time-2000" onClick={() => onTimeChange?.(2000)}>
-        time 2000
-      </button>
-      <button data-testid="mock-time-6000" onClick={() => onTimeChange?.(6000)}>
-        time 6000
-      </button>
+      <button data-testid="mock-play-toggle" onClick={onPlayPause}>toggle</button>
+      <button data-testid="mock-restart" onClick={onRestartSegment}>restart</button>
+      <button data-testid="mock-seek-song" onClick={() => onSeekSong(6000)}>seek song</button>
     </div>
   ),
 }));
@@ -99,6 +115,18 @@ const makeSession = (song: Song): SessionState => ({
 });
 
 describe("PracticeView", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      currentMs: 0,
+      durationMs: 12000,
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+  });
+
   it("renders song title", () => {
     const song = makeSong();
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
@@ -154,6 +182,7 @@ describe("PracticeView", () => {
       "data-audio-url",
       "http://example.com/audio.mp3"
     );
+    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-duration-ms", "12000");
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-start-ms", "0");
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-end-ms", "4000");
   });
@@ -174,60 +203,70 @@ describe("PracticeView", () => {
 
     expect(screen.getByTestId("practice-layout")).toBeInTheDocument();
     expect(screen.getByTestId("practice-header")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-top-bar")).toBeInTheDocument();
     expect(screen.getByTestId("practice-main")).toBeInTheDocument();
     expect(screen.getByTestId("practice-focus")).toBeInTheDocument();
     expect(screen.getByTestId("practice-queue")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
   });
 
-  it("shows previous/current/next segment previews and updates them on navigation", () => {
+  it("renders clickable segment strip and updates active segment on navigation", () => {
     const song = makeSong(3);
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
 
-    expect(screen.getByTestId("prev-segment-preview")).toHaveTextContent("Start of song");
-    expect(screen.getByTestId("current-segment-preview")).toHaveTextContent("Verse 1");
-    expect(screen.getByTestId("next-segment-preview")).toHaveTextContent("Verse 2");
-
+    expect(screen.getByTestId("practice-segment-strip")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("next-btn"));
 
-    expect(screen.getByTestId("prev-segment-preview")).toHaveTextContent("Verse 1");
-    expect(screen.getByTestId("current-segment-preview")).toHaveTextContent("Verse 2");
-    expect(screen.getByTestId("next-segment-preview")).toHaveTextContent("Verse 3");
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
   });
 
-  it("highlights the active segment row based on playback time", () => {
+  it("highlights the active queue segment based on playback position", () => {
     const song = makeSong(3);
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    const { rerender } = render(<PracticeView song={song} initialSession={makeSession(song)} />);
 
     expect(screen.getByTestId("queue-segment-seg-0")).toHaveAttribute("data-highlighted", "true");
     expect(screen.getByTestId("queue-segment-seg-1")).toHaveAttribute("data-highlighted", "false");
 
-    fireEvent.click(screen.getByTestId("mock-time-6000"));
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      currentMs: 6000,
+      durationMs: 12000,
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    rerender(<PracticeView song={song} initialSession={makeSession(song)} />);
 
     expect(screen.getByTestId("queue-segment-seg-0")).toHaveAttribute("data-highlighted", "false");
     expect(screen.getByTestId("queue-segment-seg-1")).toHaveAttribute("data-highlighted", "true");
-    expect(screen.getByTestId("current-segment-preview")).toHaveTextContent("Verse 2");
   });
 
-  it("queue prev/next controls navigate segments", () => {
-    const song = makeSong(3);
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
-
-    expect(screen.getByTestId("queue-prev-btn")).toBeDisabled();
-    fireEvent.click(screen.getByTestId("queue-next-btn"));
-    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
-
-    fireEvent.click(screen.getByTestId("queue-prev-btn"));
-    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
-  });
-
-  it("clicking a queue segment jumps directly to that segment", () => {
+  it("clicking a segment chip jumps directly to that segment", () => {
     const song = makeSong(3);
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
 
     fireEvent.click(screen.getByTestId("jump-segment-seg-2"));
 
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 3 of 3");
-    expect(screen.getByTestId("current-segment-preview")).toHaveTextContent("Verse 3");
-    expect(screen.getByTestId("next-segment-preview")).toHaveTextContent("End of song");
+    expect(mockSeek).toHaveBeenCalledWith(8000);
+  });
+
+  it("play toggle and restart call into shared audio controls", () => {
+    const song = makeSong(3);
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+    fireEvent.click(screen.getByTestId("mock-restart"));
+
+    expect(mockPlay).toHaveBeenCalledWith(0, 4000);
+  });
+
+  it("whole-song transport seeks the playhead", () => {
+    const song = makeSong(3);
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    fireEvent.click(screen.getByTestId("mock-seek-song"));
+    expect(mockSeek).toHaveBeenCalledWith(6000);
   });
 });
