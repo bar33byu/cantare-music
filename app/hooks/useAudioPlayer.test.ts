@@ -123,10 +123,24 @@ describe('useAudioPlayer', () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
 
     act(() => {
+      result.current.play(0, 4000);
+    });
+
+    act(() => {
       stub.emit('error');
     });
 
     expect(result.current.playbackError).toContain('Unable to load audio');
     expect(result.current.isReady).toBe(false);
+  });
+
+  it('does not surface decoder errors before user presses play', () => {
+    const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
+
+    act(() => {
+      stub.emit('error');
+    });
+
+    expect(result.current.playbackError).toBeNull();
   });
 });

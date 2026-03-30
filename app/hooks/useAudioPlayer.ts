@@ -23,6 +23,8 @@ export function useAudioPlayer(
   const endMsRef = useRef<number>(0);
   const pendingSeekMsRef = useRef<number | null>(null);
   const pendingPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
+  const hasUserPlayIntentRef = useRef(false);
+  const lastErrorRef = useRef<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
@@ -30,6 +32,8 @@ export function useAudioPlayer(
   const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   const startPlayback = useCallback((audio: HTMLAudioElement, startMs: number, endMs: number) => {
+    hasUserPlayIntentRef.current = true;
+    lastErrorRef.current = null;
     setPlaybackError(null);
     pendingSeekMsRef.current = startMs;
     endMsRef.current = Number.isFinite(endMs) ? endMs : 0;
@@ -70,7 +74,8 @@ export function useAudioPlayer(
     audioRef.current = audio;
 
     if ('preload' in audio) {
-      audio.preload = 'auto';
+      // Avoid eager decode/network churn before user interaction.
+      audio.preload = 'none';
     }
 
     const flushPendingPlay = () => {
@@ -118,11 +123,17 @@ export function useAudioPlayer(
       const mediaError = audio.error;
       const errorCode = mediaError?.code;
       const detail = mediaError?.message ? ` (${mediaError.message})` : '';
-      setPlaybackError(
+      const errorMessage =
         errorCode
           ? `Unable to load audio (code ${errorCode})${detail}`
-          : `Unable to load audio for this song${detail}`
-      );
+          : `Unable to load audio for this song${detail}`;
+
+      // Do not surface noisy demux errors until user explicitly tries to play.
+      if (hasUserPlayIntentRef.current && lastErrorRef.current !== errorMessage) {
+        lastErrorRef.current = errorMessage;
+        setPlaybackError(errorMessage);
+      }
+
       setIsReady(false);
       setIsPlaying(false);
     };
@@ -134,7 +145,6 @@ export function useAudioPlayer(
     audio.addEventListener('canplay', handleCanPlay);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('error', handleError);
-    audio.load?.();
 
     if (pendingSeekMsRef.current !== null) {
       audio.currentTime = pendingSeekMsRef.current / 1000;
@@ -158,6 +168,7 @@ export function useAudioPlayer(
   }, [audioUrl, audioFactory, startPlayback]);
 
   const play = useCallback((startMs: number, endMs: number) => {
+    hasUserPlayIntentRef.current = true;
     const audio = audioRef.current;
     if (!audio || !isReady) {
       pendingSeekMsRef.current = startMs;
