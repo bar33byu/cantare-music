@@ -7,6 +7,7 @@ export default function DebugAudioPage() {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any | null>(null);
 
   useEffect(() => {
     return () => {
@@ -27,7 +28,29 @@ export default function DebugAudioPage() {
         .join("/");
 
       const resp = await fetch(`/api/audio/${segments}`);
-      if (!resp.ok) throw new Error(`Failed to fetch audio: ${resp.status}`);
+      if (!resp.ok) {
+        let bodyText = null;
+        try { bodyText = await resp.text(); } catch (e) { bodyText = null; }
+        let bodyJson = null;
+        try { bodyJson = bodyText ? JSON.parse(bodyText) : null; } catch (e) { bodyJson = null; }
+        const headers: Record<string,string> = {};
+        resp.headers.forEach((v,k) => { headers[k] = v; });
+
+        const info = { audioFetch: { status: resp.status, statusText: resp.statusText, bodyText, bodyJson, headers } };
+        setDebugInfo((prev: any) => ({ ...(prev || {}), ...info }));
+
+        if (resp.status >= 500) {
+          try {
+            const dbgResp = await fetch(`/api/debug/r2?key=${segments}`);
+            const dbgJson = await dbgResp.json();
+            setDebugInfo((prev: any) => ({ ...(prev || {}), r2Check: dbgJson }));
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        throw new Error(`Failed to fetch audio: ${resp.status} ${resp.statusText}`);
+      }
 
       const blob = await resp.blob();
       const objectUrl = URL.createObjectURL(blob);
