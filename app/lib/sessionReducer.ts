@@ -1,17 +1,22 @@
 import { MemoryRating, PracticeSession } from '../types/index';
 
+export interface SessionState extends PracticeSession {
+  currentSongId: string | null;
+}
+
 export type SessionAction =
   | { type: 'NEXT_SEGMENT' }
   | { type: 'PREV_SEGMENT' }
   | { type: 'TOGGLE_LOCK' }
   | { type: 'RATE_SEGMENT'; segmentId: string; rating: MemoryRating }
   | { type: 'COMPLETE' }
-  | { type: 'RESET'; songId: string };
+  | { type: 'RESET'; songId: string }
+  | { type: 'SET_CURRENT_SONG'; songId: string };
 
 export function sessionReducer(
-  state: PracticeSession,
+  state: SessionState,
   action: SessionAction
-): PracticeSession {
+): SessionState {
   switch (action.type) {
     case 'NEXT_SEGMENT':
       return { ...state, currentSegmentIndex: state.currentSegmentIndex + 1 };
@@ -51,9 +56,17 @@ export function sessionReducer(
         ratings: [],
         startedAt: new Date().toISOString(),
         completedAt: undefined,
+        currentSongId: state.currentSongId,
       };
+
+    case 'SET_CURRENT_SONG':
+      return { ...state, currentSongId: action.songId };
 
     default:
       return state;
   }
+}
+
+export function setSongId(songId: string): SessionAction {
+  return { type: 'SET_CURRENT_SONG', songId };
 }

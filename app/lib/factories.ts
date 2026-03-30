@@ -1,4 +1,5 @@
 import type { Segment, Song, PracticeSession, SegmentRating } from "../types/index";
+import type { SessionState } from "./sessionReducer";
 
 export function makeSegment(overrides?: Partial<Segment>): Segment {
   return {
@@ -26,7 +27,7 @@ export function makeSong(overrides?: Partial<Song>): Song {
   };
 }
 
-export function makeSession(overrides?: Partial<PracticeSession>): PracticeSession {
+export function makeSession(overrides?: Partial<SessionState>): SessionState {
   return {
     id: crypto.randomUUID(),
     songId: "seed-1",
@@ -34,6 +35,7 @@ export function makeSession(overrides?: Partial<PracticeSession>): PracticeSessi
     isLocked: false,
     ratings: [],
     startedAt: new Date().toISOString(),
+    currentSongId: null,
     ...overrides,
   };
 }

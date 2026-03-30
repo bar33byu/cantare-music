@@ -74,4 +74,39 @@ describe('sessionReducer', () => {
     expect(state.ratings).toBe(originalRatings);
     expect(state.ratings).toHaveLength(0);
   });
+
+  it('initial state has current_song_id as null', () => {
+    const state = makeSession({ currentSegmentIndex: 0 }) as any;
+    expect(state.currentSongId).toBeNull();
+  });
+
+  it('SET_CURRENT_SONG action updates current_song_id', () => {
+    const state = makeSession({ currentSegmentIndex: 0 }) as any;
+    const next = sessionReducer(state, { type: 'SET_CURRENT_SONG', songId: 'song-123' } as any);
+    expect((next as any).currentSongId).toBe('song-123');
+  });
+
+  it('SET_CURRENT_SONG preserves other state properties', () => {
+    const state = makeSession({ currentSegmentIndex: 2, ratings: [
+      { id: 'r1', segmentId: 'seg1', rating: 3, ratedAt: new Date().toISOString() },
+    ]}) as any;
+    const next = sessionReducer(state, { type: 'SET_CURRENT_SONG', songId: 'song-456' } as any);
+    expect((next as any).currentSongId).toBe('song-456');
+    expect(next.currentSegmentIndex).toBe(2);
+    expect(next.ratings).toHaveLength(1);
+  });
+
+  it('other actions preserve current_song_id', () => {
+    const state = makeSession({ currentSegmentIndex: 0 }) as any;
+    state.currentSongId = 'song-abc';
+    const next = sessionReducer(state, { type: 'NEXT_SEGMENT' });
+    expect((next as any).currentSongId).toBe('song-abc');
+  });
+
+  it('RESET preserves current_song_id', () => {
+    const state = makeSession({ currentSegmentIndex: 3 }) as any;
+    state.currentSongId = 'song-xyz';
+    const next = sessionReducer(state, { type: 'RESET', songId: 'song-different' });
+    expect((next as any).currentSongId).toBe('song-xyz');
+  });
 });
