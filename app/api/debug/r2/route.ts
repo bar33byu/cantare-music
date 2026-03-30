@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
       R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
       R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
       R2_BUCKET_NAME: process.env.R2_BUCKET_NAME ?? process.env.R2_BUCKET,
+      R2_BUCKET: process.env.R2_BUCKET,
       R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
       R2_PUBLIC_BASE_URL: process.env.R2_PUBLIC_BASE_URL,
       R2_PUBLIC_BASE_UR: process.env.R2_PUBLIC_BASE_UR,
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
     // Compute chosen endpoint similar to lib/r2.ts
     const accountId = rawEnv.R2_ACCOUNT_ID;
     const computedEndpoint = rawEnv.R2_ENDPOINT ?? (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined);
-    const bucket = rawEnv.R2_BUCKET_NAME ?? rawEnv.R2_BUCKET ?? BUCKET;
+    const bucket = rawEnv.R2_BUCKET_NAME ?? BUCKET;
 
     const publicCandidates = [rawEnv.R2_PUBLIC_URL, rawEnv.R2_PUBLIC_BASE_URL, rawEnv.R2_PUBLIC_BASE_UR, rawEnv.R2_ENDPOINT]
       .filter((v) => typeof v === 'string' && v && v !== 'undefined');
