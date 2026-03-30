@@ -29,7 +29,14 @@ export interface AudioDebugInfo {
   pendingEndMs: number;
   lastEvent: string;
   lastEventAt: string;
+  eventHistory?: string[];
   playAttempts: number;
+  playCalls?: number;
+  playResolved?: number;
+  playRejected?: number;
+  lastPlayRequest?: string;
+  lastPlayOutcome?: string;
+  lastPlayError?: string | null;
   errorCode: number | null;
   errorMessage: string | null;
 }
@@ -50,7 +57,14 @@ function makeDefaultDebugInfo(audioUrl: string): AudioDebugInfo {
     pendingEndMs: 0,
     lastEvent: 'init',
     lastEventAt: new Date().toISOString(),
+    eventHistory: [],
     playAttempts: 0,
+    playCalls: 0,
+    playResolved: 0,
+    playRejected: 0,
+    lastPlayRequest: '',
+    lastPlayOutcome: 'none',
+    lastPlayError: null,
     errorCode: null,
     errorMessage: null,
   };
@@ -85,6 +99,7 @@ export function useAudioPlayer(
       const nextCurrentSrcHistory = didCurrentSrcChange
         ? [`${now} ${eventName}: ${nextCurrentSrc || '(empty)'}`, ...(previous.currentSrcHistory ?? [])].slice(0, 8)
         : (previous.currentSrcHistory ?? []);
+      const nextEventHistory = [`${now} ${eventName}`, ...(previous.eventHistory ?? [])].slice(0, 12);
 
       return {
         ...previous,
@@ -93,6 +108,7 @@ export function useAudioPlayer(
         currentSrc: nextCurrentSrc,
         currentSrcChanges: didCurrentSrcChange ? (previous.currentSrcChanges ?? 0) + 1 : (previous.currentSrcChanges ?? 0),
         currentSrcHistory: nextCurrentSrcHistory,
+        eventHistory: nextEventHistory,
         audioInstanceId: audioInstanceIdRef.current,
         audioInstancesCreated: audioInstancesCreatedRef.current,
         audioUrlChanges: audioUrlChangeCountRef.current,
@@ -139,14 +155,35 @@ export function useAudioPlayer(
     applyCurrentTime(audio, startMs, 'seek-before-play');
     setCurrentMs(startMs);
     updateDebugInfo(audio, 'play-attempt');
+    setDebugInfo((previous) => ({
+      ...previous,
+      playCalls: (previous.playCalls ?? 0) + 1,
+      lastPlayRequest: `${new Date().toISOString()} start=${startMs} end=${endMs}`,
+      lastPlayOutcome: 'pending',
+      lastPlayError: null,
+    }));
 
     try {
       const result = audio.play();
       if (result instanceof Promise) {
+        result.then(() => {
+          setDebugInfo((previous) => ({
+            ...previous,
+            playResolved: (previous.playResolved ?? 0) + 1,
+            lastPlayOutcome: 'resolved',
+          }));
+          updateDebugInfo(audio, 'play-resolved');
+        });
         result.catch((error: unknown) => {
           const message = error instanceof Error ? error.message : 'Playback failed';
           setPlaybackError(message);
           setIsPlaying(false);
+          setDebugInfo((previous) => ({
+            ...previous,
+            playRejected: (previous.playRejected ?? 0) + 1,
+            lastPlayOutcome: 'rejected',
+            lastPlayError: message,
+          }));
           updateDebugInfo(audio, 'play-rejected');
         });
       }
@@ -154,6 +191,12 @@ export function useAudioPlayer(
       const message = error instanceof Error ? error.message : 'Playback failed';
       setPlaybackError(message);
       setIsPlaying(false);
+      setDebugInfo((previous) => ({
+        ...previous,
+        playRejected: (previous.playRejected ?? 0) + 1,
+        lastPlayOutcome: 'throw',
+        lastPlayError: message,
+      }));
       updateDebugInfo(audio, 'play-throw');
     }
   }, [applyCurrentTime, updateDebugInfo]);

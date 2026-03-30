@@ -10,6 +10,15 @@ import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { toPlayableAudioUrl } from "../lib/audioUrls";
 
+interface TransportDebugState {
+  playToggleClicks: number;
+  restartClicks: number;
+  seekClicks: number;
+  debugPlayTestClicks: number;
+  lastAction: string;
+  lastActionAt: string;
+}
+
 interface PracticeViewProps {
   song: Song;
   initialSession: SessionState;
@@ -19,6 +28,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const playbackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
   const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
+  const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
+    playToggleClicks: 0,
+    restartClicks: 0,
+    seekClicks: 0,
+    debugPlayTestClicks: 0,
+    lastAction: "init",
+    lastActionAt: new Date().toISOString(),
+  });
   const hasSegments = song.segments.length > 0;
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
@@ -72,6 +89,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
   };
 
   const handleTogglePlay = () => {
+    setTransportDebug((previous) => ({
+      ...previous,
+      playToggleClicks: previous.playToggleClicks + 1,
+      lastAction: "toggle-play",
+      lastActionAt: new Date().toISOString(),
+    }));
     if (isPlaying) {
       pause();
       return;
@@ -84,6 +107,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
   };
 
   const handleRestartSegment = () => {
+    setTransportDebug((previous) => ({
+      ...previous,
+      restartClicks: previous.restartClicks + 1,
+      lastAction: "restart-segment",
+      lastActionAt: new Date().toISOString(),
+    }));
     const restartMs = currentSegment?.startMs ?? 0;
     const endMs = currentSegment?.endMs ?? (totalDurationMs || Number.POSITIVE_INFINITY);
     seek(restartMs);
@@ -91,6 +120,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
   };
 
   const handleSeekSong = (ms: number) => {
+    setTransportDebug((previous) => ({
+      ...previous,
+      seekClicks: previous.seekClicks + 1,
+      lastAction: `seek-song-${ms}`,
+      lastActionAt: new Date().toISOString(),
+    }));
     seek(ms);
     const targetIndex = song.segments.findIndex(
       (segment) => ms >= segment.startMs && ms < segment.endMs
@@ -98,6 +133,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
     if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex) {
       dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
     }
+  };
+
+  const handleDebugPlayTest = () => {
+    setTransportDebug((previous) => ({
+      ...previous,
+      debugPlayTestClicks: previous.debugPlayTestClicks + 1,
+      lastAction: "debug-play-test",
+      lastActionAt: new Date().toISOString(),
+    }));
+    play(0, 10000);
   };
 
   return (
@@ -244,9 +289,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
             playbackError={playbackError}
             debugInfo={debugInfo}
             restartLabel={hasSegments ? "Restart Segment" : "Restart Piece"}
+            transportDebug={transportDebug}
             onPlayPause={handleTogglePlay}
             onRestartSegment={handleRestartSegment}
             onSeekSong={handleSeekSong}
+            onDebugPlayTest={handleDebugPlayTest}
           />
         </section>
       </div>
