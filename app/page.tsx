@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import PracticeView from "./components/PracticeView";
 import { SongForm } from "./components/SongForm";
 import { SongBrowser } from "./components/SongBrowser";
+import { SegmentEditor } from "./components/SegmentEditor";
 import { makeSession } from "./lib/factories";
 import type { Song, Segment } from "./types";
 
@@ -15,7 +16,7 @@ interface SongListItem {
   createdAt: string;
 }
 
-type ViewMode = "list" | "practice" | "add";
+type ViewMode = "list" | "practice" | "segment_editor" | "add";
 
 export default function Home() {
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
@@ -50,13 +51,40 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-4xl mx-auto">
+          <div className="flex gap-3 mb-4">
+            <button
+              onClick={handleBackToList}
+              className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+            >
+              ← Back to Songs
+            </button>
+            <button
+              onClick={() => setViewMode("segment_editor")}
+              className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+            >
+              Edit Segments
+            </button>
+          </div>
+          <PracticeView song={selectedSong} initialSession={session} />
+        </div>
+      </div>
+    );
+  }
+
+  if (viewMode === "segment_editor" && selectedSong) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4">
+        <div className="max-w-4xl mx-auto">
           <button
             onClick={handleBackToList}
             className="mb-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
           >
             ← Back to Songs
           </button>
-          <PracticeView song={selectedSong} initialSession={session} />
+          <SegmentEditor
+            songId={selectedSong.id}
+            onBack={() => setViewMode("practice")}
+          />
         </div>
       </div>
     );

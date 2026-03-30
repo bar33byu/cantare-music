@@ -1,0 +1,98 @@
+"use client";
+
+import { useState } from 'react';
+import { Segment } from '../types/index';
+import { SegmentList } from './SegmentList';
+import { SegmentForm } from './SegmentForm';
+
+interface SegmentEditorProps {
+  songId: string;
+  onBack?: () => void;
+}
+
+export function SegmentEditor({ songId, onBack }: SegmentEditorProps) {
+  const [editingSegment, setEditingSegment] = useState<Segment | null>(null);
+  const [isAddingNew, setIsAddingNew] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleEdit = (segment: Segment) => {
+    setIsAddingNew(false);
+    setEditingSegment(segment);
+  };
+
+  const handleAddNew = () => {
+    setEditingSegment(null);
+    setIsAddingNew(true);
+  };
+
+  const handleDelete = async (segment: Segment) => {
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/songs/${songId}/segments/${segment.id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Delete failed');
+      setRefreshKey((prev) => prev + 1);
+    } catch {
+      setDeleteError('Failed to delete segment. Please try again.');
+    }
+  };
+
+  const handleFormSuccess = () => {
+    setEditingSegment(null);
+    setIsAddingNew(false);
+    setRefreshKey((prev) => prev + 1);
+  };
+
+  const handleFormCancel = () => {
+    setEditingSegment(null);
+    setIsAddingNew(false);
+  };
+
+  const showForm = isAddingNew || editingSegment !== null;
+
+  return (
+    <div className="max-w-2xl mx-auto w-full">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold text-gray-900">Edit Segments</h2>
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+          >
+            ← Back to Practice
+          </button>
+        )}
+      </div>
+
+      {deleteError && (
+        <div role="alert" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {deleteError}
+        </div>
+      )}
+
+      {showForm ? (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">
+            {editingSegment ? 'Edit Segment' : 'Add Segment'}
+          </h3>
+          <SegmentForm
+            songId={songId}
+            segment={editingSegment ?? undefined}
+            onSuccess={handleFormSuccess}
+            onCancel={handleFormCancel}
+          />
+        </div>
+      ) : (
+        <SegmentList
+          songId={songId}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onAddNew={handleAddNew}
+          refreshKey={refreshKey}
+        />
+      )}
+    </div>
+  );
+}
