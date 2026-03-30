@@ -103,16 +103,11 @@ describe('useAudioPlayer', () => {
     expect(result.current.isReady).toBe(true);
   });
 
-  it('queues play requests made before audio is ready', () => {
+  it('attempts playback immediately before audio is ready', () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
 
     act(() => {
       result.current.play(2000, 5000);
-    });
-
-    act(() => {
-      stub.readyState = 3;
-      stub.emit('canplay');
     });
 
     expect(stub.play).toHaveBeenCalled();

@@ -37,6 +37,9 @@ export function useAudioPlayer(
     setPlaybackError(null);
     pendingSeekMsRef.current = startMs;
     endMsRef.current = Number.isFinite(endMs) ? endMs : 0;
+    if (audio.readyState === 0) {
+      audio.load?.();
+    }
     audio.currentTime = startMs / 1000;
     setCurrentMs(startMs);
 
@@ -170,14 +173,14 @@ export function useAudioPlayer(
   const play = useCallback((startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;
     const audio = audioRef.current;
-    if (!audio || !isReady) {
+    if (!audio) {
       pendingSeekMsRef.current = startMs;
       pendingPlayRangeRef.current = { startMs, endMs };
       setCurrentMs(startMs);
       return;
     }
     startPlayback(audio, startMs, endMs);
-  }, [isReady, startPlayback]);
+  }, [startPlayback]);
 
   const pause = useCallback(() => {
     const audio = audioRef.current;
