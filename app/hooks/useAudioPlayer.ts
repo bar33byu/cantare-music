@@ -104,6 +104,8 @@ export function useAudioPlayer(
       if (Number.isFinite(audio.duration)) {
         setDurationMs(audio.duration * 1000);
       }
+      // Metadata availability is enough to allow user-triggered playback.
+      setIsReady(true);
       if (pendingSeekMsRef.current !== null) {
         audio.currentTime = pendingSeekMsRef.current / 1000;
       }
@@ -113,7 +115,14 @@ export function useAudioPlayer(
       }
     };
     const handleError = () => {
-      setPlaybackError('Unable to load audio for this song.');
+      const mediaError = audio.error;
+      const errorCode = mediaError?.code;
+      const detail = mediaError?.message ? ` (${mediaError.message})` : '';
+      setPlaybackError(
+        errorCode
+          ? `Unable to load audio (code ${errorCode})${detail}`
+          : `Unable to load audio for this song${detail}`
+      );
       setIsReady(false);
       setIsPlaying(false);
     };

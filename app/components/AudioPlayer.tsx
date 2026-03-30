@@ -68,10 +68,9 @@ export function AudioPlayer({
           type="button"
           onClick={onPlayPause}
           data-testid="audio-play-pause"
-          disabled={!isReady}
           className="rounded-full bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
         >
-          {!isReady ? "Loading Audio..." : isPlaying ? "Pause" : "Play"}
+          {isPlaying ? "Pause" : "Play"}
         </button>
       </div>
 
@@ -84,7 +83,7 @@ export function AudioPlayer({
         <div className="mb-3 flex items-center justify-between text-xs text-gray-500">
           <span data-testid="audio-cache-status">Caching uses the browser HTTP cache for this file.</span>
           <span data-testid="audio-status-message">
-            {playbackError ? playbackError : isReady ? "Ready to play" : "Loading audio source..."}
+            {playbackError ? playbackError : isReady ? "Ready to play" : "Loading audio source... you can tap Play"}
           </span>
         </div>
 

@@ -60,9 +60,10 @@ describe("AudioPlayer", () => {
 
   it("disables controls while audio is loading", () => {
     render(<AudioPlayer {...defaultProps} isReady={false} />);
-    expect(screen.getByTestId("audio-play-pause")).toBeDisabled();
+    expect(screen.getByTestId("audio-play-pause")).not.toBeDisabled();
     expect(screen.getByTestId("audio-restart")).toBeDisabled();
-    expect(screen.getByTestId("audio-play-pause")).toHaveTextContent("Loading Audio...");
+    expect(screen.getByTestId("audio-play-pause")).toHaveTextContent("Play");
+    expect(screen.getByTestId("audio-status-message")).toHaveTextContent("you can tap Play");
     expect(screen.getByTestId("audio-slider")).toBeDisabled();
   });
 });

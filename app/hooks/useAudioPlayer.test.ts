@@ -100,6 +100,7 @@ describe('useAudioPlayer', () => {
       stub.emit('loadedmetadata');
     });
     expect(result.current.durationMs).toBe(12000);
+    expect(result.current.isReady).toBe(true);
   });
 
   it('queues play requests made before audio is ready', () => {
@@ -125,7 +126,7 @@ describe('useAudioPlayer', () => {
       stub.emit('error');
     });
 
-    expect(result.current.playbackError).toBe('Unable to load audio for this song.');
+    expect(result.current.playbackError).toContain('Unable to load audio');
     expect(result.current.isReady).toBe(false);
   });
 });
