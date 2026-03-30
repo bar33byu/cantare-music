@@ -50,6 +50,15 @@ describe('r2 helpers', () => {
     );
   });
 
+  it('getPublicUrl falls back to same-origin audio proxy when R2_PUBLIC_URL is missing', async () => {
+    process.env.R2_PUBLIC_URL = '';
+    const { getPublicUrl } = await import('./r2');
+
+    expect(getPublicUrl('audio/song-1/my file.mp3')).toBe(
+      '/api/audio/audio/song-1/my%20file.mp3'
+    );
+  });
+
   it('generateUploadKey returns string starting with audio/', async () => {
     const { generateUploadKey } = await import('./r2');
     expect(generateUploadKey('song-1', 'clip.mp3')).toMatch(/^audio\//);

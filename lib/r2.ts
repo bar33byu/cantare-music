@@ -17,7 +17,18 @@ export function getPublicUrl(key: string): string {
     .map((segment) => encodeURIComponent(segment))
     .join('/');
 
-  return `${process.env.R2_PUBLIC_URL}/${encodedKey}`;
+  const configuredPublicUrl = process.env.R2_PUBLIC_URL;
+  const hasConfiguredPublicUrl =
+    typeof configuredPublicUrl === 'string' &&
+    configuredPublicUrl.trim().length > 0 &&
+    configuredPublicUrl !== 'undefined';
+
+  if (!hasConfiguredPublicUrl) {
+    // Fallback to same-origin proxy to avoid broken "undefined/..." URLs in production.
+    return `/api/audio/${encodedKey}`;
+  }
+
+  return `${configuredPublicUrl}/${encodedKey}`;
 }
 
 export function generateUploadKey(songId: string, filename: string): string {
