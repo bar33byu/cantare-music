@@ -66,6 +66,11 @@ describe('useUploadAudio', () => {
 
     const file = new File(['test'], 'test.mp3', { type: 'audio/mpeg' });
 
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ key: 'test-key' }),
+    });
+
     let returnedKey: string;
     await act(async () => {
       returnedKey = await result.current.upload('song-123', file);
@@ -74,16 +79,10 @@ describe('useUploadAudio', () => {
     expect(returnedKey).toBe('test-key');
     expect(result.current.uploading).toBe(false);
     expect(result.current.error).toBe(null);
-    expect(mockFetch).toHaveBeenCalledWith('/api/songs/upload-url', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        songId: 'song-123',
-        filename: 'test.mp3',
-        contentType: 'audio/mpeg',
-        size: file.size,
-      }),
-    });
+    const call = mockFetch.mock.calls[0];
+    expect(call[0]).toBe('/api/songs/upload-url');
+    expect(call[1].method).toBe('POST');
+    expect(call[1].body).toBeInstanceOf(FormData);
   });
 
   it('API error sets error string', async () => {

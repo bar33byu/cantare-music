@@ -38,58 +38,26 @@ export function useUploadAudio(): UseUploadAudioReturn {
     setUploading(true);
 
     try {
-      // Get presigned URL
+      // Upload file via multipart form data to the API
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('songId', songId);
+
       const response = await fetch('/api/songs/upload-url', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          songId,
-          filename: file.name,
-          contentType: file.type,
-          size: file.size,
-        }),
+        body: formData,
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Upload URL request failed' }));
-        const errorMsg = errorData.error || 'Failed to get upload URL';
+        const errorData = await response.json().catch(() => ({ error: 'Upload failed' }));
+        const errorMsg = errorData.error || 'Failed to upload file';
         setError(errorMsg);
         throw new Error(errorMsg);
       }
 
-      const { uploadUrl, key } = await response.json();
+      const { key } = await response.json();
 
-      // Upload file using XMLHttpRequest for progress tracking
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            setProgress(Math.round((event.loaded / event.total) * 100));
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve();
-          } else {
-            const errorMsg = `Upload failed with status ${xhr.status}`;
-            setError(errorMsg);
-            reject(new Error(errorMsg));
-          }
-        };
-
-        xhr.onerror = () => {
-          const errorMsg = 'Upload failed due to network error';
-          setError(errorMsg);
-          reject(new Error(errorMsg));
-        };
-
-        xhr.open('PUT', uploadUrl);
-        xhr.setRequestHeader('Content-Type', file.type);
-        xhr.send(file);
-      });
-
+      setProgress(100);
       setUploading(false);
       return key;
     } catch (err) {

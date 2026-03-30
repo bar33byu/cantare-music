@@ -11,8 +11,13 @@ export async function GET(
     const segments = await getSegmentsBySongId(id);
     return NextResponse.json(segments);
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown server error';
     console.error('Error fetching segments:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const errorResponse =
+      process.env.NODE_ENV === 'development'
+        ? { error: message }
+        : { error: 'Internal server error' };
+    return NextResponse.json(errorResponse, { status: 500 });
   }
 }
 
@@ -46,7 +51,12 @@ export async function PUT(
     await upsertSegments(id, segments);
     return NextResponse.json({ success: true });
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown server error';
     console.error('Error upserting segments:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const errorResponse =
+      process.env.NODE_ENV === 'development'
+        ? { error: message }
+        : { error: 'Internal server error' };
+    return NextResponse.json(errorResponse, { status: 500 });
   }
 }
