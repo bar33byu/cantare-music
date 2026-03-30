@@ -12,7 +12,12 @@ export const r2Client = new S3Client({
 export const BUCKET = process.env.R2_BUCKET_NAME ?? 'cantare-audio';
 
 export function getPublicUrl(key: string): string {
-  return `${process.env.R2_PUBLIC_URL}/${key}`;
+  const encodedKey = key
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  return `${process.env.R2_PUBLIC_URL}/${encodedKey}`;
 }
 
 export function generateUploadKey(songId: string, filename: string): string {

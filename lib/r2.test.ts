@@ -41,6 +41,15 @@ describe('r2 helpers', () => {
     expect(getPublicUrl('audio/test.mp3')).toBe('https://cdn.example.com/audio/test.mp3');
   });
 
+  it('getPublicUrl encodes special characters in object keys', async () => {
+    const { getPublicUrl } = await import('./r2');
+    expect(
+      getPublicUrl('audio/song-1/1774834932832-1547.1 [Brad] Hail_the_Day.mp3')
+    ).toBe(
+      'https://cdn.example.com/audio/song-1/1774834932832-1547.1%20%5BBrad%5D%20Hail_the_Day.mp3'
+    );
+  });
+
   it('generateUploadKey returns string starting with audio/', async () => {
     const { generateUploadKey } = await import('./r2');
     expect(generateUploadKey('song-1', 'clip.mp3')).toMatch(/^audio\//);
