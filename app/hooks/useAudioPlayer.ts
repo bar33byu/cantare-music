@@ -14,7 +14,13 @@ export interface AudioPlayerControls {
 
 export interface AudioDebugInfo {
   src: string;
+  elementSrc?: string;
   currentSrc: string;
+  currentSrcChanges?: number;
+  currentSrcHistory?: string[];
+  audioInstanceId?: number;
+  audioInstancesCreated?: number;
+  audioUrlChanges?: number;
   readyState: number;
   networkState: number;
   preload: string;
@@ -54,6 +60,9 @@ export function useAudioPlayer(
   audioUrl: string,
   audioFactory: AudioFactory = defaultFactory
 ): AudioPlayerControls {
+  const audioUrlChangeCountRef = useRef(0);
+  const audioInstanceIdRef = useRef(0);
+  const audioInstancesCreatedRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const endMsRef = useRef<number>(0);
   const pendingSeekMsRef = useRef<number | null>(null);
@@ -70,22 +79,36 @@ export function useAudioPlayer(
   const updateDebugInfo = useCallback((audio: HTMLAudioElement | null, eventName: string) => {
     const now = new Date().toISOString();
 
-    setDebugInfo((previous) => ({
-      ...previous,
-      src: audioUrl,
-      currentSrc: audio?.currentSrc ?? previous.currentSrc,
-      readyState: audio?.readyState ?? previous.readyState,
-      networkState: audio?.networkState ?? previous.networkState,
-      preload: audio?.preload ?? previous.preload,
-      hasUserPlayIntent: hasUserPlayIntentRef.current,
-      pendingSeekMs: pendingSeekMsRef.current,
-      pendingEndMs: endMsRef.current,
-      lastEvent: eventName,
-      lastEventAt: now,
-      playAttempts: eventName === 'play-attempt' ? previous.playAttempts + 1 : previous.playAttempts,
-      errorCode: audio?.error?.code ?? previous.errorCode,
-      errorMessage: audio?.error?.message ?? previous.errorMessage,
-    }));
+    setDebugInfo((previous) => {
+      const nextCurrentSrc = audio?.currentSrc ?? previous.currentSrc;
+      const didCurrentSrcChange = nextCurrentSrc !== previous.currentSrc;
+      const nextCurrentSrcHistory = didCurrentSrcChange
+        ? [`${now} ${eventName}: ${nextCurrentSrc || '(empty)'}`, ...(previous.currentSrcHistory ?? [])].slice(0, 8)
+        : (previous.currentSrcHistory ?? []);
+
+      return {
+        ...previous,
+        src: audioUrl,
+        elementSrc: audio?.src ?? previous.elementSrc,
+        currentSrc: nextCurrentSrc,
+        currentSrcChanges: didCurrentSrcChange ? (previous.currentSrcChanges ?? 0) + 1 : (previous.currentSrcChanges ?? 0),
+        currentSrcHistory: nextCurrentSrcHistory,
+        audioInstanceId: audioInstanceIdRef.current,
+        audioInstancesCreated: audioInstancesCreatedRef.current,
+        audioUrlChanges: audioUrlChangeCountRef.current,
+        readyState: audio?.readyState ?? previous.readyState,
+        networkState: audio?.networkState ?? previous.networkState,
+        preload: audio?.preload ?? previous.preload,
+        hasUserPlayIntent: hasUserPlayIntentRef.current,
+        pendingSeekMs: pendingSeekMsRef.current,
+        pendingEndMs: endMsRef.current,
+        lastEvent: eventName,
+        lastEventAt: now,
+        playAttempts: eventName === 'play-attempt' ? previous.playAttempts + 1 : previous.playAttempts,
+        errorCode: audio?.error?.code ?? previous.errorCode,
+        errorMessage: audio?.error?.message ?? previous.errorMessage,
+      };
+    });
   }, [audioUrl]);
 
   const applyCurrentTime = useCallback(
@@ -136,6 +159,7 @@ export function useAudioPlayer(
   }, [applyCurrentTime, updateDebugInfo]);
 
   useEffect(() => {
+    audioUrlChangeCountRef.current += 1;
     setIsReady(false);
     setIsPlaying(false);
     setCurrentMs(0);
@@ -151,6 +175,8 @@ export function useAudioPlayer(
     }
 
     const audio = audioFactory(audioUrl);
+    audioInstancesCreatedRef.current += 1;
+    audioInstanceIdRef.current += 1;
     audioRef.current = audio;
     updateDebugInfo(audio, 'audio-created');
 

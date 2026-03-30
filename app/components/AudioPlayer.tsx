@@ -70,6 +70,19 @@ function formatMs(ms: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function buildProxyAudioUrl(audioKey: string | null): string | null {
+  if (!audioKey) {
+    return null;
+  }
+
+  const encoded = audioKey
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  return `/api/audio/${encoded}`;
+}
+
 export function AudioPlayer({
   audioUrl,
   currentMs,
@@ -96,6 +109,7 @@ export function AudioPlayer({
   const [isDebugOpen, setIsDebugOpen] = useState(false);
 
   const audioKey = useMemo(() => parseAudioKey(audioUrl), [audioUrl]);
+  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(audioKey), [audioKey]);
 
   const checkReachability = useCallback(async () => {
     if (!audioKey) {
@@ -262,6 +276,12 @@ export function AudioPlayer({
             <p data-testid="audio-debug-reachability-content-length">reachabilityContentLength: {reachability.contentLength ?? "n/a"}</p>
             <p data-testid="audio-debug-reachability-checked-at">reachabilityCheckedAt: {reachability.checkedAt ?? "n/a"}</p>
             <p data-testid="audio-debug-open">debugOpen: {String(isDebugOpen)}</p>
+            <p data-testid="audio-debug-audio-url" className="break-all">audioUrl: {audioUrl}</p>
+            <p data-testid="audio-debug-proxy-url" className="break-all">proxyAudioUrl: {proxyAudioUrl ?? "n/a"}</p>
+            <p data-testid="audio-debug-audio-instance-id">audioInstanceId: {debugInfo?.audioInstanceId ?? "n/a"}</p>
+            <p data-testid="audio-debug-audio-instances-created">audioInstancesCreated: {debugInfo?.audioInstancesCreated ?? "n/a"}</p>
+            <p data-testid="audio-debug-audio-url-changes">audioUrlChanges: {debugInfo?.audioUrlChanges ?? "n/a"}</p>
+            <p data-testid="audio-debug-current-src-changes">currentSrcChanges: {debugInfo?.currentSrcChanges ?? 0}</p>
             <p data-testid="audio-debug-ready-state">readyState: {debugInfo?.readyState ?? -1}</p>
             <p data-testid="audio-debug-network-state">networkState: {debugInfo?.networkState ?? -1}</p>
             <p data-testid="audio-debug-last-event">lastEvent: {debugInfo?.lastEvent ?? "n/a"}</p>
@@ -273,7 +293,30 @@ export function AudioPlayer({
             <p data-testid="audio-debug-error-code">errorCode: {debugInfo?.errorCode ?? "null"}</p>
             <p data-testid="audio-debug-error-message">errorMessage: {debugInfo?.errorMessage ?? "null"}</p>
             <p data-testid="audio-debug-src" className="break-all">src: {debugInfo?.src ?? audioUrl}</p>
+            <p data-testid="audio-debug-element-src" className="break-all">elementSrc: {debugInfo?.elementSrc ?? ""}</p>
             <p data-testid="audio-debug-current-src" className="break-all">currentSrc: {debugInfo?.currentSrc ?? ""}</p>
+            <div className="mt-3 rounded border border-slate-200 bg-white p-2" data-testid="audio-debug-current-src-history-wrap">
+              <p className="font-semibold text-slate-800">currentSrcHistory</p>
+              {(debugInfo?.currentSrcHistory ?? []).length === 0 ? (
+                <p data-testid="audio-debug-current-src-history-empty">(empty)</p>
+              ) : (
+                <ul className="space-y-1" data-testid="audio-debug-current-src-history-list">
+                  {(debugInfo?.currentSrcHistory ?? []).map((entry, index) => (
+                    <li key={`${entry}-${index}`} className="break-all">{entry}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="mt-3 rounded border border-slate-200 bg-white p-2" data-testid="audio-native-probe-wrap">
+              <p className="font-semibold text-slate-800">Native Audio Probe (Direct URL)</p>
+              <audio data-testid="audio-native-probe-direct" className="mt-2 w-full" controls preload="metadata" src={audioUrl} />
+              <p className="mt-2 font-semibold text-slate-800">Native Audio Probe (Proxy URL)</p>
+              {proxyAudioUrl ? (
+                <audio data-testid="audio-native-probe-proxy" className="mt-2 w-full" controls preload="metadata" src={proxyAudioUrl} />
+              ) : (
+                <p data-testid="audio-native-probe-proxy-unavailable">Proxy probe unavailable: could not derive audio key.</p>
+              )}
+            </div>
           </div>
         </details>
       </div>

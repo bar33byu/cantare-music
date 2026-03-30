@@ -73,6 +73,8 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-restart")).toHaveTextContent("Restart Piece");
     expect(screen.getByTestId("audio-debug-panel")).toBeInTheDocument();
     expect(screen.getByTestId("audio-debug-last-event")).toHaveTextContent("init");
+    expect(screen.getByTestId("audio-native-probe-direct")).toBeInTheDocument();
+    expect(screen.getByTestId("audio-native-probe-proxy")).toBeInTheDocument();
   });
 
   it("disables controls while audio is loading", () => {
