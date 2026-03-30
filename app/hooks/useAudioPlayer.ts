@@ -88,6 +88,21 @@ export function useAudioPlayer(
     }));
   }, [audioUrl]);
 
+  const applyCurrentTime = useCallback(
+    (audio: HTMLAudioElement, ms: number, eventName: string) => {
+      try {
+        audio.currentTime = ms / 1000;
+        pendingSeekMsRef.current = null;
+        updateDebugInfo(audio, eventName);
+      } catch {
+        // Some browsers throw until metadata is available; keep seek pending.
+        pendingSeekMsRef.current = ms;
+        updateDebugInfo(audio, `${eventName}-deferred`);
+      }
+    },
+    [updateDebugInfo]
+  );
+
   const startPlayback = useCallback((audio: HTMLAudioElement, startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;
     lastErrorRef.current = null;
@@ -98,7 +113,7 @@ export function useAudioPlayer(
       audio.load?.();
       updateDebugInfo(audio, 'load');
     }
-    audio.currentTime = startMs / 1000;
+    applyCurrentTime(audio, startMs, 'seek-before-play');
     setCurrentMs(startMs);
     updateDebugInfo(audio, 'play-attempt');
 
@@ -118,7 +133,7 @@ export function useAudioPlayer(
       setIsPlaying(false);
       updateDebugInfo(audio, 'play-throw');
     }
-  }, [updateDebugInfo]);
+  }, [applyCurrentTime, updateDebugInfo]);
 
   useEffect(() => {
     setIsReady(false);
@@ -180,7 +195,7 @@ export function useAudioPlayer(
       setIsReady(true);
       updateDebugInfo(audio, 'loadedmetadata');
       if (pendingSeekMsRef.current !== null) {
-        audio.currentTime = pendingSeekMsRef.current / 1000;
+        applyCurrentTime(audio, pendingSeekMsRef.current, 'apply-pending-seek');
       }
       if (audio.readyState >= 2) {
         setIsReady(true);
@@ -228,8 +243,7 @@ export function useAudioPlayer(
     audio.addEventListener('pause', handlePauseDebug);
 
     if (pendingSeekMsRef.current !== null) {
-      audio.currentTime = pendingSeekMsRef.current / 1000;
-      updateDebugInfo(audio, 'apply-pending-seek');
+      applyCurrentTime(audio, pendingSeekMsRef.current, 'apply-pending-seek');
     }
 
     // If user clicked Play before audio element initialization completed,
@@ -260,7 +274,7 @@ export function useAudioPlayer(
       audio.removeEventListener('pause', handlePauseDebug);
       audio.pause();
     };
-  }, [audioUrl, audioFactory, startPlayback, updateDebugInfo]);
+  }, [audioUrl, audioFactory, applyCurrentTime, startPlayback, updateDebugInfo]);
 
   const play = useCallback((startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;
@@ -287,11 +301,10 @@ export function useAudioPlayer(
     const audio = audioRef.current;
     pendingSeekMsRef.current = ms;
     if (audio) {
-      audio.currentTime = ms / 1000;
-      updateDebugInfo(audio, 'seek');
+      applyCurrentTime(audio, ms, 'seek');
     }
     setCurrentMs(ms);
-  }, [updateDebugInfo]);
+  }, [applyCurrentTime]);
 
   return { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek };
 }

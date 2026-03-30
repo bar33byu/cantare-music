@@ -1,10 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AudioPlayer } from "./AudioPlayer";
 
 describe("AudioPlayer", () => {
   const defaultProps = {
-    audioUrl: "/song.mp3",
+    audioUrl: "/audio/song.mp3",
     currentMs: 2500,
     durationMs: 12000,
     segmentStartMs: 1000,
@@ -82,5 +82,26 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-play-pause")).toHaveTextContent("Play");
     expect(screen.getByTestId("audio-status-message")).toHaveTextContent("you can tap Play");
     expect(screen.getByTestId("audio-slider")).toBeDisabled();
+  });
+
+  it("runs reachability check when debug panel opens", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, meta: { ContentType: "audio/mpeg", ContentLength: 1234 } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AudioPlayer {...defaultProps} />);
+    fireEvent.click(screen.getByText("Audio Debug"));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/debug/r2?key=audio%2Fsong.mp3",
+        expect.objectContaining({ cache: "no-store" })
+      );
+    });
+
+    await screen.findByText(/reachability: reachable/i);
+    vi.unstubAllGlobals();
   });
 });

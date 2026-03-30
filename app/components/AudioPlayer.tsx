@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useMemo, useState, type SyntheticEvent } from "react";
 import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
 
 interface AudioPlayerProps {
@@ -16,6 +17,50 @@ interface AudioPlayerProps {
   onPlayPause: () => void;
   onRestartSegment: () => void;
   onSeekSong: (ms: number) => void;
+}
+
+type ReachabilityState = {
+  status: "idle" | "checking" | "reachable" | "unreachable" | "error";
+  key: string | null;
+  message: string;
+  checkedAt: string | null;
+  contentType: string | null;
+  contentLength: number | null;
+};
+
+function parseAudioKey(audioUrl: string): string | null {
+  if (!audioUrl || audioUrl.trim().length === 0) {
+    return null;
+  }
+
+  try {
+    const normalized = new URL(audioUrl, "http://localhost");
+    const path = normalized.pathname;
+    const proxyPrefix = "/api/audio/";
+
+    if (path.startsWith(proxyPrefix)) {
+      const rawKey = path.slice(proxyPrefix.length);
+      if (!rawKey) {
+        return null;
+      }
+      return rawKey
+        .split("/")
+        .map((segment) => decodeURIComponent(segment))
+        .join("/");
+    }
+
+    const trimmedPath = path.replace(/^\/+/, "");
+    if (trimmedPath.startsWith("audio/")) {
+      return trimmedPath
+        .split("/")
+        .map((segment) => decodeURIComponent(segment))
+        .join("/");
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function formatMs(ms: number): string {
@@ -40,6 +85,94 @@ export function AudioPlayer({
   onRestartSegment,
   onSeekSong,
 }: AudioPlayerProps) {
+  const [reachability, setReachability] = useState<ReachabilityState>({
+    status: "idle",
+    key: null,
+    message: "Not checked yet",
+    checkedAt: null,
+    contentType: null,
+    contentLength: null,
+  });
+  const [isDebugOpen, setIsDebugOpen] = useState(false);
+
+  const audioKey = useMemo(() => parseAudioKey(audioUrl), [audioUrl]);
+
+  const checkReachability = useCallback(async () => {
+    if (!audioKey) {
+      setReachability({
+        status: "error",
+        key: null,
+        message: "Could not derive storage key from audio URL",
+        checkedAt: new Date().toISOString(),
+        contentType: null,
+        contentLength: null,
+      });
+      return;
+    }
+
+    setReachability((previous) => ({
+      ...previous,
+      status: "checking",
+      key: audioKey,
+      message: "Checking object visibility from server...",
+      checkedAt: null,
+      contentType: null,
+      contentLength: null,
+    }));
+
+    try {
+      const response = await fetch(`/api/debug/r2?key=${encodeURIComponent(audioKey)}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        meta?: { ContentLength?: number; ContentType?: string };
+      };
+
+      if (response.ok && payload.ok) {
+        setReachability({
+          status: "reachable",
+          key: audioKey,
+          message: "Server can access this object in R2",
+          checkedAt: new Date().toISOString(),
+          contentType: payload.meta?.ContentType ?? null,
+          contentLength: payload.meta?.ContentLength ?? null,
+        });
+        return;
+      }
+
+      const errorMessage = payload.error ?? `Server check failed (HTTP ${response.status})`;
+      const unreachableStatus = /NoSuchKey|NotFound|404/i.test(errorMessage) ? "unreachable" : "error";
+      setReachability({
+        status: unreachableStatus,
+        key: audioKey,
+        message: errorMessage,
+        checkedAt: new Date().toISOString(),
+        contentType: null,
+        contentLength: null,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Reachability check failed";
+      setReachability({
+        status: "error",
+        key: audioKey,
+        message,
+        checkedAt: new Date().toISOString(),
+        contentType: null,
+        contentLength: null,
+      });
+    }
+  }, [audioKey]);
+
+  const handleDebugToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
+    const details = event.currentTarget;
+    const opened = details.open;
+    setIsDebugOpen(opened);
+    if (opened) {
+      void checkReachability();
+    }
+  }, [checkReachability]);
 
   if (!audioUrl) {
     return (
@@ -115,9 +248,20 @@ export function AudioPlayer({
           <span data-testid="audio-duration">{formatMs(safeDurationMs)}</span>
         </div>
 
-        <details data-testid="audio-debug-panel" className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+        <details
+          data-testid="audio-debug-panel"
+          className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700"
+          onToggle={handleDebugToggle}
+        >
           <summary className="cursor-pointer font-semibold text-slate-800">Audio Debug</summary>
           <div className="mt-2 space-y-1" data-testid="audio-debug-content">
+            <p data-testid="audio-debug-reachability">reachability: {reachability.status}</p>
+            <p data-testid="audio-debug-reachability-message" className="break-all">reachabilityMessage: {reachability.message}</p>
+            <p data-testid="audio-debug-reachability-key" className="break-all">reachabilityKey: {reachability.key ?? "n/a"}</p>
+            <p data-testid="audio-debug-reachability-content-type">reachabilityContentType: {reachability.contentType ?? "n/a"}</p>
+            <p data-testid="audio-debug-reachability-content-length">reachabilityContentLength: {reachability.contentLength ?? "n/a"}</p>
+            <p data-testid="audio-debug-reachability-checked-at">reachabilityCheckedAt: {reachability.checkedAt ?? "n/a"}</p>
+            <p data-testid="audio-debug-open">debugOpen: {String(isDebugOpen)}</p>
             <p data-testid="audio-debug-ready-state">readyState: {debugInfo?.readyState ?? -1}</p>
             <p data-testid="audio-debug-network-state">networkState: {debugInfo?.networkState ?? -1}</p>
             <p data-testid="audio-debug-last-event">lastEvent: {debugInfo?.lastEvent ?? "n/a"}</p>
