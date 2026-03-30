@@ -49,8 +49,14 @@ export function useUploadAudio(): UseUploadAudioReturn {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Upload failed' }));
-        const errorMsg = errorData.error || 'Failed to upload file';
+        const errorText = await response.text();
+        let errorMsg = 'Upload failed';
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMsg = errorData.error || errorText;
+        } catch {
+          errorMsg = errorText || `Upload failed with status ${response.status}`;
+        }
         setError(errorMsg);
         throw new Error(errorMsg);
       }
