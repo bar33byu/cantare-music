@@ -1,7 +1,10 @@
 import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
+const R2_ENDPOINT = process.env.R2_ENDPOINT ?? (R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : undefined);
+
 export const r2Client = new S3Client({
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  endpoint: R2_ENDPOINT,
   region: 'auto',
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID ?? '',
@@ -9,7 +12,14 @@ export const r2Client = new S3Client({
   },
 });
 
-export const BUCKET = process.env.R2_BUCKET_NAME ?? 'cantare-audio';
+export const BUCKET = process.env.R2_BUCKET_NAME ?? process.env.R2_BUCKET ?? 'cantare-audio';
+
+function firstTruthy(...candidates: Array<string | undefined>): string | undefined {
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim().length > 0 && c !== 'undefined') return c;
+  }
+  return undefined;
+}
 
 export function getPublicUrl(key: string): string {
   const encodedKey = key
@@ -17,18 +27,20 @@ export function getPublicUrl(key: string): string {
     .map((segment) => encodeURIComponent(segment))
     .join('/');
 
-  const configuredPublicUrl = process.env.R2_PUBLIC_URL;
-  const hasConfiguredPublicUrl =
-    typeof configuredPublicUrl === 'string' &&
-    configuredPublicUrl.trim().length > 0 &&
-    configuredPublicUrl !== 'undefined';
+  const configuredPublicUrl = firstTruthy(
+    process.env.R2_PUBLIC_URL,
+    process.env.R2_PUBLIC_BASE_URL,
+    process.env.R2_PUBLIC_BASE_UR,
+    process.env.R2_ENDPOINT,
+  );
 
-  if (!hasConfiguredPublicUrl) {
+  if (!configuredPublicUrl) {
     // Fallback to same-origin proxy to avoid broken "undefined/..." URLs in production.
     return `/api/audio/${encodedKey}`;
   }
 
-  return `${configuredPublicUrl}/${encodedKey}`;
+  // If the configuredPublicUrl looks like an account endpoint, append the key.
+  return `${configuredPublicUrl.replace(/\/$/, '')}/${encodedKey}`;
 }
 
 export function generateUploadKey(songId: string, filename: string): string {
