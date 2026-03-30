@@ -300,7 +300,7 @@ export function useAudioPlayer(
       audio.removeEventListener('pause', handlePauseDebug);
       audio.pause();
     };
-  }, [audioUrl, audioFactory, applyCurrentTime, startPlayback, updateDebugInfo]);
+  }, [audioUrl, audioFactory]);
 
   const play = useCallback((startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;
