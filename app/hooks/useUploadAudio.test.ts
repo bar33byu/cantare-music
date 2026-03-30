@@ -8,18 +8,39 @@ global.fetch = mockFetch;
 
 // XMLHttpRequest stub
 class XMLHttpRequestStub {
-  upload = { onprogress: null };
-  onload: (() => void) | null = null;
-  onerror: (() => void) | null = null;
+  upload = {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
+  listeners: Record<string, Array<(event: any) => void>> = {
+    load: [],
+    error: [],
+    abort: [],
+  };
   status = 200;
+  statusText = 'OK';
   open = vi.fn();
   setRequestHeader = vi.fn();
   send = vi.fn();
 
+  addEventListener(event: string, handler: (event: any) => void) {
+    if (this.listeners[event]) {
+      this.listeners[event].push(handler);
+    }
+  }
+
+  removeEventListener(event: string, handler: (event: any) => void) {
+    if (this.listeners[event]) {
+      this.listeners[event] = this.listeners[event].filter((h) => h !== handler);
+    }
+  }
+
   constructor() {
     // Simulate successful upload
     setTimeout(() => {
-      if (this.onload) this.onload();
+      this.listeners.load.forEach((handler) =>
+        handler({ type: 'load', target: this } as any)
+      );
     }, 10);
   }
 }
@@ -68,7 +89,7 @@ describe('useUploadAudio', () => {
 
     mockFetch.mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ key: 'test-key' }),
+      json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
     });
 
     let returnedKey: string;
@@ -79,15 +100,22 @@ describe('useUploadAudio', () => {
     expect(returnedKey).toBe('test-key');
     expect(result.current.uploading).toBe(false);
     expect(result.current.error).toBe(null);
-    const call = mockFetch.mock.calls[0];
-    expect(call[0]).toBe('/api/songs/upload-url');
-    expect(call[1].method).toBe('POST');
-    expect(call[1].body).toBeInstanceOf(FormData);
+    expect(mockFetch).toHaveBeenCalledWith('/api/songs/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        songId: 'song-123',
+        filename: 'test.mp3',
+        contentType: 'audio/mpeg',
+        size: file.size,
+      }),
+    });
   });
 
   it('API error sets error string', async () => {
     mockFetch.mockResolvedValue({
       ok: false,
+      text: () => Promise.resolve('{"error":"API Error"}'),
       json: () => Promise.resolve({ error: 'API Error' }),
     });
 

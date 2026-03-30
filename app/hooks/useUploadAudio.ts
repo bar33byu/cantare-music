@@ -38,30 +38,70 @@ export function useUploadAudio(): UseUploadAudioReturn {
     setUploading(true);
 
     try {
-      // Upload file via multipart form data to the API
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('songId', songId);
-
+      // Get presigned URL from the API
       const response = await fetch('/api/songs/upload-url', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          songId,
+          filename: file.name,
+          contentType: file.type,
+          size: file.size,
+        }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        let errorMsg = 'Upload failed';
+        let errorMsg = 'Failed to get upload URL';
         try {
           const errorData = JSON.parse(errorText);
           errorMsg = errorData.error || errorText;
         } catch {
-          errorMsg = errorText || `Upload failed with status ${response.status}`;
+          errorMsg = errorText || `Failed with status ${response.status}`;
         }
         setError(errorMsg);
         throw new Error(errorMsg);
       }
 
-      const { key } = await response.json();
+      const { uploadUrl, key } = await response.json();
+
+      // Upload file directly to R2 using the presigned URL
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = Math.round((event.loaded / event.total) * 100);
+            setProgress(percentComplete);
+          }
+        });
+
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            const errorMsg = `Upload failed with status ${xhr.status}: ${xhr.statusText}`;
+            setError(errorMsg);
+            reject(new Error(errorMsg));
+          }
+        });
+
+        xhr.addEventListener('error', () => {
+          const errorMsg = 'Upload failed: network error or CORS issue. Make sure R2 bucket allows cross-origin uploads.';
+          setError(errorMsg);
+          reject(new Error(errorMsg));
+        });
+
+        xhr.addEventListener('abort', () => {
+          const errorMsg = 'Upload cancelled';
+          setError(errorMsg);
+          reject(new Error(errorMsg));
+        });
+
+        xhr.open('PUT', uploadUrl);
+        xhr.setRequestHeader('Content-Type', file.type);
+        xhr.send(file);
+      });
 
       setProgress(100);
       setUploading(false);
