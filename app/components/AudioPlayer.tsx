@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState, type SyntheticEvent } from "react";
 import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
+import { buildProxyAudioUrl, parseAudioKey } from "../lib/audioUrls";
 
 interface AudioPlayerProps {
   audioUrl: string;
@@ -28,59 +29,11 @@ type ReachabilityState = {
   contentLength: number | null;
 };
 
-function parseAudioKey(audioUrl: string): string | null {
-  if (!audioUrl || audioUrl.trim().length === 0) {
-    return null;
-  }
-
-  try {
-    const normalized = new URL(audioUrl, "http://localhost");
-    const path = normalized.pathname;
-    const proxyPrefix = "/api/audio/";
-
-    if (path.startsWith(proxyPrefix)) {
-      const rawKey = path.slice(proxyPrefix.length);
-      if (!rawKey) {
-        return null;
-      }
-      return rawKey
-        .split("/")
-        .map((segment) => decodeURIComponent(segment))
-        .join("/");
-    }
-
-    const trimmedPath = path.replace(/^\/+/, "");
-    if (trimmedPath.startsWith("audio/")) {
-      return trimmedPath
-        .split("/")
-        .map((segment) => decodeURIComponent(segment))
-        .join("/");
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function buildProxyAudioUrl(audioKey: string | null): string | null {
-  if (!audioKey) {
-    return null;
-  }
-
-  const encoded = audioKey
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-
-  return `/api/audio/${encoded}`;
 }
 
 export function AudioPlayer({

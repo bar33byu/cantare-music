@@ -47,7 +47,7 @@ vi.mock("./KnowledgeBar", () => ({
 }));
 
 vi.mock("../hooks/useAudioPlayer", () => ({
-  useAudioPlayer: () => mockUseAudioPlayer(),
+  useAudioPlayer: (...args: unknown[]) => mockUseAudioPlayer(...args),
 }));
 
 vi.mock("./AudioPlayer", () => ({
@@ -99,7 +99,7 @@ const makeSong = (numSegments = 3): Song => ({
   id: "song-1",
   title: "Amazing Grace",
   composer: "John Newton",
-  audioUrl: "http://example.com/audio.mp3",
+  audioUrl: "https://cdn.example.com/audio/song-1/audio.mp3",
   segments: Array.from({ length: numSegments }, (_, i) => ({
     id: `seg-${i}`,
     songId: "song-1",
@@ -205,9 +205,10 @@ describe("PracticeView", () => {
     const song = makeSong(3);
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
 
+    expect(mockUseAudioPlayer).toHaveBeenCalledWith("/api/audio/audio/song-1/audio.mp3");
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute(
       "data-audio-url",
-      "http://example.com/audio.mp3"
+      "https://cdn.example.com/audio/song-1/audio.mp3"
     );
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-duration-ms", "12000");
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-start-ms", "0");

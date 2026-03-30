@@ -8,6 +8,7 @@ import SegmentCard from "./SegmentCard";
 import KnowledgeBar from "./KnowledgeBar";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
+import { toPlayableAudioUrl } from "../lib/audioUrls";
 
 interface PracticeViewProps {
   song: Song;
@@ -16,7 +17,8 @@ interface PracticeViewProps {
 
 const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => {
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
-  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(song.audioUrl);
+  const playbackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
+  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
   const hasSegments = song.segments.length > 0;
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
