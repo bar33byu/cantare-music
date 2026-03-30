@@ -76,8 +76,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
     }
 
     // Main play button should drive full-piece playback.
-    const fullPieceResumeMs = totalDurationMs > 0 && currentMs >= totalDurationMs ? 0 : currentMs;
-    play(fullPieceResumeMs, totalDurationMs || Number.POSITIVE_INFINITY);
+    const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
+    const fullPieceResumeMs = durationMs > 0 && currentMs >= durationMs ? 0 : currentMs;
+    play(fullPieceResumeMs, effectiveDurationMs);
   };
 
   const handleRestartSegment = () => {

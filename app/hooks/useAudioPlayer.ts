@@ -232,6 +232,12 @@ export function useAudioPlayer(
       updateDebugInfo(audio, 'apply-pending-seek');
     }
 
+    // If user clicked Play before audio element initialization completed,
+    // immediately consume the queued play request to avoid a deadlock.
+    if (pendingPlayRangeRef.current) {
+      flushPendingPlay();
+    }
+
     if (audio.readyState >= 2) {
       setIsReady(true);
       updateDebugInfo(audio, 'already-ready');

@@ -307,6 +307,40 @@ describe("PracticeView", () => {
     expect(mockPlay).toHaveBeenNthCalledWith(2, 0, 4000);
   });
 
+  it("uses unbounded full-piece play when duration metadata is not ready", () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: false,
+      currentMs: 0,
+      durationMs: 0,
+      playbackError: null,
+      debugInfo: {
+        src: "http://example.com/audio.mp3",
+        currentSrc: "",
+        readyState: 0,
+        networkState: 0,
+        preload: "none",
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: "init",
+        lastEventAt: "2026-03-30T00:00:00.000Z",
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    const song = makeSong(2);
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+    expect(mockPlay).toHaveBeenCalledWith(0, Number.POSITIVE_INFINITY);
+  });
+
   it("whole-song transport seeks the playhead", () => {
     const song = makeSong(3);
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
