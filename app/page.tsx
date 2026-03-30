@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import PracticeView from "./components/PracticeView";
 import { SongForm } from "./components/SongForm";
+import { SongBrowser } from "./components/SongBrowser";
 import { makeSession } from "./lib/factories";
 import type { Song, Segment } from "./types";
 
@@ -17,58 +18,25 @@ interface SongListItem {
 type ViewMode = "list" | "practice" | "add";
 
 export default function Home() {
-  const [songs, setSongs] = useState<SongListItem[]>([]);
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchSongs();
-  }, []);
-
-  const fetchSongs = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await fetch("/api/songs");
-      if (!response.ok) {
-        const serverError = await response
-          .json()
-          .catch(() => ({ error: response.statusText || "Unknown error" }));
-        console.error("Song fetch failed", response.status, serverError);
-        setSongs([]);
-        setError("Unable to load song list right now. You can still add a song.");
-        return;
-      }
-      const data = await response.json();
-      setSongs(data);
-    } catch (err) {
-      console.error("Song fetch error", err);
-      setSongs([]);
-      setError("Unable to load song list right now. You can still add a song.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const handleSongCreated = (songId: string) => {
-    fetchSongs(); // Refresh the song list
+    setRefreshTrigger(prev => prev + 1); // Trigger refresh of song list
     setViewMode("list");
   };
 
   const handleSelectSong = async (song: SongListItem) => {
     try {
-      setLoading(true);
       const response = await fetch(`/api/songs/${song.id}`);
       if (!response.ok) throw new Error("Failed to fetch song details");
       const fullSong: Song = await response.json();
       setSelectedSong(fullSong);
       setViewMode("practice");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load song");
-    } finally {
-      setLoading(false);
+      console.error("Failed to load song:", err);
+      // For now, just log the error. In a real app, you'd show a toast or error message
     }
   };
 
@@ -126,45 +94,11 @@ export default function Home() {
           </button>
         </div>
 
-        {loading && <div className="text-center py-8">Loading songs...</div>}
-
-        {error && (
-          <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded mb-4">
-            {error}
-          </div>
-        )}
-
-        {!loading && (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {songs.map((song) => (
-              <div
-                key={song.id}
-                className="bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => handleSelectSong(song)}
-              >
-                <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
-                {song.artist && (
-                  <p className="text-gray-600 mb-2">{song.artist}</p>
-                )}
-                <p className="text-xs text-gray-400 mt-2">
-                  Created {new Date(song.createdAt).toLocaleDateString()}
-                </p>
-              </div>
-            ))}
-
-            {songs.length === 0 && (
-              <div className="col-span-full text-center py-12 text-gray-500">
-                <p className="text-lg mb-4">No songs yet</p>
-                <button
-                  onClick={() => setViewMode("add")}
-                  className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  Add Your First Song
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        <SongBrowser
+          onSelectSong={handleSelectSong}
+          selectedSongId={selectedSong?.id || null}
+          refreshTrigger={refreshTrigger}
+        />
       </div>
     </div>
   );

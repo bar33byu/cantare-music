@@ -1,0 +1,163 @@
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { SongBrowser } from './SongBrowser';
+
+// Mock fetch
+const mockFetch = vi.fn();
+global.fetch = mockFetch;
+
+describe('SongBrowser', () => {
+  const mockOnSelectSong = vi.fn();
+
+  const mockSongs = [
+    {
+      id: 'song-1',
+      title: 'Test Song 1',
+      artist: 'Test Artist 1',
+      audioKey: 'audio-1',
+      createdAt: '2024-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'song-2',
+      title: 'Test Song 2',
+      artist: 'Test Artist 2',
+      audioKey: 'audio-2',
+      createdAt: '2024-01-02T00:00:00.000Z',
+    },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows loading state initially', () => {
+    mockFetch.mockImplementation(() => new Promise(() => {})); // Never resolves
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    expect(screen.getByTestId('song-browser-loading')).toBeInTheDocument();
+  });
+
+  it('fetches and displays songs successfully', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    expect(screen.getByTestId('song-title-song-1')).toHaveTextContent('Test Song 1');
+    expect(screen.getByTestId('song-artist-song-1')).toHaveTextContent('Test Artist 1');
+    expect(screen.getByTestId('song-created-song-1')).toHaveTextContent('Created 1/1/2024');
+
+    expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
+    expect(screen.getByTestId('song-title-song-2')).toHaveTextContent('Test Song 2');
+    expect(screen.getByTestId('song-artist-song-2')).toHaveTextContent('Test Artist 2');
+  });
+
+  it('shows error state when fetch fails', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      json: () => Promise.resolve({ error: 'Server error' }),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-error')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('song-browser-error')).toHaveTextContent('Unable to load song list right now.');
+  });
+
+  it('shows empty state when no songs', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([]),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-empty')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('song-browser-empty')).toHaveTextContent('No songs found. Add your first song to get started!');
+  });
+
+  it('calls onSelectSong when song is clicked', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-item-song-1'));
+
+    expect(mockOnSelectSong).toHaveBeenCalledWith(mockSongs[0]);
+  });
+
+  it('highlights selected song', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} selectedSongId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-selected-song-1')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('song-selected-song-1')).toHaveTextContent('Currently Selected');
+  });
+
+  it('refreshes when refreshTrigger changes', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    const { rerender } = render(<SongBrowser onSelectSong={mockOnSelectSong} refreshTrigger={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    // Mock a different response for the second fetch
+    const newSongs = [{ ...mockSongs[0], title: 'Updated Title' }];
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(newSongs),
+    });
+
+    rerender(<SongBrowser onSelectSong={mockOnSelectSong} refreshTrigger={1} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-title-song-1')).toHaveTextContent('Updated Title');
+    });
+  });
+
+  it('handles network error gracefully', async () => {
+    mockFetch.mockRejectedValue(new Error('Network error'));
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-error')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('song-browser-error')).toHaveTextContent('Unable to load song list right now.');
+  });
+});

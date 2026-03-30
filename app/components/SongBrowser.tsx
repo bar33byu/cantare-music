@@ -1,0 +1,108 @@
+"use client";
+
+import { useState, useEffect } from 'react';
+
+interface SongListItem {
+  id: string;
+  title: string;
+  artist?: string;
+  audioKey?: string;
+  createdAt: string;
+}
+
+interface SongBrowserProps {
+  onSelectSong: (song: SongListItem) => void;
+  selectedSongId?: string | null;
+  refreshTrigger?: number; // Increment this to trigger refresh
+}
+
+export function SongBrowser({ onSelectSong, selectedSongId, refreshTrigger }: SongBrowserProps) {
+  const [songs, setSongs] = useState<SongListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSongs();
+  }, [refreshTrigger]);
+
+  const fetchSongs = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch('/api/songs');
+      if (!response.ok) {
+        const serverError = await response
+          .json()
+          .catch(() => ({ error: response.statusText || 'Unknown error' }));
+        console.error('Song fetch failed', response.status, serverError);
+        setSongs([]);
+        setError('Unable to load song list right now.');
+        return;
+      }
+      const data = await response.json();
+      setSongs(data);
+    } catch (err) {
+      console.error('Song fetch error', err);
+      setSongs([]);
+      setError('Unable to load song list right now.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="text-center py-8" data-testid="song-browser-loading">
+        Loading songs...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded mb-4" data-testid="song-browser-error">
+        {error}
+      </div>
+    );
+  }
+
+  if (songs.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500" data-testid="song-browser-empty">
+        No songs found. Add your first song to get started!
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="song-browser-grid">
+      {songs.map((song) => (
+        <div
+          key={song.id}
+          className={`bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 ${
+            selectedSongId === song.id ? 'border-blue-500' : 'border-transparent'
+          }`}
+          onClick={() => onSelectSong(song)}
+          data-testid={`song-item-${song.id}`}
+        >
+          <h3 className="text-xl font-semibold mb-2" data-testid={`song-title-${song.id}`}>
+            {song.title}
+          </h3>
+          {song.artist && (
+            <p className="text-gray-600 mb-2" data-testid={`song-artist-${song.id}`}>
+              {song.artist}
+            </p>
+          )}
+          <p className="text-xs text-gray-400 mt-2" data-testid={`song-created-${song.id}`}>
+            Created {new Date(song.createdAt).toLocaleDateString()}
+          </p>
+          {selectedSongId === song.id && (
+            <div className="mt-2 text-sm text-blue-600 font-medium" data-testid={`song-selected-${song.id}`}>
+              Currently Selected
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
