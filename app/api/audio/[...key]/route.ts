@@ -19,13 +19,24 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ key: string[] }> }
 ) {
+  // Server-side debug: log environment variable presence (never print secret values)
+  const envPresence = {
+    R2_ACCOUNT_ID: typeof process.env.R2_ACCOUNT_ID === 'string' && process.env.R2_ACCOUNT_ID.trim().length > 0 ? 'present' : 'missing',
+    R2_ACCESS_KEY_ID: typeof process.env.R2_ACCESS_KEY_ID === 'string' && process.env.R2_ACCESS_KEY_ID.trim().length > 0 ? 'present' : 'missing',
+    R2_SECRET_ACCESS_KEY: typeof process.env.R2_SECRET_ACCESS_KEY === 'string' && process.env.R2_SECRET_ACCESS_KEY.trim().length > 0 ? 'present' : 'missing',
+    R2_BUCKET_NAME: typeof process.env.R2_BUCKET_NAME === 'string' && process.env.R2_BUCKET_NAME.trim().length > 0 ? 'present' : 'missing',
+    R2_PUBLIC_URL: typeof process.env.R2_PUBLIC_URL === 'string' && process.env.R2_PUBLIC_URL.trim().length > 0 ? 'present' : 'missing',
+  };
   try {
     const { key: keySegments } = await params;
+    console.info('Audio proxy request received');
+    console.info('Env presence:', envPresence);
     if (!Array.isArray(keySegments) || keySegments.length === 0) {
       return NextResponse.json({ error: 'Audio key is required' }, { status: 400 });
     }
 
     const key = toKey(keySegments);
+    console.info('Requested audio key:', key);
     const range = request.headers.get('range') ?? undefined;
 
     const object = await r2Client.send(
