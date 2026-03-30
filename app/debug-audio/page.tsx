@@ -47,14 +47,12 @@ export default function DebugAudioPage() {
       if (key) params.set('key', key);
       const resp = await fetch(`/api/debug/r2?${params.toString()}`);
       const json = await resp.json();
-      if (!resp.ok) {
+      console.info('R2 debug result:', json);
+      setDebugInfo(json);
+      if (!resp.ok || !json?.ok) {
         setError(json?.error ?? `R2 check failed: ${resp.status}`);
       } else {
-        // Show debug result in console and on page
-        console.info('R2 debug result:', json);
-        if (!json.ok) setError(json.error ?? 'R2 reported failure');
-        else setError(null);
-        alert(JSON.stringify(json, null, 2));
+        setError(null);
       }
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -95,6 +93,13 @@ export default function DebugAudioPage() {
       ) : (
         <p style={{ color: "#666" }}>No audio loaded yet.</p>
       )}
+
+      <section style={{ marginTop: 20 }}>
+        <h2>Debug info</h2>
+        <div style={{ fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap', background: '#f6f7fb', padding: 12, borderRadius: 6 }}>
+          {debugInfo ? JSON.stringify(debugInfo, null, 2) : 'No debug info yet. Click "Check R2" to fetch.'}
+        </div>
+      </section>
     </main>
   );
 }
