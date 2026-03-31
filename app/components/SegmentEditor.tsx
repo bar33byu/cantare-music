@@ -41,6 +41,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
   const [savingSegmentId, setSavingSegmentId] = useState<string | null>(null);
   const [savingTitle, setSavingTitle] = useState(false);
+  const [lastDeletedSection, setLastDeletedSection] = useState<Segment | null>(null);
+  const [undoDismissTimer, setUndoDismissTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [zoom, setZoom] = useState(1);
   const [stableDurationMs, setStableDurationMs] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
@@ -85,8 +87,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     const payload = {
       id: crypto.randomUUID(),
       label: `Section ${segments.length + 1}`,
-      startMs: basePlacement.startMs,
-      endMs: basePlacement.endMs,
+      startMs: Math.round(basePlacement.startMs),
+      endMs: Math.round(basePlacement.endMs),
       lyricText: '',
     };
 
@@ -109,8 +111,13 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     try {
       await createSegment();
     } catch {
-      setDeleteError('Failed to create segment. Please try again.');
+      setDeleteError('Failed to create section. Please try again.');
     }
+  };
+
+  const dismissUndo = () => {
+    setLastDeletedSection(null);
+    setUndoDismissTimer(null);
   };
 
   const handleDelete = async (segment: Segment) => {
@@ -123,9 +130,37 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       if (selectedSegmentId === segment.id) {
         setSelectedSegmentId(null);
       }
+      // Stash for undo, auto-dismiss after 10s
+      setLastDeletedSection(segment);
+      if (undoDismissTimer) clearTimeout(undoDismissTimer);
+      setUndoDismissTimer(setTimeout(dismissUndo, 10_000));
       setRefreshKey((prev) => prev + 1);
     } catch {
-      setDeleteError('Failed to delete segment. Please try again.');
+      setDeleteError('Failed to delete section. Please try again.');
+    }
+  };
+
+  const handleUndoDelete = async () => {
+    if (!lastDeletedSection) return;
+    const restored = lastDeletedSection;
+    dismissUndo();
+    try {
+      const response = await fetch(`/api/songs/${songId}/segments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: restored.id,
+          label: restored.label,
+          startMs: Math.round(restored.startMs),
+          endMs: Math.round(restored.endMs),
+          lyricText: restored.lyricText,
+        }),
+      });
+      if (!response.ok) throw new Error('Restore failed');
+      setSelectedSegmentId(restored.id);
+      setRefreshKey((prev) => prev + 1);
+    } catch {
+      setDeleteError('Failed to restore section. Please try again.');
     }
   };
 
@@ -198,7 +233,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     try {
       await saveSegmentPatch(target.id, { startMs: target.startMs, endMs: target.endMs });
     } catch {
-      setDeleteError('Failed to save segment timing. Please try again.');
+      setDeleteError('Failed to save section timing. Please try again.');
     }
   };
 
@@ -231,6 +266,13 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       setStableDurationMs((previous) => Math.max(previous, durationMs));
     }
   }, [durationMs]);
+
+  // Clean up undo timer on unmount to avoid memory leaks
+  useEffect(() => {
+    return () => {
+      if (undoDismissTimer) clearTimeout(undoDismissTimer);
+    };
+  }, [undoDismissTimer]);
 
   const handleTogglePlay = () => {
     if (isPlaying) {
@@ -369,6 +411,28 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       {deleteError && (
         <div role="alert" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
           {deleteError}
+        </div>
+      )}
+
+      {lastDeletedSection && (
+        <div className="mb-4 flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <span>Section &ldquo;{lastDeletedSection.label}&rdquo; deleted.</span>
+          <button
+            type="button"
+            data-testid="segment-editor-undo-delete"
+            onClick={() => { void handleUndoDelete(); }}
+            className="font-semibold underline hover:no-underline"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={dismissUndo}
+            className="ml-auto text-amber-600 hover:text-amber-900"
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -610,7 +674,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
             />
           </div>
         ) : (
-          <p className="text-sm text-gray-500">Select a segment block to edit label and lyrics.</p>
+          <p className="text-sm text-gray-500">Select a section block to edit its label and lyrics.</p>
         )}
       </div>
     </div>

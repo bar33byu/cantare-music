@@ -240,7 +240,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession, onSes
                 data-testid="no-segments"
                 className="rounded-[28px] border border-dashed border-indigo-200 bg-white/90 px-6 py-10 text-center shadow-sm"
               >
-                <p className="text-lg font-semibold text-gray-900">No practice segments yet</p>
+                <p className="text-lg font-semibold text-gray-900">No practice sections yet</p>
                 <p className="mt-2 text-sm text-gray-500">
                   You can still play the full recording below, then switch to Edit Song when you are ready to mark sections.
                 </p>

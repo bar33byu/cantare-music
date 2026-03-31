@@ -165,5 +165,24 @@ describe('SegmentEditor integration', () => {
       );
       expect(deleteCall).toBeTruthy();
     });
+
+    // Undo banner should appear
+    expect(await screen.findByTestId('segment-editor-undo-delete')).toBeInTheDocument();
+
+    // Click Undo — should re-POST the deleted segment
+    fireEvent.click(screen.getByTestId('segment-editor-undo-delete'));
+
+    await waitFor(() => {
+      const restoreCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith('/api/songs/song-1/segments') &&
+          init?.method === 'POST' &&
+          JSON.parse(String(init.body ?? '{}')).id === 'seg-2'
+      );
+      expect(restoreCall).toBeTruthy();
+    });
+
+    // Banner should be gone after undo
+    expect(screen.queryByTestId('segment-editor-undo-delete')).not.toBeInTheDocument();
   });
 });

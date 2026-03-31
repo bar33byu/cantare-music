@@ -346,6 +346,81 @@ describe('SegmentEditor', () => {
     });
   });
 
+  it('rounds startMs and endMs to integers in the POST payload', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 1234.567,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-1/segments');
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-new-section'));
+
+    await waitFor(() => {
+      const postCall = mockFetch.mock.calls.find(
+        ([url, init]) => String(url).endsWith('/api/songs/song-1/segments') && init?.method === 'POST'
+      );
+      expect(postCall).toBeTruthy();
+      const body = JSON.parse(String(postCall?.[1]?.body ?? '{}'));
+      expect(Number.isInteger(body.startMs)).toBe(true);
+      expect(Number.isInteger(body.endMs)).toBe(true);
+    });
+  });
+
+  it('shows undo banner after delete and restores section on undo click', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-block-seg-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-delete-seg-1'));
+
+    const undoBtn = await screen.findByTestId('segment-editor-undo-delete');
+    expect(undoBtn).toBeInTheDocument();
+    // Undo banner should mention the deleted section's label
+    expect(screen.getByText(/Section 1.*deleted/i)).toBeInTheDocument();
+
+    fireEvent.click(undoBtn);
+
+    await waitFor(() => {
+      const restoreCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith('/api/songs/song-1/segments') &&
+          init?.method === 'POST' &&
+          JSON.parse(String(init.body ?? '{}')).id === 'seg-1'
+      );
+      expect(restoreCall).toBeTruthy();
+    });
+
+    expect(screen.queryByTestId('segment-editor-undo-delete')).not.toBeInTheDocument();
+  });
+
   it('zooms canvas in and out from whole-song default', async () => {
     render(<SegmentEditor songId="song-1" />);
 
