@@ -1,7 +1,7 @@
-import { eq, asc, desc, inArray } from "drizzle-orm";
+import { eq, asc, desc, inArray, and } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings } from "./schema";
-import type { SongRow, SegmentRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow } from "./schema";
 
 export type PersistedMemoryRating = 1 | 2 | 3 | 4 | 5;
 
@@ -10,6 +10,34 @@ export interface PersistedSegmentRating {
   segmentId: string;
   rating: PersistedMemoryRating;
   ratedAt: string;
+}
+
+export interface PlaylistSongItem {
+  id: string;
+  title: string;
+  artist?: string;
+  audioUrl: string;
+  segments: SegmentRow[];
+  createdAt: string;
+  updatedAt?: string;
+  position: number;
+}
+
+export interface PlaylistDetail {
+  id: string;
+  name: string;
+  eventDate?: string;
+  isRetired: boolean;
+  createdAt: string;
+  songs: PlaylistSongItem[];
+}
+
+export interface PlaylistSummary {
+  id: string;
+  name: string;
+  eventDate?: string;
+  isRetired: boolean;
+  createdAt: string;
 }
 
 // ── Songs ──────────────────────────────────────────────────────────────────
@@ -200,4 +228,157 @@ export async function deleteRatingsForSong(songId: string): Promise<void> {
   await db()
     .delete(practiceRatings)
     .where(inArray(practiceRatings.segmentId, songSegments.map((segment) => segment.id)));
+}
+
+// ── Playlists ─────────────────────────────────────────────────────────────
+
+function toIso(value: Date | null): string {
+  return value ? value.toISOString() : new Date(0).toISOString();
+}
+
+function mapPlaylistSummary(row: PlaylistRow): PlaylistSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    eventDate: row.eventDate ?? undefined,
+    isRetired: row.isRetired,
+    createdAt: toIso(row.createdAt),
+  };
+}
+
+export async function getAllPlaylists(includeRetired = false): Promise<PlaylistSummary[]> {
+  const baseQuery = db().select().from(playlists).orderBy(desc(playlists.createdAt));
+  const rows = includeRetired
+    ? await baseQuery
+    : await baseQuery.where(eq(playlists.isRetired, false));
+
+  return rows.map(mapPlaylistSummary);
+}
+
+export async function getPlaylistById(id: string): Promise<PlaylistDetail | null> {
+  const playlistRows = await db()
+    .select()
+    .from(playlists)
+    .where(eq(playlists.id, id))
+    .limit(1);
+
+  const playlist = playlistRows[0];
+  if (!playlist) {
+    return null;
+  }
+
+  const linkedSongs = await db()
+    .select({
+      playlistId: playlistSongs.playlistId,
+      songId: playlistSongs.songId,
+      position: playlistSongs.position,
+      title: songs.title,
+      artist: songs.artist,
+      audioKey: songs.audioKey,
+      createdAt: songs.createdAt,
+    })
+    .from(playlistSongs)
+    .innerJoin(songs, eq(playlistSongs.songId, songs.id))
+    .where(eq(playlistSongs.playlistId, id))
+    .orderBy(asc(playlistSongs.position));
+
+  const songsWithSegments: PlaylistSongItem[] = await Promise.all(
+    linkedSongs.map(async (songRow) => ({
+      id: songRow.songId,
+      title: songRow.title,
+      artist: songRow.artist ?? undefined,
+      audioUrl: songRow.audioKey ?? "",
+      segments: await getSegmentsBySongId(songRow.songId),
+      createdAt: toIso(songRow.createdAt),
+      updatedAt: toIso(songRow.createdAt),
+      position: songRow.position,
+    }))
+  );
+
+  return {
+    ...mapPlaylistSummary(playlist),
+    songs: songsWithSegments,
+  };
+}
+
+export async function createPlaylist(data: {
+  name: string;
+  eventDate?: string;
+}): Promise<PlaylistSummary> {
+  const rows = await db()
+    .insert(playlists)
+    .values({
+      id: crypto.randomUUID(),
+      name: data.name,
+      eventDate: data.eventDate ?? null,
+    })
+    .returning();
+
+  return mapPlaylistSummary(rows[0]);
+}
+
+export async function updatePlaylist(
+  id: string,
+  data: { name?: string; eventDate?: string; isRetired?: boolean }
+): Promise<void> {
+  const updates: Partial<Pick<PlaylistRow, "name" | "eventDate" | "isRetired">> = {};
+  if (data.name !== undefined) updates.name = data.name;
+  if (data.eventDate !== undefined) updates.eventDate = data.eventDate;
+  if (data.isRetired !== undefined) updates.isRetired = data.isRetired;
+
+  if (Object.keys(updates).length === 0) {
+    return;
+  }
+
+  await db().update(playlists).set(updates).where(eq(playlists.id, id));
+}
+
+export async function deletePlaylist(id: string): Promise<void> {
+  await db().delete(playlists).where(eq(playlists.id, id));
+}
+
+export async function addSongToPlaylist(
+  playlistId: string,
+  songId: string,
+  position?: number
+): Promise<void> {
+  let nextPosition = position;
+  if (nextPosition === undefined) {
+    const rows = await db()
+      .select({ position: playlistSongs.position })
+      .from(playlistSongs)
+      .where(eq(playlistSongs.playlistId, playlistId))
+      .orderBy(desc(playlistSongs.position))
+      .limit(1);
+    nextPosition = rows.length > 0 ? rows[0].position + 1 : 0;
+  }
+
+  await db()
+    .insert(playlistSongs)
+    .values({
+      playlistId,
+      songId,
+      position: nextPosition,
+    })
+    .onConflictDoNothing();
+}
+
+export async function removeSongFromPlaylist(playlistId: string, songId: string): Promise<void> {
+  await db()
+    .delete(playlistSongs)
+    .where(and(eq(playlistSongs.playlistId, playlistId), eq(playlistSongs.songId, songId)));
+}
+
+export async function reorderPlaylistSongs(
+  playlistId: string,
+  orderedSongIds: string[]
+): Promise<void> {
+  await Promise.all(
+    orderedSongIds.map((songId, position) =>
+      db()
+        .update(playlistSongs)
+        .set({ position })
+        .where(and(eq(playlistSongs.playlistId, playlistId), eq(playlistSongs.songId, songId)))
+    )
+  );
 }

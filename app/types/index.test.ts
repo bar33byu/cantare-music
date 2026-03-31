@@ -6,6 +6,7 @@ import type {
   SegmentRating,
   PracticeSession,
   KnowledgeScore,
+  Playlist,
 } from "./index";
 
 describe("Core types", () => {
@@ -75,5 +76,27 @@ describe("Core types", () => {
       bySegment: { "seg-1": 60, "seg-2": 80 },
     } satisfies KnowledgeScore;
     expect(score.overall).toBe(60);
+  });
+
+  it("Playlist satisfies type", () => {
+    const playlist = {
+      id: "playlist-1",
+      name: "April 2026 Set",
+      eventDate: "2026-04-04",
+      isRetired: false,
+      createdAt: new Date().toISOString(),
+      songs: [
+        {
+          id: "song-1",
+          title: "Amazing Grace",
+          audioUrl: "/api/audio/key",
+          segments: [],
+          createdAt: new Date().toISOString(),
+          position: 0,
+        },
+      ],
+    } satisfies Playlist;
+
+    expect(playlist.songs[0].position).toBe(0);
   });
 });

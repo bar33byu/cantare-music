@@ -42,3 +42,12 @@ export interface KnowledgeScore {
   overall: number;
   bySegment: Record<string, number>;
 }
+
+export interface Playlist {
+  id: string;
+  name: string;
+  eventDate?: string;
+  isRetired: boolean;
+  createdAt: string;
+  songs: Array<Song & { position: number }>;
+}

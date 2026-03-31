@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { eq, desc } from "drizzle-orm";
-import { songs, segments, practiceRatings } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs } from "./schema";
 
 // ── chainable mock builder ─────────────────────────────────────────────────────
 // Creates a fluent mock object where every method returns itself and
@@ -294,5 +294,77 @@ describe("deleteRatingsForSong", () => {
     await deleteRatingsForSong("song-1");
 
     expect(deleteSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAllPlaylists", () => {
+  it("excludes retired playlists by default", async () => {
+    const chain = makeChain([]);
+    selectSpy.mockReturnValue(chain);
+
+    const { getAllPlaylists } = await getQueries();
+    await getAllPlaylists();
+
+    expect(selectSpy).toHaveBeenCalledOnce();
+    const fromSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["from"];
+    expect(fromSpy).toHaveBeenCalledWith(playlists);
+    const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).toHaveBeenCalled();
+  });
+
+  it("includes retired playlists when includeRetired is true", async () => {
+    const chain = makeChain([]);
+    selectSpy.mockReturnValue(chain);
+
+    const { getAllPlaylists } = await getQueries();
+    await getAllPlaylists(true);
+
+    const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("createPlaylist", () => {
+  it("inserts and returns playlist summary", async () => {
+    const createdAt = new Date("2026-03-31T00:00:00.000Z");
+    const insertChain = makeChain([
+      { id: "pl-1", name: "Sunday Set", eventDate: "2026-04-04", isRetired: false, createdAt },
+    ]);
+    insertSpy.mockReturnValue(insertChain);
+
+    const { createPlaylist } = await getQueries();
+    const result = await createPlaylist({ name: "Sunday Set", eventDate: "2026-04-04" });
+
+    expect(insertSpy).toHaveBeenCalledWith(playlists);
+    expect(result.id).toBe("pl-1");
+    expect(result.name).toBe("Sunday Set");
+  });
+});
+
+describe("deletePlaylist", () => {
+  it("deletes only from playlists table", async () => {
+    const chain = makeChain();
+    deleteSpy.mockReturnValue(chain);
+
+    const { deletePlaylist } = await getQueries();
+    await deletePlaylist("pl-1");
+
+    expect(deleteSpy).toHaveBeenCalledWith(playlists);
+    const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).toHaveBeenCalled();
+  });
+});
+
+describe("reorderPlaylistSongs", () => {
+  it("issues updates for each ordered song", async () => {
+    const chain = makeChain();
+    updateSpy.mockReturnValue(chain);
+
+    const { reorderPlaylistSongs } = await getQueries();
+    await reorderPlaylistSongs("pl-1", ["song-2", "song-1"]);
+
+    expect(updateSpy).toHaveBeenCalledWith(playlistSongs);
+    const setSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
+    expect(setSpy).toHaveBeenCalledWith({ position: 1 });
   });
 });
