@@ -400,6 +400,7 @@ export function AudioPlayer({
             <p data-testid="audio-debug-ui-last-action-at">uiLastActionAt: {transportDebug?.lastActionAt ?? "n/a"}</p>
             <p data-testid="audio-debug-audio-instance-id">audioInstanceId: {debugInfo?.audioInstanceId ?? "n/a"}</p>
             <p data-testid="audio-debug-audio-instances-created">audioInstancesCreated: {debugInfo?.audioInstancesCreated ?? "n/a"}</p>
+            <p data-testid="audio-debug-audio-init-runs">audioInitRuns: {debugInfo?.audioInitRuns ?? "n/a"}</p>
             <p data-testid="audio-debug-audio-url-changes">audioUrlChanges: {debugInfo?.audioUrlChanges ?? "n/a"}</p>
             <p data-testid="audio-debug-current-src-changes">currentSrcChanges: {debugInfo?.currentSrcChanges ?? 0}</p>
             <p data-testid="audio-debug-ready-state">readyState: {debugInfo?.readyState ?? -1}</p>

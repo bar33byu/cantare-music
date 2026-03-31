@@ -20,6 +20,7 @@ export interface AudioDebugInfo {
   currentSrcHistory?: string[];
   audioInstanceId?: number;
   audioInstancesCreated?: number;
+  audioInitRuns?: number;
   audioUrlChanges?: number;
   readyState: number;
   networkState: number;
@@ -74,7 +75,10 @@ export function useAudioPlayer(
   audioUrl: string,
   audioFactory: AudioFactory = defaultFactory
 ): AudioPlayerControls {
+  const audioFactoryRef = useRef(audioFactory);
+  const previousAudioUrlRef = useRef<string | null>(null);
   const audioUrlChangeCountRef = useRef(0);
+  const audioInitRunsRef = useRef(0);
   const audioInstanceIdRef = useRef(0);
   const audioInstancesCreatedRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -111,6 +115,7 @@ export function useAudioPlayer(
         eventHistory: nextEventHistory,
         audioInstanceId: audioInstanceIdRef.current,
         audioInstancesCreated: audioInstancesCreatedRef.current,
+        audioInitRuns: audioInitRunsRef.current,
         audioUrlChanges: audioUrlChangeCountRef.current,
         readyState: audio?.readyState ?? previous.readyState,
         networkState: audio?.networkState ?? previous.networkState,
@@ -202,7 +207,11 @@ export function useAudioPlayer(
   }, [applyCurrentTime, updateDebugInfo]);
 
   useEffect(() => {
-    audioUrlChangeCountRef.current += 1;
+    audioInitRunsRef.current += 1;
+    if (previousAudioUrlRef.current !== audioUrl) {
+      audioUrlChangeCountRef.current += 1;
+      previousAudioUrlRef.current = audioUrl;
+    }
     setIsReady(false);
     setIsPlaying(false);
     setCurrentMs(0);
@@ -217,7 +226,7 @@ export function useAudioPlayer(
       return;
     }
 
-    const audio = audioFactory(audioUrl);
+    const audio = audioFactoryRef.current(audioUrl);
     audioInstancesCreatedRef.current += 1;
     audioInstanceIdRef.current += 1;
     audioRef.current = audio;
@@ -343,7 +352,7 @@ export function useAudioPlayer(
       audio.removeEventListener('pause', handlePauseDebug);
       audio.pause();
     };
-  }, [audioUrl, audioFactory]);
+  }, [audioUrl]);
 
   const play = useCallback((startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;
