@@ -2,11 +2,14 @@
 
 import { useState } from "react";
 import PracticeView from "./components/PracticeView";
+import { PlaylistBrowser } from "./components/PlaylistBrowser";
+import { PlaylistDetail } from "./components/PlaylistDetail";
+import { PlaylistPracticeView } from "./components/PlaylistPracticeView";
 import { SongForm } from "./components/SongForm";
 import { SongBrowser } from "./components/SongBrowser";
 import { SegmentEditor } from "./components/SegmentEditor";
 import { makeSession } from "./lib/factories";
-import type { Song } from "./types";
+import type { Playlist, Song } from "./types";
 
 interface SongListItem {
   id: string;
@@ -18,21 +21,31 @@ interface SongListItem {
 
 type ViewMode = "list" | "practice" | "segment_editor" | "add";
 
+type AppView =
+  | "library"
+  | "song_practice"
+  | "song_segment_editor"
+  | "song_add"
+  | "playlists"
+  | "playlist_detail"
+  | "playlist_practice";
+
 export default function Home() {
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [activeView, setActiveView] = useState<AppView>("library");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
 
   const handleSongCreated = (songId: string) => {
     setRefreshTrigger(prev => prev + 1); // Trigger refresh of song list
-    setViewMode("list");
+    setActiveView("library");
   };
 
   const handleSongDeleted = (songId: string) => {
     setRefreshTrigger((prev) => prev + 1);
     if (selectedSong?.id === songId) {
       setSelectedSong(null);
-      setViewMode("list");
+      setActiveView("library");
     }
   };
 
@@ -42,7 +55,7 @@ export default function Home() {
       if (!response.ok) throw new Error("Failed to fetch song details");
       const fullSong: Song = await response.json();
       setSelectedSong(fullSong);
-      setViewMode("practice");
+      setActiveView("song_practice");
     } catch (err) {
       console.error("Failed to load song:", err);
     }
@@ -50,7 +63,7 @@ export default function Home() {
 
   const handleBackToList = () => {
     setSelectedSong(null);
-    setViewMode("list");
+    setActiveView("library");
   };
 
   const refreshSelectedSong = async () => {
@@ -65,12 +78,12 @@ export default function Home() {
     }
   };
 
-  if (viewMode === "practice" && selectedSong) {
+  if (activeView === "song_practice" && selectedSong) {
     const session = makeSession({ songId: selectedSong.id });
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-4xl mx-auto">
-          <div className="flex gap-3 mb-4">
+          <div className="mb-4 flex gap-3">
             <button
               onClick={handleBackToList}
               className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
@@ -78,7 +91,7 @@ export default function Home() {
               ← Back to Songs
             </button>
             <button
-              onClick={() => setViewMode("segment_editor")}
+              onClick={() => setActiveView("song_segment_editor")}
               className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700"
             >
               Edit Segments
@@ -90,7 +103,7 @@ export default function Home() {
     );
   }
 
-  if (viewMode === "segment_editor" && selectedSong) {
+  if (activeView === "song_segment_editor" && selectedSong) {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-4xl mx-auto">
@@ -102,7 +115,7 @@ export default function Home() {
           </button>
           <SegmentEditor
             songId={selectedSong.id}
-            onBack={() => setViewMode("practice")}
+            onBack={() => setActiveView("song_practice")}
             onSongUpdated={refreshSelectedSong}
           />
         </div>
@@ -110,12 +123,12 @@ export default function Home() {
     );
   }
 
-  if (viewMode === "add") {
+  if (activeView === "song_add") {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-2xl mx-auto">
           <button
-            onClick={() => setViewMode("list")}
+            onClick={() => setActiveView("library")}
             className="mb-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
           >
             ← Back to Songs
@@ -129,25 +142,97 @@ export default function Home() {
     );
   }
 
+  if (activeView === "playlist_detail" && selectedPlaylist) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4">
+        <div className="mx-auto max-w-4xl">
+          <PlaylistDetail
+            playlistId={selectedPlaylist.id}
+            onBack={() => setActiveView("playlists")}
+            onPractice={(playlist) => {
+              setSelectedPlaylist(playlist);
+              setActiveView("playlist_practice");
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (activeView === "playlist_practice" && selectedPlaylist) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4">
+        <div className="mx-auto max-w-4xl">
+          <PlaylistPracticeView
+            playlist={selectedPlaylist}
+            onExit={() => setActiveView("playlists")}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
+        <div className="mb-3 flex justify-between items-center">
           <h1 className="text-3xl font-bold">Cantare Music</h1>
-          <button
-            onClick={() => setViewMode("add")}
-            className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            Add Song
-          </button>
+          <div className="flex gap-2">
+            <button
+              data-testid="library-tab"
+              onClick={() => {
+                setSelectedPlaylist(null);
+                setActiveView("library");
+              }}
+              className={`rounded px-4 py-2 ${activeView === "library" ? "bg-blue-600 text-white" : "border border-blue-300 text-blue-700"}`}
+            >
+              Library
+            </button>
+            <button
+              data-testid="playlists-tab"
+              onClick={() => {
+                setSelectedSong(null);
+                setActiveView("playlists");
+              }}
+              className={`rounded px-4 py-2 ${activeView === "playlists" ? "bg-indigo-600 text-white" : "border border-indigo-300 text-indigo-700"}`}
+            >
+              Playlists
+            </button>
+          </div>
         </div>
 
-        <SongBrowser
-          onSelectSong={handleSelectSong}
-          onDeleteSong={handleSongDeleted}
-          selectedSongId={selectedSong?.id || null}
-          refreshTrigger={refreshTrigger}
-        />
+        {activeView === "library" ? (
+          <>
+            <div className="mb-6 flex justify-end">
+              <button
+                onClick={() => setActiveView("song_add")}
+                className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Add Song
+              </button>
+            </div>
+
+            <SongBrowser
+              onSelectSong={handleSelectSong}
+              onDeleteSong={handleSongDeleted}
+              selectedSongId={selectedSong?.id || null}
+              refreshTrigger={refreshTrigger}
+            />
+          </>
+        ) : null}
+
+        {activeView === "playlists" ? (
+          <PlaylistBrowser
+            onSelectPlaylist={(playlist) => {
+              setSelectedPlaylist(playlist);
+              setActiveView("playlist_practice");
+            }}
+            onManagePlaylist={(playlist) => {
+              setSelectedPlaylist(playlist);
+              setActiveView("playlist_detail");
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );

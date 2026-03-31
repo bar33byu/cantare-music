@@ -12,6 +12,7 @@ interface PlaylistBrowserProps {
 
 export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: PlaylistBrowserProps) {
   const [playlists, setPlaylists] = useState<PlaylistListItem[]>([]);
+  const [knowledgeByPlaylist, setKnowledgeByPlaylist] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -30,10 +31,24 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
         throw new Error('Failed to load playlists');
       }
       const data = (await response.json()) as { playlists?: PlaylistListItem[] };
-      setPlaylists(Array.isArray(data.playlists) ? data.playlists : []);
+      const list = Array.isArray(data.playlists) ? data.playlists : [];
+      setPlaylists(list);
+
+      const knowledgeEntries = await Promise.all(
+        list.map(async (playlist) => {
+          const knowledgeResponse = await fetch(`/api/playlists/${playlist.id}/knowledge`);
+          if (!knowledgeResponse.ok) {
+            return [playlist.id, 0] as const;
+          }
+          const payload = (await knowledgeResponse.json()) as { score?: number };
+          return [playlist.id, Math.round((payload.score ?? 0) * 100)] as const;
+        })
+      );
+      setKnowledgeByPlaylist(Object.fromEntries(knowledgeEntries));
     } catch {
       setError('Unable to load playlists right now.');
       setPlaylists([]);
+      setKnowledgeByPlaylist({});
     } finally {
       setLoading(false);
     }
@@ -172,6 +187,9 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
                     <h3 className="font-semibold" data-testid={`playlist-name-${playlist.id}`}>{playlist.name}</h3>
                     {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
                     <p className="text-xs text-gray-500">Songs: {playlist.songs?.length ?? 0}</p>
+                    <p className="text-xs text-indigo-700" data-testid={`playlist-knowledge-${playlist.id}`}>
+                      Knowledge: {knowledgeByPlaylist[playlist.id] ?? 0}%
+                    </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button data-testid={`playlist-practice-${playlist.id}`} className="rounded bg-indigo-600 px-3 py-1 text-white" onClick={() => onSelectPlaylist({ ...playlist, songs: playlist.songs ?? [] } as Playlist)}>Practice</button>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeKnowledgeScore, getSegmentKnowledgePercent } from './knowledgeUtils';
+import { computeKnowledgeScore, computePlaylistKnowledge, getSegmentKnowledgePercent } from './knowledgeUtils';
 import { makeSong, makeSession, makeRating } from './factories';
 
 describe('getSegmentKnowledgePercent', () => {
@@ -60,5 +60,50 @@ describe('computeKnowledgeScore', () => {
     const result = computeKnowledgeScore(session, song);
     expect(result.bySegment['seg1']).toBe(100);
     expect(result.overall).toBe(100);
+  });
+});
+
+describe('computePlaylistKnowledge', () => {
+  it('returns 0 when songs array is empty', () => {
+    expect(computePlaylistKnowledge([], [])).toBe(0);
+  });
+
+  it('returns 0 for songs with no ratings', () => {
+    const songs = [
+      makeSong({
+        id: 'song-1',
+        segments: [
+          { id: 'seg-1', label: 'Section 1', order: 0, songId: 'song-1' },
+        ],
+      }),
+    ];
+    expect(computePlaylistKnowledge(songs, [])).toBe(0);
+  });
+
+  it('averages per-song scores with mixed ratings', () => {
+    const songs = [
+      makeSong({
+        id: 'song-1',
+        segments: [
+          { id: 'seg-1', label: 'Section 1', order: 0, songId: 'song-1' },
+          { id: 'seg-2', label: 'Section 2', order: 1, songId: 'song-1' },
+        ],
+      }),
+      makeSong({
+        id: 'song-2',
+        segments: [
+          { id: 'seg-3', label: 'Section 1', order: 0, songId: 'song-2' },
+        ],
+      }),
+    ];
+
+    const ratings = [
+      makeRating({ segmentId: 'seg-1', rating: 5, ratedAt: '2026-03-01T00:00:00.000Z' }),
+      makeRating({ segmentId: 'seg-2', rating: 3, ratedAt: '2026-03-01T00:00:00.000Z' }),
+      makeRating({ segmentId: 'seg-3', rating: 2, ratedAt: '2026-03-01T00:00:00.000Z' }),
+    ];
+
+    // Song1 avg = (100 + 60) / 2 = 80; Song2 avg = 40; playlist avg = 60
+    expect(computePlaylistKnowledge(songs, ratings)).toBe(60);
   });
 });

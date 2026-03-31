@@ -22,9 +22,10 @@ interface TransportDebugState {
 interface PracticeViewProps {
   song: Song;
   initialSession: SessionState;
+  onSessionChange?: (session: SessionState) => void;
 }
 
-const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => {
+const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession, onSessionChange }) => {
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const [ratingsLoading, setRatingsLoading] = React.useState(true);
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
@@ -170,6 +171,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
     }));
     play(0, 10000);
   };
+
+  useEffect(() => {
+    onSessionChange?.(session);
+  }, [session, onSessionChange]);
 
   return (
     <div
