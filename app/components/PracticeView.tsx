@@ -88,16 +88,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
     };
   }, [song.id]);
 
-  const playbackSegmentIndex = useMemo(() => {
-    if (!hasSegments) {
-      return -1;
-    }
-    const byPlayback = song.segments.findIndex(
-      (segment) => currentMs >= segment.startMs && currentMs < segment.endMs
-    );
-    return byPlayback === -1 ? session.currentSegmentIndex : byPlayback;
-  }, [currentMs, hasSegments, session.currentSegmentIndex, song.segments]);
-
   const currentRating: MemoryRating | undefined = (() => {
     if (!currentSegment) {
       return undefined;
@@ -184,22 +174,20 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
   return (
     <div
       data-testid="practice-layout"
-      className="mx-auto w-full max-w-6xl rounded-[32px] border border-gray-200 bg-gradient-to-b from-white to-indigo-50/30 p-4 shadow-sm md:p-6"
+      className="flex h-screen flex-col bg-gray-50"
     >
-      <header data-testid="practice-header" className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900" data-testid="song-title">
-            {song.title}
-          </h1>
-          <p className="text-sm text-gray-500" data-testid="segment-counter">
-            {hasSegments
-              ? `Segment ${session.currentSegmentIndex + 1} of ${song.segments.length}`
-              : "Full piece playback"}
-          </p>
-        </div>
+      <header data-testid="practice-header" className="px-4 pb-2 pt-4 md:px-8">
+        <h1 className="text-xl font-semibold text-gray-900" data-testid="song-title">
+          {song.title}
+        </h1>
+        <p className="text-sm text-gray-500" data-testid="segment-counter">
+          {hasSegments
+            ? `Segment ${session.currentSegmentIndex + 1} of ${song.segments.length}`
+            : "Full piece playback"}
+        </p>
       </header>
 
-      <div className="mb-8" data-testid="practice-top-bar">
+      <div className="px-4 md:px-8" data-testid="practice-top-bar">
         {ratingsLoading ? (
           <div
             data-testid="ratings-loading-skeleton"
@@ -215,59 +203,33 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
         ) : null}
       </div>
 
-      <div data-testid="practice-main" className="space-y-8">
-        <section
-          data-testid="practice-focus"
-          className="flex items-center justify-center gap-4 md:gap-10"
-        >
+      <main data-testid="practice-main" className="flex flex-1 items-center justify-center px-4 pb-6 pt-2 md:px-8">
+        <section data-testid="practice-focus" className="flex w-full items-center justify-center gap-4 md:gap-8">
           {hasSegments ? (
             <button
               data-testid="prev-btn"
+              aria-label="Previous segment"
               disabled={isFirst}
               onClick={() => jumpToSegment(session.currentSegmentIndex - 1)}
-              className="h-16 w-16 rounded-full border border-indigo-200 bg-white text-3xl text-indigo-600 shadow-sm disabled:opacity-40"
+              className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-2xl text-indigo-700 shadow-sm disabled:opacity-40"
             >
               &lt;
             </button>
           ) : null}
 
-          <div className="w-full max-w-xl">
+          <div className="w-full max-w-md">
             {hasSegments && currentSegment ? (
-              <>
-                <div className="mb-4 flex flex-wrap justify-center gap-2" data-testid="practice-segment-strip">
-                  {song.segments.map((segment, index) => {
-                    const isActive = index === session.currentSegmentIndex;
-                    return (
-                      <button
-                        key={segment.id}
-                        type="button"
-                        data-testid={`jump-segment-${segment.id}`}
-                        onClick={() => jumpToSegment(index)}
-                        className={[
-                          "rounded-full px-3 py-1 text-sm transition-colors",
-                          isActive
-                            ? "bg-indigo-600 text-white"
-                            : "bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50",
-                        ].join(" ")}
-                      >
-                        {segment.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <SegmentCard
-                  segment={currentSegment}
-                  currentRating={currentRating}
-                  onRate={(rating) =>
-                    dispatch({ type: "RATE_SEGMENT", segmentId: currentSegment.id, rating })
-                  }
-                  isLocked={session.isLocked}
-                  onToggleLock={() => dispatch({ type: "TOGGLE_LOCK" })}
-                  playbackMs={currentMs}
-                  onSeek={seek}
-                />
-              </>
+              <SegmentCard
+                segment={currentSegment}
+                currentRating={currentRating}
+                onRate={(rating) =>
+                  dispatch({ type: "RATE_SEGMENT", segmentId: currentSegment.id, rating })
+                }
+                isLocked={session.isLocked}
+                onToggleLock={() => dispatch({ type: "TOGGLE_LOCK" })}
+                playbackMs={currentMs}
+                onSeek={seek}
+              />
             ) : (
               <div
                 data-testid="no-segments"
@@ -284,67 +246,36 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
           {hasSegments ? (
             <button
               data-testid="next-btn"
+              aria-label="Next segment"
               disabled={isLast}
               onClick={() => jumpToSegment(session.currentSegmentIndex + 1)}
-              className="h-16 w-16 rounded-full border border-indigo-200 bg-white text-3xl text-indigo-600 shadow-sm disabled:opacity-40"
+              className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-2xl text-indigo-700 shadow-sm disabled:opacity-40"
             >
               &gt;
             </button>
           ) : null}
         </section>
+      </main>
 
-        <section data-testid="practice-queue" className="rounded-2xl border border-indigo-100 bg-white/80 p-4">
-          {hasSegments ? (
-            <div className="grid gap-3 md:grid-cols-3">
-              {song.segments.map((segment, index) => {
-                const isActive = index === playbackSegmentIndex;
-                return (
-                  <div
-                    key={segment.id}
-                    data-testid={`queue-segment-${segment.id}`}
-                    data-highlighted={isActive ? "true" : "false"}
-                    className={[
-                      "rounded-xl border px-4 py-3 text-left transition-colors",
-                      isActive
-                        ? "border-amber-300 bg-amber-50 text-amber-900"
-                        : "border-gray-200 bg-white text-gray-700",
-                    ].join(" ")}
-                  >
-                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                      Section {index + 1}
-                    </p>
-                    <p className="mt-1 font-medium">{segment.label}</p>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div data-testid="no-segments-queue" className="text-sm text-gray-500">
-              Segment highlights will appear here after you create practice sections.
-            </div>
-          )}
-        </section>
-
-        <section data-testid="practice-transport">
-          <AudioPlayer
-            audioUrl={song.audioUrl}
-            currentMs={currentMs}
-            durationMs={totalDurationMs}
-            segmentStartMs={activeStartMs}
-            segmentEndMs={activeEndMs}
-            isPlaying={isPlaying}
-            isReady={isReady}
-            playbackError={playbackError}
-            debugInfo={debugInfo}
-            restartLabel={hasSegments ? "Restart Segment" : "Restart Piece"}
-            transportDebug={transportDebug}
-            onPlayPause={handleTogglePlay}
-            onRestartSegment={handleRestartSegment}
-            onSeekSong={handleSeekSong}
-            onDebugPlayTest={handleDebugPlayTest}
-          />
-        </section>
-      </div>
+      <section data-testid="practice-transport" className="border-t border-gray-200 bg-white px-4 py-4 md:px-8">
+        <AudioPlayer
+          audioUrl={song.audioUrl}
+          currentMs={currentMs}
+          durationMs={totalDurationMs}
+          segmentStartMs={activeStartMs}
+          segmentEndMs={activeEndMs}
+          isPlaying={isPlaying}
+          isReady={isReady}
+          playbackError={playbackError}
+          debugInfo={debugInfo}
+          restartLabel={hasSegments ? "Restart Segment" : "Restart Piece"}
+          transportDebug={transportDebug}
+          onPlayPause={handleTogglePlay}
+          onRestartSegment={handleRestartSegment}
+          onSeekSong={handleSeekSong}
+          onDebugPlayTest={handleDebugPlayTest}
+        />
+      </section>
     </div>
   );
 };

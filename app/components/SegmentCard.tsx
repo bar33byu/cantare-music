@@ -3,8 +3,6 @@
 import React from "react";
 import { Segment, MemoryRating } from "../types/index";
 import RatingBar from "./RatingBar";
-import KnowledgeBar from "./KnowledgeBar";
-import { getSegmentKnowledgePercent } from "../lib/knowledgeUtils";
 
 interface SegmentCardProps {
   segment: Segment;
@@ -20,7 +18,7 @@ function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 const SegmentCard: React.FC<SegmentCardProps> = ({
@@ -30,64 +28,62 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   isLocked,
   onToggleLock,
   playbackMs,
-  onSeek,
 }) => {
   const clampedPlaybackMs = Math.min(
     segment.endMs,
     Math.max(segment.startMs, playbackMs ?? segment.startMs)
   );
+  const durationMs = Math.max(1, segment.endMs - segment.startMs);
+  const progress = Math.min(1, Math.max(0, (clampedPlaybackMs - segment.startMs) / durationMs));
 
   return (
-    <div className="relative mx-auto w-full max-w-xl rounded-[28px] border border-gray-200 bg-white px-6 py-7 shadow-md">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.24em] text-indigo-500">
-            Current Segment
-          </p>
-          <h2 className="mt-2 text-2xl font-bold text-gray-800">{segment.label}</h2>
-        </div>
+    <div className="relative mx-auto w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-center text-sm text-gray-500" data-testid="segment-label-text">
+          {segment.label}
+        </p>
         <button
           aria-label="Toggle lock"
           data-testid="lock-toggle"
           onClick={onToggleLock}
-          className="ml-3 flex-shrink-0 text-sm px-3 py-1 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+          className="text-sm px-3 py-1 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
         >
           {isLocked ? "Locked" : "Unlocked"}
         </button>
       </div>
       <p
         data-testid="segment-lyric-text"
-        className="mb-5 text-center text-2xl leading-relaxed text-slate-700"
+        className="mb-5 text-center text-3xl leading-relaxed text-slate-700"
       >
         {segment.lyricText || "No lyrics for this segment yet."}
       </p>
-      <div className="mb-5 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-3">
-        <input
-          type="range"
-          min={segment.startMs}
-          max={segment.endMs}
-          value={clampedPlaybackMs}
-          onChange={(event) => onSeek?.(Number(event.target.value))}
-          data-testid="segment-scrubber"
-          className="w-full"
-        />
+      <div className="mb-5">
+        <div
+          role="progressbar"
+          aria-valuenow={Math.round(progress * 100)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          data-testid="segment-progress"
+          className="h-4 w-full overflow-hidden rounded border border-indigo-300 bg-indigo-50"
+        >
+          <div
+            data-testid="segment-progress-fill"
+            className="h-full bg-amber-400"
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
         <div className="mt-2 flex justify-between text-sm text-indigo-700">
-          <span data-testid="segment-start-time">{formatMs(segment.startMs)}</span>
-          <span data-testid="segment-current-time">{formatMs(clampedPlaybackMs)}</span>
-          <span data-testid="segment-end-time">{formatMs(segment.endMs)}</span>
+          <span data-testid="segment-start-time">{formatMs(0)}</span>
+          <span data-testid="segment-end-time">{formatMs(segment.endMs - segment.startMs)}</span>
         </div>
       </div>
+
+      <p className="mb-2 text-sm text-gray-500">Level of knowledge</p>
       <RatingBar
         currentRating={currentRating}
         onRate={onRate}
         disabled={isLocked}
       />
-      <div className="mt-4">
-        <KnowledgeBar
-          percent={currentRating ? getSegmentKnowledgePercent(currentRating) : 0}
-          label="Knowledge"
-        />
-      </div>
     </div>
   );
 };
