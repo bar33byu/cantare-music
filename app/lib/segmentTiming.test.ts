@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { getDefaultNewSegmentPlacement, inferTimelineOrder } from './segmentTiming';
+import {
+  getDefaultNewSegmentPlacement,
+  getPlaybackAnchoredNewSegmentPlacement,
+  inferTimelineOrder,
+} from './segmentTiming';
 
 describe('getDefaultNewSegmentPlacement', () => {
   it('uses playback position when there are no visible segments', () => {
@@ -68,5 +72,30 @@ describe('inferTimelineOrder', () => {
 
     expect(first).toEqual(second);
     expect(first.map((segment) => segment.id)).toEqual(['seg-a', 'seg-b']);
+  });
+});
+
+describe('getPlaybackAnchoredNewSegmentPlacement', () => {
+  it('anchors to playback when playback is after last segment offset', () => {
+    const placement = getPlaybackAnchoredNewSegmentPlacement(
+      [{ id: 'seg-1', startMs: 0, endMs: 30_000 }],
+      45_000
+    );
+
+    expect(placement).toEqual({ startMs: 45_000, endMs: 65_000 });
+  });
+
+  it('keeps last-segment offset when playback is behind it', () => {
+    const placement = getPlaybackAnchoredNewSegmentPlacement(
+      [{ id: 'seg-1', startMs: 0, endMs: 30_000 }],
+      20_000
+    );
+
+    expect(placement).toEqual({ startMs: 30_500, endMs: 50_500 });
+  });
+
+  it('clamps invalid playback to zero', () => {
+    const placement = getPlaybackAnchoredNewSegmentPlacement([], Number.NaN);
+    expect(placement).toEqual({ startMs: 0, endMs: 20_000 });
   });
 });

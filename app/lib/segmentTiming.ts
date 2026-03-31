@@ -52,3 +52,29 @@ export function getDefaultNewSegmentPlacement(
 
   return { startMs, endMs };
 }
+
+export function getPlaybackAnchoredNewSegmentPlacement(
+  segments: TimelineSegment[],
+  playbackMs: number,
+  durationMs = DEFAULT_DURATION_MS,
+  minimumDurationMs = DEFAULT_MIN_GAP_MS,
+  offsetAfterLastMs = DEFAULT_OFFSET_AFTER_LAST_MS
+): NewSegmentPlacement {
+  const basePlacement = getDefaultNewSegmentPlacement(
+    segments,
+    undefined,
+    durationMs,
+    minimumDurationMs,
+    offsetAfterLastMs
+  );
+  const safePlaybackMs = Math.max(0, asFiniteNumber(playbackMs, 0));
+  const nextStartMs = Math.max(basePlacement.startMs, safePlaybackMs);
+  const safeDuration = Math.max(0, asFiniteNumber(durationMs, DEFAULT_DURATION_MS));
+  const safeMinimumDuration = Math.max(1, asFiniteNumber(minimumDurationMs, DEFAULT_MIN_GAP_MS));
+  const nextEndMs = Math.max(nextStartMs + safeDuration, nextStartMs + safeMinimumDuration);
+
+  return {
+    startMs: nextStartMs,
+    endMs: nextEndMs,
+  };
+}

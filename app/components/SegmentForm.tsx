@@ -7,19 +7,19 @@ import { SegmentTimeline } from './SegmentTimeline';
 interface SegmentFormProps {
   songId: string;
   segment?: Segment; // If provided, we're editing; if not, we're creating
+  draftValues?: Partial<Pick<Segment, 'label' | 'startMs' | 'endMs' | 'lyricText'>>;
   durationMs: number;
   existingSegments: Segment[];
   onSuccess: (segment: Segment) => void;
   onCancel?: () => void;
 }
 
-export function SegmentForm({ songId, segment, durationMs, existingSegments, onSuccess, onCancel }: SegmentFormProps) {
-  const [label, setLabel] = useState(segment?.label || '');
-  const [order, setOrder] = useState(segment?.order?.toString() || '');
+export function SegmentForm({ songId, segment, draftValues, durationMs, existingSegments, onSuccess, onCancel }: SegmentFormProps) {
+  const [label, setLabel] = useState(segment?.label ?? draftValues?.label ?? '');
   const defaultEndMs = durationMs > 0 ? Math.min(durationMs, 10000) : 10000;
-  const [startMs, setStartMs] = useState(segment?.startMs ?? 0);
-  const [endMs, setEndMs] = useState(segment?.endMs ?? defaultEndMs);
-  const [lyricText, setLyricText] = useState(segment?.lyricText || '');
+  const [startMs, setStartMs] = useState(segment?.startMs ?? draftValues?.startMs ?? 0);
+  const [endMs, setEndMs] = useState(segment?.endMs ?? draftValues?.endMs ?? defaultEndMs);
+  const [lyricText, setLyricText] = useState(segment?.lyricText ?? draftValues?.lyricText ?? '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -33,13 +33,6 @@ export function SegmentForm({ songId, segment, durationMs, existingSegments, onS
     // Validation
     if (!label.trim()) {
       setError('Label is required');
-      setLoading(false);
-      return;
-    }
-
-    const orderNum = parseInt(order);
-    if (isNaN(orderNum) || orderNum < 0) {
-      setError('Order must be a non-negative number');
       setLoading(false);
       return;
     }
@@ -66,7 +59,6 @@ export function SegmentForm({ songId, segment, durationMs, existingSegments, onS
       const segmentData = {
         id: segment?.id || crypto.randomUUID(),
         label: label.trim(),
-        order: orderNum,
         startMs,
         endMs,
         lyricText: lyricText.trim(),
@@ -80,7 +72,6 @@ export function SegmentForm({ songId, segment, durationMs, existingSegments, onS
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             label: segmentData.label,
-            order: segmentData.order,
             startMs: segmentData.startMs,
             endMs: segmentData.endMs,
             lyricText: segmentData.lyricText,
@@ -125,22 +116,6 @@ export function SegmentForm({ songId, segment, durationMs, existingSegments, onS
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
           placeholder="e.g., Verse 1, Chorus, Bridge"
         />
-      </div>
-
-      <div>
-        <label htmlFor="order" className="block text-sm font-medium text-gray-700">
-          Order *
-        </label>
-        <input
-          id="order"
-          type="number"
-          value={order}
-          onChange={(e) => setOrder(String(e.target.value))}
-          data-testid="segment-order-input"
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-          placeholder="0"
-        />
-        <p className="mt-1 text-sm text-gray-500">Position in the song (0-based)</p>
       </div>
 
       <div>

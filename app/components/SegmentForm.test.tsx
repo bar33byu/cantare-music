@@ -43,7 +43,7 @@ describe('SegmentForm', () => {
   });
 
   describe('Create Mode', () => {
-    it('renders label/order/lyrics fields and timeline editor', () => {
+    it('renders label/lyrics fields and timeline editor without order input', () => {
       render(
         <SegmentForm
           songId={songId}
@@ -54,7 +54,7 @@ describe('SegmentForm', () => {
       );
 
       expect(screen.getByTestId('segment-label-input')).toBeInTheDocument();
-      expect(screen.getByTestId('segment-order-input')).toBeInTheDocument();
+      expect(screen.queryByTestId('segment-order-input')).not.toBeInTheDocument();
       expect(screen.getByTestId('segment-lyrics-input')).toBeInTheDocument();
       expect(screen.getByTestId('segment-timeline')).toBeInTheDocument();
       expect(screen.queryByTestId('segment-start-input')).not.toBeInTheDocument();
@@ -72,7 +72,6 @@ describe('SegmentForm', () => {
       );
 
       fireEvent.change(screen.getByTestId('segment-label-input'), { target: { value: 'Verse 1' } });
-      fireEvent.change(screen.getByTestId('segment-order-input'), { target: { value: '1' } });
       fireEvent.change(screen.getByTestId('segment-lyrics-input'), { target: { value: 'Test lyrics' } });
 
       fireEvent.click(screen.getByTestId('segment-submit-button'));
@@ -83,7 +82,7 @@ describe('SegmentForm', () => {
         const body = JSON.parse(call[1].body);
         expect(typeof body.id).toBe('string');
         expect(body.label).toBe('Verse 1');
-        expect(body.order).toBe(1);
+        expect(body.order).toBeUndefined();
         expect(body.startMs).toBe(0);
         expect(body.endMs).toBe(10000);
         expect(body.lyricText).toBe('Test lyrics');
@@ -103,33 +102,11 @@ describe('SegmentForm', () => {
       );
 
       fireEvent.change(screen.getByTestId('segment-label-input'), { target: { value: '' } });
-      fireEvent.change(screen.getByTestId('segment-order-input'), { target: { value: '1' } });
 
       fireEvent.click(screen.getByTestId('segment-submit-button'));
 
       await waitFor(() => {
         expect(screen.getByRole('alert')).toHaveTextContent('Label is required');
-      });
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
-
-    it('shows validation error for invalid order', async () => {
-      render(
-        <SegmentForm
-          songId={songId}
-          durationMs={durationMs}
-          existingSegments={existingSegments}
-          onSuccess={mockOnSuccess}
-        />
-      );
-
-      fireEvent.change(screen.getByTestId('segment-label-input'), { target: { value: 'Verse 1' } });
-      fireEvent.change(screen.getByTestId('segment-order-input'), { target: { value: '-1' } });
-
-      fireEvent.click(screen.getByTestId('segment-submit-button'));
-
-      await waitFor(() => {
-        expect(screen.getByRole('alert')).toHaveTextContent('Order must be a non-negative number');
       });
       expect(mockFetch).not.toHaveBeenCalled();
     });
@@ -150,7 +127,6 @@ describe('SegmentForm', () => {
       );
 
       fireEvent.change(screen.getByTestId('segment-label-input'), { target: { value: 'Verse 1' } });
-      fireEvent.change(screen.getByTestId('segment-order-input'), { target: { value: '1' } });
 
       fireEvent.click(screen.getByTestId('segment-submit-button'));
 
@@ -176,7 +152,6 @@ describe('SegmentForm', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('segment-label-input')).toHaveValue('Verse 1');
-        expect(screen.getByTestId('segment-order-input')).toHaveValue(1);
         expect(screen.getByTestId('segment-lyrics-input')).toHaveValue('Amazing grace, how sweet the sound');
       });
 
@@ -204,7 +179,6 @@ describe('SegmentForm', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             label: 'Chorus',
-            order: 1,
             startMs: 0,
             endMs: 10000,
             lyricText: 'Amazing grace, how sweet the sound',
