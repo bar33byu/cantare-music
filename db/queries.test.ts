@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { eq, desc } from "drizzle-orm";
-import { songs, segments } from "./schema";
+import { songs, segments, practiceRatings } from "./schema";
 
 // ── chainable mock builder ─────────────────────────────────────────────────────
 // Creates a fluent mock object where every method returns itself and
@@ -187,5 +187,112 @@ describe("deleteSegment", () => {
     expect(deleteSpy).toHaveBeenCalledWith(segments);
     const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
     expect(whereSpy).toHaveBeenCalledWith(eq(segments.id, "seg-1"));
+  });
+});
+
+describe("getRatingsForSong", () => {
+  it("returns ratings ordered by ratedAt desc for a song", async () => {
+    const ratedAt = new Date("2026-03-31T12:00:00.000Z");
+    const rows = [
+      {
+        id: "r-1",
+        segmentId: "seg-1",
+        rating: 4,
+        ratedAt,
+      },
+    ];
+    const chain = makeChain(rows);
+    selectSpy.mockReturnValue(chain);
+
+    const { getRatingsForSong } = await getQueries();
+    const result = await getRatingsForSong("song-1");
+
+    expect(selectSpy).toHaveBeenCalledOnce();
+    const fromSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["from"];
+    expect(fromSpy).toHaveBeenCalledWith(practiceRatings);
+    const orderBySpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["orderBy"];
+    expect(orderBySpy).toHaveBeenCalledWith(desc(practiceRatings.ratedAt));
+    expect(result).toEqual([
+      {
+        id: "r-1",
+        segmentId: "seg-1",
+        rating: 4,
+        ratedAt: "2026-03-31T12:00:00.000Z",
+      },
+    ]);
+  });
+});
+
+describe("saveRatings", () => {
+  it("inserts all ratings with generated ids and onConflictDoNothing", async () => {
+    const insertChain = makeChain([]);
+    insertSpy.mockReturnValue(insertChain);
+
+    const { saveRatings } = await getQueries();
+    await saveRatings([
+      {
+        segmentId: "seg-1",
+        rating: 5,
+        ratedAt: new Date("2026-03-31T12:00:00.000Z"),
+      },
+      {
+        segmentId: "seg-2",
+        rating: 3,
+        ratedAt: new Date("2026-03-31T12:01:00.000Z"),
+      },
+    ]);
+
+    expect(insertSpy).toHaveBeenCalledWith(practiceRatings);
+    const valuesSpy = (insertChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
+    expect(valuesSpy).toHaveBeenCalledWith([
+      {
+        id: expect.any(String),
+        segmentId: "seg-1",
+        rating: 5,
+        ratedAt: new Date("2026-03-31T12:00:00.000Z"),
+      },
+      {
+        id: expect.any(String),
+        segmentId: "seg-2",
+        rating: 3,
+        ratedAt: new Date("2026-03-31T12:01:00.000Z"),
+      },
+    ]);
+    const onConflictSpy = (insertChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["onConflictDoNothing"];
+    expect(onConflictSpy).toHaveBeenCalled();
+  });
+
+  it("skips insert when there are no ratings", async () => {
+    const { saveRatings } = await getQueries();
+    await saveRatings([]);
+    expect(insertSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteRatingsForSong", () => {
+  it("deletes ratings for all segments of a song", async () => {
+    const selectChain = makeChain([{ id: "seg-1" }, { id: "seg-2" }]);
+    const deleteChain = makeChain();
+    selectSpy.mockReturnValue(selectChain);
+    deleteSpy.mockReturnValue(deleteChain);
+
+    const { deleteRatingsForSong } = await getQueries();
+    await deleteRatingsForSong("song-1");
+
+    const fromSpy = (selectChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["from"];
+    expect(fromSpy).toHaveBeenCalledWith(segments);
+    expect(deleteSpy).toHaveBeenCalledWith(practiceRatings);
+    const whereSpy = (deleteChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).toHaveBeenCalled();
+  });
+
+  it("does not delete when song has no segments", async () => {
+    const selectChain = makeChain([]);
+    selectSpy.mockReturnValue(selectChain);
+
+    const { deleteRatingsForSong } = await getQueries();
+    await deleteRatingsForSong("song-1");
+
+    expect(deleteSpy).not.toHaveBeenCalled();
   });
 });

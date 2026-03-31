@@ -1,7 +1,16 @@
-import { eq, asc, desc } from "drizzle-orm";
+import { eq, asc, desc, inArray } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments } from "./schema";
+import { songs, segments, practiceRatings } from "./schema";
 import type { SongRow, SegmentRow } from "./schema";
+
+export type PersistedMemoryRating = 1 | 2 | 3 | 4 | 5;
+
+export interface PersistedSegmentRating {
+  id: string;
+  segmentId: string;
+  rating: PersistedMemoryRating;
+  ratedAt: string;
+}
 
 // ── Songs ──────────────────────────────────────────────────────────────────
 
@@ -127,4 +136,68 @@ export async function reorderSegments(
 
 export async function deleteSegment(id: string): Promise<void> {
   await db().delete(segments).where(eq(segments.id, id));
+}
+
+// ── Practice Ratings ──────────────────────────────────────────────────────
+
+export async function getRatingsForSong(
+  songId: string
+): Promise<PersistedSegmentRating[]> {
+  const rows = await db()
+    .select({
+      id: practiceRatings.id,
+      segmentId: practiceRatings.segmentId,
+      rating: practiceRatings.rating,
+      ratedAt: practiceRatings.ratedAt,
+    })
+    .from(practiceRatings)
+    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
+    .where(eq(segments.songId, songId))
+    .orderBy(desc(practiceRatings.ratedAt));
+
+  return rows.map((row) => ({
+    id: row.id,
+    segmentId: row.segmentId,
+    rating: row.rating as PersistedMemoryRating,
+    ratedAt: row.ratedAt.toISOString(),
+  }));
+}
+
+export async function saveRatings(
+  ratings: Array<{
+    segmentId: string;
+    rating: PersistedMemoryRating;
+    ratedAt: Date;
+  }>
+): Promise<void> {
+  if (ratings.length === 0) {
+    return;
+  }
+
+  await db()
+    .insert(practiceRatings)
+    .values(
+      ratings.map((rating) => ({
+        id: crypto.randomUUID(),
+        segmentId: rating.segmentId,
+        rating: rating.rating,
+        ratedAt: rating.ratedAt,
+      }))
+    )
+    .onConflictDoNothing();
+}
+
+export async function deleteRatingsForSong(songId: string): Promise<void> {
+  const songSegments = await db()
+    .select({ id: segments.id })
+    .from(segments)
+    .where(eq(segments.songId, songId));
+
+  if (songSegments.length === 0) {
+    return;
+  }
+
+  await db()
+    .delete(practiceRatings)
+    .where(inArray(practiceRatings.segmentId, songSegments.map((segment) => segment.id)));
 }
