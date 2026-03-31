@@ -39,31 +39,17 @@ export function SegmentTimeline({
 }: SegmentTimelineProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [activeDrag, setActiveDrag] = useState<DragHandle>(null);
+  const [activePointerId, setActivePointerId] = useState<number | null>(null);
 
   const plottedSegments = useMemo(() => {
-    const byStart = [...segments].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
-    let lane0End = -1;
-    let lane1End = -1;
+    const byStart = [...segments].sort(
+      (a, b) => a.startMs - b.startMs || a.endMs - b.endMs || a.id.localeCompare(b.id)
+    );
 
-    return byStart.map((segment) => {
-      const overlapsLane0 = segment.startMs < lane0End;
-      const overlapsLane1 = segment.startMs < lane1End;
-
-      let lane = 0;
-      if (overlapsLane0 && !overlapsLane1) {
-        lane = 1;
-      } else if (overlapsLane0 && overlapsLane1) {
-        lane = lane0End <= lane1End ? 0 : 1;
-      }
-
-      if (lane === 0) {
-        lane0End = Math.max(lane0End, segment.endMs);
-      } else {
-        lane1End = Math.max(lane1End, segment.endMs);
-      }
-
-      return { segment, lane };
-    });
+    return byStart.map((segment, index) => ({
+      segment,
+      lane: index % 2,
+    }));
   }, [segments]);
 
   const msFromClientX = (clientX: number): number => {
@@ -75,8 +61,11 @@ export function SegmentTimeline({
     return Math.round(ratio * durationMs);
   };
 
-  const updateDragValue = (clientX: number) => {
+  const updateDragValue = (clientX: number, pointerId: number) => {
     if (!editState || !activeDrag || durationMs <= 0) {
+      return;
+    }
+    if (activePointerId !== null && pointerId !== activePointerId) {
       return;
     }
 
@@ -89,6 +78,11 @@ export function SegmentTimeline({
 
     const nextEnd = clamp(rawMs, Math.min(durationMs, editState.startMs + 1000), durationMs);
     editState.onChange(editState.startMs, nextEnd);
+  };
+
+  const stopDrag = () => {
+    setActiveDrag(null);
+    setActivePointerId(null);
   };
 
   if (durationMs === 0) {
@@ -113,10 +107,10 @@ export function SegmentTimeline({
           if (!activeDrag) {
             return;
           }
-          updateDragValue(e.clientX);
+          updateDragValue(e.clientX, e.pointerId);
         }}
-        onPointerUp={() => setActiveDrag(null)}
-        onPointerCancel={() => setActiveDrag(null)}
+        onPointerUp={stopDrag}
+        onPointerCancel={stopDrag}
       >
         {plottedSegments.map(({ segment, lane }) => {
           const left = (segment.startMs / durationMs) * 100;
@@ -161,10 +155,18 @@ export function SegmentTimeline({
               style={{ left: `${editLeftPct}%` }}
               onPointerDown={(e) => {
                 setActiveDrag("start");
+                setActivePointerId(e.pointerId);
                 if (typeof e.currentTarget.setPointerCapture === "function") {
                   e.currentTarget.setPointerCapture(e.pointerId);
                 }
               }}
+              onPointerUp={(e) => {
+                if (typeof e.currentTarget.releasePointerCapture === "function") {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                }
+                stopDrag();
+              }}
+              onPointerCancel={stopDrag}
             />
             <button
               type="button"
@@ -174,10 +176,18 @@ export function SegmentTimeline({
               style={{ left: `${editLeftPct + editWidthPct}%` }}
               onPointerDown={(e) => {
                 setActiveDrag("end");
+                setActivePointerId(e.pointerId);
                 if (typeof e.currentTarget.setPointerCapture === "function") {
                   e.currentTarget.setPointerCapture(e.pointerId);
                 }
               }}
+              onPointerUp={(e) => {
+                if (typeof e.currentTarget.releasePointerCapture === "function") {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                }
+                stopDrag();
+              }}
+              onPointerCancel={stopDrag}
             />
           </>
         ) : null}

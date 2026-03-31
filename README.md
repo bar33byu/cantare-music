@@ -34,3 +34,13 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Segment Editor Behavior Notes
+
+- Segment ordering is inferred from timeline placement. The backend normalizes order by `startMs`, then `endMs`, then `id` for deterministic ties.
+- The segment form no longer accepts manual sequence input. Users edit label, timeline boundaries, and lyrics only.
+- New segment defaults use timeline-aware placement:
+	- base start is 500ms after the latest visible segment end
+	- base duration is 20 seconds
+	- while playback is active in the editor, start is anchored to `max(currentPlaybackMs, latestEnd+500ms)`
+- Updating `startMs` or `endMs` re-normalizes ordering server-side to keep timeline position and sequence consistent.

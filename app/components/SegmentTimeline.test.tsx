@@ -81,6 +81,23 @@ describe("SegmentTimeline", () => {
     expect(screen.getByTestId("segment-block-seg-2")).toHaveStyle({ height: "50%" });
   });
 
+  it("alternates adjacent segments across lanes for edge accessibility", () => {
+    render(
+      <SegmentTimeline
+        durationMs={12000}
+        segments={[
+          makeSegment({ id: "seg-1", startMs: 0, endMs: 3000 }),
+          makeSegment({ id: "seg-2", startMs: 3000, endMs: 6000 }),
+          makeSegment({ id: "seg-3", startMs: 6000, endMs: 9000 }),
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId("segment-block-seg-1")).toHaveStyle({ top: "0%" });
+    expect(screen.getByTestId("segment-block-seg-2")).toHaveStyle({ top: "50%" });
+    expect(screen.getByTestId("segment-block-seg-3")).toHaveStyle({ top: "0%" });
+  });
+
   it("renders drag handles when editState is provided", () => {
     const onChange = vi.fn();
     render(
@@ -151,6 +168,69 @@ describe("SegmentTimeline", () => {
     fireEvent.pointerMove(timeline, { pointerId: 1, clientX: 900 });
 
     expect(onChange).toHaveBeenCalledWith(2000, 3000);
+  });
+
+  it("stops drag updates after pointer up", () => {
+    const onChange = vi.fn();
+    render(
+      <SegmentTimeline
+        durationMs={10000}
+        segments={[]}
+        editState={{ startMs: 1000, endMs: 5000, onChange }}
+      />
+    );
+
+    const timeline = screen.getByTestId("segment-timeline");
+    vi.spyOn(timeline, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 64,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 64,
+      toJSON: () => ({}),
+    });
+
+    const handleStart = screen.getByTestId("handle-start");
+    fireEvent.pointerDown(handleStart, { pointerId: 7, clientX: 100 });
+    fireEvent.pointerMove(timeline, { pointerId: 7, clientX: 200 });
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    fireEvent.pointerUp(handleStart, { pointerId: 7, clientX: 200 });
+    fireEvent.pointerMove(timeline, { pointerId: 7, clientX: 300 });
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores pointer moves from non-active pointer ids", () => {
+    const onChange = vi.fn();
+    render(
+      <SegmentTimeline
+        durationMs={10000}
+        segments={[]}
+        editState={{ startMs: 1000, endMs: 5000, onChange }}
+      />
+    );
+
+    const timeline = screen.getByTestId("segment-timeline");
+    vi.spyOn(timeline, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 64,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 64,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(screen.getByTestId("handle-start"), { pointerId: 3, clientX: 100 });
+    fireEvent.pointerMove(timeline, { pointerId: 4, clientX: 200 });
+
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("shows handle timestamp labels", () => {
