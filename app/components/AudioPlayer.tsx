@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type SyntheticEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type MouseEvent, type SyntheticEvent } from "react";
 import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey } from "../lib/audioUrls";
 
@@ -47,6 +47,8 @@ type FetchProbeState = {
   checkedAt: string | null;
 };
 
+let audioPlayerMountCounter = 0;
+
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -87,6 +89,18 @@ export function AudioPlayer({
     contentType: null,
     contentRange: null,
     checkedAt: null,
+  });
+  const mountIdRef = useRef(0);
+  if (mountIdRef.current === 0) {
+    audioPlayerMountCounter += 1;
+    mountIdRef.current = audioPlayerMountCounter;
+  }
+  const [localClickAck, setLocalClickAck] = useState({
+    playButtonClicks: 0,
+    debugPlayButtonClicks: 0,
+    fetchProbeButtonClicks: 0,
+    lastAck: "none",
+    lastAckAt: "n/a",
   });
 
   const audioKey = useMemo(() => parseAudioKey(audioUrl), [audioUrl]);
@@ -222,6 +236,42 @@ export function AudioPlayer({
     }
   }, [checkReachability, runProxyFetchProbe]);
 
+  const handlePlayPauseClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setLocalClickAck((previous) => ({
+      ...previous,
+      playButtonClicks: previous.playButtonClicks + 1,
+      lastAck: "play-button",
+      lastAckAt: new Date().toISOString(),
+    }));
+    onPlayPause();
+  }, [onPlayPause]);
+
+  const handleDebugPlayTestClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setLocalClickAck((previous) => ({
+      ...previous,
+      debugPlayButtonClicks: previous.debugPlayButtonClicks + 1,
+      lastAck: "debug-play-test-button",
+      lastAckAt: new Date().toISOString(),
+    }));
+    onDebugPlayTest?.();
+  }, [onDebugPlayTest]);
+
+  const handleFetchProbeClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setLocalClickAck((previous) => ({
+      ...previous,
+      fetchProbeButtonClicks: previous.fetchProbeButtonClicks + 1,
+      lastAck: "fetch-probe-button",
+      lastAckAt: new Date().toISOString(),
+    }));
+    void runProxyFetchProbe();
+  }, [runProxyFetchProbe]);
+
   if (!audioUrl) {
     return (
       <div
@@ -251,7 +301,7 @@ export function AudioPlayer({
         </button>
         <button
           type="button"
-          onClick={onPlayPause}
+          onClick={handlePlayPauseClick}
           data-testid="audio-play-pause"
           className="rounded-full bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
         >
@@ -307,7 +357,7 @@ export function AudioPlayer({
               <button
                 type="button"
                 data-testid="audio-debug-run-play-test"
-                onClick={onDebugPlayTest}
+                onClick={handleDebugPlayTestClick}
                 className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
               >
                 Run Hook Play Test
@@ -315,7 +365,7 @@ export function AudioPlayer({
               <button
                 type="button"
                 data-testid="audio-debug-run-fetch-probe"
-                onClick={() => void runProxyFetchProbe()}
+                onClick={handleFetchProbeClick}
                 className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
               >
                 Run Proxy Fetch Probe
@@ -336,6 +386,12 @@ export function AudioPlayer({
             <p data-testid="audio-debug-open">debugOpen: {String(isDebugOpen)}</p>
             <p data-testid="audio-debug-audio-url" className="break-all">audioUrl: {audioUrl}</p>
             <p data-testid="audio-debug-proxy-url" className="break-all">proxyAudioUrl: {proxyAudioUrl ?? "n/a"}</p>
+            <p data-testid="audio-debug-mount-id">audioPlayerMountId: {mountIdRef.current}</p>
+            <p data-testid="audio-debug-local-play-clicks">localPlayButtonClicks: {localClickAck.playButtonClicks}</p>
+            <p data-testid="audio-debug-local-debug-play-clicks">localDebugPlayButtonClicks: {localClickAck.debugPlayButtonClicks}</p>
+            <p data-testid="audio-debug-local-fetch-clicks">localFetchProbeButtonClicks: {localClickAck.fetchProbeButtonClicks}</p>
+            <p data-testid="audio-debug-local-last-ack" className="break-all">localLastAck: {localClickAck.lastAck}</p>
+            <p data-testid="audio-debug-local-last-ack-at">localLastAckAt: {localClickAck.lastAckAt}</p>
             <p data-testid="audio-debug-ui-play-toggle-clicks">uiPlayToggleClicks: {transportDebug?.playToggleClicks ?? 0}</p>
             <p data-testid="audio-debug-ui-restart-clicks">uiRestartClicks: {transportDebug?.restartClicks ?? 0}</p>
             <p data-testid="audio-debug-ui-seek-clicks">uiSeekClicks: {transportDebug?.seekClicks ?? 0}</p>
