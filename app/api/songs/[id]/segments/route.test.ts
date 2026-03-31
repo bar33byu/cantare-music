@@ -39,17 +39,30 @@ describe('POST /api/songs/[id]/segments', () => {
     vi.clearAllMocks();
   });
 
-  it('creates segment successfully', async () => {
+  it('creates segment successfully without requiring order', async () => {
     const newSegment = {
       id: 'seg-1',
       label: 'Verse 1',
-      order: 1,
       startMs: 0,
       endMs: 1000,
       lyricText: 'Lyrics here',
     };
-    const createdSegment = { ...newSegment, songId: 'song-1' };
+    const existingSegments = [
+      {
+        id: 'seg-older',
+        songId: 'song-1',
+        label: 'Intro',
+        order: 0,
+        startMs: 0,
+        endMs: 500,
+        lyricText: '',
+      },
+    ];
+    const createdSegment = { ...newSegment, songId: 'song-1', order: 1 };
+
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(existingSegments);
     vi.mocked(createSegment).mockResolvedValue(createdSegment);
+    vi.mocked(reorderSegments).mockResolvedValue(undefined);
 
     const request = new Request('http://localhost/api/songs/song-1/segments', {
       method: 'POST',
@@ -61,7 +74,8 @@ describe('POST /api/songs/[id]/segments', () => {
     const data = await response.json();
 
     expect(response.status).toBe(201);
-    expect(data).toEqual(createdSegment);
+    expect(data).toEqual({ ...createdSegment, order: 1 });
+    expect(getSegmentsBySongId).toHaveBeenCalledWith('song-1');
     expect(createSegment).toHaveBeenCalledWith({
       id: 'seg-1',
       songId: 'song-1',
@@ -71,6 +85,69 @@ describe('POST /api/songs/[id]/segments', () => {
       endMs: 1000,
       lyricText: 'Lyrics here',
     });
+    expect(reorderSegments).toHaveBeenCalledWith([
+      { id: 'seg-older', order: 0 },
+      { id: 'seg-1', order: 1 },
+    ]);
+  });
+
+  it('ignores provided order and infers timeline-based order', async () => {
+    const requestBody = {
+      id: 'seg-2',
+      label: 'Middle',
+      order: 99,
+      startMs: 2000,
+      endMs: 2500,
+      lyricText: 'middle section',
+    };
+
+    const existingSegments = [
+      {
+        id: 'seg-1',
+        songId: 'song-1',
+        label: 'Intro',
+        order: 0,
+        startMs: 0,
+        endMs: 1000,
+        lyricText: '',
+      },
+      {
+        id: 'seg-3',
+        songId: 'song-1',
+        label: 'Outro',
+        order: 1,
+        startMs: 4000,
+        endMs: 5000,
+        lyricText: '',
+      },
+    ];
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(existingSegments);
+    vi.mocked(createSegment).mockResolvedValue({ ...requestBody, songId: 'song-1', order: 1 });
+    vi.mocked(reorderSegments).mockResolvedValue(undefined);
+
+    const request = new Request('http://localhost/api/songs/song-1/segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'song-1' }) });
+
+    expect(response.status).toBe(201);
+    expect(createSegment).toHaveBeenCalledWith({
+      id: 'seg-2',
+      songId: 'song-1',
+      label: 'Middle',
+      order: 1,
+      startMs: 2000,
+      endMs: 2500,
+      lyricText: 'middle section',
+    });
+    expect(reorderSegments).toHaveBeenCalledWith([
+      { id: 'seg-1', order: 0 },
+      { id: 'seg-2', order: 1 },
+      { id: 'seg-3', order: 2 },
+    ]);
   });
 
   it('returns 400 for missing id', async () => {
@@ -87,15 +164,14 @@ describe('POST /api/songs/[id]/segments', () => {
     expect(data.error).toBe('Segment ID is required and must be a string');
   });
 
-  it('returns 400 for invalid order type', async () => {
+  it('returns 400 for invalid startMs type', async () => {
     const request = new Request('http://localhost/api/songs/song-1/segments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: 'seg-1',
         label: 'Verse 1',
-        order: 'invalid',
-        startMs: 0,
+        startMs: 'invalid',
         endMs: 1000,
         lyricText: 'Lyrics here',
       }),
@@ -105,7 +181,7 @@ describe('POST /api/songs/[id]/segments', () => {
     const data = await response.json();
 
     expect(response.status).toBe(400);
-    expect(data.error).toBe('Order is required and must be a number');
+    expect(data.error).toBe('Start time is required and must be a number');
   });
 });
 

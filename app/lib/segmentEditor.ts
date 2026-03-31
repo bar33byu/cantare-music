@@ -1,4 +1,5 @@
 import { SegmentRow } from '../../db/schema';
+import { inferTimelineOrder } from './segmentTiming';
 
 export type EditorSegment = {
   id: string;
@@ -21,13 +22,7 @@ export function createEditorSegment(startMs: number, endMs: number): EditorSegme
 }
 
 export function reorderSegments(segments: EditorSegment[]): EditorSegment[] {
-  return segments
-    .slice()
-    .sort((a, b) => a.startMs - b.startMs)
-    .map((segment, index) => ({
-      ...segment,
-      order: index,
-    }));
+  return inferTimelineOrder(segments);
 }
 
 export function updateSegmentBounds(

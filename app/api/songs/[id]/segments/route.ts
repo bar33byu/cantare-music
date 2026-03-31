@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments } from '../../../../../db/queries';
+import { inferTimelineOrder } from '../../../../lib/segmentTiming';
 
 export async function GET(
   request: NextRequest,
@@ -27,16 +28,13 @@ export async function POST(
   try {
     const { id: songId } = await params;
     const body = await request.json();
-    const { id, label, order, startMs, endMs, lyricText } = body;
+    const { id, label, startMs, endMs, lyricText } = body;
 
     if (!id || typeof id !== 'string') {
       return NextResponse.json({ error: 'Segment ID is required and must be a string' }, { status: 400 });
     }
     if (!label || typeof label !== 'string') {
       return NextResponse.json({ error: 'Label is required and must be a string' }, { status: 400 });
-    }
-    if (order === undefined || typeof order !== 'number') {
-      return NextResponse.json({ error: 'Order is required and must be a number' }, { status: 400 });
     }
     if (startMs === undefined || typeof startMs !== 'number') {
       return NextResponse.json({ error: 'Start time is required and must be a number' }, { status: 400 });
@@ -48,17 +46,30 @@ export async function POST(
       return NextResponse.json({ error: 'Lyric text is required and must be a string' }, { status: 400 });
     }
 
+    const existingSegments = await getSegmentsBySongId(songId);
+    const timelineOrdered = inferTimelineOrder([
+      ...existingSegments,
+      {
+        id,
+        startMs,
+        endMs,
+      },
+    ]);
+    const assignedOrder = timelineOrdered.findIndex((segment) => segment.id === id);
+
     const segment = await createSegment({
       id,
       songId,
       label,
-      order,
+      order: assignedOrder,
       startMs,
       endMs,
       lyricText,
     });
 
-    return NextResponse.json(segment, { status: 201 });
+    await reorderSegments(timelineOrdered.map((segment, order) => ({ id: segment.id, order })));
+
+    return NextResponse.json({ ...segment, order: assignedOrder }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown server error';
     console.error('Error creating segment:', error);

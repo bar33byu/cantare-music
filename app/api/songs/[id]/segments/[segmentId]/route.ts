@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSegmentsBySongId, updateSegment, deleteSegment } from '../../../../../../db/queries';
+import { getSegmentsBySongId, updateSegment, deleteSegment, reorderSegments } from '../../../../../../db/queries';
+import { inferTimelineOrder } from '../../../../../lib/segmentTiming';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -39,14 +40,11 @@ export async function PATCH(
   try {
     const { id: songId, segmentId } = await params;
     const body = await request.json();
-    const { label, order, startMs, endMs, lyricText } = body;
+    const { label, startMs, endMs, lyricText } = body;
 
     // Validate input
     if (label !== undefined && typeof label !== 'string') {
       return NextResponse.json({ error: 'Label must be a string' }, { status: 400 });
-    }
-    if (order !== undefined && typeof order !== 'number') {
-      return NextResponse.json({ error: 'Order must be a number' }, { status: 400 });
     }
     if (startMs !== undefined && typeof startMs !== 'number') {
       return NextResponse.json({ error: 'Start time must be a number' }, { status: 400 });
@@ -60,7 +58,8 @@ export async function PATCH(
 
     // Check if segment exists
     const segments = await getSegmentsBySongId(songId);
-    const segmentExists = segments.some(s => s.id === segmentId);
+    const segmentToUpdate = segments.find(s => s.id === segmentId);
+    const segmentExists = Boolean(segmentToUpdate);
     if (!segmentExists) {
       return NextResponse.json({ error: 'Segment not found' }, { status: 404 });
     }
@@ -68,7 +67,6 @@ export async function PATCH(
     // Prepare updates object
     const updates: Record<string, any> = {};
     if (label !== undefined) updates.label = label;
-    if (order !== undefined) updates.order = order;
     if (startMs !== undefined) updates.startMs = startMs;
     if (endMs !== undefined) updates.endMs = endMs;
     if (lyricText !== undefined) updates.lyricText = lyricText;
@@ -78,6 +76,24 @@ export async function PATCH(
     }
 
     await updateSegment(segmentId, updates);
+
+    if (startMs !== undefined || endMs !== undefined) {
+      const updatedSegments = segments.map((segment) => {
+        if (segment.id !== segmentId) {
+          return segment;
+        }
+
+        return {
+          ...segment,
+          startMs: startMs ?? segment.startMs,
+          endMs: endMs ?? segment.endMs,
+        };
+      });
+
+      const normalized = inferTimelineOrder(updatedSegments);
+      await reorderSegments(normalized.map(({ id, order }) => ({ id, order })));
+    }
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error updating segment:', error);
