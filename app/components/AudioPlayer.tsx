@@ -302,7 +302,25 @@ export function AudioPlayer({
           onToggle={handleDebugToggle}
         >
           <summary className="cursor-pointer font-semibold text-slate-800">Audio Debug</summary>
-          <div className="mt-2 space-y-1" data-testid="audio-debug-content">
+          <div className="mt-2 max-h-80 space-y-1 overflow-y-auto pr-1" data-testid="audio-debug-content">
+            <div className="mb-2 flex gap-2" data-testid="audio-debug-actions-top">
+              <button
+                type="button"
+                data-testid="audio-debug-run-play-test"
+                onClick={onDebugPlayTest}
+                className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
+              >
+                Run Hook Play Test
+              </button>
+              <button
+                type="button"
+                data-testid="audio-debug-run-fetch-probe"
+                onClick={() => void runProxyFetchProbe()}
+                className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
+              >
+                Run Proxy Fetch Probe
+              </button>
+            </div>
             <p data-testid="audio-debug-reachability">reachability: {reachability.status}</p>
             <p data-testid="audio-debug-reachability-message" className="break-all">reachabilityMessage: {reachability.message}</p>
             <p data-testid="audio-debug-reachability-key" className="break-all">reachabilityKey: {reachability.key ?? "n/a"}</p>
@@ -346,7 +364,7 @@ export function AudioPlayer({
             <p data-testid="audio-debug-error-message">errorMessage: {debugInfo?.errorMessage ?? "null"}</p>
             <p data-testid="audio-debug-src" className="break-all">src: {debugInfo?.src ?? audioUrl}</p>
             <p data-testid="audio-debug-element-src" className="break-all">elementSrc: {debugInfo?.elementSrc ?? ""}</p>
-            <p data-testid="audio-debug-current-src" className="break-all">currentSrc: {debugInfo?.currentSrc ?? ""}</p>
+            <p data-testid="audio-debug-current-src-length">currentSrcLength: {(debugInfo?.currentSrc ?? "").length}</p>
             <div className="mt-3 rounded border border-slate-200 bg-white p-2" data-testid="audio-debug-current-src-history-wrap">
               <p className="font-semibold text-slate-800">currentSrcHistory</p>
               {(debugInfo?.currentSrcHistory ?? []).length === 0 ? (
@@ -360,24 +378,6 @@ export function AudioPlayer({
               )}
             </div>
             <div className="mt-3 rounded border border-slate-200 bg-white p-2" data-testid="audio-native-probe-wrap">
-              <div className="mb-2 flex gap-2">
-                <button
-                  type="button"
-                  data-testid="audio-debug-run-play-test"
-                  onClick={onDebugPlayTest}
-                  className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
-                >
-                  Run Hook Play Test
-                </button>
-                <button
-                  type="button"
-                  data-testid="audio-debug-run-fetch-probe"
-                  onClick={() => void runProxyFetchProbe()}
-                  className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
-                >
-                  Run Proxy Fetch Probe
-                </button>
-              </div>
               <p className="font-semibold text-slate-800">Native Audio Probe (Direct URL)</p>
               <audio data-testid="audio-native-probe-direct" className="mt-2 w-full" controls preload="metadata" src={audioUrl} />
               <p className="mt-2 font-semibold text-slate-800">Native Audio Probe (Proxy URL)</p>
