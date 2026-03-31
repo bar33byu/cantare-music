@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPlaylistById, getRatingsForSong } from '../../../../../db/queries';
 import { computePlaylistKnowledge } from '../../../../lib/knowledgeUtils';
+import type { Song } from '../../../../types';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -28,7 +29,14 @@ export async function GET(
     );
 
     const ratings = ratingsBySong.flat();
-    const score = computePlaylistKnowledge(playlist.songs, ratings);
+    const normalizedSongs: Song[] = playlist.songs.map((song) => ({
+      ...song,
+      segments: song.segments.map((segment) => ({
+        ...segment,
+        lyricText: segment.lyricText ?? '',
+      })),
+    }));
+    const score = computePlaylistKnowledge(normalizedSongs, ratings);
 
     return NextResponse.json({ score });
   } catch (error) {
