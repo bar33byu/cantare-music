@@ -20,7 +20,7 @@ const initialSegments: Segment[] = [
     order: 0,
     startMs: 0,
     endMs: 20000,
-    lyricText: 'first',
+    lyricText: 'lyrics for section 1',
   },
   {
     id: 'seg-2',
@@ -29,7 +29,7 @@ const initialSegments: Segment[] = [
     order: 1,
     startMs: 20000,
     endMs: 40000,
-    lyricText: 'second',
+    lyricText: 'lyrics for section 2',
   },
 ];
 
@@ -103,6 +103,22 @@ describe('SegmentEditor integration', () => {
         } as Response;
       }
 
+      if (url.includes('/api/songs/song-1/segments/') && method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments/') && method === 'DELETE') {
+        const segmentId = url.split('/').pop();
+        segmentsState = segmentsState.filter((segment) => segment.id !== segmentId);
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
       return {
         ok: false,
         json: async () => ({ error: 'Unexpected fetch' }),
@@ -112,33 +128,42 @@ describe('SegmentEditor integration', () => {
     global.fetch = mockFetch;
   });
 
-  it('creates a new section from editor and clears form state after save', async () => {
+  it('creates, edits, and deletes from inline segment canvas', async () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-1/segments');
+      expect(screen.getByTestId('segment-block-seg-1')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-block-seg-2')).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByTestId('segment-editor-new-section'));
-
-    const labelInput = await screen.findByTestId('segment-label-input');
-    fireEvent.change(labelInput, { target: { value: 'Section 3' } });
-
-    fireEvent.click(screen.getByTestId('segment-submit-button'));
 
     await waitFor(() => {
       const postCall = mockFetch.mock.calls.find(
         ([url, init]) => String(url).endsWith('/api/songs/song-1/segments') && init?.method === 'POST'
       );
       expect(postCall).toBeTruthy();
-      const body = JSON.parse(String(postCall?.[1]?.body ?? '{}'));
-      expect(body.startMs).toBe(40500);
-      expect(body.endMs).toBe(60500);
-      expect(body.label).toBe('Section 3');
     });
 
+    fireEvent.click(screen.getByTestId('segment-block-seg-1'));
+    const labelInput = await screen.findByTestId('segment-editor-label-input');
+    fireEvent.change(labelInput, { target: { value: 'Section A' } });
+    fireEvent.blur(labelInput);
+
     await waitFor(() => {
-      expect(screen.queryByTestId('segment-submit-button')).not.toBeInTheDocument();
+      const patchCall = mockFetch.mock.calls.find(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/seg-1') && init?.method === 'PATCH'
+      );
+      expect(patchCall).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-delete-seg-2'));
+
+    await waitFor(() => {
+      const deleteCall = mockFetch.mock.calls.find(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/seg-2') && init?.method === 'DELETE'
+      );
+      expect(deleteCall).toBeTruthy();
     });
   });
 });

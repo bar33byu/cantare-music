@@ -233,9 +233,11 @@ export function useAudioPlayer(
     updateDebugInfo(audio, 'audio-created');
 
     if ('preload' in audio) {
-      // Avoid eager decode/network churn before user interaction.
-      audio.preload = 'none';
+      // Load metadata early so duration is known before first user play.
+      audio.preload = 'metadata';
     }
+    audio.load?.();
+    updateDebugInfo(audio, 'load-metadata');
 
     const flushPendingPlay = () => {
       if (!pendingPlayRangeRef.current) {

@@ -94,7 +94,7 @@ export default function Home() {
               onClick={() => setActiveView("song_segment_editor")}
               className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700"
             >
-              Edit Segments
+              Edit Song
             </button>
           </div>
           <PracticeView song={selectedSong} initialSession={session} />

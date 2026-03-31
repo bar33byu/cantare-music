@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SegmentEditor } from './SegmentEditor';
-import type { Segment } from '../types';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
+import type { Segment } from '../types';
 
 const sampleSegments: Segment[] = [
   {
@@ -31,47 +31,6 @@ vi.mock('../hooks/useAudioPlayer', () => ({
 
 vi.mock('./ReplaceAudioForm', () => ({
   ReplaceAudioForm: () => <div data-testid="replace-audio" />,
-}));
-
-vi.mock('./SegmentTimeline', () => ({
-  SegmentTimeline: ({ onSegmentClick }: { onSegmentClick?: (segment: Segment) => void }) => (
-    <div data-testid="segment-timeline">
-      <button data-testid="timeline-edit-seg-1" onClick={() => onSegmentClick?.(sampleSegments[0])}>
-        Edit section 1
-      </button>
-    </div>
-  ),
-}));
-
-vi.mock('./SegmentList', () => ({
-  SegmentList: ({ onAddNew }: { onAddNew?: () => void }) => (
-    <div data-testid="segment-list">
-      <button data-testid="segment-list-add" onClick={() => onAddNew?.()}>
-        Add Segment
-      </button>
-    </div>
-  ),
-}));
-
-vi.mock('./SegmentForm', () => ({
-  SegmentForm: ({
-    durationMs,
-    existingSegments,
-    draftValues,
-  }: {
-    durationMs: number;
-    existingSegments: Segment[];
-    draftValues?: { label?: string; startMs?: number; endMs?: number };
-  }) => (
-    <div
-      data-testid="segment-form"
-      data-duration-ms={durationMs}
-      data-existing-count={existingSegments.length}
-      data-draft-start-ms={draftValues?.startMs}
-      data-draft-end-ms={draftValues?.endMs}
-      data-draft-label={draftValues?.label}
-    />
-  ),
 }));
 
 describe('SegmentEditor', () => {
@@ -104,31 +63,73 @@ describe('SegmentEditor', () => {
       pause: vi.fn(),
       seek: vi.fn(),
     });
-    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes('/segments')) {
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
         return {
           ok: true,
           json: async () => sampleSegments,
         } as Response;
       }
 
-      if (url.includes('/api/songs/song-1')) {
+      if (url.endsWith('/api/songs/song-1/segments') && method === 'POST') {
         return {
           ok: true,
-          json: async () => ({ audioUrl: '/audio/song.mp3' }),
+          json: async () => ({ ...sampleSegments[0], id: 'seg-new' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments/') && method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments/') && method === 'DELETE') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
         } as Response;
       }
 
       return {
         ok: false,
-        json: async () => ({}),
+        json: async () => ({ error: 'Unexpected request' }),
       } as Response;
     });
+
     global.fetch = mockFetch;
   });
 
-  it('passes loaded timeline duration and segments to SegmentForm in add mode', async () => {
+  it('renders inline segment canvas blocks', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-board')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-block-seg-1')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-block-seg-2')).toBeInTheDocument();
+    });
+  });
+
+  it('creates new section using timeline-aware defaults', async () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
@@ -137,24 +138,18 @@ describe('SegmentEditor', () => {
 
     fireEvent.click(screen.getByTestId('segment-editor-new-section'));
 
-    expect(screen.getByTestId('segment-form')).toHaveAttribute('data-duration-ms', '60000');
-    expect(screen.getByTestId('segment-form')).toHaveAttribute('data-existing-count', '2');
-    expect(screen.getByTestId('segment-form')).toHaveAttribute('data-draft-start-ms', '40500');
-    expect(screen.getByTestId('segment-form')).toHaveAttribute('data-draft-end-ms', '60500');
-  });
-
-  it('opens edit form when clicking a segment on timeline', async () => {
-    render(<SegmentEditor songId="song-1" />);
-
     await waitFor(() => {
-      expect(screen.getByTestId('segment-timeline')).toBeInTheDocument();
+      const postCall = mockFetch.mock.calls.find(
+        ([url, init]) => String(url).endsWith('/api/songs/song-1/segments') && init?.method === 'POST'
+      );
+      expect(postCall).toBeTruthy();
+      const body = JSON.parse(String(postCall?.[1]?.body ?? '{}'));
+      expect(body.startMs).toBe(40500);
+      expect(body.endMs).toBe(60500);
     });
-
-    fireEvent.click(screen.getByTestId('timeline-edit-seg-1'));
-    expect(screen.getByTestId('segment-form')).toBeInTheDocument();
   });
 
-  it('shows playback controls and plays from current time', async () => {
+  it('plays from current transport position', async () => {
     const play = vi.fn();
     vi.mocked(useAudioPlayer).mockReturnValue({
       isPlaying: false,
@@ -192,12 +187,50 @@ describe('SegmentEditor', () => {
     expect(play).toHaveBeenCalledWith(2000, 60000);
   });
 
-  it('does not pause playback when opening add form and uses playback-anchored default', async () => {
-    const pause = vi.fn();
+  it('play toggle still requests playback before readiness settles', async () => {
+    const play = vi.fn();
     vi.mocked(useAudioPlayer).mockReturnValue({
-      isPlaying: true,
+      isPlaying: false,
+      isReady: false,
+      currentMs: 2000,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-play-toggle')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-play-toggle'));
+    expect(play).toHaveBeenCalledWith(2000, 60000);
+  });
+
+  it('renders full-song timeline strip and seeks from slider', async () => {
+    const seek = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
       isReady: true,
-      currentMs: 50000,
+      currentMs: 5000,
       durationMs: 60000,
       playbackError: null,
       debugInfo: {
@@ -216,20 +249,190 @@ describe('SegmentEditor', () => {
         errorMessage: null,
       },
       play: vi.fn(),
-      pause,
-      seek: vi.fn(),
+      pause: vi.fn(),
+      seek,
     });
 
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('segment-editor-new-section')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-song-timeline')).toBeInTheDocument();
+      expect(screen.getByTestId('song-timeline-segment-seg-1')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('segment-editor-new-section'));
+    fireEvent.change(screen.getByTestId('segment-editor-song-seek'), { target: { value: '15000' } });
+    expect(seek).toHaveBeenCalledWith(15000);
+  });
 
-    expect(pause).not.toHaveBeenCalled();
-    expect(screen.getByTestId('segment-form')).toHaveAttribute('data-draft-start-ms', '50000');
-    expect(screen.getByTestId('segment-form')).toHaveAttribute('data-draft-end-ms', '70000');
+  it('saves selected label changes via patch on blur', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const segment = await screen.findByTestId('segment-block-seg-1');
+    fireEvent.click(segment);
+
+    const labelInput = await screen.findByTestId('segment-editor-label-input');
+    fireEvent.change(labelInput, { target: { value: 'Refrain' } });
+    fireEvent.blur(labelInput);
+
+    await waitFor(() => {
+      const patchCall = mockFetch.mock.calls.find(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/seg-1') && init?.method === 'PATCH'
+      );
+      expect(patchCall).toBeTruthy();
+    });
+  });
+
+  it('drags start edge and saves updated bounds', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const board = await screen.findByTestId('segment-editor-board');
+    vi.spyOn(board, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 560,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 560,
+      toJSON: () => ({}),
+    });
+
+    const startHandle = screen.getByLabelText('Resize start Section 1');
+    fireEvent.pointerDown(startHandle, { pointerId: 11, clientX: 0 });
+
+    fireEvent.pointerMove(window, { pointerId: 11, clientX: 100 });
+    fireEvent.pointerUp(window, { pointerId: 11, clientX: 100 });
+
+    await waitFor(() => {
+      const patchCall = mockFetch.mock.calls.find(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/seg-1') && init?.method === 'PATCH'
+      );
+      expect(patchCall).toBeTruthy();
+      const body = JSON.parse(String(patchCall?.[1]?.body ?? '{}'));
+      expect(body.startMs).toBe(6000);
+    });
+  });
+
+  it('drags full segment horizontally and saves shifted bounds', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const board = await screen.findByTestId('segment-editor-board');
+    vi.spyOn(board, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 560,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 560,
+      toJSON: () => ({}),
+    });
+
+    const moveHandle = screen.getByLabelText('Move Section 1');
+    fireEvent.pointerDown(moveHandle, { pointerId: 22, clientX: 0 });
+    fireEvent.pointerMove(window, { pointerId: 22, clientX: 100 });
+    fireEvent.pointerUp(window, { pointerId: 22, clientX: 100 });
+
+    await waitFor(() => {
+      const patchCall = mockFetch.mock.calls.find(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/seg-1') && init?.method === 'PATCH'
+      );
+      expect(patchCall).toBeTruthy();
+      const body = JSON.parse(String(patchCall?.[1]?.body ?? '{}'));
+      expect(body.startMs).toBe(6000);
+      expect(body.endMs).toBe(26000);
+    });
+  });
+
+  it('zooms canvas in and out from whole-song default', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const board = await screen.findByTestId('segment-editor-board');
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('100%');
+    expect(board).toHaveStyle({ width: '100%' });
+
+    fireEvent.click(screen.getByTestId('segment-editor-zoom-in'));
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('150%');
+    expect(board).toHaveStyle({ width: '150%' });
+
+    fireEvent.click(screen.getByTestId('segment-editor-zoom-out'));
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('100%');
+    expect(board).toHaveStyle({ width: '100%' });
+  });
+
+  it('loads song title into input and saves on blur', async () => {
+    const onSongUpdated = vi.fn();
+    render(<SegmentEditor songId="song-1" onSongUpdated={onSongUpdated} />);
+
+    const titleInput = await screen.findByTestId('segment-editor-title-input');
+    expect(titleInput).toHaveValue('My Song');
+
+    fireEvent.change(titleInput, { target: { value: 'New Title' } });
+    fireEvent.blur(titleInput);
+
+    await waitFor(() => {
+      const patchCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1') &&
+          !String(url).includes('/segments') &&
+          init?.method === 'PATCH'
+      );
+      expect(patchCall).toBeTruthy();
+      const body = JSON.parse(String(patchCall?.[1]?.body ?? '{}'));
+      expect(body.title).toBe('New Title');
+    });
+    expect(onSongUpdated).toHaveBeenCalled();
+  });
+
+  it('hides ReplaceAudioForm until toggle is clicked', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('replace-audio')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-replace-audio-toggle'));
+    expect(screen.getByTestId('replace-audio')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('segment-editor-replace-audio-toggle'));
+    expect(screen.queryByTestId('replace-audio')).not.toBeInTheDocument();
+  });
+
+  it('renders playhead line on the canvas board', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 10000,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    const playhead = await screen.findByTestId('segment-editor-canvas-playhead');
+    // 10000 / 60000 ≈ 16.67% — just verify a non-zero left position is set
+    const style = playhead.getAttribute('style') ?? '';
+    expect(style).toMatch(/left/);
+    expect(style).not.toBe('left: 0%');
   });
 });

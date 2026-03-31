@@ -41,6 +41,12 @@ describe('useAudioPlayer', () => {
     expect(result.current.isReady).toBe(false);
   });
 
+  it('requests metadata on initialization', () => {
+    renderHook(() => useAudioPlayer('test.mp3', factory));
+    expect(stub.preload).toBe('metadata');
+    expect(stub.load).toHaveBeenCalledTimes(1);
+  });
+
   it('seek() updates currentMs', () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
     act(() => {
