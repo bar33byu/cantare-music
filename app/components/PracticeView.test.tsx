@@ -82,6 +82,16 @@ const makeSession = (song: Song): SessionState => ({
 });
 
 describe("PracticeView", () => {
+  const renderAndWaitForRatings = async (song: Song, session: SessionState = makeSession(song)) => {
+    render(<PracticeView song={song} initialSession={session} />);
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("ratings-loading-skeleton")).not.toBeInTheDocument();
+    });
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ratings: [] }) });
@@ -98,9 +108,9 @@ describe("PracticeView", () => {
     });
   });
 
-  it("renders full-screen layout regions", () => {
+  it("renders full-screen layout regions", async () => {
     const song = makeSong();
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    await renderAndWaitForRatings(song);
     expect(screen.getByTestId("practice-layout")).toBeInTheDocument();
     expect(screen.getByTestId("practice-top-bar")).toBeInTheDocument();
     expect(screen.getByTestId("practice-main")).toBeInTheDocument();
@@ -109,46 +119,46 @@ describe("PracticeView", () => {
 
   it("renders knowledge bar in the top section", async () => {
     const song = makeSong();
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    await renderAndWaitForRatings(song);
     await waitFor(() => {
       const topBar = screen.getByTestId("practice-top-bar");
       expect(within(topBar).getByTestId("mock-knowledge-bar")).toBeInTheDocument();
     });
   });
 
-  it("left arrow is disabled on first segment", () => {
+  it("left arrow is disabled on first segment", async () => {
     const song = makeSong(3);
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    await renderAndWaitForRatings(song);
     expect(screen.getByTestId("prev-btn")).toBeDisabled();
   });
 
-  it("right arrow is disabled on last segment", () => {
+  it("right arrow is disabled on last segment", async () => {
     const song = makeSong(2);
     const session = makeSession(song);
-    render(<PracticeView song={song} initialSession={session} />);
+    await renderAndWaitForRatings(song, session);
     fireEvent.click(screen.getByTestId("next-btn"));
     expect(screen.getByTestId("next-btn")).toBeDisabled();
   });
 
-  it("clicking right arrow advances segment", () => {
+  it("clicking right arrow advances segment", async () => {
     const song = makeSong(3);
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("next-btn"));
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
   });
 
-  it("clicking left arrow goes to previous segment", () => {
+  it("clicking left arrow goes to previous segment", async () => {
     const song = makeSong(3);
     const session = makeSession(song);
     session.currentSegmentIndex = 1;
-    render(<PracticeView song={song} initialSession={session} />);
+    await renderAndWaitForRatings(song, session);
     fireEvent.click(screen.getByTestId("prev-btn"));
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
   });
 
-  it("renders audio player in bottom transport section", () => {
+  it("renders audio player in bottom transport section", async () => {
     const song = makeSong(3);
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    await renderAndWaitForRatings(song);
     const transport = screen.getByTestId("practice-transport");
     expect(within(transport).getByTestId("mock-audio-player")).toBeInTheDocument();
   });
@@ -179,23 +189,23 @@ describe("PracticeView", () => {
     });
   });
 
-  it("plays full piece when toggling play", () => {
+  it("plays full piece when toggling play", async () => {
     const song = makeSong(3);
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("mock-play-toggle"));
     expect(mockPlay).toHaveBeenCalledWith(0, 12000);
   });
 
-  it("restarts current segment on restart action", () => {
+  it("restarts current segment on restart action", async () => {
     const song = makeSong(3);
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("mock-restart"));
     expect(mockPlay).toHaveBeenCalledWith(0, 4000);
   });
 
-  it("shows no-segments fallback and full-piece restart label", () => {
+  it("shows no-segments fallback and full-piece restart label", async () => {
     const song = makeSong(0);
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    await renderAndWaitForRatings(song);
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Full piece playback");
     expect(screen.getByTestId("no-segments")).toBeInTheDocument();
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-restart-label", "Restart Piece");

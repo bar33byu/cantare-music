@@ -59,13 +59,13 @@ describe('useAudioPlayer', () => {
     expect(result.current.isReady).toBe(true);
   });
 
-  it('play() calls audio.play and sets isPlaying via play event', () => {
+  it('play() calls audio.play and sets isPlaying via play event', async () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
     act(() => {
       stub.readyState = 3;
       stub.emit('canplay');
     });
-    act(() => {
+    await act(async () => {
       result.current.play(0, 5000);
     });
     expect(stub.play).toHaveBeenCalled();
@@ -103,10 +103,10 @@ describe('useAudioPlayer', () => {
     expect(result.current.isReady).toBe(true);
   });
 
-  it('attempts playback immediately before audio is ready', () => {
+  it('attempts playback immediately before audio is ready', async () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
 
-    act(() => {
+    await act(async () => {
       result.current.play(2000, 5000);
     });
 
@@ -114,10 +114,10 @@ describe('useAudioPlayer', () => {
     expect(stub.currentTime).toBe(2);
   });
 
-  it('captures audio load errors', () => {
+  it('captures audio load errors', async () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
 
-    act(() => {
+    await act(async () => {
       result.current.play(0, 4000);
     });
 
