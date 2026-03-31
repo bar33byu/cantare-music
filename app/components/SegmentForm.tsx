@@ -2,19 +2,23 @@
 
 import { useState, FormEvent } from 'react';
 import { Segment } from '../types/index';
+import { SegmentTimeline } from './SegmentTimeline';
 
 interface SegmentFormProps {
   songId: string;
   segment?: Segment; // If provided, we're editing; if not, we're creating
+  durationMs: number;
+  existingSegments: Segment[];
   onSuccess: (segment: Segment) => void;
   onCancel?: () => void;
 }
 
-export function SegmentForm({ songId, segment, onSuccess, onCancel }: SegmentFormProps) {
+export function SegmentForm({ songId, segment, durationMs, existingSegments, onSuccess, onCancel }: SegmentFormProps) {
   const [label, setLabel] = useState(segment?.label || '');
   const [order, setOrder] = useState(segment?.order?.toString() || '');
-  const [startMs, setStartMs] = useState(segment?.startMs?.toString() || '');
-  const [endMs, setEndMs] = useState(segment?.endMs?.toString() || '');
+  const defaultEndMs = durationMs > 0 ? Math.min(durationMs, 10000) : 10000;
+  const [startMs, setStartMs] = useState(segment?.startMs ?? 0);
+  const [endMs, setEndMs] = useState(segment?.endMs ?? defaultEndMs);
   const [lyricText, setLyricText] = useState(segment?.lyricText || '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -40,21 +44,19 @@ export function SegmentForm({ songId, segment, onSuccess, onCancel }: SegmentFor
       return;
     }
 
-    const startMsNum = parseInt(startMs);
-    if (isNaN(startMsNum) || startMsNum < 0) {
+    if (startMs < 0) {
       setError('Start time must be a non-negative number');
       setLoading(false);
       return;
     }
 
-    const endMsNum = parseInt(endMs);
-    if (isNaN(endMsNum) || endMsNum < 0) {
+    if (endMs < 0) {
       setError('End time must be a non-negative number');
       setLoading(false);
       return;
     }
 
-    if (endMsNum <= startMsNum) {
+    if (endMs <= startMs) {
       setError('End time must be greater than start time');
       setLoading(false);
       return;
@@ -65,8 +67,8 @@ export function SegmentForm({ songId, segment, onSuccess, onCancel }: SegmentFor
         id: segment?.id || crypto.randomUUID(),
         label: label.trim(),
         order: orderNum,
-        startMs: startMsNum,
-        endMs: endMsNum,
+        startMs,
+        endMs,
         lyricText: lyricText.trim(),
       };
 
@@ -141,36 +143,21 @@ export function SegmentForm({ songId, segment, onSuccess, onCancel }: SegmentFor
         <p className="mt-1 text-sm text-gray-500">Position in the song (0-based)</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label htmlFor="startMs" className="block text-sm font-medium text-gray-700">
-            Start Time (ms) *
-          </label>
-          <input
-            id="startMs"
-            type="number"
-            value={startMs}
-            onChange={(e) => setStartMs(e.target.value)}
-            data-testid="segment-start-input"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-            placeholder="0"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="endMs" className="block text-sm font-medium text-gray-700">
-            End Time (ms) *
-          </label>
-          <input
-            id="endMs"
-            type="number"
-            value={endMs}
-            onChange={(e) => setEndMs(e.target.value)}
-            data-testid="segment-end-input"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-            placeholder="10000"
-          />
-        </div>
+      <div>
+        <p className="mb-2 block text-sm font-medium text-gray-700">Segment boundaries *</p>
+        <SegmentTimeline
+          durationMs={durationMs}
+          segments={existingSegments}
+          activeSegmentId={segment?.id}
+          editState={{
+            startMs,
+            endMs,
+            onChange: (nextStartMs, nextEndMs) => {
+              setStartMs(nextStartMs);
+              setEndMs(nextEndMs);
+            },
+          }}
+        />
       </div>
 
       <div>

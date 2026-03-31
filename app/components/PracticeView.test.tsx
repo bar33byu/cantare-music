@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { vi } from "vitest";
 import PracticeView from "./PracticeView";
@@ -10,6 +10,9 @@ const mockPlay = vi.fn();
 const mockPause = vi.fn();
 const mockSeek = vi.fn();
 const mockUseAudioPlayer = vi.fn();
+const mockFetch = vi.fn();
+
+global.fetch = mockFetch;
 
 // Mock SegmentCard to expose onRate so we can trigger ratings
 vi.mock("./SegmentCard", () => ({
@@ -127,6 +130,10 @@ const makeSession = (song: Song): SessionState => ({
 describe("PracticeView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ratings: [] }),
+    });
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
       isReady: true,
@@ -183,13 +190,48 @@ describe("PracticeView", () => {
   it("Rating a segment updates the KnowledgeBar", () => {
     const song = makeSong(3);
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
-    const bar = screen.getByTestId("mock-knowledge-bar");
-    expect(bar).toHaveAttribute("data-percent", "0");
-    fireEvent.click(screen.getByTestId("rate-btn"));
-    expect(screen.getByTestId("mock-knowledge-bar")).not.toHaveAttribute(
-      "data-percent",
-      "0"
+    return waitFor(() => {
+      const bar = screen.getByTestId("mock-knowledge-bar");
+      expect(bar).toHaveAttribute("data-percent", "0");
+      fireEvent.click(screen.getByTestId("rate-btn"));
+      expect(screen.getByTestId("mock-knowledge-bar")).not.toHaveAttribute(
+        "data-percent",
+        "0"
+      );
+    });
+  });
+
+  it("fetches historical ratings on mount", async () => {
+    const song = makeSong(2);
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    });
+  });
+
+  it("shows loading skeleton while ratings request is in flight", () => {
+    mockFetch.mockImplementation(
+      () => new Promise(() => {
+        return;
+      })
     );
+
+    const song = makeSong(2);
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    expect(screen.getByTestId("ratings-loading-skeleton")).toBeInTheDocument();
+  });
+
+  it("renders load error and keeps knowledge bar available on ratings fetch failure", async () => {
+    mockFetch.mockRejectedValue(new Error("network"));
+    const song = makeSong(2);
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("ratings-load-error")).toBeInTheDocument();
+      expect(screen.getByTestId("mock-knowledge-bar")).toHaveAttribute("data-percent", "0");
+    });
   });
 
   it("Next button is disabled on last segment", () => {

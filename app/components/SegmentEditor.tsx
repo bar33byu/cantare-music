@@ -84,6 +84,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
           <SegmentForm
             songId={songId}
             segment={editingSegment ?? undefined}
+            durationMs={editingSegment?.endMs ?? 0}
+            existingSegments={editingSegment ? [editingSegment] : []}
             onSuccess={handleFormSuccess}
             onCancel={handleFormCancel}
           />

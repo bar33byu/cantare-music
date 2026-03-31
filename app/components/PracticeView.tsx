@@ -26,6 +26,8 @@ interface PracticeViewProps {
 
 const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => {
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
+  const [ratingsLoading, setRatingsLoading] = React.useState(true);
+  const [ratingsError, setRatingsError] = React.useState<string | null>(null);
   const playbackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
   const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
@@ -51,6 +53,40 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
     pause();
     seek(currentSegment.startMs);
   }, [currentSegment, song.audioUrl, pause, seek]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadRatings = async () => {
+      setRatingsLoading(true);
+      setRatingsError(null);
+      try {
+        const response = await fetch(`/api/songs/${song.id}/ratings`);
+        if (!response.ok) {
+          throw new Error(`Failed to load ratings (${response.status})`);
+        }
+
+        const payload = await response.json() as { ratings?: SessionState['ratings'] };
+        if (!cancelled) {
+          dispatch({ type: 'LOAD_RATINGS', ratings: Array.isArray(payload.ratings) ? payload.ratings : [] });
+        }
+      } catch {
+        if (!cancelled) {
+          setRatingsError('Could not load previous ratings. Practice is still available.');
+        }
+      } finally {
+        if (!cancelled) {
+          setRatingsLoading(false);
+        }
+      }
+    };
+
+    void loadRatings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [song.id]);
 
   const playbackSegmentIndex = useMemo(() => {
     if (!hasSegments) {
@@ -164,7 +200,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
       </header>
 
       <div className="mb-8" data-testid="practice-top-bar">
-        <KnowledgeBar percent={knowledgeScore.overall} label="Piece Knowledge" />
+        {ratingsLoading ? (
+          <div
+            data-testid="ratings-loading-skeleton"
+            className="h-8 w-full animate-pulse rounded-full bg-gray-200"
+          />
+        ) : (
+          <KnowledgeBar percent={knowledgeScore.overall} label="Piece Knowledge" />
+        )}
+        {ratingsError ? (
+          <p data-testid="ratings-load-error" className="mt-2 text-sm text-amber-700">
+            {ratingsError}
+          </p>
+        ) : null}
       </div>
 
       <div data-testid="practice-main" className="space-y-8">

@@ -10,6 +10,7 @@ export type SessionAction =
   | { type: 'SET_SEGMENT_INDEX'; index: number }
   | { type: 'TOGGLE_LOCK' }
   | { type: 'RATE_SEGMENT'; segmentId: string; rating: MemoryRating }
+  | { type: 'LOAD_RATINGS'; ratings: PracticeSession['ratings'] }
   | { type: 'COMPLETE' }
   | { type: 'RESET'; songId: string }
   | { type: 'SET_CURRENT_SONG'; songId: string };
@@ -49,6 +50,15 @@ export function sessionReducer(
             ratedAt: new Date().toISOString(),
           },
         ],
+      };
+
+    case 'LOAD_RATINGS':
+      if (state.completedAt) {
+        return state;
+      }
+      return {
+        ...state,
+        ratings: action.ratings,
       };
 
     case 'COMPLETE':

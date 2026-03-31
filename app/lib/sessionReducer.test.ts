@@ -121,4 +121,29 @@ describe('sessionReducer', () => {
     const next = sessionReducer(state, { type: 'RESET', songId: 'song-different' });
     expect((next as any).currentSongId).toBe('song-xyz');
   });
+
+  it('LOAD_RATINGS replaces existing ratings', () => {
+    const state = makeSession({
+      ratings: [{ id: 'old-1', segmentId: 'seg-1', rating: 2, ratedAt: new Date().toISOString() }],
+    });
+    const loadedRatings = [
+      { id: 'new-1', segmentId: 'seg-2', rating: 5 as const, ratedAt: new Date().toISOString() },
+    ];
+
+    const next = sessionReducer(state, { type: 'LOAD_RATINGS', ratings: loadedRatings });
+    expect(next.ratings).toEqual(loadedRatings);
+  });
+
+  it('LOAD_RATINGS is ignored when session is complete', () => {
+    const state = makeSession({
+      completedAt: new Date().toISOString(),
+      ratings: [{ id: 'old-1', segmentId: 'seg-1', rating: 2, ratedAt: new Date().toISOString() }],
+    });
+    const loadedRatings = [
+      { id: 'new-1', segmentId: 'seg-2', rating: 5 as const, ratedAt: new Date().toISOString() },
+    ];
+
+    const next = sessionReducer(state, { type: 'LOAD_RATINGS', ratings: loadedRatings });
+    expect(next.ratings).toEqual(state.ratings);
+  });
 });
