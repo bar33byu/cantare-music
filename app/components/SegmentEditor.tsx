@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Segment } from '../types/index';
 import { SegmentList } from './SegmentList';
 import { SegmentForm } from './SegmentForm';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
+import { SegmentTimeline } from './SegmentTimeline';
 
 interface SegmentEditorProps {
   songId: string;
@@ -17,6 +18,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [segments, setSegments] = useState<Segment[]>([]);
 
   const handleEdit = (segment: Segment) => {
     setIsAddingNew(false);
@@ -53,6 +55,35 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   };
 
   const showForm = isAddingNew || editingSegment !== null;
+  const timelineDurationMs = useMemo(() => {
+    const maxEnd = Math.max(0, ...segments.map((segment) => segment.endMs));
+    return maxEnd > 0 ? maxEnd : 60000;
+  }, [segments]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSegments = async () => {
+      try {
+        const response = await fetch(`/api/songs/${songId}/segments`);
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as Segment[];
+        if (!cancelled) {
+          setSegments(data.sort((a, b) => a.order - b.order));
+        }
+      } catch {
+        // SegmentList owns user-facing fetch errors, so this stays silent.
+      }
+    };
+
+    void loadSegments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [songId, refreshKey]);
 
   return (
     <div className="max-w-2xl mx-auto w-full">
@@ -76,6 +107,16 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
 
       <ReplaceAudioForm songId={songId} onReplaced={onSongUpdated} />
 
+      <div className="mb-4 rounded-lg border border-indigo-100 bg-white p-4">
+        <p className="mb-2 text-sm font-medium text-gray-700">Segment map</p>
+        <SegmentTimeline
+          durationMs={timelineDurationMs}
+          segments={segments}
+          activeSegmentId={editingSegment?.id}
+          onSegmentClick={handleEdit}
+        />
+      </div>
+
       {showForm ? (
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold mb-4">
@@ -84,8 +125,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
           <SegmentForm
             songId={songId}
             segment={editingSegment ?? undefined}
-            durationMs={editingSegment?.endMs ?? 0}
-            existingSegments={editingSegment ? [editingSegment] : []}
+            durationMs={timelineDurationMs}
+            existingSegments={segments}
             onSuccess={handleFormSuccess}
             onCancel={handleFormCancel}
           />
