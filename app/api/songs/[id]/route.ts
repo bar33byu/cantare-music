@@ -41,6 +41,7 @@ export async function GET(
         endMs: segment.endMs,
       })),
       createdAt: song.createdAt,
+      lastPracticedAt: song.lastPracticedAt,
       updatedAt: song.createdAt, // No updatedAt in schema, using createdAt
     };
 

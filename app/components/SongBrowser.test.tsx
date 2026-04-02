@@ -17,6 +17,7 @@ describe('SongBrowser', () => {
       artist: 'Test Artist 1',
       audioKey: 'audio-1',
       createdAt: '2024-01-01T00:00:00.000Z',
+      lastPracticedAt: '2024-02-01T00:00:00.000Z',
     },
     {
       id: 'song-2',
@@ -24,6 +25,7 @@ describe('SongBrowser', () => {
       artist: 'Test Artist 2',
       audioKey: 'audio-2',
       createdAt: '2024-01-02T00:00:00.000Z',
+      lastPracticedAt: null,
     },
   ];
 
@@ -54,7 +56,8 @@ describe('SongBrowser', () => {
     expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
     expect(screen.getByTestId('song-title-song-1')).toHaveTextContent('Test Song 1');
     expect(screen.getByTestId('song-artist-song-1')).toHaveTextContent('Test Artist 1');
-    expect(screen.getByTestId('song-created-song-1')).toHaveTextContent('Created 1/1/2024');
+    expect(screen.getByTestId('song-last-practiced-song-1')).toHaveTextContent('Last practiced 2/1/2024');
+    expect(screen.getByTestId('song-last-practiced-song-2')).toHaveTextContent('Not practiced yet');
 
     expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
     expect(screen.getByTestId('song-title-song-2')).toHaveTextContent('Test Song 2');
@@ -177,6 +180,8 @@ describe('SongBrowser', () => {
       expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByTestId('song-browser-toggle-edit-mode'));
+
     fireEvent.click(screen.getByTestId('song-delete-song-1'));
 
     await waitFor(() => {
@@ -200,9 +205,28 @@ describe('SongBrowser', () => {
       expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByTestId('song-browser-toggle-edit-mode'));
+
     fireEvent.click(screen.getByTestId('song-delete-song-1'));
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockOnDeleteSong).not.toHaveBeenCalled();
+  });
+
+  it('hides delete controls until edit mode is enabled', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('song-delete-song-1')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('song-browser-toggle-edit-mode'));
+    expect(screen.getByTestId('song-delete-song-1')).toBeInTheDocument();
   });
 });

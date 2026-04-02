@@ -1,0 +1,1 @@
+ALTER TABLE "songs" ADD COLUMN "last_practiced_at" timestamp;

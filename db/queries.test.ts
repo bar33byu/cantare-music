@@ -63,6 +63,38 @@ describe("getAllSongs", () => {
     const orderBySpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["orderBy"];
     expect(orderBySpy).toHaveBeenCalledWith(desc(songs.createdAt));
   });
+
+  it("falls back when last_practiced_at column is missing", async () => {
+    const missingColumnChain = {
+      from: vi.fn(() => {
+        throw new Error('column "last_practiced_at" does not exist');
+      }),
+    };
+    const fallbackRows = [
+      {
+        id: "song-1",
+        title: "Song 1",
+        artist: null,
+        audioKey: null,
+        createdAt: new Date("2026-04-02T00:00:00.000Z"),
+      },
+    ];
+    const fallbackChain = makeChain(fallbackRows);
+    selectSpy
+      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
+      .mockReturnValueOnce(fallbackChain);
+
+    const { getAllSongs } = await getQueries();
+    const result = await getAllSongs();
+
+    expect(selectSpy).toHaveBeenCalledTimes(2);
+    expect(result).toEqual([
+      {
+        ...fallbackRows[0],
+        lastPracticedAt: null,
+      },
+    ]);
+  });
 });
 
 describe("deleteSong", () => {
@@ -129,6 +161,23 @@ describe("updateSongAudioKey", () => {
     const setSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
     // Only audioKey is passed — no title, artist, or createdAt
     expect(setSpy).toHaveBeenCalledWith({ audioKey: "r2/audio/song-1.mp3" });
+    const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).toHaveBeenCalledWith(eq(songs.id, "song-1"));
+  });
+});
+
+describe("markSongPracticed", () => {
+  it("updates lastPracticedAt for the song", async () => {
+    const chain = makeChain();
+    updateSpy.mockReturnValue(chain);
+
+    const { markSongPracticed } = await getQueries();
+    const practicedAt = new Date("2026-04-02T12:34:56.000Z");
+    await markSongPracticed("song-1", practicedAt);
+
+    expect(updateSpy).toHaveBeenCalledWith(songs);
+    const setSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
+    expect(setSpy).toHaveBeenCalledWith({ lastPracticedAt: practicedAt });
     const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
     expect(whereSpy).toHaveBeenCalledWith(eq(songs.id, "song-1"));
   });

@@ -15,6 +15,13 @@
       "when": 1774931081003,
       "tag": "0001_petite_quentin_quire",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775061000000,
+      "tag": "0002_nifty_practice_clock",
+      "breakpoints": true
     }
   ]
 }

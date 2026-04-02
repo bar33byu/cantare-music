@@ -9,6 +9,7 @@ describe("schema tables", () => {
     expect(cols).toContain("artist");
     expect(cols).toContain("audioKey");
     expect(cols).toContain("createdAt");
+    expect(cols).toContain("lastPracticedAt");
   });
 
   it("segments table has expected columns", () => {

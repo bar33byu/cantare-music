@@ -40,6 +40,8 @@ const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
   hidden: "Hidden",
 };
 
+const PRACTICED_PLAYBACK_THRESHOLD_MS = 10_000;
+
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
   if (mode === "full") {
     return "hint";
@@ -69,6 +71,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(false);
   const [useProxyFallback, setUseProxyFallback] = React.useState(false);
+  const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
+  const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
+  const practicedRecordedRef = React.useRef(false);
+  const accumulatedPlaybackMsRef = React.useRef(0);
+  const playbackStartedAtRef = React.useRef<number | null>(null);
   // True after the user explicitly pauses; cleared when playback restarts.
   // Used to distinguish a user pause from the hook stopping at a natural segment end.
   const pausedByUserRef = React.useRef(false);
@@ -114,6 +121,92 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     // Reset per-song fallback state when switching songs.
     setUseProxyFallback(false);
   }, [song.id]);
+
+  const flushPlayedTime = React.useCallback(() => {
+    if (playbackStartedAtRef.current === null) {
+      return;
+    }
+    const now = Date.now();
+    accumulatedPlaybackMsRef.current += Math.max(0, now - playbackStartedAtRef.current);
+    playbackStartedAtRef.current = now;
+  }, []);
+
+  const markPracticedIfNeeded = React.useCallback(() => {
+    if (practicedRecordedRef.current) {
+      return;
+    }
+    if (accumulatedPlaybackMsRef.current < PRACTICED_PLAYBACK_THRESHOLD_MS) {
+      return;
+    }
+
+    practicedRecordedRef.current = true;
+    void fetch(`/api/songs/${song.id}/practice`, { method: "POST" }).catch(() => {
+      practicedRecordedRef.current = false;
+    });
+  }, [song.id]);
+
+  useEffect(() => {
+    practicedRecordedRef.current = false;
+    accumulatedPlaybackMsRef.current = 0;
+    playbackStartedAtRef.current = null;
+  }, [song.id]);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      flushPlayedTime();
+      playbackStartedAtRef.current = null;
+      markPracticedIfNeeded();
+      return;
+    }
+
+    if (playbackStartedAtRef.current === null) {
+      playbackStartedAtRef.current = Date.now();
+    }
+
+    const remainingMs = PRACTICED_PLAYBACK_THRESHOLD_MS - accumulatedPlaybackMsRef.current;
+    if (remainingMs <= 0) {
+      markPracticedIfNeeded();
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      flushPlayedTime();
+      markPracticedIfNeeded();
+    }, remainingMs);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [flushPlayedTime, isPlaying, markPracticedIfNeeded]);
+
+  useEffect(() => {
+    const measureTitleOverflow = () => {
+      const el = songTitleRef.current;
+      if (!el) {
+        setIsSongTitleTruncated(false);
+        return;
+      }
+      setIsSongTitleTruncated(el.scrollWidth > el.clientWidth + 1);
+    };
+
+    measureTitleOverflow();
+
+    if (typeof window === "undefined" || typeof window.ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new window.ResizeObserver(() => {
+      measureTitleOverflow();
+    });
+
+    if (songTitleRef.current) {
+      observer.observe(songTitleRef.current);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [song.title, breadcrumbRootLabel]);
 
   useEffect(() => {
     if (!playbackError || useProxyFallback || !proxyAudioUrl) {
@@ -531,23 +624,55 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       <header data-testid="practice-header" className="px-4 pb-2 pt-4 md:px-8">
         <div className="flex items-start justify-between gap-3">
           {breadcrumbRootLabel ? (
-            <nav aria-label="Breadcrumb" className="min-w-0 text-sm font-medium text-gray-600" data-testid="practice-breadcrumb">
+            <nav aria-label="Breadcrumb" className="min-w-0" data-testid="practice-breadcrumb">
               {onBreadcrumbRootClick ? (
                 <button
                   onClick={onBreadcrumbRootClick}
-                  className="rounded px-1 py-0.5 text-gray-600 hover:bg-gray-200 hover:text-gray-900"
+                  className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-emerald-500 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                 >
+                  <span aria-hidden="true" className="text-base leading-none">&#x2190;</span>
                   {breadcrumbRootLabel}
                 </button>
               ) : (
-                <span className="px-1 py-0.5 text-gray-600">{breadcrumbRootLabel}</span>
+                <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700">{breadcrumbRootLabel}</span>
               )}
-              <span className="px-1 text-gray-400">&gt;&gt;</span>
-              <span className="truncate text-gray-900" data-testid="song-title">{song.title}</span>
+              <span className="px-2 text-gray-400" aria-hidden="true">/</span>
+              <span className="group relative inline-flex min-w-0 max-w-[15rem] items-center align-middle sm:max-w-[22rem] md:max-w-[30rem] lg:max-w-[36rem]">
+                <span
+                  ref={songTitleRef}
+                  tabIndex={isSongTitleTruncated ? 0 : -1}
+                  title={isSongTitleTruncated ? song.title : undefined}
+                  className="block truncate text-2xl font-bold tracking-tight text-gray-900 outline-none md:text-3xl"
+                  data-testid="song-title"
+                >
+                  {song.title}
+                </span>
+                {isSongTitleTruncated ? (
+                  <span className="ml-2 shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-600">
+                    full
+                  </span>
+                ) : null}
+                {isSongTitleTruncated ? (
+                  <span
+                    role="tooltip"
+                    className="pointer-events-none absolute left-0 top-full z-10 mt-2 hidden max-w-[min(90vw,36rem)] rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white shadow-lg group-hover:block group-focus-within:block"
+                  >
+                    {song.title}
+                  </span>
+                ) : null}
+              </span>
             </nav>
           ) : (
-            <h1 className="text-xl font-semibold text-gray-900" data-testid="song-title">
-              {song.title}
+            <h1 className="min-w-0 max-w-[15rem] text-2xl font-bold tracking-tight text-gray-900 sm:max-w-[22rem] md:max-w-[30rem] md:text-3xl lg:max-w-[36rem]">
+              <span
+                ref={songTitleRef}
+                tabIndex={isSongTitleTruncated ? 0 : -1}
+                title={isSongTitleTruncated ? song.title : undefined}
+                className="group relative block truncate outline-none"
+                data-testid="song-title"
+              >
+                {song.title}
+              </span>
             </h1>
           )}
           {onEditSongClick ? (
@@ -573,7 +698,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             </button>
           ) : null}
         </div>
-        <p className="text-sm text-gray-500" data-testid="segment-counter">
+        <p className="sr-only" data-testid="segment-counter">
           {hasSegments
             ? `Segment ${session.currentSegmentIndex + 1} of ${song.segments.length}`
             : "Full piece playback"}

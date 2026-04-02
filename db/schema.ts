@@ -14,6 +14,7 @@ export const songs = pgTable("songs", {
   artist: text("artist"),
   audioKey: text("audio_key"),
   createdAt: timestamp("created_at").defaultNow(),
+  lastPracticedAt: timestamp("last_practiced_at"),
 });
 
 export const segments = pgTable("segments", {

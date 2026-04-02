@@ -40,21 +40,73 @@ export interface PlaylistSummary {
   createdAt: string;
 }
 
+function isMissingLastPracticedColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes("last_practiced_at") && message.includes("does not exist");
+}
+
 // ── Songs ──────────────────────────────────────────────────────────────────
 
 export async function getAllSongs(): Promise<SongRow[]> {
-  return db().select().from(songs).orderBy(desc(songs.createdAt));
+  try {
+    return await db().select().from(songs).orderBy(desc(songs.createdAt));
+  } catch (error) {
+    if (!isMissingLastPracticedColumnError(error)) {
+      throw error;
+    }
+
+    const legacyRows = await db()
+      .select({
+        id: songs.id,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        createdAt: songs.createdAt,
+      })
+      .from(songs)
+      .orderBy(desc(songs.createdAt));
+
+    return legacyRows.map((row) => ({ ...row, lastPracticedAt: null } as SongRow));
+  }
 }
 
 export async function getSongById(
   id: string
 ): Promise<SongRow | undefined> {
-  const rows = await db()
-    .select()
-    .from(songs)
-    .where(eq(songs.id, id))
-    .limit(1);
-  return rows[0];
+  try {
+    const rows = await db()
+      .select()
+      .from(songs)
+      .where(eq(songs.id, id))
+      .limit(1);
+    return rows[0];
+  } catch (error) {
+    if (!isMissingLastPracticedColumnError(error)) {
+      throw error;
+    }
+
+    const rows = await db()
+      .select({
+        id: songs.id,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        createdAt: songs.createdAt,
+      })
+      .from(songs)
+      .where(eq(songs.id, id))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) {
+      return undefined;
+    }
+
+    return { ...row, lastPracticedAt: null } as SongRow;
+  }
 }
 
 export async function createSong(data: {
@@ -92,6 +144,16 @@ export async function updateSong(
   await db()
     .update(songs)
     .set(updates)
+    .where(eq(songs.id, id));
+}
+
+export async function markSongPracticed(
+  id: string,
+  practicedAt: Date = new Date()
+): Promise<void> {
+  await db()
+    .update(songs)
+    .set({ lastPracticedAt: practicedAt })
     .where(eq(songs.id, id));
 }
 

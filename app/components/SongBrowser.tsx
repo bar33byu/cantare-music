@@ -8,6 +8,7 @@ interface SongListItem {
   artist?: string;
   audioKey?: string;
   createdAt: string;
+  lastPracticedAt?: string | null;
 }
 
 interface SongBrowserProps {
@@ -22,6 +23,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
 
   useEffect(() => {
     fetchSongs();
@@ -104,48 +106,68 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="song-browser-grid">
-      {songs.map((song) => (
-        <div
-          key={song.id}
-          className={`bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 ${
-            selectedSongId === song.id ? 'border-blue-500' : 'border-transparent'
-          }`}
-          onClick={() => onSelectSong(song)}
-          data-testid={`song-item-${song.id}`}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
+        <p className="text-sm text-gray-600" data-testid="song-browser-edit-hint">
+          {isEditMode ? 'Editing mode is on. Delete controls are enabled.' : 'Delete controls are hidden until editing mode is enabled.'}
+        </p>
+        <button
+          type="button"
+          data-testid="song-browser-toggle-edit-mode"
+          onClick={() => setIsEditMode((previous) => !previous)}
+          className={`rounded px-3 py-1.5 text-sm font-medium ${isEditMode ? 'bg-gray-700 text-white hover:bg-gray-800' : 'border border-red-300 text-red-700 hover:bg-red-50'}`}
         >
-          <h3 className="text-xl font-semibold mb-2" data-testid={`song-title-${song.id}`}>
-            {song.title}
-          </h3>
-          {song.artist && (
-            <p className="text-gray-600 mb-2" data-testid={`song-artist-${song.id}`}>
-              {song.artist}
+          {isEditMode ? 'Done Editing' : 'Edit Library'}
+        </button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="song-browser-grid">
+        {songs.map((song) => (
+          <div
+            key={song.id}
+            className={`bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 ${
+              selectedSongId === song.id ? 'border-blue-500' : 'border-transparent'
+            }`}
+            onClick={() => onSelectSong(song)}
+            data-testid={`song-item-${song.id}`}
+          >
+            <h3 className="text-xl font-semibold mb-2" data-testid={`song-title-${song.id}`}>
+              {song.title}
+            </h3>
+            {song.artist && (
+              <p className="text-gray-600 mb-2" data-testid={`song-artist-${song.id}`}>
+                {song.artist}
+              </p>
+            )}
+            <p className="text-xs text-gray-500 mt-2" data-testid={`song-last-practiced-${song.id}`}>
+              {song.lastPracticedAt
+                ? `Last practiced ${new Date(song.lastPracticedAt).toLocaleDateString()}`
+                : 'Not practiced yet'}
             </p>
-          )}
-          <p className="text-xs text-gray-400 mt-2" data-testid={`song-created-${song.id}`}>
-            Created {new Date(song.createdAt).toLocaleDateString()}
-          </p>
-          {selectedSongId === song.id && (
-            <div className="mt-2 text-sm text-blue-600 font-medium" data-testid={`song-selected-${song.id}`}>
-              Currently Selected
-            </div>
-          )}
-          <div className="mt-4">
-            <button
-              type="button"
-              data-testid={`song-delete-${song.id}`}
-              disabled={deletingSongId === song.id}
-              onClick={(event) => {
-                event.stopPropagation();
-                handleDeleteSong(song);
-              }}
-              className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
-            >
-              {deletingSongId === song.id ? 'Deleting...' : 'Delete Song'}
-            </button>
+            {selectedSongId === song.id && (
+              <div className="mt-2 text-sm text-blue-600 font-medium" data-testid={`song-selected-${song.id}`}>
+                Currently Selected
+              </div>
+            )}
+            {isEditMode ? (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  data-testid={`song-delete-${song.id}`}
+                  disabled={deletingSongId === song.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleDeleteSong(song);
+                  }}
+                  className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+                >
+                  {deletingSongId === song.id ? 'Deleting...' : 'Delete Song'}
+                </button>
+              </div>
+            ) : null}
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ interface SongListItem {
   artist?: string;
   audioKey?: string;
   createdAt: string;
+  lastPracticedAt?: string | null;
 }
 
 type ViewMode = "list" | "practice" | "segment_editor" | "add";

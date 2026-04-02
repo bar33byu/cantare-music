@@ -19,15 +19,52 @@ import { getAllSongs, createSong } from '../../../db/queries';
 
 describe('GET /api/songs', () => {
   it('returns array of songs', async () => {
-    const mockSongs = [{ id: '1', title: 'Song 1' }];
+    const mockSongs = [{
+      id: '1',
+      title: 'Song 1',
+      artist: null,
+      audioKey: null,
+      createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      lastPracticedAt: new Date('2024-01-02T00:00:00.000Z'),
+    }];
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
 
     const response = await GET();
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(data).toEqual(mockSongs);
+    expect(data).toEqual([
+      {
+        ...mockSongs[0],
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastPracticedAt: '2024-01-02T00:00:00.000Z',
+      },
+    ]);
     expect(getAllSongs).toHaveBeenCalled();
+  });
+
+  it('handles string timestamps from the database', async () => {
+    const mockSongs = [{
+      id: '2',
+      title: 'Song 2',
+      artist: null,
+      audioKey: null,
+      createdAt: '2024-03-10T00:00:00.000Z',
+      lastPracticedAt: '2024-03-11T00:00:00.000Z',
+    }];
+    vi.mocked(getAllSongs).mockResolvedValue(mockSongs as any);
+
+    const response = await GET();
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual([
+      {
+        ...mockSongs[0],
+        createdAt: '2024-03-10T00:00:00.000Z',
+        lastPracticedAt: '2024-03-11T00:00:00.000Z',
+      },
+    ]);
   });
 });
 

@@ -16,6 +16,7 @@ export interface Song {
   audioUrl: string;
   segments: Segment[];
   createdAt: string;
+  lastPracticedAt?: string;
   updatedAt?: string;
 }
 

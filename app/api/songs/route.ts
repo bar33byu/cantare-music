@@ -1,6 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllSongs, createSong } from '../../../db/queries';
 
+function toIsoString(value: unknown): string | null {
+  if (!value) {
+    return null;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+  return null;
+}
+
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
   const shouldExpose =
@@ -13,7 +29,13 @@ function formatError(error: unknown) {
 export async function GET() {
   try {
     const songs = await getAllSongs();
-    return NextResponse.json(songs);
+    return NextResponse.json(
+      songs.map((song) => ({
+        ...song,
+        createdAt: toIsoString(song.createdAt) ?? new Date(0).toISOString(),
+        lastPracticedAt: toIsoString(song.lastPracticedAt),
+      }))
+    );
   } catch (error) {
     console.error('Error fetching songs:', error);
     return NextResponse.json(formatError(error), { status: 500 });
