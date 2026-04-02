@@ -78,26 +78,33 @@ export default function Home() {
     }
   };
 
+  const handleBackToPractice = async () => {
+    await refreshSelectedSong();
+    setActiveView("song_practice");
+  };
+
   if (activeView === "song_practice" && selectedSong) {
     const session = makeSession({ songId: selectedSong.id });
+    const breadcrumbRootLabel = selectedPlaylist?.name ?? "Songs";
+    const handleBreadcrumbRootClick = () => {
+      setSelectedSong(null);
+      if (selectedPlaylist) {
+        setActiveView("playlist_practice");
+        return;
+      }
+      setActiveView("library");
+    };
+
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-4xl mx-auto">
-          <div className="mb-4 flex gap-3">
-            <button
-              onClick={handleBackToList}
-              className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-            >
-              ← Back to Songs
-            </button>
-            <button
-              onClick={() => setActiveView("song_segment_editor")}
-              className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700"
-            >
-              Edit Song
-            </button>
-          </div>
-          <PracticeView song={selectedSong} initialSession={session} />
+          <PracticeView
+            song={selectedSong}
+            initialSession={session}
+            breadcrumbRootLabel={breadcrumbRootLabel}
+            onBreadcrumbRootClick={handleBreadcrumbRootClick}
+            onEditSongClick={() => setActiveView("song_segment_editor")}
+          />
         </div>
       </div>
     );
@@ -115,7 +122,7 @@ export default function Home() {
           </button>
           <SegmentEditor
             songId={selectedSong.id}
-            onBack={() => setActiveView("song_practice")}
+            onBack={() => void handleBackToPractice()}
             onSongUpdated={refreshSelectedSong}
           />
         </div>

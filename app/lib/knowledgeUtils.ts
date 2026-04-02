@@ -21,11 +21,11 @@ export function computeKnowledgeScore(
     }
   }
 
-  const values = Object.values(bySegment);
-  const overall =
-    values.length === 0
-      ? 0
-      : values.reduce((sum, v) => sum + v, 0) / values.length;
+  const totalSegments = song.segments.length;
+  const totalKnowledge = song.segments.reduce((sum, segment) => {
+    return sum + (bySegment[segment.id] ?? 0);
+  }, 0);
+  const overall = totalSegments === 0 ? 0 : totalKnowledge / totalSegments;
 
   return { bySegment, overall };
 }

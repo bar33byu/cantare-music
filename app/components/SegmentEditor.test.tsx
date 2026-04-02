@@ -225,6 +225,50 @@ describe('SegmentEditor', () => {
     expect(play).toHaveBeenCalledWith(2000, 60000);
   });
 
+  it('renders practice-style skip controls and seeks by 5 seconds', async () => {
+    const seek = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 10000,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek,
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-skip-back')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('segment-editor-skip-back')).toHaveTextContent('-5');
+    expect(screen.getByTestId('segment-editor-skip-forward')).toHaveTextContent('+5');
+
+    fireEvent.click(screen.getByTestId('segment-editor-skip-back'));
+    fireEvent.click(screen.getByTestId('segment-editor-skip-forward'));
+
+    expect(seek).toHaveBeenNthCalledWith(1, 5000);
+    expect(seek).toHaveBeenNthCalledWith(2, 15000);
+  });
+
   it('renders full-song timeline strip and seeks from slider', async () => {
     const seek = vi.fn();
     vi.mocked(useAudioPlayer).mockReturnValue({

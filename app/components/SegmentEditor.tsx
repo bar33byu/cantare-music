@@ -11,6 +11,13 @@ const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.5;
 
+function formatMs(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 type ResizeEdge = 'start' | 'end';
 
 interface ActiveInteraction {
@@ -282,6 +289,12 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     const safeDuration = timelineDurationMs > 0 ? timelineDurationMs : Number.POSITIVE_INFINITY;
     const startMs = Math.max(0, Math.min(currentMs, safeDuration));
     play(startMs, safeDuration);
+  };
+
+  const handleSkipBy = (deltaMs: number) => {
+    const safeDuration = timelineDurationMs > 0 ? timelineDurationMs : Math.max(durationMs, currentMs, 0);
+    const targetMs = Math.max(0, Math.min(safeDuration, currentMs + deltaMs));
+    seek(targetMs);
   };
 
   useEffect(() => {
@@ -644,21 +657,55 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
         </div>
       </div>
 
-      <div className="mb-4 rounded-lg border border-indigo-100 bg-white p-4" data-testid="segment-editor-playback-controls">
-        <div className="mb-2 flex items-center gap-2">
+      <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" data-testid="segment-editor-playback-controls">
+        <div className="mb-2 flex items-center justify-center gap-2">
+          <button
+            type="button"
+            data-testid="segment-editor-skip-back"
+            onClick={() => handleSkipBy(-5000)}
+            aria-label="Skip backward 5 seconds"
+            disabled={!isReady}
+            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+          >
+            <span className="inline-flex items-center gap-1 text-sm font-semibold">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 8H5v4" />
+                <path d="M5 12a7 7 0 1 0 2-5" />
+              </svg>
+              <span>-5</span>
+            </span>
+          </button>
           <button
             type="button"
             data-testid="segment-editor-play-toggle"
             onClick={handleTogglePlay}
             aria-label={isPlaying ? 'Pause' : 'Play'}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-indigo-400 text-lg text-indigo-700 hover:bg-indigo-50"
+            className="h-9 w-[72px] rounded-xl bg-indigo-600 text-lg text-white hover:bg-indigo-700"
           >
-            {isPlaying ? '||' : '>'}
+            {isPlaying ? '⏸' : '▶'}
           </button>
-          <span data-testid="segment-editor-current-ms" className="text-sm text-gray-600">
-            {Math.floor(currentMs)}
-          </span>
-          {savingSegmentId ? <span className="text-xs text-indigo-600">Saving...</span> : null}
+          <button
+            type="button"
+            data-testid="segment-editor-skip-forward"
+            onClick={() => handleSkipBy(5000)}
+            aria-label="Skip forward 5 seconds"
+            disabled={!isReady}
+            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+          >
+            <span className="inline-flex items-center gap-1 text-sm font-semibold">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 8h4v4" />
+                <path d="M19 12a7 7 0 1 1-2-5" />
+              </svg>
+              <span>+5</span>
+            </span>
+          </button>
+        </div>
+        <div className="mb-2 flex items-center justify-center gap-2 text-sm text-gray-600">
+          <span data-testid="segment-editor-current-ms">{formatMs(currentMs)}</span>
+          <span className="text-gray-400">/</span>
+          <span>{formatMs(timelineDurationMs)}</span>
+          {savingSegmentId ? <span className="ml-2 text-xs text-indigo-600">Saving...</span> : null}
         </div>
         {selectedSegment ? (
           <div className="grid gap-2 md:grid-cols-[160px,1fr]">

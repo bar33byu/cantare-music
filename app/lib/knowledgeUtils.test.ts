@@ -44,6 +44,22 @@ describe('computeKnowledgeScore', () => {
     expect(result.overall).toBe(60);
   });
 
+  it('treats unrated segments as 0 in overall score', () => {
+    const song = makeSong({
+      segments: [
+        { id: 'seg1', label: 'Verse 1', order: 0 },
+        { id: 'seg2', label: 'Verse 2', order: 1 },
+      ],
+    });
+    const r1 = makeRating({ segmentId: 'seg1', rating: 3 });
+    const session = makeSession({ songId: song.id, ratings: [r1] });
+    const result = computeKnowledgeScore(session, song);
+
+    expect(result.bySegment['seg1']).toBe(60);
+    expect(result.bySegment['seg2']).toBeUndefined();
+    expect(result.overall).toBe(30);
+  });
+
   it('uses most recent rating when multiple exist for same segment', () => {
     const song = makeSong({ segments: [{ id: 'seg1', label: 'Verse 1', order: 0 }] });
     const older = makeRating({

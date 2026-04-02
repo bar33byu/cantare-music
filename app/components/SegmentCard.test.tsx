@@ -18,8 +18,6 @@ const mockSegment: Segment = {
 const defaultProps = {
   segment: mockSegment,
   onRate: vi.fn(),
-  isLocked: false,
-  onToggleLock: vi.fn(),
   playbackMs: 16000,
 };
 
@@ -30,10 +28,37 @@ describe("SegmentCard", () => {
     expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("Some lyrics here");
   });
 
+  it("renders no-lyrics fallback in muted gray", () => {
+    render(
+      <SegmentCard
+        {...defaultProps}
+        segment={{ ...mockSegment, lyricText: "   " }}
+      />
+    );
+    expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("No lyrics for this segment yet.");
+    expect(screen.getByTestId("segment-lyric-text").className).toContain("text-gray-400");
+  });
+
+  it("renders first-letter hints when lyricVisibilityMode is hint", () => {
+    render(<SegmentCard {...defaultProps} lyricVisibilityMode="hint" />);
+    expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("S___ l_____ h___");
+  });
+
+  it("hides lyrics when lyricVisibilityMode is hidden", () => {
+    render(<SegmentCard {...defaultProps} lyricVisibilityMode="hidden" />);
+    expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("Lyrics hidden");
+    expect(screen.getByTestId("segment-lyric-text").className).toContain("text-gray-400");
+  });
+
   it("renders progress bar with correct value while in range", () => {
     render(<SegmentCard {...defaultProps} playbackMs={16000} />);
     expect(screen.getByTestId("segment-progress")).toHaveAttribute("aria-valuenow", "50");
     expect(screen.getByTestId("segment-progress-fill")).toHaveStyle({ width: "50%" });
+  });
+
+  it("renders mastery-colored top edge from masteryPercent", () => {
+    render(<SegmentCard {...defaultProps} masteryPercent={100} />);
+    expect(screen.getByTestId("segment-mastery-edge")).toHaveStyle({ backgroundColor: "rgb(22, 163, 74)" });
   });
 
   it("clamps progress to 0 before segment start", () => {
@@ -58,15 +83,43 @@ describe("SegmentCard", () => {
     expect(onRate).toHaveBeenCalledWith(3);
   });
 
+  it("clicking progress bar seeks within current segment", () => {
+    const onSeek = vi.fn();
+    render(<SegmentCard {...defaultProps} onSeek={onSeek} />);
+
+    const progressBar = screen.getByTestId("segment-progress");
+    Object.defineProperty(progressBar, "getBoundingClientRect", {
+      value: () => ({
+        left: 10,
+        top: 0,
+        right: 210,
+        bottom: 16,
+        width: 200,
+        height: 16,
+        x: 10,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.click(progressBar, { clientX: 110 });
+    expect(onSeek).toHaveBeenCalledWith(16000);
+  });
+
+  it("does not throw when progress bar is clicked without onSeek", () => {
+    render(<SegmentCard {...defaultProps} onSeek={undefined} />);
+    const progressBar = screen.getByTestId("segment-progress");
+    fireEvent.click(progressBar, { clientX: 80 });
+    expect(screen.getByTestId("segment-progress")).toBeInTheDocument();
+  });
+
   it("selected rating button has selected style", () => {
     render(<SegmentCard {...defaultProps} currentRating={4} />);
     expect(screen.getByTestId("rating-button-4").className).toContain("bg-indigo-600");
   });
 
-  it("lock button toggles lock callback", () => {
-    const onToggleLock = vi.fn();
-    render(<SegmentCard {...defaultProps} onToggleLock={onToggleLock} />);
-    fireEvent.click(screen.getByTestId("lock-toggle"));
-    expect(onToggleLock).toHaveBeenCalledTimes(1);
+  it("does not render lock toggle", () => {
+    render(<SegmentCard {...defaultProps} />);
+    expect(screen.queryByTestId("lock-toggle")).not.toBeInTheDocument();
   });
 });

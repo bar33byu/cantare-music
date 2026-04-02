@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Home from './page';
 
+const practiceViewMock = vi.fn();
+
 const samplePlaylist = {
   id: 'playlist-1',
   name: 'Set A',
@@ -21,11 +23,40 @@ const samplePlaylist = {
 };
 
 vi.mock('./components/PracticeView', () => ({
-  default: () => <div data-testid="mock-practice-view">Practice View</div>,
+  default: ({
+    song,
+    breadcrumbRootLabel,
+    onBreadcrumbRootClick,
+    onEditSongClick,
+  }: {
+    song: { segments: Array<unknown> };
+    breadcrumbRootLabel?: string;
+    onBreadcrumbRootClick?: () => void;
+    onEditSongClick?: () => void;
+  }) => {
+    practiceViewMock(song);
+    return (
+      <div data-testid="mock-practice-view">
+        Segments: {song.segments.length}
+        {breadcrumbRootLabel ? (
+          <button onClick={onBreadcrumbRootClick}>{breadcrumbRootLabel}</button>
+        ) : null}
+        {onEditSongClick ? (
+          <button aria-label="Edit song" onClick={onEditSongClick}>Edit</button>
+        ) : null}
+      </div>
+    );
+  },
 }));
 
 vi.mock('./components/SegmentEditor', () => ({
-  SegmentEditor: () => <div data-testid="mock-segment-editor">Segment Editor</div>,
+  SegmentEditor: ({ onBack }: { onBack?: () => void }) => (
+    <div data-testid="mock-segment-editor">
+      <button data-testid="mock-segment-editor-back" onClick={onBack}>
+        Back to Practice
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('./components/SongForm', () => ({
@@ -86,6 +117,7 @@ vi.mock('./components/PlaylistPracticeView', () => ({
 describe('Home page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    practiceViewMock.mockReset();
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -133,5 +165,90 @@ describe('Home page', () => {
     fireEvent.click(screen.getByTestId('mock-detail-practice'));
 
     expect(await screen.findByTestId('mock-playlist-practice-view')).toBeInTheDocument();
+  });
+
+  it('refreshes the selected song before returning from edit mode', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'song-1',
+          title: 'Song One',
+          artist: 'Artist One',
+          audioUrl: 'https://example.com/one.mp3',
+          segments: [
+            {
+              id: 'seg-1',
+              songId: 'song-1',
+              order: 0,
+              label: 'Section 1',
+              lyricText: 'Verse 1',
+              startMs: 0,
+              endMs: 10000,
+            },
+          ],
+          createdAt: '2025-01-01T00:00:00.000Z',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'song-1',
+          title: 'Song One',
+          artist: 'Artist One',
+          audioUrl: 'https://example.com/one.mp3',
+          segments: [
+            {
+              id: 'seg-1',
+              songId: 'song-1',
+              order: 0,
+              label: 'Section 1',
+              lyricText: 'Verse 1',
+              startMs: 0,
+              endMs: 10000,
+            },
+            {
+              id: 'seg-2',
+              songId: 'song-1',
+              order: 1,
+              label: 'Section 2',
+              lyricText: 'Verse 2',
+              startMs: 10000,
+              endMs: 20000,
+            },
+          ],
+          createdAt: '2025-01-01T00:00:00.000Z',
+        }),
+      });
+
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('mock-select-song'));
+
+    expect(await screen.findByTestId('mock-practice-view')).toHaveTextContent('Segments: 1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit song' }));
+    expect(await screen.findByTestId('mock-segment-editor')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-segment-editor-back'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-practice-view')).toHaveTextContent('Segments: 2');
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/songs/song-1');
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/songs/song-1');
+  });
+
+  it('shows breadcrumb root as Songs in song practice and returns to library when clicked', async () => {
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('mock-select-song'));
+    expect(await screen.findByTestId('mock-practice-view')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Songs' }));
+    expect(await screen.findByTestId('mock-select-song')).toBeInTheDocument();
   });
 });

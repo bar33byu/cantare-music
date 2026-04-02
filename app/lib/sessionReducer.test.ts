@@ -58,6 +58,22 @@ describe('sessionReducer', () => {
     expect(s2.ratings[1].rating).toBe(5);
   });
 
+  it('CLEAR_SEGMENT_RATING removes all ratings for target segment only', () => {
+    const state = makeSession({
+      ratings: [
+        { id: 'r1', segmentId: 'seg1', rating: 1, ratedAt: new Date().toISOString() },
+        { id: 'r2', segmentId: 'seg1', rating: 4, ratedAt: new Date().toISOString() },
+        { id: 'r3', segmentId: 'seg2', rating: 5, ratedAt: new Date().toISOString() },
+      ],
+    });
+
+    const next = sessionReducer(state, { type: 'CLEAR_SEGMENT_RATING', segmentId: 'seg1' });
+
+    expect(next.ratings).toHaveLength(1);
+    expect(next.ratings[0].segmentId).toBe('seg2');
+    expect(next.ratings[0].rating).toBe(5);
+  });
+
   it('COMPLETE sets completedAt', () => {
     const state = makeSession({ completedAt: undefined });
     const next = sessionReducer(state, { type: 'COMPLETE' });
