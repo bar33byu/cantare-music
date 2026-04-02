@@ -44,20 +44,39 @@ function isMissingLastPracticedColumnError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
+
   const message = error.message.toLowerCase();
-  return message.includes("last_practiced_at") && message.includes("does not exist");
+  if (message.includes("last_practiced_at") && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (causeMessage.includes("last_practiced_at") && causeMessage.includes("does not exist")) {
+      return true;
+    }
+    if (causeCode === "42703" && message.includes("last_practiced_at")) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // ── Songs ──────────────────────────────────────────────────────────────────
 
 export async function getAllSongs(): Promise<SongRow[]> {
+  let primaryError: unknown;
   try {
     return await db().select().from(songs).orderBy(desc(songs.createdAt));
   } catch (error) {
-    if (!isMissingLastPracticedColumnError(error)) {
-      throw error;
-    }
+    primaryError = error;
+  }
 
+  try {
     const legacyRows = await db()
       .select({
         id: songs.id,
@@ -70,12 +89,15 @@ export async function getAllSongs(): Promise<SongRow[]> {
       .orderBy(desc(songs.createdAt));
 
     return legacyRows.map((row) => ({ ...row, lastPracticedAt: null } as SongRow));
+  } catch {
+    throw primaryError;
   }
 }
 
 export async function getSongById(
   id: string
 ): Promise<SongRow | undefined> {
+  let primaryError: unknown;
   try {
     const rows = await db()
       .select()
@@ -84,10 +106,10 @@ export async function getSongById(
       .limit(1);
     return rows[0];
   } catch (error) {
-    if (!isMissingLastPracticedColumnError(error)) {
-      throw error;
-    }
+    primaryError = error;
+  }
 
+  try {
     const rows = await db()
       .select({
         id: songs.id,
@@ -106,6 +128,8 @@ export async function getSongById(
     }
 
     return { ...row, lastPracticedAt: null } as SongRow;
+  } catch {
+    throw primaryError;
   }
 }
 
@@ -151,10 +175,17 @@ export async function markSongPracticed(
   id: string,
   practicedAt: Date = new Date()
 ): Promise<void> {
-  await db()
-    .update(songs)
-    .set({ lastPracticedAt: practicedAt })
-    .where(eq(songs.id, id));
+  try {
+    await db()
+      .update(songs)
+      .set({ lastPracticedAt: practicedAt })
+      .where(eq(songs.id, id));
+  } catch (error) {
+    if (isMissingLastPracticedColumnError(error)) {
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function deleteSong(id: string): Promise<void> {

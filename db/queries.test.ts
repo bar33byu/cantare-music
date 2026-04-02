@@ -95,6 +95,38 @@ describe("getAllSongs", () => {
       },
     ]);
   });
+
+  it("falls back even when primary select fails with generic error", async () => {
+    const failingChain = {
+      from: vi.fn(() => {
+        throw new Error('Failed query: select ...');
+      }),
+    };
+    const fallbackRows = [
+      {
+        id: "song-9",
+        title: "Fallback Song",
+        artist: null,
+        audioKey: null,
+        createdAt: new Date("2026-04-02T00:00:00.000Z"),
+      },
+    ];
+    const fallbackChain = makeChain(fallbackRows);
+
+    selectSpy
+      .mockReturnValueOnce(failingChain as unknown as ReturnType<typeof makeChain>)
+      .mockReturnValueOnce(fallbackChain);
+
+    const { getAllSongs } = await getQueries();
+    const result = await getAllSongs();
+
+    expect(result).toEqual([
+      {
+        ...fallbackRows[0],
+        lastPracticedAt: null,
+      },
+    ]);
+  });
 });
 
 describe("deleteSong", () => {
@@ -180,6 +212,40 @@ describe("markSongPracticed", () => {
     expect(setSpy).toHaveBeenCalledWith({ lastPracticedAt: practicedAt });
     const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
     expect(whereSpy).toHaveBeenCalledWith(eq(songs.id, "song-1"));
+  });
+
+  it("no-ops when last_practiced_at column is missing", async () => {
+    const failingChain = {
+      set: vi.fn(() => ({
+        where: vi.fn(() => {
+          throw new Error('column "last_practiced_at" of relation "songs" does not exist');
+        }),
+      })),
+    };
+    updateSpy.mockReturnValue(failingChain as unknown as ReturnType<typeof makeChain>);
+
+    const { markSongPracticed } = await getQueries();
+    await expect(markSongPracticed("song-1", new Date("2026-04-02T12:34:56.000Z"))).resolves.toBeUndefined();
+  });
+
+  it("no-ops when missing-column error is on cause", async () => {
+    const error = new Error('Failed query: update "songs" set "last_practiced_at" = $1 where "songs"."id" = $2');
+    (error as Error & { cause?: unknown }).cause = {
+      code: '42703',
+      message: 'column "last_practiced_at" of relation "songs" does not exist',
+    };
+
+    const failingChain = {
+      set: vi.fn(() => ({
+        where: vi.fn(() => {
+          throw error;
+        }),
+      })),
+    };
+    updateSpy.mockReturnValue(failingChain as unknown as ReturnType<typeof makeChain>);
+
+    const { markSongPracticed } = await getQueries();
+    await expect(markSongPracticed("song-1", new Date("2026-04-02T12:34:56.000Z"))).resolves.toBeUndefined();
   });
 });
 
