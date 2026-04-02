@@ -3,32 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Playlist } from '../types';
 import { PlaylistPracticeView } from './PlaylistPracticeView';
 
-vi.mock('./PracticeView', () => ({
-  default: ({ onSessionChange }: { onSessionChange?: (session: any) => void }) => (
-    <div data-testid="mock-practice-view">
-      <button
-        data-testid="emit-session"
-        onClick={() =>
-          onSessionChange?.({
-            currentSongId: 'song-1',
-            currentSegmentId: null,
-            currentTime: 0,
-            ratings: [
-              {
-                segmentId: 'seg-1',
-                rating: 4,
-                ratedAt: '2025-01-01T00:00:00.000Z',
-              },
-            ],
-          })
-        }
-      >
-        Emit Session
-      </button>
-    </div>
-  ),
-}));
-
 const playlist: Playlist = {
   id: 'playlist-1',
   name: 'Morning Warmup',
@@ -57,43 +31,48 @@ const playlist: Playlist = {
 };
 
 describe('PlaylistPracticeView', () => {
-  it('shows breadcrumb and playlist knowledge score', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0.67 }) });
+  it('shows playlist name, knowledge score, and song cards', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) });
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} />);
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
+    expect(screen.getByText('Morning Warmup')).toBeInTheDocument();
     expect(await screen.findByTestId('playlist-practice-score')).toHaveTextContent('Playlist Knowledge: 67%');
-    expect(screen.getByTestId('playlist-practice-breadcrumb')).toHaveTextContent('Morning Warmup > 1 Alpha');
+    expect(screen.getByTestId('playlist-practice-song-song-1')).toHaveTextContent('Alpha');
+    expect(screen.getByTestId('playlist-practice-song-song-2')).toHaveTextContent('Beta');
   });
 
-  it('persists ratings before moving to next song', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ score: 0.5 }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ score: 0.6 }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ score: 0.7 }) });
-    global.fetch = fetchMock as unknown as typeof fetch;
+  it('calls onSelectSong when a song card is clicked', async () => {
+    const onSelectSong = vi.fn();
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
 
-    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} />);
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={onSelectSong} />);
 
-    fireEvent.click(await screen.findByTestId('emit-session'));
-    fireEvent.click(screen.getByTestId('playlist-next-song'));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/songs/song-1/ratings', expect.objectContaining({ method: 'POST' }));
-    });
-
-    expect(screen.getByTestId('playlist-practice-breadcrumb')).toHaveTextContent('Morning Warmup > 2 Beta');
+    await waitFor(() => expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('playlist-practice-song-song-1'));
+    expect(onSelectSong).toHaveBeenCalledWith('song-1');
   });
 
-  it('calls onExit when exit is clicked', async () => {
+  it('calls onExit when back button is clicked', async () => {
     const onExit = vi.fn();
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0.6 }) }) as unknown as typeof fetch;
 
-    render(<PlaylistPracticeView playlist={playlist} onExit={onExit} />);
+    render(<PlaylistPracticeView playlist={playlist} onExit={onExit} onSelectSong={() => undefined} />);
 
     fireEvent.click(await screen.findByTestId('playlist-practice-exit'));
     expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows empty state with manage button when playlist has no songs', async () => {
+    const onManage = vi.fn();
+    const emptyPlaylist: Playlist = { ...playlist, songs: [] };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={emptyPlaylist} onExit={() => undefined} onSelectSong={() => undefined} onManage={onManage} />);
+
+    expect(screen.getByTestId('playlist-practice-empty')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('playlist-practice-manage'));
+    expect(onManage).toHaveBeenCalledTimes(1);
   });
 });

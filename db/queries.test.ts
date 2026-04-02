@@ -488,7 +488,8 @@ describe("getAllPlaylists", () => {
     const { getAllPlaylists } = await getQueries();
     await getAllPlaylists();
 
-    expect(selectSpy).toHaveBeenCalledOnce();
+    // getAllPlaylists now calls select twice (once for playlists, once for playlistSongs)
+    expect(selectSpy).toHaveBeenCalledTimes(2);
     const fromSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["from"];
     expect(fromSpy).toHaveBeenCalledWith(playlists);
     const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];

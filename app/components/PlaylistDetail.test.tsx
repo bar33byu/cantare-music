@@ -66,8 +66,12 @@ describe('PlaylistDetail', () => {
     await waitFor(() => expect(screen.getByTestId('playlist-add-song')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('playlist-add-song'));
 
-    await waitFor(() => expect(screen.getByTestId('playlist-song-picker')).toBeInTheDocument());
-    fireEvent.change(screen.getByTestId('playlist-song-picker'), { target: { value: 'song-3' } });
+    await waitFor(() => expect(screen.getByTestId('playlist-song-search')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('playlist-song-search'), { target: { value: 'Three' } });
+
+    await waitFor(() => expect(screen.getByTestId('playlist-song-suggestion-song-3')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('playlist-song-suggestion-song-3'));
+
     fireEvent.click(screen.getByTestId('playlist-song-add-submit'));
 
     await waitFor(() => {

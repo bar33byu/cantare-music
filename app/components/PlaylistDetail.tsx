@@ -13,6 +13,8 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [selectedSongId, setSelectedSongId] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
 
@@ -39,6 +41,18 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
     }
     const data = (await response.json()) as Song[];
     setSongs(Array.isArray(data) ? data : []);
+    setShowSuggestions(true);
+  };
+
+  const handleSearchChange = (query: string) => {
+    setSearchQuery(query);
+    setShowSuggestions(true);
+  };
+
+  const handleSelectSong = (songId: string) => {
+    setSelectedSongId(songId);
+    setSearchQuery('');
+    setShowSuggestions(false);
   };
 
   const handleAddSong = async () => {
@@ -109,6 +123,19 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
   const sortedSongs = [...playlist.songs].sort((a, b) => a.position - b.position);
   const existingIds = new Set(sortedSongs.map((song) => song.id));
 
+  // Filter songs based on search query
+  const filteredSongs = searchQuery.trim() === ''
+    ? songs
+    : songs.filter((song) => {
+        const query = searchQuery.toLowerCase();
+        const title = song.title.toLowerCase();
+        const artist = (song.artist || '').toLowerCase();
+        return title.includes(query) || artist.includes(query);
+      });
+
+  // Get the selected song details for display
+  const selectedSong = songs.find((s) => s.id === selectedSongId);
+
   return (
     <section data-testid="playlist-detail" className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -127,23 +154,53 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
           Add Song
         </button>
         {songs.length > 0 ? (
-          <div className="mt-3 flex gap-2">
-            <select
-              data-testid="playlist-song-picker"
-              value={selectedSongId}
-              onChange={(event) => setSelectedSongId(event.target.value)}
-              className="rounded border border-gray-300 px-2 py-1"
-            >
-              <option value="">Select song</option>
-              {songs.map((song) => (
-                <option key={song.id} value={song.id} disabled={existingIds.has(song.id)}>
-                  {song.title}
-                </option>
-              ))}
-            </select>
-            <button data-testid="playlist-song-add-submit" className="rounded bg-indigo-600 px-3 py-1 text-white" onClick={() => void handleAddSong()}>
-              Add
-            </button>
+          <div className="mt-3 space-y-2">
+            <div className="relative">
+              <input
+                data-testid="playlist-song-search"
+                type="text"
+                placeholder="Search songs by title or artist..."
+                value={searchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onFocus={() => setShowSuggestions(true)}
+                className="w-full rounded border border-gray-300 px-3 py-2"
+              />
+              {showSuggestions && filteredSongs.length > 0 && (
+                <ul
+                  data-testid="playlist-song-suggestions"
+                  className="absolute top-full left-0 right-0 z-10 mt-1 max-h-48 overflow-y-auto rounded border border-gray-300 bg-white shadow-lg"
+                >
+                  {filteredSongs.map((song) => (
+                    <li
+                      key={song.id}
+                      data-testid={`playlist-song-suggestion-${song.id}`}
+                      onClick={() => handleSelectSong(song.id)}
+                      className={`cursor-pointer px-3 py-2 hover:bg-indigo-50 ${
+                        existingIds.has(song.id) ? 'opacity-50 cursor-not-allowed' : ''
+                      } ${selectedSongId === song.id ? 'bg-indigo-100' : ''}`}
+                    >
+                      <div className="font-medium">{song.title}</div>
+                      {song.artist ? <div className="text-sm text-gray-500">{song.artist}</div> : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {selectedSong && (
+              <div className="flex items-center justify-between gap-2 rounded bg-indigo-50 px-3 py-2">
+                <div>
+                  <div className="font-medium">{selectedSong.title}</div>
+                  {selectedSong.artist ? <div className="text-sm text-gray-500">{selectedSong.artist}</div> : null}
+                </div>
+                <button
+                  data-testid="playlist-song-add-submit"
+                  className="rounded bg-indigo-600 px-3 py-1 text-white hover:bg-indigo-700"
+                  onClick={() => void handleAddSong()}
+                >
+                  Add
+                </button>
+              </div>
+            )}
           </div>
         ) : null}
       </div>

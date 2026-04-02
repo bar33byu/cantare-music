@@ -2,123 +2,241 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { Playlist } from '../types';
-import type { SessionState } from '../lib/sessionReducer';
-import { makeSession } from '../lib/factories';
-import PracticeView from './PracticeView';
+import { getMasteryColor } from '../lib/masteryColors';
+
+type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
+interface SortState { key: SortKey; asc: boolean }
+const SORT_STORAGE_KEY = 'playlist-practice-sort';
+const DEFAULT_SORT: SortState = { key: 'date-practiced', asc: false };
+
+const sortKeyLabel: Record<SortKey, string> = {
+  alphabetical: 'Alphabetical',
+  'date-added': 'Date Added',
+  'date-practiced': 'Last Practiced',
+  'memory-score': 'Memory Score',
+};
+
+const sortDirLabel: Record<SortKey, [string, string]> = {
+  alphabetical: ['Z–A', 'A–Z'],
+  'date-added': ['Newest', 'Oldest'],
+  'date-practiced': ['Recent', 'Oldest'],
+  'memory-score': ['Highest', 'Lowest'],
+};
+
+const defaultAscForKey = (key: SortKey) => key === 'alphabetical';
+
+function getLastPracticedLabel(value?: string | null): string {
+  if (!value) return 'Not practiced yet';
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return 'Not practiced yet';
+  const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  const units: Array<{ unit: Intl.RelativeTimeFormatUnit; seconds: number }> = [
+    { unit: 'year', seconds: 31536000 },
+    { unit: 'month', seconds: 2592000 },
+    { unit: 'week', seconds: 604800 },
+    { unit: 'day', seconds: 86400 },
+    { unit: 'hour', seconds: 3600 },
+    { unit: 'minute', seconds: 60 },
+  ];
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'always' });
+  for (const { unit, seconds } of units) {
+    if (elapsed >= seconds) return `Last practiced ${rtf.format(-Math.floor(elapsed / seconds), unit)}`;
+  }
+  return 'Last practiced just now';
+}
 
 interface PlaylistPracticeViewProps {
   playlist: Playlist;
-  initialSongIndex?: number;
   onExit: () => void;
+  onManage?: () => void;
+  onSelectSong: (songId: string) => void;
 }
 
-export function PlaylistPracticeView({ playlist, initialSongIndex = 0, onExit }: PlaylistPracticeViewProps) {
-  const [currentSongIndex, setCurrentSongIndex] = useState(initialSongIndex);
+export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
   const [playlistScore, setPlaylistScore] = useState(0);
-  const [sessionsBySong, setSessionsBySong] = useState<Record<string, SessionState>>({});
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
+  const [showSortMenu, setShowSortMenu] = useState(false);
 
-  const songs = useMemo(
-    () => [...playlist.songs].sort((a, b) => a.position - b.position),
-    [playlist.songs]
-  );
-
-  const currentSong = songs[currentSongIndex] ?? null;
-  const hasPrev = currentSongIndex > 0;
-  const hasNext = currentSongIndex < songs.length - 1;
-
-  const loadPlaylistScore = async () => {
+  useEffect(() => {
     try {
-      const response = await fetch(`/api/playlists/${playlist.id}/knowledge`);
-      if (!response?.ok) {
-        return;
+      const raw = localStorage.getItem(SORT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (
+          parsed !== null &&
+          typeof parsed === 'object' &&
+          'key' in parsed && 'asc' in parsed &&
+          ['alphabetical', 'date-added', 'date-practiced', 'memory-score'].includes((parsed as SortState).key) &&
+          typeof (parsed as SortState).asc === 'boolean'
+        ) {
+          setSort(parsed as SortState);
+        }
       }
-      const data = (await response.json()) as { score?: number };
-      setPlaylistScore(Math.round((data.score ?? 0) * 100));
-    } catch {
-      return;
-    }
+    } catch { /* ignore */ }
+  }, []);
+
+  const updateSort = (next: SortState) => {
+    setSort(next);
+    try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
   };
 
   useEffect(() => {
-    void loadPlaylistScore();
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/playlists/${playlist.id}/knowledge`);
+        if (res.ok) {
+          const data = (await res.json()) as { score?: number };
+          setPlaylistScore(Math.min(Math.round(data.score ?? 0), 100));
+        }
+      } catch { /* ignore */ }
+    };
+    void load();
   }, [playlist.id]);
 
-  const currentSession = useMemo(() => {
-    if (!currentSong) {
-      return null;
-    }
-    return sessionsBySong[currentSong.id] ?? makeSession({ songId: currentSong.id, currentSongId: currentSong.id });
-  }, [currentSong, sessionsBySong]);
-
-  const persistCurrentSongRatings = async () => {
-    if (!currentSong || !currentSession) {
-      return;
-    }
-    await fetch(`/api/songs/${currentSong.id}/ratings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ratings: currentSession.ratings.map((rating) => ({
-          segmentId: rating.segmentId,
-          rating: rating.rating,
-          ratedAt: rating.ratedAt,
-        })),
-      }),
+  const displayedSongs = useMemo(() => {
+    const dir = sort.asc ? 1 : -1;
+    return [...playlist.songs].sort((a, b) => {
+      switch (sort.key) {
+        case 'alphabetical':
+          return dir * a.title.localeCompare(b.title);
+        case 'date-added':
+          return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
+        case 'date-practiced': {
+          const aTime = a.lastPracticedAt ?? '';
+          const bTime = b.lastPracticedAt ?? '';
+          if (!aTime && !bTime) return 0;
+          if (!aTime) return 1;
+          if (!bTime) return -1;
+          return dir * aTime.localeCompare(bTime);
+        }
+        case 'memory-score':
+          return dir * ((a.masteryPercent ?? 0) - (b.masteryPercent ?? 0));
+        default:
+          return 0;
+      }
     });
-  };
+  }, [playlist.songs, sort]);
 
-  const moveSong = async (offset: number) => {
-    const target = currentSongIndex + offset;
-    if (target < 0 || target >= songs.length) {
-      return;
-    }
-
-    await persistCurrentSongRatings();
-    setCurrentSongIndex(target);
-    await loadPlaylistScore();
-  };
-
-  if (!currentSong || !currentSession) {
-    return <div data-testid="playlist-practice-empty">No songs in this playlist yet.</div>;
+  if (playlist.songs.length === 0) {
+    return (
+      <section data-testid="playlist-practice-empty" className="space-y-4">
+        <header className="flex items-center justify-between">
+          <p className="text-gray-600">No songs in this playlist yet.</p>
+          <div className="flex gap-2">
+            {onManage ? (
+              <button data-testid="playlist-practice-manage" className="rounded bg-indigo-600 px-3 py-2 text-white" onClick={onManage}>
+                Manage
+              </button>
+            ) : null}
+            <button data-testid="playlist-practice-exit" className="rounded border border-gray-300 px-3 py-2" onClick={onExit}>
+              Exit
+            </button>
+          </div>
+        </header>
+      </section>
+    );
   }
 
   return (
     <section data-testid="playlist-practice-view" className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
+          <h2 className="text-2xl font-bold">{playlist.name}</h2>
           <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
             Playlist Knowledge: {playlistScore}%
           </p>
-          <p data-testid="playlist-practice-breadcrumb" className="text-sm text-gray-600">
-            {playlist.name} {'>'} {currentSongIndex + 1} {currentSong.title}
-          </p>
         </div>
-        <button data-testid="playlist-practice-exit" className="rounded border border-gray-300 px-3 py-2" onClick={onExit}>
-          Exit
-        </button>
+        <div className="flex gap-2">
+          {onManage ? (
+            <button data-testid="playlist-practice-manage" className="rounded border border-indigo-300 px-3 py-2 text-indigo-700" onClick={onManage}>
+              Manage
+            </button>
+          ) : null}
+          <button data-testid="playlist-practice-exit" className="rounded border border-gray-300 px-3 py-2" onClick={onExit}>
+            ← Back
+          </button>
+        </div>
       </header>
 
-      <PracticeView
-        song={currentSong}
-        initialSession={currentSession}
-        onSessionChange={(session) => {
-          setSessionsBySong((previous) => ({ ...previous, [currentSong.id]: session }));
-          void loadPlaylistScore();
-        }}
-      />
-
-      <div className="flex justify-between">
-        {hasPrev ? (
-          <button data-testid="playlist-prev-song" className="rounded border border-indigo-300 px-3 py-2 text-indigo-700" onClick={() => void moveSong(-1)}>
-            ← Previous Song
+      {/* Sort toolbar */}
+      <div className="flex items-center gap-2">
+        <div className="relative ml-auto">
+          <button
+            type="button"
+            data-testid="playlist-sort-toggle"
+            onClick={() => setShowSortMenu((prev) => !prev)}
+            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm text-gray-500 hover:bg-gray-100"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+              <line x1="8" y1="6" x2="21" y2="6" />
+              <line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
+              <polyline points="3 6 4 7 6 5" />
+              <polyline points="3 12 4 13 6 11" />
+              <polyline points="3 18 4 19 6 17" />
+            </svg>
+            {sortDirLabel[sort.key][sort.asc ? 1 : 0]}
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
           </button>
-        ) : <span />}
+          {showSortMenu && (
+            <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-gray-200 bg-white shadow-lg">
+              {(['alphabetical', 'date-added', 'date-practiced', 'memory-score'] as const).map((key) => {
+                const isActive = sort.key === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    data-testid={`playlist-sort-${key}`}
+                    onClick={() => {
+                      updateSort({ key, asc: isActive ? !sort.asc : defaultAscForKey(key) });
+                      setShowSortMenu(false);
+                    }}
+                    className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg hover:bg-gray-50 ${
+                      isActive ? 'font-semibold text-blue-600' : 'text-gray-700'
+                    }`}
+                  >
+                    {sortKeyLabel[key]}
+                    {isActive && (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                        {sort.asc
+                          ? <polyline points="18 15 12 9 6 15" />
+                          : <polyline points="6 9 12 15 18 9" />}
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
 
-        {hasNext ? (
-          <button data-testid="playlist-next-song" className="rounded bg-indigo-600 px-3 py-2 text-white" onClick={() => void moveSong(1)}>
-            Next Song →
-          </button>
-        ) : null}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="playlist-song-grid">
+        {displayedSongs.map((song) => {
+          const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
+          const masteryColor = getMasteryColor(mastery);
+          return (
+            <div
+              key={song.id}
+              data-testid={`playlist-practice-song-${song.id}`}
+              className="relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent"
+              onClick={() => onSelectSong(song.id)}
+            >
+              <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
+                <div
+                  className="h-full rounded-tl-lg"
+                  style={{ width: `${mastery}%`, backgroundColor: masteryColor }}
+                />
+              </div>
+              <p className="absolute right-2 top-1 text-[11px] font-semibold text-gray-700">{mastery}%</p>
+              <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
+              {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
+              <p className="text-xs text-gray-500 mt-2">{getLastPracticedLabel(song.lastPracticedAt)}</p>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

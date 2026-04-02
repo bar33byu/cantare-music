@@ -1,4 +1,4 @@
-import { eq, asc, desc, inArray, and } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, count } from "drizzle-orm";
 import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow } from "./schema";
@@ -21,6 +21,8 @@ export interface PlaylistSongItem {
   createdAt: string;
   updatedAt?: string;
   position: number;
+  masteryPercent: number;
+  lastPracticedAt?: string | null;
 }
 
 export interface PlaylistDetail {
@@ -38,6 +40,7 @@ export interface PlaylistSummary {
   eventDate?: string;
   isRetired: boolean;
   createdAt: string;
+  songCount: number;
 }
 
 function isMissingLastPracticedColumnError(error: unknown): boolean {
@@ -401,13 +404,14 @@ function toIso(value: Date | null): string {
   return value ? value.toISOString() : new Date(0).toISOString();
 }
 
-function mapPlaylistSummary(row: PlaylistRow): PlaylistSummary {
+function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSummary {
   return {
     id: row.id,
     name: row.name,
     eventDate: row.eventDate ?? undefined,
     isRetired: row.isRetired,
     createdAt: toIso(row.createdAt),
+    songCount,
   };
 }
 
@@ -417,7 +421,20 @@ export async function getAllPlaylists(includeRetired = false): Promise<PlaylistS
     ? await baseQuery
     : await baseQuery.where(eq(playlists.isRetired, false));
 
-  return rows.map(mapPlaylistSummary);
+  // Get song counts for each playlist
+  const songCounts = await db()
+    .select({
+      playlistId: playlistSongs.playlistId,
+      count: count(playlistSongs.songId),
+    })
+    .from(playlistSongs)
+    .groupBy(playlistSongs.playlistId);
+
+  const countMap = Object.fromEntries(
+    songCounts.map((row) => [row.playlistId, row.count])
+  );
+
+  return rows.map((row) => mapPlaylistSummary(row, countMap[row.id] ?? 0));
 }
 
 export async function getPlaylistById(id: string): Promise<PlaylistDetail | null> {
@@ -441,24 +458,34 @@ export async function getPlaylistById(id: string): Promise<PlaylistDetail | null
       artist: songs.artist,
       audioKey: songs.audioKey,
       createdAt: songs.createdAt,
+      lastPracticedAt: songs.lastPracticedAt,
     })
     .from(playlistSongs)
     .innerJoin(songs, eq(playlistSongs.songId, songs.id))
     .where(eq(playlistSongs.playlistId, id))
     .orderBy(asc(playlistSongs.position));
 
-  const songsWithSegments: PlaylistSongItem[] = await Promise.all(
-    linkedSongs.map(async (songRow) => ({
-      id: songRow.songId,
-      title: songRow.title,
-      artist: songRow.artist ?? undefined,
-      audioUrl: songRow.audioKey ?? "",
-      segments: await getSegmentsBySongId(songRow.songId),
-      createdAt: toIso(songRow.createdAt),
-      updatedAt: toIso(songRow.createdAt),
-      position: songRow.position,
-    }))
-  );
+  const songIds = linkedSongs.map((s) => s.songId);
+  const [segmentsBySong, masteryBySong, latestRatingTimes] = await Promise.all([
+    Promise.all(linkedSongs.map((s) => getSegmentsBySongId(s.songId))),
+    getSongKnowledgeBySongIds(songIds),
+    getLatestRatingTimeBySongIds(songIds),
+  ]);
+
+  const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow, i) => ({
+    id: songRow.songId,
+    title: songRow.title,
+    artist: songRow.artist ?? undefined,
+    audioUrl: songRow.audioKey ?? "",
+    segments: segmentsBySong[i],
+    createdAt: toIso(songRow.createdAt),
+    updatedAt: toIso(songRow.createdAt),
+    position: songRow.position,
+    masteryPercent: masteryBySong[songRow.songId] ?? 0,
+    lastPracticedAt: songRow.lastPracticedAt
+      ? toIso(songRow.lastPracticedAt)
+      : latestRatingTimes[songRow.songId] ?? null,
+  }));
 
   return {
     ...mapPlaylistSummary(playlist),

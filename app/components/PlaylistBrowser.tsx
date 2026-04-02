@@ -3,7 +3,15 @@
 import { useEffect, useState } from 'react';
 import type { Playlist } from '../types';
 
-type PlaylistListItem = Omit<Playlist, 'songs'> & { songs?: Playlist['songs'] };
+type PlaylistListItem = {
+  id: string;
+  name: string;
+  eventDate?: string;
+  isRetired: boolean;
+  createdAt: string;
+  songCount: number;
+  songs?: Playlist['songs'];
+};
 
 interface PlaylistBrowserProps {
   onSelectPlaylist: (playlist: Playlist) => void;
@@ -18,7 +26,6 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
   const [showArchived, setShowArchived] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
-  const [createEventDate, setCreateEventDate] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const fetchPlaylists = async (includeRetired: boolean) => {
@@ -41,7 +48,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
             return [playlist.id, 0] as const;
           }
           const payload = (await knowledgeResponse.json()) as { score?: number };
-          return [playlist.id, Math.round((payload.score ?? 0) * 100)] as const;
+          return [playlist.id, Math.min(Math.round(payload.score ?? 0), 100)] as const;
         })
       );
       setKnowledgeByPlaylist(Object.fromEntries(knowledgeEntries));
@@ -69,7 +76,6 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: createName.trim(),
-        eventDate: createEventDate || undefined,
       }),
     });
 
@@ -79,7 +85,6 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
     }
 
     setCreateName('');
-    setCreateEventDate('');
     setShowCreate(false);
     await fetchPlaylists(showArchived);
   };
@@ -134,19 +139,12 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
 
       {showCreate ? (
         <div data-testid="new-playlist-form" className="rounded border border-gray-200 bg-white p-4">
-          <div className="grid gap-3 md:grid-cols-2">
+          <div>
             <input
               data-testid="new-playlist-name"
               value={createName}
               onChange={(event) => setCreateName(event.target.value)}
               placeholder="Playlist name"
-              className="rounded border border-gray-300 px-3 py-2"
-            />
-            <input
-              data-testid="new-playlist-date"
-              type="date"
-              value={createEventDate}
-              onChange={(event) => setCreateEventDate(event.target.value)}
               className="rounded border border-gray-300 px-3 py-2"
             />
           </div>
@@ -186,9 +184,9 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
                   <div>
                     <h3 className="font-semibold" data-testid={`playlist-name-${playlist.id}`}>{playlist.name}</h3>
                     {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
-                    <p className="text-xs text-gray-500">Songs: {playlist.songs?.length ?? 0}</p>
+                    <p className="text-xs text-gray-500">Songs: {playlist.songCount ?? 0}</p>
                     <p className="text-xs text-indigo-700" data-testid={`playlist-knowledge-${playlist.id}`}>
-                      Knowledge: {knowledgeByPlaylist[playlist.id] ?? 0}%
+                      Knowledge: {Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100)}%
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">

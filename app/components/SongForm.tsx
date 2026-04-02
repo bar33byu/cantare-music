@@ -7,7 +7,6 @@ interface SongFormProps {
 
 export function SongForm({ onSuccess }: SongFormProps) {
   const [title, setTitle] = useState('');
-  const [artist, setArtist] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [debugMode, setDebugMode] = useState(false);
@@ -28,12 +27,12 @@ export function SongForm({ onSuccess }: SongFormProps) {
     }
 
     try {
-      appendDebug(`POST /api/songs payload: ${JSON.stringify({ title: title.trim(), artist: artist.trim() || undefined })}`);
+      appendDebug(`POST /api/songs payload: ${JSON.stringify({ title: title.trim() })}`);
       // Create song record
       const createResponse = await fetch('/api/songs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), artist: artist.trim() || undefined }),
+        body: JSON.stringify({ title: title.trim() }),
       });
 
       appendDebug(`Received status ${createResponse.status} from /api/songs`);
@@ -97,20 +96,6 @@ export function SongForm({ onSuccess }: SongFormProps) {
           onChange={(e) => setTitle(e.target.value)}
           required
           data-testid="song-title-input"
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-        />
-      </div>
-
-      <div>
-        <label htmlFor="artist" className="block text-sm font-medium text-gray-700">
-          Artist
-        </label>
-        <input
-          id="artist"
-          type="text"
-          value={artist}
-          onChange={(e) => setArtist(e.target.value)}
-          data-testid="song-artist-input"
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
         />
       </div>

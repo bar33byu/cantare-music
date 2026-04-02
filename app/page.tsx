@@ -179,6 +179,18 @@ export default function Home() {
           <PlaylistPracticeView
             playlist={selectedPlaylist}
             onExit={() => setActiveView("playlists")}
+            onManage={() => setActiveView("playlist_detail")}
+            onSelectSong={async (songId) => {
+              try {
+                const response = await fetch(`/api/songs/${songId}`);
+                if (!response.ok) throw new Error("Failed to fetch song");
+                const fullSong: Song = await response.json();
+                setSelectedSong(fullSong);
+                setActiveView("song_practice");
+              } catch (err) {
+                console.error("Failed to load song:", err);
+              }
+            }}
           />
         </div>
       </div>
@@ -188,57 +200,85 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-4xl mx-auto">
-        <div className="mb-3 flex justify-between items-center">
+        <div className="mb-6">
           <h1 className="text-3xl font-bold">Cantare Music</h1>
-          <div className="flex gap-2">
-            <button
-              data-testid="library-tab"
-              onClick={() => {
-                setSelectedPlaylist(null);
-                setActiveView("library");
-              }}
-              className={`rounded px-4 py-2 ${activeView === "library" ? "bg-blue-600 text-white" : "border border-blue-300 text-blue-700"}`}
-            >
-              Library
-            </button>
-            <button
-              data-testid="playlists-tab"
-              onClick={() => {
-                setSelectedSong(null);
-                setActiveView("playlists");
-              }}
-              className={`rounded px-4 py-2 ${activeView === "playlists" ? "bg-indigo-600 text-white" : "border border-indigo-300 text-indigo-700"}`}
-            >
-              Playlists
-            </button>
-          </div>
+        </div>
+
+        {/* Tab navigation */}
+        <div className="flex gap-0 mb-6 border-b border-gray-300">
+          <button
+            data-testid="library-tab"
+            onClick={() => {
+              setSelectedPlaylist(null);
+              setActiveView("library");
+            }}
+            className={`px-4 py-3 font-medium transition-colors ${
+              activeView === "library"
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+          >
+            Library
+          </button>
+          <button
+            data-testid="playlists-tab"
+            onClick={() => {
+              setSelectedSong(null);
+              setActiveView("playlists");
+            }}
+            className={`px-4 py-3 font-medium transition-colors ${
+              activeView === "playlists"
+                ? "border-b-2 border-indigo-600 text-indigo-600"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+          >
+            Playlists
+          </button>
         </div>
 
         {activeView === "library" ? (
           <>
-            <div className="mb-6 flex justify-end">
-              <button
-                onClick={() => setActiveView("song_add")}
-                className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                Add Song
-              </button>
-            </div>
-
             <SongBrowser
               onSelectSong={handleSelectSong}
               onDeleteSong={handleSongDeleted}
               selectedSongId={selectedSong?.id || null}
               refreshTrigger={refreshTrigger}
             />
+            {/* Plus button for adding songs */}
+            <button
+              onClick={() => setActiveView("song_add")}
+              title="Add Song"
+              className="fixed top-6 right-6 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-6 w-6"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
           </>
         ) : null}
 
         {activeView === "playlists" ? (
           <PlaylistBrowser
-            onSelectPlaylist={(playlist) => {
-              setSelectedPlaylist(playlist);
-              setActiveView("playlist_practice");
+            onSelectPlaylist={async (playlist) => {
+              try {
+                const response = await fetch(`/api/playlists/${playlist.id}`);
+                if (!response.ok) throw new Error("Failed to fetch playlist");
+                const fullPlaylist: Playlist = await response.json();
+                setSelectedPlaylist(fullPlaylist);
+                setActiveView("playlist_practice");
+              } catch (err) {
+                console.error("Failed to load playlist:", err);
+              }
             }}
             onManagePlaylist={(playlist) => {
               setSelectedPlaylist(playlist);

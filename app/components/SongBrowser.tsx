@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { getMasteryColor } from '../lib/masteryColors';
 
 interface SongListItem {
@@ -26,6 +26,93 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   const [error, setError] = useState<string | null>(null);
   const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [filterText, setFilterText] = useState('');
+  const [showFilter, setShowFilter] = useState(false);
+
+  type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
+  interface SortState { key: SortKey; asc: boolean }
+  const SORT_STORAGE_KEY = 'song-browser-sort';
+  const DEFAULT_SORT: SortState = { key: 'date-practiced', asc: false };
+
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
+  const [showSortMenu, setShowSortMenu] = useState(false);
+
+  // Load persisted sort from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SORT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (
+          parsed !== null &&
+          typeof parsed === 'object' &&
+          'key' in parsed &&
+          'asc' in parsed &&
+          ['alphabetical', 'date-added', 'date-practiced'].includes((parsed as SortState).key) &&
+          typeof (parsed as SortState).asc === 'boolean'
+        ) {
+          setSort(parsed as SortState);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const updateSort = (next: SortState) => {
+    setSort(next);
+    try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+
+  // Per-key labels for the compact button and menu items
+  const sortKeyLabel: Record<SortKey, string> = {
+    alphabetical: 'Alphabetical',
+    'date-added': 'Date Added',
+    'date-practiced': 'Last Practiced',
+    'memory-score': 'Memory Score',
+  };
+
+  // Directional labels: index 0 = descending, index 1 = ascending
+  const sortDirLabel: Record<SortKey, [string, string]> = {
+    alphabetical: ['Z–A', 'A–Z'],
+    'date-added':   ['Newest', 'Oldest'],
+    'date-practiced': ['Recent', 'Oldest'],
+    'memory-score': ['Highest', 'Lowest'],
+  };
+
+  // Default direction when switching to a new key: asc for alpha, desc for everything else
+  const defaultAscForKey = (key: SortKey) => key === 'alphabetical';
+
+  const displayedSongs = useMemo(() => {
+    let result = songs;
+    if (filterText.trim()) {
+      const lower = filterText.toLowerCase();
+      result = result.filter((s) => s.title.toLowerCase().includes(lower));
+    }
+    const dir = sort.asc ? 1 : -1;
+    return [...result].sort((a, b) => {
+      switch (sort.key) {
+        case 'alphabetical':
+          return dir * a.title.localeCompare(b.title);
+        case 'date-added':
+          return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
+        case 'date-practiced': {
+          const aTime = a.lastPracticedAt ?? '';
+          const bTime = b.lastPracticedAt ?? '';
+          if (!aTime && !bTime) return 0;
+          // Always push unpracticed songs to the bottom regardless of direction
+          if (!aTime) return 1;
+          if (!bTime) return -1;
+          return dir * aTime.localeCompare(bTime);
+        }
+        case 'memory-score': {
+          const aScore = a.masteryPercent ?? 0;
+          const bScore = b.masteryPercent ?? 0;
+          return dir * (aScore - bScore);
+        }
+        default:
+          return 0;
+      }
+    });
+  }, [songs, filterText, sort]);
 
   useEffect(() => {
     fetchSongs();
@@ -149,22 +236,96 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
-        <p className="text-sm text-gray-600" data-testid="song-browser-edit-hint">
-          {isEditMode ? 'Editing mode is on. Delete controls are enabled.' : 'Delete controls are hidden until editing mode is enabled.'}
-        </p>
+      <div className="flex items-center gap-2">
         <button
           type="button"
-          data-testid="song-browser-toggle-edit-mode"
-          onClick={() => setIsEditMode((previous) => !previous)}
-          className={`rounded px-3 py-1.5 text-sm font-medium ${isEditMode ? 'bg-gray-700 text-white hover:bg-gray-800' : 'border border-red-300 text-red-700 hover:bg-red-50'}`}
+          data-testid="song-browser-filter-toggle"
+          onClick={() => {
+            setShowFilter((prev) => !prev);
+            if (showFilter) setFilterText('');
+          }}
+          title="Filter by title"
+          className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm transition-colors ${
+            showFilter ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'
+          }`}
         >
-          {isEditMode ? 'Done Editing' : 'Edit Library'}
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+          </svg>
+          Filter
         </button>
+        {showFilter && (
+          <input
+            type="text"
+            data-testid="song-browser-filter-input"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            placeholder="Search titles…"
+            autoFocus
+            className="flex-1 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-400 focus:outline-none"
+          />
+        )}
+        <div className="relative ml-auto">
+          <button
+            type="button"
+            data-testid="song-browser-sort-toggle"
+            onClick={() => setShowSortMenu((prev) => !prev)}
+            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm text-gray-500 hover:bg-gray-100"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+              <line x1="8" y1="6" x2="21" y2="6" />
+              <line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
+              <polyline points="3 6 4 7 6 5" />
+              <polyline points="3 12 4 13 6 11" />
+              <polyline points="3 18 4 19 6 17" />
+            </svg>
+            {sortDirLabel[sort.key][sort.asc ? 1 : 0]}
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          {showSortMenu && (
+            <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-gray-200 bg-white shadow-lg">
+              {(['alphabetical', 'date-added', 'date-practiced', 'memory-score'] as const).map((key) => {
+                const isActive = sort.key === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    data-testid={`song-browser-sort-${key}`}
+                    onClick={() => {
+                      const newAsc = isActive ? !sort.asc : defaultAscForKey(key);
+                      updateSort({ key, asc: newAsc });
+                      setShowSortMenu(false);
+                    }}
+                    className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg hover:bg-gray-50 ${
+                      isActive ? 'font-semibold text-blue-600' : 'text-gray-700'
+                    }`}
+                  >
+                    {sortKeyLabel[key]}
+                    {isActive && (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                        {sort.asc
+                          ? <polyline points="18 15 12 9 6 15" />
+                          : <polyline points="6 9 12 15 18 9" />}
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="song-browser-grid">
-        {songs.map((song) => {
+        {displayedSongs.length === 0 && (
+          <p className="col-span-full text-center py-8 text-gray-500" data-testid="song-browser-filter-empty">
+            No songs match &ldquo;{filterText}&rdquo;.
+          </p>
+        )}
+        {displayedSongs.map((song) => {
           const masteryPercent = clampPercent(song.masteryPercent);
           const masteryColor = getMasteryColor(masteryPercent);
 
@@ -223,6 +384,24 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           );
         })}
       </div>
+
+      <button
+        type="button"
+        data-testid="song-browser-toggle-edit-mode"
+        onClick={() => setIsEditMode((previous) => !previous)}
+        title={isEditMode ? 'Done Editing' : 'Edit Library'}
+        className={`fixed bottom-6 right-6 flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-colors ${
+          isEditMode ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-white text-red-600 hover:bg-red-50 border border-red-200'
+        }`}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+        </svg>
+      </button>
     </div>
   );
 }

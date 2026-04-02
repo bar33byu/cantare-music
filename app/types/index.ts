@@ -50,5 +50,5 @@ export interface Playlist {
   eventDate?: string;
   isRetired: boolean;
   createdAt: string;
-  songs: Array<Song & { position: number }>;
+  songs: Array<Song & { position: number; masteryPercent?: number; lastPracticedAt?: string | null }>;
 }

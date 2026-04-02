@@ -27,11 +27,10 @@ describe('SongForm', () => {
     });
   });
 
-  it('renders title input, artist input, file input, submit button', () => {
+  it('renders title input, file input, submit button', () => {
     render(<SongForm onSuccess={mockOnSuccess} />);
 
     expect(screen.getByTestId('song-title-input')).toBeInTheDocument();
-    expect(screen.getByTestId('song-artist-input')).toBeInTheDocument();
     expect(screen.getByTestId('audio-file-input')).toBeInTheDocument();
     expect(screen.getByTestId('song-form-submit')).toBeInTheDocument();
     expect(screen.getByText('Max 15 MB')).toBeInTheDocument();

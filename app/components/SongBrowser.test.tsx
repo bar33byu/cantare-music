@@ -34,6 +34,7 @@ describe('SongBrowser', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (window as any).confirm = vi.fn(() => true);
+    localStorage.clear();
   });
 
   it('shows loading state initially', () => {
@@ -232,5 +233,159 @@ describe('SongBrowser', () => {
     expect(screen.queryByTestId('song-delete-song-1')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('song-browser-toggle-edit-mode'));
     expect(screen.getByTestId('song-delete-song-1')).toBeInTheDocument();
+  });
+
+  it('filters songs by title substring', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-browser-filter-toggle'));
+    const input = screen.getByTestId('song-browser-filter-input');
+    fireEvent.change(input, { target: { value: 'Song 1' } });
+
+    expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('song-item-song-2')).not.toBeInTheDocument();
+  });
+
+  it('shows empty message when filter matches nothing', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-browser-filter-toggle'));
+    fireEvent.change(screen.getByTestId('song-browser-filter-input'), { target: { value: 'zzznomatch' } });
+
+    expect(screen.getByTestId('song-browser-filter-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('song-item-song-1')).not.toBeInTheDocument();
+  });
+
+  it('clears filter when filter toggle is clicked a second time', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-browser-filter-toggle'));
+    fireEvent.change(screen.getByTestId('song-browser-filter-input'), { target: { value: 'Song 1' } });
+    expect(screen.queryByTestId('song-item-song-2')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('song-browser-filter-toggle'));
+    expect(screen.queryByTestId('song-browser-filter-input')).not.toBeInTheDocument();
+    expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
+  });
+
+  it('changes sort order via sort menu', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    // Open sort menu and pick "Date Added"
+    fireEvent.click(screen.getByTestId('song-browser-sort-toggle'));
+    expect(screen.getByTestId('song-browser-sort-alphabetical')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('song-browser-sort-date-added'));
+
+    // Menu should close after selection
+    expect(screen.queryByTestId('song-browser-sort-alphabetical')).not.toBeInTheDocument();
+    // Both songs still visible
+    expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
+  });
+
+  it('toggles sort direction when clicking the active sort key', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    // Default is date-practiced desc — label should be "Recent"
+    expect(screen.getByTestId('song-browser-sort-toggle')).toHaveTextContent('Recent');
+
+    // Open menu and click the already-active "date-practiced" → toggles to asc
+    fireEvent.click(screen.getByTestId('song-browser-sort-toggle'));
+    fireEvent.click(screen.getByTestId('song-browser-sort-date-practiced'));
+    expect(screen.getByTestId('song-browser-sort-toggle')).toHaveTextContent('Oldest');
+
+    // Toggle back
+    fireEvent.click(screen.getByTestId('song-browser-sort-toggle'));
+    fireEvent.click(screen.getByTestId('song-browser-sort-date-practiced'));
+    expect(screen.getByTestId('song-browser-sort-toggle')).toHaveTextContent('Recent');
+  });
+
+  it('sorts by memory score descending by default', async () => {
+    const songsWithScores = [
+      { ...mockSongs[0], masteryPercent: 30 },
+      { ...mockSongs[1], masteryPercent: 80 },
+    ];
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(songsWithScores),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-browser-sort-toggle'));
+    fireEvent.click(screen.getByTestId('song-browser-sort-memory-score'));
+
+    expect(screen.getByTestId('song-browser-sort-toggle')).toHaveTextContent('Highest');
+    expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
+  });
+
+  it('persists sort preference to localStorage', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-browser-sort-toggle'));
+    fireEvent.click(screen.getByTestId('song-browser-sort-alphabetical'));
+
+    const stored = JSON.parse(localStorage.getItem('song-browser-sort') ?? 'null');
+    expect(stored).toEqual({ key: 'alphabetical', asc: true });
   });
 });
