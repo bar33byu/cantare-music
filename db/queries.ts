@@ -311,6 +311,51 @@ export async function getLatestRatingTimeBySongIds(
   return bySong;
 }
 
+export async function getSongKnowledgeBySongIds(
+  songIds: string[]
+): Promise<Record<string, number>> {
+  if (songIds.length === 0) {
+    return {};
+  }
+
+  const rows = await db()
+    .select({
+      songId: segments.songId,
+      segmentId: segments.id,
+      rating: practiceRatings.rating,
+      ratedAt: practiceRatings.ratedAt,
+    })
+    .from(practiceRatings)
+    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
+    .where(inArray(segments.songId, songIds))
+    .orderBy(desc(practiceRatings.ratedAt));
+
+  const latestBySongSegment: Record<string, Record<string, number>> = {};
+
+  for (const row of rows) {
+    if (!latestBySongSegment[row.songId]) {
+      latestBySongSegment[row.songId] = {};
+    }
+    if (latestBySongSegment[row.songId][row.segmentId] !== undefined) {
+      continue;
+    }
+    latestBySongSegment[row.songId][row.segmentId] = row.rating;
+  }
+
+  const knowledgeBySong: Record<string, number> = {};
+  for (const songId of Object.keys(latestBySongSegment)) {
+    const segmentRatings = Object.values(latestBySongSegment[songId]);
+    if (segmentRatings.length === 0) {
+      knowledgeBySong[songId] = 0;
+      continue;
+    }
+    const averageRating = segmentRatings.reduce((sum, rating) => sum + rating, 0) / segmentRatings.length;
+    knowledgeBySong[songId] = Math.round(averageRating * 20);
+  }
+
+  return knowledgeBySong;
+}
+
 export async function saveRatings(
   ratings: Array<{
     segmentId: string;

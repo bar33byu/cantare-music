@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { getMasteryColor } from '../lib/masteryColors';
 
 interface SongListItem {
   id: string;
@@ -9,6 +10,7 @@ interface SongListItem {
   audioKey?: string;
   createdAt: string;
   lastPracticedAt?: string | null;
+  masteryPercent?: number;
 }
 
 interface SongBrowserProps {
@@ -114,6 +116,13 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
     return 'Last practiced just now';
   };
 
+  const clampPercent = (value?: number): number => {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(100, Math.round(value)));
+  };
+
   if (loading) {
     return (
       <div className="text-center py-8" data-testid="song-browser-loading">
@@ -155,15 +164,29 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="song-browser-grid">
-        {songs.map((song) => (
+        {songs.map((song) => {
+          const masteryPercent = clampPercent(song.masteryPercent);
+          const masteryColor = getMasteryColor(masteryPercent);
+
+          return (
           <div
             key={song.id}
-            className={`bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 ${
+            className={`relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 ${
               selectedSongId === song.id ? 'border-blue-500' : 'border-transparent'
             }`}
             onClick={() => onSelectSong(song)}
             data-testid={`song-item-${song.id}`}
           >
+            <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100" data-testid={`song-mastery-track-${song.id}`}>
+              <div
+                className="h-full rounded-tl-lg"
+                data-testid={`song-mastery-fill-${song.id}`}
+                style={{ width: `${masteryPercent}%`, backgroundColor: masteryColor }}
+              />
+            </div>
+            <p className="absolute right-2 top-1 text-[11px] font-semibold text-gray-700" data-testid={`song-mastery-percent-${song.id}`}>
+              {masteryPercent}%
+            </p>
             <h3 className="text-xl font-semibold mb-2" data-testid={`song-title-${song.id}`}>
               {song.title}
             </h3>
@@ -197,7 +220,8 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
               </div>
             ) : null}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

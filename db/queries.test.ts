@@ -365,6 +365,47 @@ describe("getLatestRatingTimeBySongIds", () => {
   });
 });
 
+describe("getSongKnowledgeBySongIds", () => {
+  it("returns rounded percentage based on latest rating per segment", async () => {
+    const rows = [
+      {
+        songId: "song-1",
+        segmentId: "seg-1",
+        rating: 5,
+        ratedAt: new Date("2026-04-02T10:00:00.000Z"),
+      },
+      {
+        songId: "song-1",
+        segmentId: "seg-1",
+        rating: 2,
+        ratedAt: new Date("2026-04-01T10:00:00.000Z"),
+      },
+      {
+        songId: "song-1",
+        segmentId: "seg-2",
+        rating: 3,
+        ratedAt: new Date("2026-04-02T09:00:00.000Z"),
+      },
+      {
+        songId: "song-2",
+        segmentId: "seg-3",
+        rating: 4,
+        ratedAt: new Date("2026-04-02T08:00:00.000Z"),
+      },
+    ];
+    const chain = makeChain(rows);
+    selectSpy.mockReturnValue(chain);
+
+    const { getSongKnowledgeBySongIds } = await getQueries();
+    const result = await getSongKnowledgeBySongIds(["song-1", "song-2"]);
+
+    // song-1 latest ratings: 5 and 3 => avg 4 => 80%
+    expect(result["song-1"]).toBe(80);
+    // song-2 latest rating: 4 => 80%
+    expect(result["song-2"]).toBe(80);
+  });
+});
+
 describe("saveRatings", () => {
   it("inserts all ratings with generated ids and onConflictDoNothing", async () => {
     const insertChain = makeChain([]);
