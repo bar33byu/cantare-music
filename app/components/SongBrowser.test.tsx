@@ -56,7 +56,7 @@ describe('SongBrowser', () => {
     expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
     expect(screen.getByTestId('song-title-song-1')).toHaveTextContent('Test Song 1');
     expect(screen.getByTestId('song-artist-song-1')).toHaveTextContent('Test Artist 1');
-    expect(screen.getByTestId('song-last-practiced-song-1')).toHaveTextContent('Last practiced 2/1/2024');
+    expect(screen.getByTestId('song-last-practiced-song-1').textContent).toMatch(/^Last practiced .* ago$/);
     expect(screen.getByTestId('song-last-practiced-song-2')).toHaveTextContent('Not practiced yet');
 
     expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();

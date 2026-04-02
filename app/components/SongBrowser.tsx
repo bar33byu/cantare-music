@@ -82,6 +82,38 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
     }
   };
 
+  const getLastPracticedLabel = (value?: string | null): string => {
+    if (!value) {
+      return 'Not practiced yet';
+    }
+
+    const practicedAtMs = Date.parse(value);
+    if (Number.isNaN(practicedAtMs)) {
+      return 'Not practiced yet';
+    }
+
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - practicedAtMs) / 1000));
+
+    const units: Array<{ unit: Intl.RelativeTimeFormatUnit; seconds: number }> = [
+      { unit: 'year', seconds: 60 * 60 * 24 * 365 },
+      { unit: 'month', seconds: 60 * 60 * 24 * 30 },
+      { unit: 'week', seconds: 60 * 60 * 24 * 7 },
+      { unit: 'day', seconds: 60 * 60 * 24 },
+      { unit: 'hour', seconds: 60 * 60 },
+      { unit: 'minute', seconds: 60 },
+    ];
+
+    const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'always' });
+    for (const { unit, seconds } of units) {
+      if (elapsedSeconds >= seconds) {
+        const amount = Math.floor(elapsedSeconds / seconds);
+        return `Last practiced ${rtf.format(-amount, unit)}`;
+      }
+    }
+
+    return 'Last practiced just now';
+  };
+
   if (loading) {
     return (
       <div className="text-center py-8" data-testid="song-browser-loading">
@@ -141,9 +173,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
               </p>
             )}
             <p className="text-xs text-gray-500 mt-2" data-testid={`song-last-practiced-${song.id}`}>
-              {song.lastPracticedAt
-                ? `Last practiced ${new Date(song.lastPracticedAt).toLocaleDateString()}`
-                : 'Not practiced yet'}
+              {getLastPracticedLabel(song.lastPracticedAt)}
             </p>
             {selectedSongId === song.id && (
               <div className="mt-2 text-sm text-blue-600 font-medium" data-testid={`song-selected-${song.id}`}>
