@@ -64,6 +64,7 @@ export default function Home() {
 
   const handleBackToList = () => {
     setSelectedSong(null);
+    setRefreshTrigger((previous) => previous + 1);
     setActiveView("library");
   };
 
@@ -93,6 +94,7 @@ export default function Home() {
         setActiveView("playlist_practice");
         return;
       }
+      setRefreshTrigger((previous) => previous + 1);
       setActiveView("library");
     };
 
@@ -136,7 +138,10 @@ export default function Home() {
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-2xl mx-auto">
           <button
-            onClick={() => setActiveView("library")}
+            onClick={() => {
+              setRefreshTrigger((previous) => previous + 1);
+              setActiveView("library");
+            }}
             className="mb-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
           >
             ← Back to Songs

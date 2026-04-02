@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllSongs, createSong, getLatestRatingTimeBySongIds } from '../../../db/queries';
 
-export const dynamic = 'force-dynamic';
-
 function toIsoString(value: unknown): string | null {
   if (!value) {
     return null;
