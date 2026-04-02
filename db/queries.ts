@@ -484,7 +484,9 @@ export async function getPlaylistById(id: string): Promise<PlaylistDetail | null
     masteryPercent: masteryBySong[songRow.songId] ?? 0,
     lastPracticedAt: songRow.lastPracticedAt
       ? toIso(songRow.lastPracticedAt)
-      : latestRatingTimes[songRow.songId] ?? null,
+      : latestRatingTimes[songRow.songId]
+        ? toIso(latestRatingTimes[songRow.songId])
+        : null,
   }));
 
   return {

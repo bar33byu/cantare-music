@@ -16,7 +16,7 @@ export interface Song {
   audioUrl: string;
   segments: Segment[];
   createdAt: string;
-  lastPracticedAt?: string;
+  lastPracticedAt?: string | null;
   updatedAt?: string;
 }
 
@@ -50,5 +50,5 @@ export interface Playlist {
   eventDate?: string;
   isRetired: boolean;
   createdAt: string;
-  songs: Array<Song & { position: number; masteryPercent?: number; lastPracticedAt?: string | null }>;
+  songs: Array<Song & { position: number; masteryPercent?: number }>;
 }
