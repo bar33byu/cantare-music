@@ -8,7 +8,7 @@ import SegmentCard from "./SegmentCard";
 import KnowledgeBar from "./KnowledgeBar";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { toPlayableAudioUrl } from "../lib/audioUrls";
+import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
 import { getMasteryColor, getMasteryPercent } from "../lib/masteryColors";
 
 interface TransportDebugState {
@@ -68,6 +68,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(false);
+  const [useProxyFallback, setUseProxyFallback] = React.useState(false);
   // True after the user explicitly pauses; cleared when playback restarts.
   // Used to distinguish a user pause from the hook stopping at a natural segment end.
   const pausedByUserRef = React.useRef(false);
@@ -76,7 +77,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // Snapshot of the current playback state readable in effects without adding each
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
-  const playbackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
+  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(song.audioUrl)), [song.audioUrl]);
+  const playbackAudioUrl = useMemo(() => {
+    if (useProxyFallback && proxyAudioUrl) {
+      return proxyAudioUrl;
+    }
+    return toPlayableAudioUrl(song.audioUrl);
+  }, [proxyAudioUrl, song.audioUrl, useProxyFallback]);
   const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
@@ -102,6 +109,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     : 0;
   // Keep snapshot up-to-date every render (before effects run).
   playbackStateRef.current = { isPlaying, currentMs, currentSegment, durationMs };
+
+  useEffect(() => {
+    // Reset per-song fallback state when switching songs.
+    setUseProxyFallback(false);
+  }, [song.id]);
+
+  useEffect(() => {
+    if (!playbackError || useProxyFallback || !proxyAudioUrl) {
+      return;
+    }
+    // If direct/public URL fails, transparently retry through same-origin proxy.
+    setUseProxyFallback(true);
+  }, [playbackError, proxyAudioUrl, useProxyFallback]);
 
   useEffect(() => {
     if (!song.audioUrl || !currentSegment) {
@@ -583,7 +603,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             aria-label="Previous segment"
             data-testid="practice-prev-segment"
             onClick={handlePrevSegment}
-            disabled={!isReady || !hasSegments || isFirst}
+            disabled={!hasSegments || isFirst}
             className="inline-flex h-[70%] min-h-[220px] max-h-[560px] w-14 shrink-0 items-center justify-center rounded-[28px] border border-indigo-300/80 bg-gradient-to-b from-white via-indigo-50 to-indigo-100 text-indigo-700 shadow-lg shadow-indigo-300/30 transition hover:-translate-y-0.5 hover:from-white hover:to-indigo-200 hover:shadow-xl disabled:opacity-30"
           >
             <span aria-hidden="true" className="text-3xl leading-none">&#x2039;</span>
@@ -683,7 +703,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             aria-label="Next segment"
             data-testid="practice-next-segment"
             onClick={handleNextSegment}
-            disabled={!isReady || !hasSegments || isLast}
+            disabled={!hasSegments || isLast}
             className="inline-flex h-[70%] min-h-[220px] max-h-[560px] w-14 shrink-0 items-center justify-center rounded-[28px] border border-indigo-300/80 bg-gradient-to-b from-white via-indigo-50 to-indigo-100 text-indigo-700 shadow-lg shadow-indigo-300/30 transition hover:-translate-y-0.5 hover:from-white hover:to-indigo-200 hover:shadow-xl disabled:opacity-30"
           >
             <span aria-hidden="true" className="text-3xl leading-none">&#x203A;</span>
