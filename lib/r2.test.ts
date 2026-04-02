@@ -59,6 +59,16 @@ describe('r2 helpers', () => {
     );
   });
 
+  it('getPublicUrl does not use private R2_ENDPOINT for browser playback', async () => {
+    process.env.R2_PUBLIC_URL = '';
+    process.env.R2_PUBLIC_BASE_URL = '';
+    process.env.R2_PUBLIC_BASE_UR = '';
+    process.env.R2_ENDPOINT = 'https://acct123.r2.cloudflarestorage.com';
+    const { getPublicUrl } = await import('./r2');
+
+    expect(getPublicUrl('audio/song-1/file.mp3')).toBe('/api/audio/audio/song-1/file.mp3');
+  });
+
   it('generateUploadKey returns string starting with audio/', async () => {
     const { generateUploadKey } = await import('./r2');
     expect(generateUploadKey('song-1', 'clip.mp3')).toMatch(/^audio\//);

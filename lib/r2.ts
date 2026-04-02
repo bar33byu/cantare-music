@@ -31,7 +31,6 @@ export function getPublicUrl(key: string): string {
     process.env.R2_PUBLIC_URL,
     process.env.R2_PUBLIC_BASE_URL,
     process.env.R2_PUBLIC_BASE_UR,
-    process.env.R2_ENDPOINT,
   );
 
   if (!configuredPublicUrl) {
@@ -39,7 +38,6 @@ export function getPublicUrl(key: string): string {
     return `/api/audio/${encodedKey}`;
   }
 
-  // If the configuredPublicUrl looks like an account endpoint, append the key.
   return `${configuredPublicUrl.replace(/\/$/, '')}/${encodedKey}`;
 }
 
