@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRatingsForSong, getSongById, getSegmentsBySongId, saveRatings } from '../../../../../db/queries';
+import { getRatingsForSong, getSongById, getSegmentsBySongId, saveRatings, markSongPracticed } from '../../../../../db/queries';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -84,6 +84,10 @@ export async function POST(
         ratedAt: new Date(item.ratedAt),
       }))
     );
+
+    if (ratings.length > 0) {
+      await markSongPracticed(id, new Date());
+    }
 
     return new NextResponse(null, { status: 204 });
   } catch (error) {

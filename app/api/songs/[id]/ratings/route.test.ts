@@ -14,10 +14,11 @@ vi.mock('../../../../../db/queries', () => ({
   getRatingsForSong: vi.fn(),
   getSegmentsBySongId: vi.fn(),
   saveRatings: vi.fn(),
+  markSongPracticed: vi.fn(),
 }));
 
 import { GET, POST } from './route';
-import { getSongById, getRatingsForSong, getSegmentsBySongId, saveRatings } from '../../../../../db/queries';
+import { getSongById, getRatingsForSong, getSegmentsBySongId, saveRatings, markSongPracticed } from '../../../../../db/queries';
 
 describe('GET /api/songs/[id]/ratings', () => {
   beforeEach(() => {
@@ -101,6 +102,7 @@ describe('POST /api/songs/[id]/ratings', () => {
         ratedAt: new Date('2026-03-31T12:00:00.000Z'),
       },
     ]);
+    expect(markSongPracticed).toHaveBeenCalledWith('song-1', expect.any(Date));
   });
 
   it('returns 400 for invalid rating value', async () => {

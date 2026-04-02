@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllSongs, createSong } from '../../../db/queries';
+import { getAllSongs, createSong, getLatestRatingTimeBySongIds } from '../../../db/queries';
+
+export const dynamic = 'force-dynamic';
 
 function toIsoString(value: unknown): string | null {
   if (!value) {
@@ -33,11 +35,12 @@ function isMissingDatabaseConfigError(error: unknown): boolean {
 export async function GET() {
   try {
     const songs = await getAllSongs();
+    const ratingFallbackBySongId = await getLatestRatingTimeBySongIds(songs.map((song) => song.id));
     return NextResponse.json(
       songs.map((song) => ({
         ...song,
         createdAt: toIsoString(song.createdAt) ?? new Date(0).toISOString(),
-        lastPracticedAt: toIsoString(song.lastPracticedAt),
+        lastPracticedAt: toIsoString(song.lastPracticedAt ?? ratingFallbackBySongId[song.id] ?? null),
       }))
     );
   } catch (error) {

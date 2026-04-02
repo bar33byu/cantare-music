@@ -11,11 +11,12 @@ vi.mock('../../../db/index', () => ({
 
 vi.mock('../../../db/queries', () => ({
   getAllSongs: vi.fn(),
+  getLatestRatingTimeBySongIds: vi.fn(),
   createSong: vi.fn(),
 }));
 
 import { GET, POST } from './route';
-import { getAllSongs, createSong } from '../../../db/queries';
+import { getAllSongs, getLatestRatingTimeBySongIds, createSong } from '../../../db/queries';
 
 describe('GET /api/songs', () => {
   it('returns array of songs', async () => {
@@ -28,6 +29,7 @@ describe('GET /api/songs', () => {
       lastPracticedAt: new Date('2024-01-02T00:00:00.000Z'),
     }];
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
+    vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
 
     const response = await GET();
     const data = await response.json();
@@ -41,6 +43,7 @@ describe('GET /api/songs', () => {
       },
     ]);
     expect(getAllSongs).toHaveBeenCalled();
+    expect(getLatestRatingTimeBySongIds).toHaveBeenCalledWith(['1']);
   });
 
   it('handles string timestamps from the database', async () => {
@@ -53,6 +56,7 @@ describe('GET /api/songs', () => {
       lastPracticedAt: '2024-03-11T00:00:00.000Z',
     }];
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs as any);
+    vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
 
     const response = await GET();
     const data = await response.json();
@@ -75,6 +79,27 @@ describe('GET /api/songs', () => {
 
     expect(response.status).toBe(200);
     expect(data).toEqual([]);
+  });
+
+  it('falls back to latest rating time when lastPracticedAt is null', async () => {
+    const mockSongs = [{
+      id: 'song-9',
+      title: 'Song 9',
+      artist: null,
+      audioKey: null,
+      createdAt: new Date('2024-03-10T00:00:00.000Z'),
+      lastPracticedAt: null,
+    }];
+    vi.mocked(getAllSongs).mockResolvedValue(mockSongs as any);
+    vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({
+      'song-9': new Date('2024-03-20T00:00:00.000Z'),
+    });
+
+    const response = await GET();
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data[0].lastPracticedAt).toBe('2024-03-20T00:00:00.000Z');
   });
 });
 

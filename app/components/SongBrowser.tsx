@@ -33,7 +33,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch('/api/songs');
+      const response = await fetch('/api/songs', { cache: 'no-store' });
       if (!response.ok) {
         const serverError = await response
           .json()

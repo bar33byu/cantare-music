@@ -284,6 +284,33 @@ export async function getRatingsForSong(
   }));
 }
 
+export async function getLatestRatingTimeBySongIds(
+  songIds: string[]
+): Promise<Record<string, Date>> {
+  if (songIds.length === 0) {
+    return {};
+  }
+
+  const rows = await db()
+    .select({
+      songId: segments.songId,
+      ratedAt: practiceRatings.ratedAt,
+    })
+    .from(practiceRatings)
+    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
+    .where(inArray(segments.songId, songIds))
+    .orderBy(desc(practiceRatings.ratedAt));
+
+  const bySong: Record<string, Date> = {};
+  for (const row of rows) {
+    if (!bySong[row.songId]) {
+      bySong[row.songId] = row.ratedAt;
+    }
+  }
+
+  return bySong;
+}
+
 export async function saveRatings(
   ratings: Array<{
     segmentId: string;

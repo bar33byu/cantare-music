@@ -338,6 +338,33 @@ describe("getRatingsForSong", () => {
   });
 });
 
+describe("getLatestRatingTimeBySongIds", () => {
+  it("returns latest rating timestamp per song", async () => {
+    const rows = [
+      {
+        songId: "song-1",
+        ratedAt: new Date("2026-04-02T10:00:00.000Z"),
+      },
+      {
+        songId: "song-1",
+        ratedAt: new Date("2026-04-01T10:00:00.000Z"),
+      },
+      {
+        songId: "song-2",
+        ratedAt: new Date("2026-04-02T09:00:00.000Z"),
+      },
+    ];
+    const chain = makeChain(rows);
+    selectSpy.mockReturnValue(chain);
+
+    const { getLatestRatingTimeBySongIds } = await getQueries();
+    const result = await getLatestRatingTimeBySongIds(["song-1", "song-2"]);
+
+    expect(result["song-1"]).toEqual(new Date("2026-04-02T10:00:00.000Z"));
+    expect(result["song-2"]).toEqual(new Date("2026-04-02T09:00:00.000Z"));
+  });
+});
+
 describe("saveRatings", () => {
   it("inserts all ratings with generated ids and onConflictDoNothing", async () => {
     const insertChain = makeChain([]);
