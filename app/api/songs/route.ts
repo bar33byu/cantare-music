@@ -26,6 +26,10 @@ function formatError(error: unknown) {
   return shouldExpose ? { error: message } : { error: 'Internal server error' };
 }
 
+function isMissingDatabaseConfigError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('DATABASE_URL environment variable is not set');
+}
+
 export async function GET() {
   try {
     const songs = await getAllSongs();
@@ -37,6 +41,10 @@ export async function GET() {
       }))
     );
   } catch (error) {
+    if (isMissingDatabaseConfigError(error)) {
+      // Local/dev environments may intentionally run without DB while wiring UI.
+      return NextResponse.json([]);
+    }
     console.error('Error fetching songs:', error);
     return NextResponse.json(formatError(error), { status: 500 });
   }

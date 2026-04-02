@@ -66,6 +66,16 @@ describe('GET /api/songs', () => {
       },
     ]);
   });
+
+  it('returns empty list when database is not configured', async () => {
+    vi.mocked(getAllSongs).mockRejectedValue(new Error('DATABASE_URL environment variable is not set'));
+
+    const response = await GET();
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual([]);
+  });
 });
 
 describe('POST /api/songs', () => {
