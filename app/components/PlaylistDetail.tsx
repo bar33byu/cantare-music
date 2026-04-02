@@ -7,9 +7,10 @@ interface PlaylistDetailProps {
   playlistId: string;
   onBack: () => void;
   onPractice: (playlist: Playlist) => void;
+  onEditSong?: (songId: string) => void;
 }
 
-export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetailProps) {
+export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: PlaylistDetailProps) {
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [selectedSongId, setSelectedSongId] = useState('');
@@ -17,6 +18,9 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [inlineCreatePending, setInlineCreatePending] = useState(false);
+  const [pickerError, setPickerError] = useState<string | null>(null);
 
   const fetchPlaylist = async () => {
     const response = await fetch(`/api/playlists/${playlistId}`);
@@ -35,8 +39,11 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
   }, [playlistId]);
 
   const openSongPicker = async () => {
+    setPickerError(null);
+    setPickerOpen(true);
     const response = await fetch('/api/songs');
     if (!response.ok) {
+      setPickerError('Unable to load songs right now.');
       return;
     }
     const data = (await response.json()) as Song[];
@@ -46,13 +53,19 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
 
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
+    setSelectedSongId('');
     setShowSuggestions(true);
+    setPickerError(null);
   };
 
   const handleSelectSong = (songId: string) => {
+    if (existingIds.has(songId)) {
+      return;
+    }
     setSelectedSongId(songId);
     setSearchQuery('');
     setShowSuggestions(false);
+    setPickerError(null);
   };
 
   const handleAddSong = async () => {
@@ -66,8 +79,58 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
     });
 
     if (response.ok) {
+      const songId = selectedSongId;
       setSelectedSongId('');
+      setSearchQuery('');
+      setShowSuggestions(false);
+      setPickerError(null);
       await fetchPlaylist();
+      onEditSong?.(songId);
+    }
+  };
+
+  const handleCreateSongAndAdd = async () => {
+    const title = searchQuery.trim();
+    if (!title) {
+      return;
+    }
+
+    setInlineCreatePending(true);
+    setPickerError(null);
+
+    try {
+      const createResponse = await fetch('/api/songs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+
+      if (!createResponse.ok) {
+        throw new Error('Unable to create song right now.');
+      }
+
+      const createdSong = (await createResponse.json()) as Song;
+
+      const addResponse = await fetch(`/api/playlists/${playlistId}/songs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ songId: createdSong.id }),
+      });
+
+      if (!addResponse.ok) {
+        throw new Error('Song was created, but adding it to the playlist failed.');
+      }
+
+      setSongs((previous) => [...previous, { ...createdSong, segments: createdSong.segments ?? [] }]);
+      setSearchQuery('');
+      setSelectedSongId('');
+      setShowSuggestions(false);
+      await fetchPlaylist();
+      onEditSong?.(createdSong.id);
+    } catch (error) {
+      setPickerError(error instanceof Error ? error.message : 'Unable to create song right now.');
+    } finally {
+      setInlineCreatePending(false);
     }
   };
 
@@ -133,6 +196,10 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
         return title.includes(query) || artist.includes(query);
       });
 
+  const creatableTitle = searchQuery.trim();
+  const exactExistingSong = songs.find((song) => song.title.trim().toLowerCase() === creatableTitle.toLowerCase());
+  const canCreateSong = creatableTitle.length > 0 && !exactExistingSong;
+
   // Get the selected song details for display
   const selectedSong = songs.find((s) => s.id === selectedSongId);
 
@@ -153,7 +220,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
         <button data-testid="playlist-add-song" className="rounded border border-indigo-300 px-3 py-1 text-indigo-700" onClick={() => void openSongPicker()}>
           Add Song
         </button>
-        {songs.length > 0 ? (
+        {pickerOpen ? (
           <div className="mt-3 space-y-2">
             <div className="relative">
               <input
@@ -186,6 +253,21 @@ export function PlaylistDetail({ playlistId, onBack, onPractice }: PlaylistDetai
                 </ul>
               )}
             </div>
+            {canCreateSong ? (
+              <button
+                data-testid="playlist-song-create-submit"
+                className="rounded border border-emerald-300 px-3 py-2 text-emerald-700 hover:bg-emerald-50"
+                onClick={() => void handleCreateSongAndAdd()}
+                disabled={inlineCreatePending}
+              >
+                {inlineCreatePending ? 'Creating Song...' : `Create and Add "${creatableTitle}"`}
+              </button>
+            ) : null}
+            {pickerError ? (
+              <p data-testid="playlist-song-picker-error" className="text-sm text-red-600">
+                {pickerError}
+              </p>
+            ) : null}
             {selectedSong && (
               <div className="flex items-center justify-between gap-2 rounded bg-indigo-50 px-3 py-2">
                 <div>

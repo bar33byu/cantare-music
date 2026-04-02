@@ -129,6 +129,14 @@ describe('SegmentEditor', () => {
     });
   });
 
+  it('uses a playable proxied audio URL for edit-page playback', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(vi.mocked(useAudioPlayer)).toHaveBeenCalledWith('/api/audio/audio/song.mp3');
+    });
+  });
+
   it('creates new section using timeline-aware defaults', async () => {
     render(<SegmentEditor songId="song-1" />);
 
@@ -146,6 +154,47 @@ describe('SegmentEditor', () => {
       const body = JSON.parse(String(postCall?.[1]?.body ?? '{}'));
       expect(body.startMs).toBe(40500);
       expect(body.endMs).toBe(60500);
+    });
+  });
+
+  it('bulk-imports sections from separator-delimited lyrics with equal timing', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
+      target: {
+        value: ['Line A1', 'Line A2', '***', 'Line B1', 'Line B2'].join('\n'),
+      },
+    });
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
+
+    await waitFor(() => {
+      const patchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/') && init?.method === 'PATCH'
+      );
+      expect(patchCalls.length).toBeGreaterThanOrEqual(2);
+
+      const firstPatchBody = JSON.parse(String(patchCalls[patchCalls.length - 2][1]?.body ?? '{}'));
+      const secondPatchBody = JSON.parse(String(patchCalls[patchCalls.length - 1][1]?.body ?? '{}'));
+
+      expect(firstPatchBody.startMs).toBe(0);
+      expect(firstPatchBody.endMs).toBe(30000);
+      expect(firstPatchBody.lyricText).toBe('Line A1\nLine A2');
+
+      expect(secondPatchBody.startMs).toBe(30000);
+      expect(secondPatchBody.endMs).toBe(60000);
+      expect(secondPatchBody.lyricText).toBe('Line B1\nLine B2');
+
+      const createCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).endsWith('/api/songs/song-1/segments') && init?.method === 'POST'
+      );
+
+      // No new sections are needed when there are already 2 existing sections.
+      expect(createCalls.length).toBe(0);
     });
   });
 

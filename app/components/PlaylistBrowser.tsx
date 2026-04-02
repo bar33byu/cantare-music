@@ -84,9 +84,11 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
       return;
     }
 
+    const createdPlaylist = (await response.json()) as PlaylistListItem;
+
     setCreateName('');
     setShowCreate(false);
-    await fetchPlaylists(showArchived);
+    onManagePlaylist({ ...createdPlaylist, songs: [] } as Playlist);
   };
 
   const handleRetireToggle = async (playlist: PlaylistListItem, isRetired: boolean) => {

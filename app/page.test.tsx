@@ -92,7 +92,7 @@ vi.mock('./components/PlaylistBrowser', () => ({
 }));
 
 vi.mock('./components/PlaylistDetail', () => ({
-  PlaylistDetail: ({ onPractice, onBack }: { onPractice: (playlist: any) => void; onBack: () => void }) => (
+  PlaylistDetail: ({ onPractice, onBack }: { onPractice: (playlist: any) => void; onBack: () => void; onEditSong?: (songId: string) => void }) => (
     <div data-testid="mock-playlist-detail">
       <button data-testid="mock-detail-practice" onClick={() => onPractice(samplePlaylist)}>
         Start Practice
@@ -250,5 +250,20 @@ describe('Home page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Songs' }));
     expect(await screen.findByTestId('mock-select-song')).toBeInTheDocument();
+  });
+
+  it('opens segment editor immediately after creating a song', async () => {
+    render(<Home />);
+
+    fireEvent.click(screen.getByTitle('Add Song'));
+    expect(await screen.findByTestId('mock-song-form-success')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-song-form-success'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-segment-editor')).toBeInTheDocument();
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith('/api/songs/song-1');
   });
 });

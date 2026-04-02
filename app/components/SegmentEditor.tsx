@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Segment } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
+import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
 import { getDefaultNewSegmentPlacement, getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
 
 const MIN_SEGMENT_MS = 1000;
@@ -42,6 +43,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [audioUrl, setAudioUrl] = useState('');
+  const [useProxyFallback, setUseProxyFallback] = useState(false);
   const [songTitle, setSongTitle] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
   const [showReplaceAudio, setShowReplaceAudio] = useState(false);
@@ -52,9 +54,22 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   const [undoDismissTimer, setUndoDismissTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [zoom, setZoom] = useState(1);
   const [stableDurationMs, setStableDurationMs] = useState(0);
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const [bulkSeparator, setBulkSeparator] = useState('***');
+  const [replaceExistingOnBulk, setReplaceExistingOnBulk] = useState(true);
+  const [bulkImportPending, setBulkImportPending] = useState(false);
   const boardRef = useRef<HTMLDivElement | null>(null);
 
-  const { isPlaying, isReady, currentMs, durationMs, play, pause, seek } = useAudioPlayer(audioUrl);
+  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(audioUrl)), [audioUrl]);
+  const playbackAudioUrl = useMemo(() => {
+    if (useProxyFallback && proxyAudioUrl) {
+      return proxyAudioUrl;
+    }
+    return toPlayableAudioUrl(audioUrl);
+  }, [audioUrl, proxyAudioUrl, useProxyFallback]);
+
+  const { isPlaying, isReady, currentMs, durationMs, playbackError, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
 
   const selectedSegment = useMemo(
     () => segments.find((segment) => segment.id === selectedSegmentId) ?? null,
@@ -119,6 +134,190 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       await createSegment();
     } catch {
       setDeleteError('Failed to create section. Please try again.');
+    }
+  };
+
+  const parseBulkSections = (text: string, separator: string): string[] => {
+    const normalizedSeparator = separator.trim();
+    if (!normalizedSeparator) {
+      return [];
+    }
+
+    return text
+      .split(normalizedSeparator)
+      .map((section) => section.trim())
+      .filter((section) => section.length > 0);
+  };
+
+  const buildBulkTimings = (sectionCount: number, totalDurationMs: number) => {
+    const safeTotalDuration = Math.max(totalDurationMs, sectionCount * MIN_SEGMENT_MS);
+
+    return Array.from({ length: sectionCount }, (_, index) => {
+      const startMs = Math.round((index * safeTotalDuration) / sectionCount);
+      const endMs = index === sectionCount - 1
+        ? safeTotalDuration
+        : Math.round(((index + 1) * safeTotalDuration) / sectionCount);
+
+      return {
+        startMs,
+        endMs: Math.max(endMs, startMs + MIN_SEGMENT_MS),
+      };
+    });
+  };
+
+  const handleBulkImport = async () => {
+    setDeleteError(null);
+
+    const sections = parseBulkSections(bulkText, bulkSeparator);
+    if (sections.length === 0) {
+      setDeleteError('Bulk import needs at least one section split by the separator.');
+      return;
+    }
+
+    setBulkImportPending(true);
+    let successfulOperations = 0;
+
+    const readErrorMessage = async (response: Response, fallback: string) => {
+      try {
+        const payload = (await response.json()) as { error?: string };
+        return payload.error || fallback;
+      } catch {
+        return fallback;
+      }
+    };
+
+    const requestWithRetry = async (
+      makeRequest: () => Promise<Response>,
+      retries: number = 2
+    ): Promise<Response> => {
+      let lastResponse: Response | null = null;
+      for (let attempt = 0; attempt <= retries; attempt += 1) {
+        const response = await makeRequest();
+        if (response.ok) {
+          return response;
+        }
+        lastResponse = response;
+      }
+
+      if (lastResponse) {
+        return lastResponse;
+      }
+
+      throw new Error('Request failed before receiving a response.');
+    };
+
+    try {
+      const timings = buildBulkTimings(sections.length, timelineDurationMs);
+
+      if (replaceExistingOnBulk) {
+        const orderedExisting = [...segments].sort((a, b) => a.order - b.order);
+
+        for (let i = 0; i < sections.length; i += 1) {
+          const existing = orderedExisting[i];
+
+          if (existing) {
+            const patchResponse = await requestWithRetry(() =>
+              fetch(`/api/songs/${songId}/segments/${existing.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  label: `Section ${i + 1}`,
+                  startMs: timings[i].startMs,
+                  endMs: timings[i].endMs,
+                  lyricText: sections[i],
+                }),
+              })
+            );
+
+            if (!patchResponse.ok) {
+              const message = await readErrorMessage(
+                patchResponse,
+                `Failed to update section ${i + 1}.`
+              );
+              throw new Error(message);
+            }
+            successfulOperations += 1;
+            continue;
+          }
+
+          const createResponse = await requestWithRetry(() =>
+            fetch(`/api/songs/${songId}/segments`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: crypto.randomUUID(),
+                label: `Section ${i + 1}`,
+                startMs: timings[i].startMs,
+                endMs: timings[i].endMs,
+                lyricText: sections[i],
+              }),
+            })
+          );
+
+          if (!createResponse.ok) {
+            const message = await readErrorMessage(
+              createResponse,
+              `Failed to create section ${i + 1}.`
+            );
+            throw new Error(message);
+          }
+          successfulOperations += 1;
+        }
+
+        // Best-effort cleanup of extra trailing sections beyond the imported count.
+        // If deletes fail (for example due to historical rating references), keep them.
+        for (let i = sections.length; i < orderedExisting.length; i += 1) {
+          const extra = orderedExisting[i];
+          const deleteResponse = await fetch(`/api/songs/${songId}/segments/${extra.id}`, {
+            method: 'DELETE',
+          });
+          if (!deleteResponse.ok) {
+            // Non-fatal: preserve extras instead of failing the whole import.
+            break;
+          }
+        }
+      } else {
+        for (let i = 0; i < sections.length; i += 1) {
+          const createResponse = await requestWithRetry(() =>
+            fetch(`/api/songs/${songId}/segments`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: crypto.randomUUID(),
+                label: `Section ${i + 1}`,
+                startMs: timings[i].startMs,
+                endMs: timings[i].endMs,
+                lyricText: sections[i],
+              }),
+            })
+          );
+
+          if (!createResponse.ok) {
+            const message = await readErrorMessage(
+              createResponse,
+              `Failed to create section ${i + 1}.`
+            );
+            throw new Error(message);
+          }
+          successfulOperations += 1;
+        }
+      }
+
+      setShowBulkImport(false);
+      setBulkText('');
+      setRefreshKey((previous) => previous + 1);
+      setSelectedSegmentId(null);
+    } catch (error) {
+      if (successfulOperations > 0) {
+        setDeleteError('Bulk import partially completed. New sections were created; reloading timeline.');
+        setShowBulkImport(false);
+        setRefreshKey((previous) => previous + 1);
+      } else {
+        const message = error instanceof Error ? error.message : 'Bulk import failed. Please review the separator and try again.';
+        setDeleteError(message);
+      }
+    } finally {
+      setBulkImportPending(false);
     }
   };
 
@@ -273,6 +472,17 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       setStableDurationMs((previous) => Math.max(previous, durationMs));
     }
   }, [durationMs]);
+
+  useEffect(() => {
+    setUseProxyFallback(false);
+  }, [songId]);
+
+  useEffect(() => {
+    if (!playbackError || useProxyFallback || !proxyAudioUrl) {
+      return;
+    }
+    setUseProxyFallback(true);
+  }, [playbackError, proxyAudioUrl, useProxyFallback]);
 
   // Clean up undo timer on unmount to avoid memory leaks
   useEffect(() => {
@@ -461,6 +671,17 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
             >
               + New section
             </button>
+            <button
+              type="button"
+              data-testid="segment-editor-bulk-open"
+              onClick={() => {
+                setDeleteError(null);
+                setShowBulkImport((previous) => !previous);
+              }}
+              className="px-3 py-1 border border-indigo-300 text-indigo-700 text-sm rounded hover:bg-indigo-50"
+            >
+              Bulk Lyrics
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <p className="text-xs text-gray-500">Drag top bar to move · Drag edges to resize</p>
@@ -487,6 +708,68 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
             </div>
           </div>
         </div>
+
+        {showBulkImport ? (
+          <div data-testid="segment-editor-bulk-panel" className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+            <div className="mb-2 grid gap-2 md:grid-cols-[1fr,180px]">
+              <label className="text-xs font-semibold text-indigo-800">
+                Separator token
+                <input
+                  data-testid="segment-editor-bulk-separator"
+                  value={bulkSeparator}
+                  onChange={(event) => setBulkSeparator(event.target.value)}
+                  className="mt-1 w-full rounded border border-indigo-300 bg-white px-2 py-1 text-sm"
+                  placeholder="***"
+                />
+              </label>
+              <label className="mt-5 inline-flex items-center gap-2 text-xs text-indigo-900">
+                <input
+                  data-testid="segment-editor-bulk-replace"
+                  type="checkbox"
+                  checked={replaceExistingOnBulk}
+                  onChange={(event) => setReplaceExistingOnBulk(event.target.checked)}
+                />
+                Replace existing sections
+              </label>
+            </div>
+            <label className="block text-xs font-semibold text-indigo-800">Paste all lyrics</label>
+            <textarea
+              data-testid="segment-editor-bulk-text"
+              value={bulkText}
+              onChange={(event) => setBulkText(event.target.value)}
+              placeholder={[
+                'Verse 1 line 1',
+                'Verse 1 line 2',
+                '***',
+                'Verse 2 line 1',
+                'Verse 2 line 2',
+              ].join('\n')}
+              className="mt-1 h-36 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-indigo-700">
+              Default separator is <strong>***</strong>. Each block becomes one section, spaced evenly across the full song.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                data-testid="segment-editor-bulk-submit"
+                onClick={() => { void handleBulkImport(); }}
+                disabled={bulkImportPending}
+                className="rounded bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {bulkImportPending ? 'Creating sections...' : 'Create sections'}
+              </button>
+              <button
+                type="button"
+                data-testid="segment-editor-bulk-cancel"
+                onClick={() => setShowBulkImport(false)}
+                className="rounded border border-gray-300 px-3 py-2 text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="overflow-x-auto rounded-lg border border-indigo-300">
           <div

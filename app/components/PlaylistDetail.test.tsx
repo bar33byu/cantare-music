@@ -20,6 +20,7 @@ const playlistResponse = {
 describe('PlaylistDetail', () => {
   const onBack = vi.fn();
   const onPractice = vi.fn();
+  const onEditSong = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -27,7 +28,7 @@ describe('PlaylistDetail', () => {
   });
 
   it('renders song list in position order', async () => {
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} />);
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
 
     await waitFor(() => {
       expect(screen.getByTestId('playlist-song-row-song-1')).toBeInTheDocument();
@@ -39,7 +40,7 @@ describe('PlaylistDetail', () => {
   });
 
   it('dragging song calls reorder patch', async () => {
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} />);
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
 
     await waitFor(() => {
       expect(screen.getByTestId('playlist-song-row-song-1')).toBeInTheDocument();
@@ -61,7 +62,7 @@ describe('PlaylistDetail', () => {
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse });
 
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} />);
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
 
     await waitFor(() => expect(screen.getByTestId('playlist-add-song')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('playlist-add-song'));
@@ -77,6 +78,33 @@ describe('PlaylistDetail', () => {
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/songs', expect.objectContaining({ method: 'POST' }));
     });
+
+    expect(onEditSong).toHaveBeenCalledWith('song-3');
+  });
+
+  it('creates a new song inline and adds it to the playlist', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'song-9', title: 'Brand New Song', audioUrl: '', segments: [], createdAt: '2026-01-01T00:00:00.000Z' }) })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse });
+
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+
+    await waitFor(() => expect(screen.getByTestId('playlist-add-song')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('playlist-add-song'));
+
+    await waitFor(() => expect(screen.getByTestId('playlist-song-search')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('playlist-song-search'), { target: { value: 'Brand New Song' } });
+    fireEvent.click(screen.getByTestId('playlist-song-create-submit'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/songs', expect.objectContaining({ method: 'POST' }));
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/songs', expect.objectContaining({ method: 'POST' }));
+    });
+
+    expect(onEditSong).toHaveBeenCalledWith('song-9');
   });
 
   it('remove button calls DELETE', async () => {
@@ -85,7 +113,7 @@ describe('PlaylistDetail', () => {
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse });
 
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} />);
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
     await waitFor(() => expect(screen.getByTestId('playlist-song-remove-song-1')).toBeInTheDocument());
 
     fireEvent.click(screen.getByTestId('playlist-song-remove-song-1'));
@@ -96,7 +124,7 @@ describe('PlaylistDetail', () => {
   });
 
   it('back button calls onBack', async () => {
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} />);
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
     await waitFor(() => expect(screen.getByTestId('playlist-detail-back')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('playlist-detail-back'));
     expect(onBack).toHaveBeenCalled();

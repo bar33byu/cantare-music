@@ -62,22 +62,30 @@ describe('PlaylistBrowser', () => {
     expect(screen.getByTestId('playlist-row-pl-1').className).toContain('italic');
   });
 
-  it('new playlist button opens form and submit posts', async () => {
+  it('new playlist button opens form and submit transitions to manage mode', async () => {
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
     await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
 
     fireEvent.click(screen.getByTestId('new-playlist-button'));
     expect(screen.getByTestId('new-playlist-form')).toBeInTheDocument();
 
-    mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'pl-2' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ playlists: [basePlaylist] }) });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: 'pl-2',
+        name: 'Conference Set',
+        isRetired: false,
+        createdAt: '2026-03-05T00:00:00.000Z',
+        songCount: 0,
+      }),
+    });
 
     fireEvent.change(screen.getByTestId('new-playlist-name'), { target: { value: 'Conference Set' } });
     fireEvent.click(screen.getByTestId('create-playlist-submit'));
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists', expect.objectContaining({ method: 'POST' }));
+      expect(onManagePlaylist).toHaveBeenCalledWith(expect.objectContaining({ id: 'pl-2', name: 'Conference Set', songs: [] }));
     });
   });
 

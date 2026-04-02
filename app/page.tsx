@@ -31,15 +31,30 @@ type AppView =
   | "playlist_detail"
   | "playlist_practice";
 
+type SongEditorReturnView = "library" | "song_practice" | "playlist_detail";
+
 export default function Home() {
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [activeView, setActiveView] = useState<AppView>("library");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+  const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
+
+  const openSongEditor = async (songId: string, returnView: SongEditorReturnView) => {
+    try {
+      const response = await fetch(`/api/songs/${songId}`);
+      if (!response.ok) throw new Error("Failed to fetch song");
+      const fullSong: Song = await response.json();
+      setSelectedSong(fullSong);
+      setSongEditorReturnView(returnView);
+      setActiveView("song_segment_editor");
+    } catch (err) {
+      console.error("Failed to load song:", err);
+    }
+  };
 
   const handleSongCreated = (songId: string) => {
-    setRefreshTrigger(prev => prev + 1); // Trigger refresh of song list
-    setActiveView("library");
+    void openSongEditor(songId, "library");
   };
 
   const handleSongDeleted = (songId: string) => {
@@ -85,6 +100,23 @@ export default function Home() {
     setActiveView("song_practice");
   };
 
+  const handleExitSongEditor = async () => {
+    if (songEditorReturnView === "song_practice") {
+      await handleBackToPractice();
+      return;
+    }
+
+    if (songEditorReturnView === "playlist_detail") {
+      setSelectedSong(null);
+      setActiveView("playlist_detail");
+      return;
+    }
+
+    setSelectedSong(null);
+    setRefreshTrigger((previous) => previous + 1);
+    setActiveView("library");
+  };
+
   if (activeView === "song_practice" && selectedSong) {
     const session = makeSession({ songId: selectedSong.id });
     const breadcrumbRootLabel = selectedPlaylist?.name ?? "Songs";
@@ -106,7 +138,10 @@ export default function Home() {
             initialSession={session}
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
-            onEditSongClick={() => setActiveView("song_segment_editor")}
+            onEditSongClick={() => {
+              setSongEditorReturnView("song_practice");
+              setActiveView("song_segment_editor");
+            }}
           />
         </div>
       </div>
@@ -114,18 +149,24 @@ export default function Home() {
   }
 
   if (activeView === "song_segment_editor" && selectedSong) {
+    const backLabel = songEditorReturnView === "playlist_detail"
+      ? "\u2190 Back to Playlist"
+      : songEditorReturnView === "song_practice"
+        ? "\u2190 Back to Practice"
+        : "\u2190 Back to Songs";
+
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-4xl mx-auto">
           <button
-            onClick={handleBackToList}
+            onClick={() => void handleExitSongEditor()}
             className="mb-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
           >
-            ← Back to Songs
+            {backLabel}
           </button>
           <SegmentEditor
             songId={selectedSong.id}
-            onBack={() => void handleBackToPractice()}
+            onBack={() => void handleExitSongEditor()}
             onSongUpdated={refreshSelectedSong}
           />
         </div>
@@ -165,6 +206,9 @@ export default function Home() {
             onPractice={(playlist) => {
               setSelectedPlaylist(playlist);
               setActiveView("playlist_practice");
+            }}
+            onEditSong={(songId) => {
+              void openSongEditor(songId, "playlist_detail");
             }}
           />
         </div>
