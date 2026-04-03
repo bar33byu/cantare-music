@@ -460,7 +460,7 @@ export function AudioPlayer({
         />
 
         <div className="mt-1 flex justify-between text-xs text-gray-500">
-          <span>00:00</span>
+          <span data-testid="audio-current-time">{formatMs(Math.min(currentMs, safeDurationMs))}</span>
           <span data-testid="audio-duration">{formatMs(safeDurationMs)}</span>
         </div>
 

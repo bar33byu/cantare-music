@@ -170,8 +170,8 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
           />
         </div>
         <div className="mt-2 flex justify-between text-sm text-indigo-700">
-          <span data-testid="segment-start-time">{formatMs(0)}</span>
-          <span data-testid="segment-end-time">{formatMs(segment.endMs - segment.startMs)}</span>
+          <span data-testid="segment-start-time">{formatMs(clampedPlaybackMs)}</span>
+          <span data-testid="segment-end-time">{formatMs(segment.endMs)}</span>
         </div>
       </div>
 

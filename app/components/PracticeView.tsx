@@ -41,6 +41,7 @@ const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
 };
 
 const PRACTICED_PLAYBACK_THRESHOLD_MS = 10_000;
+const PREV_SEGMENT_GO_BACK_THRESHOLD_MS = 3_000;
 
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
   if (mode === "full") {
@@ -387,16 +388,26 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   };
 
   const handlePrevSegment = () => {
-    if (!hasSegments || isFirst) {
+    if (!hasSegments || !currentSegment) {
       return;
     }
+
+    const elapsedInSegmentMs = currentMs - currentSegment.startMs;
+    const shouldGoToPreviousSegment = elapsedInSegmentMs <= PREV_SEGMENT_GO_BACK_THRESHOLD_MS && !isFirst;
+
     setTransportDebug((previous) => ({
       ...previous,
       prevSegmentClicks: previous.prevSegmentClicks + 1,
-      lastAction: "prev-segment",
+      lastAction: shouldGoToPreviousSegment ? "prev-segment" : "restart-segment",
       lastActionAt: new Date().toISOString(),
     }));
-    jumpToSegment(session.currentSegmentIndex - 1);
+
+    if (shouldGoToPreviousSegment) {
+      jumpToSegment(session.currentSegmentIndex - 1);
+      return;
+    }
+
+    jumpToSegment(session.currentSegmentIndex);
   };
 
   const handleNextSegment = () => {

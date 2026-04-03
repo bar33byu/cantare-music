@@ -229,6 +229,30 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
   });
 
+  it("clicking transport previous after 3 seconds restarts current segment", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 8200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    const song = makeSong(3);
+    const session = makeSession(song);
+    session.currentSegmentIndex = 1;
+    await renderAndWaitForRatings(song, session);
+
+    fireEvent.click(screen.getByTestId("practice-prev-segment"));
+
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
+    expect(mockSeek).toHaveBeenCalledWith(4000);
+  });
+
   it("renders audio player in bottom transport section", async () => {
     const song = makeSong(3);
     await renderAndWaitForRatings(song);

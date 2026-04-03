@@ -93,6 +93,7 @@ describe("AudioPlayer", () => {
 
   it("shows full duration", () => {
     render(<AudioPlayer {...defaultProps} />);
+    expect(screen.getByTestId("audio-current-time")).toHaveTextContent("00:02");
     expect(screen.getByTestId("audio-duration")).toHaveTextContent("00:12");
   });
 

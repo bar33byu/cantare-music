@@ -79,6 +79,7 @@ describe("SegmentCard", () => {
 
   it("shows duration label as M:SS", () => {
     render(<SegmentCard {...defaultProps} />);
+    expect(screen.getByTestId("segment-start-time")).toHaveTextContent("0:16");
     expect(screen.getByTestId("segment-end-time")).toHaveTextContent("0:32");
   });
 
