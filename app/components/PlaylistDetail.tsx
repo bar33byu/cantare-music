@@ -51,6 +51,14 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
     setShowSuggestions(true);
   };
 
+  const closeSongPicker = () => {
+    setPickerOpen(false);
+    setShowSuggestions(false);
+    setSearchQuery('');
+    setSelectedSongId('');
+    setPickerError(null);
+  };
+
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
     setSelectedSongId('');
@@ -79,13 +87,12 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
     });
 
     if (response.ok) {
-      const songId = selectedSongId;
       setSelectedSongId('');
       setSearchQuery('');
       setShowSuggestions(false);
       setPickerError(null);
       await fetchPlaylist();
-      onEditSong?.(songId);
+      closeSongPicker();
     }
   };
 
@@ -126,7 +133,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
       setSelectedSongId('');
       setShowSuggestions(false);
       await fetchPlaylist();
-      onEditSong?.(createdSong.id);
+      closeSongPicker();
     } catch (error) {
       setPickerError(error instanceof Error ? error.message : 'Unable to create song right now.');
     } finally {
@@ -230,6 +237,12 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
                 value={searchQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
                 onFocus={() => setShowSuggestions(true)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeSongPicker();
+                  }
+                }}
                 className="w-full rounded border border-gray-300 px-3 py-2"
               />
               {showSuggestions && filteredSongs.length > 0 && (

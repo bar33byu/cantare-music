@@ -79,7 +79,8 @@ describe('PlaylistDetail', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/songs', expect.objectContaining({ method: 'POST' }));
     });
 
-    expect(onEditSong).toHaveBeenCalledWith('song-3');
+    expect(onEditSong).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('playlist-song-search')).not.toBeInTheDocument();
   });
 
   it('creates a new song inline and adds it to the playlist', async () => {
@@ -104,7 +105,26 @@ describe('PlaylistDetail', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/songs', expect.objectContaining({ method: 'POST' }));
     });
 
-    expect(onEditSong).toHaveBeenCalledWith('song-9');
+    expect(onEditSong).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('playlist-song-search')).not.toBeInTheDocument();
+  });
+
+  it('pressing escape in song search closes the picker', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'song-3', title: 'Song Three' }] });
+
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+
+    await waitFor(() => expect(screen.getByTestId('playlist-add-song')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('playlist-add-song'));
+
+    const searchInput = await screen.findByTestId('playlist-song-search');
+    fireEvent.keyDown(searchInput, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('playlist-song-search')).not.toBeInTheDocument();
+    });
   });
 
   it('remove button calls DELETE', async () => {
