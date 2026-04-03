@@ -13,6 +13,8 @@ const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.5;
 const DEFAULT_TIMELINE_FALLBACK_MS = 60000;
 const BULK_DURATION_PROBE_TIMEOUT_MS = 3000;
+const BULK_REQUEST_RETRIES = 4;
+const BULK_REQUEST_RETRY_DELAY_MS = 250;
 
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -245,7 +247,8 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     }
 
     setBulkImportPending(true);
-    let successfulOperations = 0;
+    const failures: Array<{ section: number; message: string }> = [];
+    let hadExtraDeleteFailure = false;
 
     const readErrorMessage = async (response: Response, fallback: string) => {
       try {
@@ -256,9 +259,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       }
     };
 
+    const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
     const requestWithRetry = async (
       makeRequest: () => Promise<Response>,
-      retries: number = 2
+      retries: number = BULK_REQUEST_RETRIES,
+      retryDelayMs: number = BULK_REQUEST_RETRY_DELAY_MS
     ): Promise<Response> => {
       let lastResponse: Response | null = null;
       for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -267,6 +273,9 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           return response;
         }
         lastResponse = response;
+        if (attempt < retries) {
+          await wait(retryDelayMs * (attempt + 1));
+        }
       }
 
       if (lastResponse) {
@@ -301,13 +310,13 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
             );
 
             if (!patchResponse.ok) {
-              const message = await readErrorMessage(
+              const patchMessage = await readErrorMessage(
                 patchResponse,
                 `Failed to update section ${i + 1}.`
               );
-              throw new Error(message);
+              failures.push({ section: i + 1, message: patchMessage });
+              continue;
             }
-            successfulOperations += 1;
             continue;
           }
 
@@ -326,13 +335,13 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           );
 
           if (!createResponse.ok) {
-            const message = await readErrorMessage(
+            const createMessage = await readErrorMessage(
               createResponse,
               `Failed to create section ${i + 1}.`
             );
-            throw new Error(message);
+            failures.push({ section: i + 1, message: createMessage });
+            continue;
           }
-          successfulOperations += 1;
         }
 
         // Best-effort cleanup of extra trailing sections beyond the imported count.
@@ -344,6 +353,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           });
           if (!deleteResponse.ok) {
             // Non-fatal: preserve extras instead of failing the whole import.
+            hadExtraDeleteFailure = true;
             break;
           }
         }
@@ -364,13 +374,13 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           );
 
           if (!createResponse.ok) {
-            const message = await readErrorMessage(
+            const createMessage = await readErrorMessage(
               createResponse,
               `Failed to create section ${i + 1}.`
             );
-            throw new Error(message);
+            failures.push({ section: i + 1, message: createMessage });
+            continue;
           }
-          successfulOperations += 1;
         }
       }
 
@@ -378,15 +388,16 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       setBulkText('');
       setRefreshKey((previous) => previous + 1);
       setSelectedSegmentId(null);
-    } catch (error) {
-      if (successfulOperations > 0) {
-        setDeleteError('Bulk import partially completed. New sections were created; reloading timeline.');
-        setShowBulkImport(false);
-        setRefreshKey((previous) => previous + 1);
-      } else {
-        const message = error instanceof Error ? error.message : 'Bulk import failed. Please review the separator and try again.';
-        setDeleteError(message);
+
+      if (failures.length > 0) {
+        const failedSections = failures.map((failure) => failure.section).join(', ');
+        setDeleteError(`Bulk import completed with issues. Failed sections: ${failedSections}.`);
+      } else if (hadExtraDeleteFailure) {
+        setDeleteError('Bulk import completed, but one or more extra sections could not be deleted.');
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Bulk import failed. Please review the separator and try again.';
+      setDeleteError(message);
     } finally {
       setBulkImportPending(false);
     }
@@ -543,6 +554,27 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       setStableDurationMs((previous) => Math.max(previous, durationMs));
     }
   }, [durationMs]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const preloadDuration = async () => {
+      if (!playbackAudioUrl || durationMs > 0 || stableDurationMs > 0) {
+        return;
+      }
+
+      const probedDuration = await probeAudioDurationMs(playbackAudioUrl);
+      if (!cancelled && probedDuration && probedDuration > 0) {
+        setStableDurationMs((previous) => Math.max(previous, probedDuration));
+      }
+    };
+
+    void preloadDuration();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [durationMs, playbackAudioUrl, stableDurationMs]);
 
   useEffect(() => {
     setUseProxyFallback(false);
