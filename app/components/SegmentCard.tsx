@@ -36,16 +36,48 @@ interface SegmentCardProps {
   lyricVisibilityMode?: "full" | "hint" | "hidden";
 }
 
-function toLyricHints(text: string): string {
-  return text
-    .split(/(\s+)/)
-    .map((token) => {
-      if (/^\s+$/.test(token) || token.length <= 1) {
-        return token;
-      }
-      return token[0] + token.slice(1).replace(/[A-Za-z0-9]/g, "_");
-    })
-    .join("");
+function isMaskableLyricChar(char: string): boolean {
+  return /[\p{L}\p{N}]/u.test(char);
+}
+
+function maskedGlyph(char: string, index: number) {
+  return (
+    <span key={`mask-${index}`} className="relative inline-block align-baseline" data-testid="segment-lyric-mask-char">
+      <span aria-hidden="true" className="invisible">
+        {char}
+      </span>
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-[0.14em] left-0 right-0 border-b-2 border-current"
+      />
+    </span>
+  );
+}
+
+function renderLyricWithStableMask(text: string, mode: "full" | "hint" | "hidden"): React.ReactNode {
+  if (mode === "full") {
+    return text;
+  }
+
+  let atWordStart = true;
+
+  return Array.from(text).map((char, index) => {
+    const isWhitespace = /\s/u.test(char);
+    if (isWhitespace) {
+      atWordStart = true;
+      return <React.Fragment key={`space-${index}`}>{char}</React.Fragment>;
+    }
+
+    const canMask = isMaskableLyricChar(char);
+    const showChar = mode === "hint" && canMask && atWordStart;
+    atWordStart = false;
+
+    if (!canMask || showChar) {
+      return <React.Fragment key={`char-${index}`}>{char}</React.Fragment>;
+    }
+
+    return maskedGlyph(char, index);
+  });
 }
 
 function formatMs(ms: number): string {
@@ -69,17 +101,11 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
     () => getAdaptiveLyricFontSize(segment.lyricText || ""),
     [segment.lyricText]
   );
-  const displayLyricText = React.useMemo(() => {
+  const displayLyricContent = React.useMemo(() => {
     if (!hasLyrics) {
       return "No lyrics for this segment yet.";
     }
-    if (lyricVisibilityMode === "hidden") {
-      return "Lyrics hidden";
-    }
-    if (lyricVisibilityMode === "hint") {
-      return toLyricHints(segment.lyricText);
-    }
-    return segment.lyricText;
+    return renderLyricWithStableMask(segment.lyricText, lyricVisibilityMode);
   }, [hasLyrics, lyricVisibilityMode, segment.lyricText]);
 
   const clampedPlaybackMs = Math.min(
@@ -121,10 +147,10 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
       <div className="mb-4 min-h-0 flex-1 overflow-y-auto pr-2">
         <p
           data-testid="segment-lyric-text"
-          className={`text-center ${hasLyrics && lyricVisibilityMode !== "hidden" ? "text-slate-700" : "text-gray-400"}`}
+          className={`whitespace-pre-wrap text-center ${hasLyrics ? "text-slate-700" : "text-gray-400"}`}
           style={{ fontSize: lyricFontSize, lineHeight: 1.4 }}
         >
-          {displayLyricText}
+          {displayLyricContent}
         </p>
       </div>
       <div className="mb-3">

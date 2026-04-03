@@ -41,13 +41,19 @@ describe("SegmentCard", () => {
 
   it("renders first-letter hints when lyricVisibilityMode is hint", () => {
     render(<SegmentCard {...defaultProps} lyricVisibilityMode="hint" />);
-    expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("S___ l_____ h___");
+    const lyric = screen.getByTestId("segment-lyric-text");
+    expect(lyric).toHaveTextContent("S");
+    expect(lyric).toHaveTextContent("l");
+    expect(lyric).toHaveTextContent("h");
+    expect(screen.getAllByTestId("segment-lyric-mask-char")).toHaveLength(11);
   });
 
   it("hides lyrics when lyricVisibilityMode is hidden", () => {
     render(<SegmentCard {...defaultProps} lyricVisibilityMode="hidden" />);
-    expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("Lyrics hidden");
-    expect(screen.getByTestId("segment-lyric-text").className).toContain("text-gray-400");
+    const lyric = screen.getByTestId("segment-lyric-text");
+    expect(lyric).toHaveTextContent("Some lyrics here");
+    expect(lyric.className).toContain("text-slate-700");
+    expect(screen.getAllByTestId("segment-lyric-mask-char")).toHaveLength(14);
   });
 
   it("renders progress bar with correct value while in range", () => {
