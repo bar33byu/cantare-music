@@ -61,7 +61,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   onEditSongClick,
 }) => {
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
-  const lastSyncedSegmentIdRef = React.useRef<string | null>(null);
+  const initialSegmentId = song.segments[initialSession.currentSegmentIndex]?.id ?? null;
+  const lastSyncedSegmentIdRef = React.useRef<string | null>(initialSegmentId);
   const previousSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
   const lastSavedRatingsRef = React.useRef<string>("unloaded");
   const [transitionDirection, setTransitionDirection] = React.useState<"forward" | "backward">("forward");
@@ -70,7 +71,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(false);
-  const [useProxyFallback, setUseProxyFallback] = React.useState(false);
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
   const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
   const practicedRecordedRef = React.useRef(false);
@@ -85,12 +85,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(song.audioUrl)), [song.audioUrl]);
-  const playbackAudioUrl = useMemo(() => {
-    if (useProxyFallback && proxyAudioUrl) {
-      return proxyAudioUrl;
-    }
-    return toPlayableAudioUrl(song.audioUrl);
-  }, [proxyAudioUrl, song.audioUrl, useProxyFallback]);
+  const playbackAudioUrl = useMemo(() => proxyAudioUrl ?? toPlayableAudioUrl(song.audioUrl), [proxyAudioUrl, song.audioUrl]);
   const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
@@ -130,9 +125,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   playbackStateRef.current = { isPlaying, currentMs, currentSegment, durationMs };
 
   useEffect(() => {
-    // Reset per-song fallback state when switching songs.
-    setUseProxyFallback(false);
-  }, [song.id]);
+    // On song change, avoid forcing an initial jump to the first section start.
+    lastSyncedSegmentIdRef.current = song.segments[session.currentSegmentIndex]?.id ?? null;
+  }, [session.currentSegmentIndex, song.id, song.segments]);
 
   const flushPlayedTime = React.useCallback(() => {
     if (playbackStartedAtRef.current === null) {
@@ -219,14 +214,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       observer.disconnect();
     };
   }, [song.title, breadcrumbRootLabel]);
-
-  useEffect(() => {
-    if (!playbackError || useProxyFallback || !proxyAudioUrl) {
-      return;
-    }
-    // If direct/public URL fails, transparently retry through same-origin proxy.
-    setUseProxyFallback(true);
-  }, [playbackError, proxyAudioUrl, useProxyFallback]);
 
   useEffect(() => {
     if (!song.audioUrl || !currentSegment) {

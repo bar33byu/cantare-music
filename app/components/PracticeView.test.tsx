@@ -262,34 +262,18 @@ describe("PracticeView", () => {
     });
   });
 
-  it("falls back to proxy audio URL when direct URL playback errors", async () => {
+  it("uses proxy audio URL immediately when audio key can be parsed", async () => {
     const song = makeSong(2);
-    mockUseAudioPlayer.mockImplementation((audioUrl: string) => {
-      if (audioUrl.startsWith("http")) {
-        return {
-          isPlaying: false,
-          isReady: false,
-          currentMs: 0,
-          durationMs: 12000,
-          playbackError: "failed",
-          debugInfo: {},
-          play: mockPlay,
-          pause: mockPause,
-          seek: mockSeek,
-        };
-      }
-
-      return {
-        isPlaying: false,
-        isReady: true,
-        currentMs: 0,
-        durationMs: 12000,
-        playbackError: null,
-        debugInfo: {},
-        play: mockPlay,
-        pause: mockPause,
-        seek: mockSeek,
-      };
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
     });
 
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
@@ -297,7 +281,6 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(mockUseAudioPlayer).toHaveBeenCalled();
       const args = mockUseAudioPlayer.mock.calls.map((call) => String(call[0]));
-      expect(args).toContain("https://cdn.example.com/audio/song-1/audio.mp3");
       expect(args).toContain("/api/audio/audio/song-1/audio.mp3");
     });
   });
