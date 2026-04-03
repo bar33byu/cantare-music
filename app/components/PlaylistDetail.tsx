@@ -1,6 +1,6 @@
 "use client";
 
-import { DragEvent, useEffect, useState } from 'react';
+import { DragEvent, useEffect, useRef, useState } from 'react';
 import type { Playlist, Song } from '../types';
 
 interface PlaylistDetailProps {
@@ -21,6 +21,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
   const [pickerOpen, setPickerOpen] = useState(false);
   const [inlineCreatePending, setInlineCreatePending] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchPlaylist = async () => {
     const response = await fetch(`/api/playlists/${playlistId}`);
@@ -53,11 +54,17 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
 
   const closeSongPicker = () => {
     setPickerOpen(false);
-    setShowSuggestions(false);
     setSearchQuery('');
     setSelectedSongId('');
+    setShowSuggestions(false);
     setPickerError(null);
   };
+
+  useEffect(() => {
+    if (pickerOpen) {
+      searchInputRef.current?.focus();
+    }
+  }, [pickerOpen]);
 
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
@@ -87,12 +94,13 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
     });
 
     if (response.ok) {
+      const songId = selectedSongId;
       setSelectedSongId('');
       setSearchQuery('');
       setShowSuggestions(false);
       setPickerError(null);
       await fetchPlaylist();
-      closeSongPicker();
+      onEditSong?.(songId);
     }
   };
 
@@ -133,7 +141,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
       setSelectedSongId('');
       setShowSuggestions(false);
       await fetchPlaylist();
-      closeSongPicker();
+      onEditSong?.(createdSong.id);
     } catch (error) {
       setPickerError(error instanceof Error ? error.message : 'Unable to create song right now.');
     } finally {
@@ -214,23 +222,43 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
     <section data-testid="playlist-detail" className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
+          <div className="mb-1 flex items-center gap-1 text-sm text-gray-600">
+            <button
+              data-testid="playlist-detail-breadcrumb-back"
+              className="hover:text-indigo-700 hover:underline"
+              onClick={onBack}
+            >
+              Playlists
+            </button>
+            <span>/</span>
+            <span className="text-gray-900">{playlist.name}</span>
+          </div>
           <h2 data-testid="playlist-detail-name" className="text-2xl font-bold">{playlist.name}</h2>
           {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
         </div>
         <div className="flex gap-2">
-          <button data-testid="playlist-detail-back" className="rounded border border-gray-300 px-3 py-2" onClick={onBack}>← Back</button>
+          <button
+            data-testid="playlist-add-song"
+            aria-label="Add Song"
+            title="Add Song"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700"
+            onClick={() => void openSongPicker()}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
           <button data-testid="playlist-detail-practice" className="rounded bg-indigo-600 px-3 py-2 text-white" onClick={() => onPractice(playlist)}>Practice</button>
         </div>
       </div>
 
       <div className="rounded border border-gray-200 bg-white p-4">
-        <button data-testid="playlist-add-song" className="rounded border border-indigo-300 px-3 py-1 text-indigo-700" onClick={() => void openSongPicker()}>
-          Add Song
-        </button>
         {pickerOpen ? (
           <div className="mt-3 space-y-2">
             <div className="relative">
               <input
+                ref={searchInputRef}
                 data-testid="playlist-song-search"
                 type="text"
                 placeholder="Search songs by title or artist..."
@@ -266,16 +294,30 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
                 </ul>
               )}
             </div>
-            {canCreateSong ? (
+            <div className="rounded border border-emerald-200 bg-emerald-50/40 p-3">
+              <p className="text-xs font-medium text-emerald-800">Not in the library yet?</p>
               <button
                 data-testid="playlist-song-create-submit"
-                className="rounded border border-emerald-300 px-3 py-2 text-emerald-700 hover:bg-emerald-50"
+                className="mt-2 rounded border border-emerald-300 px-3 py-2 text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => void handleCreateSongAndAdd()}
-                disabled={inlineCreatePending}
+                disabled={inlineCreatePending || !canCreateSong}
               >
-                {inlineCreatePending ? 'Creating Song...' : `Create and Add "${creatableTitle}"`}
+                {inlineCreatePending
+                  ? 'Creating Song...'
+                  : creatableTitle
+                    ? `Create and Add "${creatableTitle}"`
+                    : 'Create and Add New Song'}
               </button>
-            ) : null}
+              {creatableTitle && exactExistingSong ? (
+                <p className="mt-2 text-xs text-emerald-900">
+                  A song with this exact title already exists. Pick it from suggestions or type a new title.
+                </p>
+              ) : (
+                <p className="mt-2 text-xs text-emerald-900">
+                  Type a title above, then create it instantly and add it to this playlist.
+                </p>
+              )}
+            </div>
             {pickerError ? (
               <p data-testid="playlist-song-picker-error" className="text-sm text-red-600">
                 {pickerError}

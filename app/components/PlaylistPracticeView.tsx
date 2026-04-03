@@ -120,16 +120,38 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   if (playlist.songs.length === 0) {
     return (
       <section data-testid="playlist-practice-empty" className="space-y-4">
-        <header className="flex items-center justify-between">
-          <p className="text-gray-600">No songs in this playlist yet.</p>
-          <div className="flex gap-2">
+        <header className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1 text-sm text-gray-600">
+              <button
+                data-testid="playlist-practice-exit"
+                className="hover:text-indigo-700 hover:underline"
+                onClick={onExit}
+              >
+                Playlists
+              </button>
+              <span>/</span>
+              <span className="text-gray-900">{playlist.name}</span>
+            </div>
             {onManage ? (
-              <button data-testid="playlist-practice-manage" className="rounded bg-indigo-600 px-3 py-2 text-white" onClick={onManage}>
-                Manage
+              <button
+                data-testid="playlist-practice-manage"
+                aria-label="Edit Playlist"
+                title="Edit Playlist"
+                className="flex h-10 w-10 items-center justify-center rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                onClick={onManage}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
               </button>
             ) : null}
-            <button data-testid="playlist-practice-exit" className="rounded border border-gray-300 px-3 py-2" onClick={onExit}>
-              Exit
+          </div>
+          <p className="text-gray-600">No songs in this playlist yet.</p>
+          <div className="flex gap-2">
+            <button className="rounded border border-gray-300 px-3 py-2" onClick={onExit}>
+              Back to Playlists
             </button>
           </div>
         </header>
@@ -141,6 +163,17 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
     <section data-testid="playlist-practice-view" className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
+          <div className="mb-1 flex items-center gap-1 text-sm text-gray-600">
+            <button
+              data-testid="playlist-practice-exit"
+              className="hover:text-indigo-700 hover:underline"
+              onClick={onExit}
+            >
+              Playlists
+            </button>
+            <span>/</span>
+            <span className="text-gray-900">{playlist.name}</span>
+          </div>
           <h2 className="text-2xl font-bold">{playlist.name}</h2>
           <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
             Playlist Knowledge: {playlistScore}%
@@ -148,13 +181,19 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
         </div>
         <div className="flex gap-2">
           {onManage ? (
-            <button data-testid="playlist-practice-manage" className="rounded border border-indigo-300 px-3 py-2 text-indigo-700" onClick={onManage}>
-              Manage
+            <button
+              data-testid="playlist-practice-manage"
+              aria-label="Edit Playlist"
+              title="Edit Playlist"
+              className="flex h-10 w-10 items-center justify-center rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+              onClick={onManage}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
             </button>
           ) : null}
-          <button data-testid="playlist-practice-exit" className="rounded border border-gray-300 px-3 py-2" onClick={onExit}>
-            ← Back
-          </button>
         </div>
       </header>
 

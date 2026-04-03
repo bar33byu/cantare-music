@@ -779,7 +779,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   return (
                     <div
                       key={`past-ghost-${depth}`}
-                      className="segment-stack-ghost pointer-events-none absolute inset-0 rounded-2xl border border-slate-300/70 bg-slate-100/65"
+                      className="segment-stack-ghost pointer-events-none absolute inset-0 hidden rounded-2xl border border-slate-300/70 bg-slate-100/65 md:block"
                       style={{
                         transform: `translateX(${translateX}px) scale(${scale.toFixed(3)})`,
                         transformOrigin: "center center",
@@ -809,7 +809,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   return (
                     <div
                       key={`future-ghost-${depth}`}
-                      className="segment-stack-ghost pointer-events-none absolute inset-0 rounded-2xl border border-indigo-300/70 bg-indigo-50/55"
+                      className="segment-stack-ghost pointer-events-none absolute inset-0 hidden rounded-2xl border border-indigo-300/70 bg-indigo-50/55 md:block"
                       style={{
                         transform: `translateX(${translateX}px) scale(${scale.toFixed(3)})`,
                         transformOrigin: "center center",

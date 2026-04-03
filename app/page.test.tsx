@@ -232,7 +232,7 @@ describe('Home page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit song' }));
     expect(await screen.findByTestId('mock-segment-editor')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('mock-segment-editor-back'));
+    fireEvent.click(screen.getByTestId('song-editor-back'));
 
     await waitFor(() => {
       expect(screen.getByTestId('mock-practice-view')).toHaveTextContent('Segments: 2');

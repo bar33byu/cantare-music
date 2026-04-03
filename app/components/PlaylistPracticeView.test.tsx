@@ -37,7 +37,7 @@ describe('PlaylistPracticeView', () => {
 
     render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
-    expect(screen.getByText('Morning Warmup')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Morning Warmup' })).toBeInTheDocument();
     expect(await screen.findByTestId('playlist-practice-score')).toHaveTextContent('Playlist Knowledge: 67%');
     expect(screen.getByTestId('playlist-practice-song-song-1')).toHaveTextContent('Alpha');
     expect(screen.getByTestId('playlist-practice-song-song-2')).toHaveTextContent('Beta');

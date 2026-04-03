@@ -305,11 +305,21 @@ export function AudioPlayer({
   const safeDurationMs = Math.max(durationMs, segmentEndMs);
   const segmentWidth = safeDurationMs > 0 ? ((segmentEndMs - segmentStartMs) / safeDurationMs) * 100 : 0;
   const segmentOffset = safeDurationMs > 0 ? (segmentStartMs / safeDurationMs) * 100 : 0;
+  const clampedCurrentMs = Math.min(currentMs, safeDurationMs);
+  const playheadOffset = safeDurationMs > 0 ? (clampedCurrentMs / safeDurationMs) * 100 : 0;
   const masteryChunks = useMemo(
     () => buildMasteryTimelineChunks(segments, masteryBySegment, safeDurationMs),
     [segments, masteryBySegment, safeDurationMs]
   );
   const showAudioDebug = process.env.NEXT_PUBLIC_SHOW_AUDIO_DEBUG === "true";
+  const handleUnifiedTimelineSeek = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || safeDurationMs <= 0) {
+      return;
+    }
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    onSeekSong(Math.round(ratio * safeDurationMs));
+  }, [onSeekSong, safeDurationMs]);
 
   return (
     <div data-testid="audio-player" className="space-y-2">
@@ -390,10 +400,14 @@ export function AudioPlayer({
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
-        <div className="mb-2">
+        <div
+          data-testid="audio-unified-timeline"
+          className="relative mb-2 h-5 cursor-pointer"
+          onClick={handleUnifiedTimelineSeek}
+        >
           <div
             data-testid="audio-piece-mastery-bar"
-            className="relative h-2.5 overflow-hidden rounded-full border border-emerald-200"
+            className="pointer-events-none absolute inset-x-0 top-0 h-1 overflow-hidden rounded-full border border-emerald-200"
             style={{ backgroundColor: getMasteryColor(0) }}
           >
             {masteryChunks.map((chunk, index) => {
@@ -418,49 +432,55 @@ export function AudioPlayer({
               );
             })}
           </div>
-        </div>
 
-        <div className="relative mb-1 h-2.5 overflow-hidden rounded-full bg-gray-200">
-          {segments.length > 0 ? (
-            segments.map((segment, index) => {
-              const segWidth = safeDurationMs > 0
-                ? ((segment.endMs - segment.startMs) / safeDurationMs) * 100
-                : 0;
-              const segLeft = safeDurationMs > 0
-                ? (segment.startMs / safeDurationMs) * 100
-                : 0;
-              const isActive = index === currentSegmentIndex;
-              return (
-                <div
-                  key={segment.id}
-                  data-testid={isActive ? "audio-segment-window" : `audio-segment-item-${index}`}
-                  className={`absolute inset-y-0 ${isActive ? "bg-amber-400" : "bg-amber-200/70"}`}
-                  style={{ left: `${segLeft}%`, width: `${segWidth}%` }}
-                />
-              );
-            })
-          ) : (
-            <div
-              data-testid="audio-segment-window"
-              className="absolute top-0 h-2.5 rounded-full bg-amber-300/90"
-              style={{ left: `${segmentOffset}%`, width: `${segmentWidth}%` }}
-            />
-          )}
-        </div>
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2 overflow-hidden rounded-full bg-gray-200">
+            {segments.length > 0 ? (
+              segments.map((segment, index) => {
+                const segWidth = safeDurationMs > 0
+                  ? ((segment.endMs - segment.startMs) / safeDurationMs) * 100
+                  : 0;
+                const segLeft = safeDurationMs > 0
+                  ? (segment.startMs / safeDurationMs) * 100
+                  : 0;
+                const isActive = index === currentSegmentIndex;
+                return (
+                  <div
+                    key={segment.id}
+                    data-testid={isActive ? "audio-segment-window" : `audio-segment-item-${index}`}
+                    className={`absolute inset-y-0 ${isActive ? "bg-amber-400" : "bg-amber-200/70"}`}
+                    style={{ left: `${segLeft}%`, width: `${segWidth}%` }}
+                  />
+                );
+              })
+            ) : (
+              <div
+                data-testid="audio-segment-window"
+                className="absolute top-0 h-2.5 rounded-full bg-amber-300/90"
+                style={{ left: `${segmentOffset}%`, width: `${segmentWidth}%` }}
+              />
+            )}
+          </div>
 
-        <input
-          type="range"
-          min={0}
-          max={safeDurationMs}
-          value={Math.min(currentMs, safeDurationMs)}
-          onChange={(event) => onSeekSong(Number(event.target.value))}
-          data-testid="audio-slider"
-          disabled={!isReady}
-          className="w-full"
-        />
+          <div
+            data-testid="audio-playhead-marker"
+            className="pointer-events-none absolute inset-y-0 w-0.5 rounded-full bg-indigo-700"
+            style={{ left: `calc(${playheadOffset}% - 1px)` }}
+          />
+
+          <input
+            type="range"
+            min={0}
+            max={safeDurationMs}
+            value={clampedCurrentMs}
+            onChange={(event) => onSeekSong(Number(event.target.value))}
+            data-testid="audio-slider"
+            disabled={!isReady}
+            className="sr-only"
+          />
+        </div>
 
         <div className="mt-1 flex justify-between text-xs text-gray-500">
-          <span data-testid="audio-current-time">{formatMs(Math.min(currentMs, safeDurationMs))}</span>
+          <span data-testid="audio-current-time">{formatMs(clampedCurrentMs)}</span>
           <span data-testid="audio-duration">{formatMs(safeDurationMs)}</span>
         </div>
 
