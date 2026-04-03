@@ -35,12 +35,39 @@ export async function GET(
     R2_PUBLIC_URL: typeof process.env.R2_PUBLIC_URL === 'string' && process.env.R2_PUBLIC_URL.trim().length > 0 ? 'present' : 'missing',
   };
 
-  const tryPublicFallback = (reason: string) => {
+  const tryPublicFallback = async (reason: string) => {
     if (!key) return null;
     const publicUrl = getPublicUrl(key);
     if (publicUrl.startsWith('http')) {
-      console.info(`Audio proxy: falling back to public URL (${reason})`);
-      return NextResponse.redirect(publicUrl, { status: 302 });
+      console.info(`Audio proxy: fetching public URL (${reason})`);
+      const range = request.headers.get('range');
+      const response = await fetch(publicUrl, {
+        headers: range ? { Range: range } : undefined,
+      });
+
+      if (response.ok || response.status === 206) {
+        const headers = new Headers();
+        const contentType = response.headers.get('content-type') ?? 'audio/mpeg';
+        headers.set('Content-Type', contentType);
+        headers.set('Accept-Ranges', response.headers.get('accept-ranges') ?? 'bytes');
+
+        const cacheControl = response.headers.get('cache-control');
+        if (cacheControl) headers.set('Cache-Control', cacheControl);
+
+        const contentLength = response.headers.get('content-length');
+        if (contentLength) headers.set('Content-Length', contentLength);
+
+        const contentRange = response.headers.get('content-range');
+        if (contentRange) headers.set('Content-Range', contentRange);
+
+        const eTag = response.headers.get('etag');
+        if (eTag) headers.set('ETag', eTag);
+
+        const lastModified = response.headers.get('last-modified');
+        if (lastModified) headers.set('Last-Modified', lastModified);
+
+        return new NextResponse(response.body, { status: response.status, headers });
+      }
     }
     return null;
   };
@@ -54,10 +81,10 @@ export async function GET(
 
     console.info('Requested audio key:', key);
 
-    // If a public URL is available, redirect to it directly — no credentials needed.
-    const publicUrl = getPublicUrl(key);
-    if (publicUrl.startsWith('http')) {
-      return NextResponse.redirect(publicUrl, { status: 302 });
+    // If a public URL is available, fetch and stream it directly.
+    const publicResult = await tryPublicFallback('public url available');
+    if (publicResult) {
+      return publicResult;
     }
 
     // No public URL: must proxy through R2. Require credentials.
@@ -116,7 +143,7 @@ export async function GET(
       /SignatureDoesNotMatch|InvalidAccessKeyId|AccessDenied/.test(errorCode) ||
       /signature|credentials|access denied|403/i.test(message);
     if (isAuthError) {
-      return tryPublicFallback('auth error') ??
+      return (await tryPublicFallback('auth error')) ??
         NextResponse.json({ error: 'Audio access denied' }, { status: 403 });
     }
 
