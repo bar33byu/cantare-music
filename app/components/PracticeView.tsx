@@ -214,8 +214,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
                   onRate={(rating) =>
                     dispatch({ type: "RATE_SEGMENT", segmentId: currentSegment.id, rating })
                   }
-                  isLocked={session.isLocked}
-                  onToggleLock={() => dispatch({ type: "TOGGLE_LOCK" })}
                   playbackMs={currentMs}
                   onSeek={seek}
                 />
