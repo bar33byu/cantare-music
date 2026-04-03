@@ -198,6 +198,116 @@ describe('SegmentEditor', () => {
     });
   });
 
+  it('bulk-import spreads sections across probed song duration when player duration is not ready', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: false,
+      currentMs: 0,
+      durationMs: 0,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => [],
+        } as Response;
+      }
+
+      if (url.endsWith('/api/songs/song-1/segments') && method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    const originalAudio = globalThis.Audio;
+    class FakeAudio extends EventTarget {
+      duration = 180;
+      preload = 'none';
+
+      load() {
+        this.dispatchEvent(new Event('loadedmetadata'));
+      }
+
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject | null) {
+        super.addEventListener(type, listener as EventListener);
+      }
+
+      removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null) {
+        super.removeEventListener(type, listener as EventListener);
+      }
+    }
+    vi.stubGlobal('Audio', FakeAudio as unknown as typeof Audio);
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-replace'));
+    fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
+      target: {
+        value: ['Verse 1', '***', 'Verse 2'].join('\n'),
+      },
+    });
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
+
+    await waitFor(() => {
+      const createCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).endsWith('/api/songs/song-1/segments') && init?.method === 'POST'
+      );
+      expect(createCalls.length).toBe(2);
+
+      const firstCreateBody = JSON.parse(String(createCalls[0][1]?.body ?? '{}'));
+      const secondCreateBody = JSON.parse(String(createCalls[1][1]?.body ?? '{}'));
+
+      expect(firstCreateBody.startMs).toBe(0);
+      expect(firstCreateBody.endMs).toBe(90000);
+      expect(secondCreateBody.startMs).toBe(90000);
+      expect(secondCreateBody.endMs).toBe(180000);
+    });
+
+    vi.stubGlobal('Audio', originalAudio);
+  });
+
   it('plays from current transport position', async () => {
     const play = vi.fn();
     vi.mocked(useAudioPlayer).mockReturnValue({

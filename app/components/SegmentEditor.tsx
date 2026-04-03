@@ -11,6 +11,8 @@ const MIN_SEGMENT_MS = 1000;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.5;
+const DEFAULT_TIMELINE_FALLBACK_MS = 60000;
+const BULK_DURATION_PROBE_TIMEOUT_MS = 3000;
 
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -175,6 +177,64 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     });
   };
 
+  const probeAudioDurationMs = async (url: string): Promise<number | null> => {
+    if (!url) {
+      return null;
+    }
+
+    return new Promise((resolve) => {
+      const audio = new Audio(url);
+      let settled = false;
+
+      const cleanup = () => {
+        audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+        audio.removeEventListener('error', onError);
+      };
+
+      const settle = (value: number | null) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(value);
+      };
+
+      const onLoadedMetadata = () => {
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          settle(Math.round(audio.duration * 1000));
+          return;
+        }
+        settle(null);
+      };
+
+      const onError = () => settle(null);
+
+      audio.preload = 'metadata';
+      audio.addEventListener('loadedmetadata', onLoadedMetadata);
+      audio.addEventListener('error', onError);
+      audio.load?.();
+
+      window.setTimeout(() => settle(null), BULK_DURATION_PROBE_TIMEOUT_MS);
+    });
+  };
+
+  const resolveBulkDurationMs = async (): Promise<number> => {
+    const knownDuration = Math.max(durationMs, stableDurationMs);
+    if (knownDuration > 0) {
+      return knownDuration;
+    }
+
+    const probedDuration = playbackAudioUrl ? await probeAudioDurationMs(playbackAudioUrl) : null;
+    if (probedDuration && probedDuration > 0) {
+      setStableDurationMs((previous) => Math.max(previous, probedDuration));
+      return probedDuration;
+    }
+
+    const maxEnd = Math.max(0, ...segments.map((segment) => segment.endMs));
+    return Math.max(maxEnd, DEFAULT_TIMELINE_FALLBACK_MS);
+  };
+
   const handleBulkImport = async () => {
     setDeleteError(null);
 
@@ -217,7 +277,8 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     };
 
     try {
-      const timings = buildBulkTimings(sections.length, timelineDurationMs);
+      const bulkDurationMs = await resolveBulkDurationMs();
+      const timings = buildBulkTimings(sections.length, bulkDurationMs);
 
       if (replaceExistingOnBulk) {
         const orderedExisting = [...segments].sort((a, b) => a.order - b.order);
@@ -384,7 +445,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     const maxEnd = Math.max(0, ...segments.map((segment) => segment.endMs));
     const maxPlaybackDuration = Math.max(0, durationMs, stableDurationMs);
     const candidate = Math.max(maxEnd, maxPlaybackDuration);
-    return candidate > 0 ? candidate : 60000;
+    return candidate > 0 ? candidate : DEFAULT_TIMELINE_FALLBACK_MS;
   }, [durationMs, segments, stableDurationMs]);
 
   const zoomPercent = Math.round(zoom * 100);
