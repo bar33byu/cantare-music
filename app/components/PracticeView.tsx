@@ -114,6 +114,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const futureGhostCount = hasSegments
     ? Math.min(song.segments.length - session.currentSegmentIndex - 1, 7)
     : 0;
+
+  const getSegmentIndexAtMs = React.useCallback((ms: number) => {
+    // During overlaps, prefer the later segment so rapid next-clicks keep advancing.
+    for (let i = song.segments.length - 1; i >= 0; i -= 1) {
+      const segment = song.segments[i];
+      if (ms >= segment.startMs && ms < segment.endMs) {
+        return i;
+      }
+    }
+    return -1;
+  }, [song.segments]);
+
   // Keep snapshot up-to-date every render (before effects run).
   playbackStateRef.current = { isPlaying, currentMs, currentSegment, durationMs };
 
@@ -241,9 +253,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
 
-    const targetIndex = song.segments.findIndex(
-      (segment) => currentMs >= segment.startMs && currentMs < segment.endMs
-    );
+    const targetIndex = getSegmentIndexAtMs(currentMs);
 
     // When looping, stay on the current segment — don't auto-advance.
     if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex && !isLooping) {
@@ -273,7 +283,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (currentMs >= song.segments[song.segments.length - 1].endMs && session.currentSegmentIndex !== song.segments.length - 1) {
       dispatch({ type: "SET_SEGMENT_INDEX", index: song.segments.length - 1 });
     }
-  }, [currentMs, hasSegments, isLooping, isPlaying, session.currentSegmentIndex, song.segments]);
+  }, [currentMs, getSegmentIndexAtMs, hasSegments, isLooping, isPlaying, session.currentSegmentIndex, song.segments]);
 
   useEffect(() => {
     let cancelled = false;
@@ -440,9 +450,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastActionAt: new Date().toISOString(),
     }));
     seek(ms);
-    const targetIndex = song.segments.findIndex(
-      (segment) => ms >= segment.startMs && ms < segment.endMs
-    );
+    const targetIndex = getSegmentIndexAtMs(ms);
     if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex) {
       dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
     }

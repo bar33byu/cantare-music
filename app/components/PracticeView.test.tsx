@@ -356,6 +356,35 @@ describe("PracticeView", () => {
     expect(mockPause).not.toHaveBeenCalled();
   });
 
+  it("next click in an overlap jumps to the later segment", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 3400,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    const song = makeSong(3);
+    song.segments = [
+      { ...song.segments[0], startMs: 0, endMs: 4000 },
+      { ...song.segments[1], startMs: 3300, endMs: 8000 },
+      { ...song.segments[2], startMs: 7600, endMs: 12000 },
+    ];
+
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+    expect(mockPlay).toHaveBeenCalledWith(7600, 12000);
+    expect(mockPause).not.toHaveBeenCalled();
+  });
+
   it("does not reset playhead to segment start after pause", async () => {
     const playbackState = {
       isPlaying: false,
