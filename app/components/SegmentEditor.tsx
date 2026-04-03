@@ -39,6 +39,7 @@ interface SegmentEditorProps {
 
 export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -101,6 +102,16 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     }
   };
 
+  const getNextSectionNumber = () => {
+    const numbers = segments
+      .map((s) => {
+        const match = s.label.match(/Section (\d+)/);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter((n) => n > 0);
+    return Math.max(0, ...numbers) + 1;
+  };
+
   const createSegment = async () => {
     const basePlacement = isReady
       ? getPlaybackAnchoredNewSegmentPlacement(segments, currentMs)
@@ -108,7 +119,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
 
     const payload = {
       id: crypto.randomUUID(),
-      label: `Section ${segments.length + 1}`,
+      label: `Section ${getNextSectionNumber()}`,
       startMs: Math.round(basePlacement.startMs),
       endMs: Math.round(basePlacement.endMs),
       lyricText: '',
@@ -709,6 +720,58 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
           </div>
         </div>
 
+        <div className="mb-3 flex flex-col items-center gap-2 rounded-lg bg-indigo-50/40 p-3">
+          <div className="flex items-center justify-center gap-2">
+            <button
+              type="button"
+              data-testid="segment-editor-skip-back"
+              onClick={() => handleSkipBy(-5000)}
+              aria-label="Skip backward 5 seconds"
+              disabled={!isReady}
+              className="flex h-8 w-[76px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
+            >
+              <span className="inline-flex items-center gap-1 font-semibold">
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 8H5v4" />
+                  <path d="M5 12a7 7 0 1 0 2-5" />
+                </svg>
+                <span>-5s</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              data-testid="segment-editor-play-toggle"
+              onClick={handleTogglePlay}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+              className="h-8 w-12 rounded-xl bg-indigo-600 text-base text-white hover:bg-indigo-700"
+            >
+              {isPlaying ? '⏸' : '▶'}
+            </button>
+            <button
+              type="button"
+              data-testid="segment-editor-skip-forward"
+              onClick={() => handleSkipBy(5000)}
+              aria-label="Skip forward 5 seconds"
+              disabled={!isReady}
+              className="flex h-8 w-[76px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
+            >
+              <span className="inline-flex items-center gap-1 font-semibold">
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 8h4v4" />
+                  <path d="M19 12a7 7 0 1 1-2-5" />
+                </svg>
+                <span>+5s</span>
+              </span>
+            </button>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-gray-600">
+            <span data-testid="segment-editor-current-ms">{formatMs(currentMs)}</span>
+            <span className="text-gray-400">/</span>
+            <span>{formatMs(timelineDurationMs)}</span>
+            {savingSegmentId ? <span className="text-indigo-600">Saving...</span> : null}
+          </div>
+        </div>
+
         {showBulkImport ? (
           <div data-testid="segment-editor-bulk-panel" className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
             <div className="mb-2 grid gap-2 md:grid-cols-[1fr,180px]">
@@ -795,7 +858,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
                   left: `${left}%`,
                   width: `${width}%`,
                   top: lane === 0 ? '24px' : '56px',
-                  height: lane === 0 ? 'calc(100% - 44px)' : 'calc(100% - 76px)',
+                  height: lane === 0 ? 'calc(100% - 76px)' : 'calc(100% - 44px)',
                 }}
                 onClick={() => setSelectedSegmentId(segment.id)}
               >
@@ -853,7 +916,35 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
                 />
 
                 <div className="relative z-10 flex h-full flex-col gap-2 p-2 pt-9">
-                  <label className="text-center text-sm font-semibold text-indigo-900">{segment.label}</label>
+                  {editingLabelId === segment.id ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={segment.label}
+                      onChange={(event) => updateLocalSegment(segment.id, { label: event.target.value })}
+                      onBlur={() => {
+                        void saveSegmentPatch(segment.id, { label: segment.label });
+                        setEditingLabelId(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          void saveSegmentPatch(segment.id, { label: segment.label });
+                          setEditingLabelId(null);
+                        }
+                        if (event.key === 'Escape') {
+                          setEditingLabelId(null);
+                        }
+                      }}
+                      className="text-center text-sm font-semibold text-indigo-900 rounded border border-indigo-400 px-1 py-0.5"
+                    />
+                  ) : (
+                    <label
+                      onClick={() => setEditingLabelId(segment.id)}
+                      className="text-center text-sm font-semibold text-indigo-900 cursor-pointer hover:bg-indigo-50 rounded px-1 py-0.5"
+                    >
+                      {segment.label}
+                    </label>
+                  )}
                   <textarea
                     value={segment.lyricText}
                     onChange={(event) => updateLocalSegment(segment.id, { lyricText: event.target.value })}
@@ -867,16 +958,19 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
                     <span>{Math.floor(segment.startMs / 1000)}s</span>
                     <span>{Math.floor(segment.endMs / 1000)}s</span>
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex justify-center">
                     <button
                       type="button"
                       data-testid={`segment-delete-${segment.id}`}
                       onClick={() => {
                         void handleDelete(segment);
                       }}
-                      className="h-8 w-8 rounded-full border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                      className="h-8 w-8 rounded-full border border-indigo-300 text-indigo-700 hover:bg-indigo-50 flex items-center justify-center"
+                      aria-label={`Delete ${segment.label}`}
                     >
-                      X
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
                     </button>
                   </div>
                 </div>
@@ -940,73 +1034,6 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
         </div>
       </div>
 
-      <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" data-testid="segment-editor-playback-controls">
-        <div className="mb-2 flex items-center justify-center gap-2">
-          <button
-            type="button"
-            data-testid="segment-editor-skip-back"
-            onClick={() => handleSkipBy(-5000)}
-            aria-label="Skip backward 5 seconds"
-            disabled={!isReady}
-            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-          >
-            <span className="inline-flex items-center gap-1 text-sm font-semibold">
-              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 8H5v4" />
-                <path d="M5 12a7 7 0 1 0 2-5" />
-              </svg>
-              <span>-5</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            data-testid="segment-editor-play-toggle"
-            onClick={handleTogglePlay}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-            className="h-9 w-[72px] rounded-xl bg-indigo-600 text-lg text-white hover:bg-indigo-700"
-          >
-            {isPlaying ? '⏸' : '▶'}
-          </button>
-          <button
-            type="button"
-            data-testid="segment-editor-skip-forward"
-            onClick={() => handleSkipBy(5000)}
-            aria-label="Skip forward 5 seconds"
-            disabled={!isReady}
-            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-          >
-            <span className="inline-flex items-center gap-1 text-sm font-semibold">
-              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M15 8h4v4" />
-                <path d="M19 12a7 7 0 1 1-2-5" />
-              </svg>
-              <span>+5</span>
-            </span>
-          </button>
-        </div>
-        <div className="mb-2 flex items-center justify-center gap-2 text-sm text-gray-600">
-          <span data-testid="segment-editor-current-ms">{formatMs(currentMs)}</span>
-          <span className="text-gray-400">/</span>
-          <span>{formatMs(timelineDurationMs)}</span>
-          {savingSegmentId ? <span className="ml-2 text-xs text-indigo-600">Saving...</span> : null}
-        </div>
-        {selectedSegment ? (
-          <div className="grid gap-2 md:grid-cols-[160px,1fr]">
-            <label className="text-sm font-medium text-gray-700">Selected label</label>
-            <input
-              data-testid="segment-editor-label-input"
-              value={selectedSegment.label}
-              onChange={(event) => updateLocalSegment(selectedSegment.id, { label: event.target.value })}
-              onBlur={() => {
-                void saveSegmentPatch(selectedSegment.id, { label: selectedSegment.label });
-              }}
-              className="rounded border border-indigo-200 px-2 py-1 text-sm"
-            />
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">Select a section block to edit its label and lyrics.</p>
-        )}
-      </div>
     </div>
   );
 }

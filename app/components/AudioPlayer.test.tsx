@@ -28,18 +28,9 @@ describe("AudioPlayer", () => {
       errorMessage: null,
     },
     onPlayPause: vi.fn(),
-    onSkipBack: vi.fn(),
-    onSkipForward: vi.fn(),
+    onRestartSegment: vi.fn(),
     onSeekSong: vi.fn(),
-    isLooping: false,
-    onToggleLoop: vi.fn(),
   };
-
-  it("hides debug panel by default", () => {
-    delete process.env.NEXT_PUBLIC_SHOW_AUDIO_DEBUG;
-    render(<AudioPlayer {...defaultProps} />);
-    expect(screen.queryByTestId("audio-debug-panel")).not.toBeInTheDocument();
-  });
 
   it("renders no-audio state when audioUrl is empty", () => {
     render(<AudioPlayer {...defaultProps} audioUrl="" />);
@@ -52,37 +43,10 @@ describe("AudioPlayer", () => {
     expect(defaultProps.onPlayPause).toHaveBeenCalledTimes(1);
   });
 
-  it("does not render segment navigation controls in transport", () => {
+  it("calls restart callback", () => {
     render(<AudioPlayer {...defaultProps} />);
-    expect(screen.queryByTestId("audio-prev-segment")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("audio-next-segment")).not.toBeInTheDocument();
-  });
-
-  it("calls skip callbacks", () => {
-    render(<AudioPlayer {...defaultProps} />);
-    fireEvent.click(screen.getByTestId("audio-skip-back"));
-    fireEvent.click(screen.getByTestId("audio-skip-forward"));
-    expect(defaultProps.onSkipBack).toHaveBeenCalledTimes(1);
-    expect(defaultProps.onSkipForward).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows -5 and +5 labels on skip controls", () => {
-    render(<AudioPlayer {...defaultProps} />);
-    expect(screen.getByTestId("audio-skip-back")).toHaveTextContent("-5");
-    expect(screen.getByTestId("audio-skip-forward")).toHaveTextContent("+5");
-  });
-
-  it("renders loop toggle button and calls onToggleLoop", () => {
-    render(<AudioPlayer {...defaultProps} />);
-    const btn = screen.getByTestId("audio-loop-toggle");
-    expect(btn).toBeInTheDocument();
-    fireEvent.click(btn);
-    expect(defaultProps.onToggleLoop).toHaveBeenCalledTimes(1);
-  });
-
-  it("styles loop button as active when isLooping is true", () => {
-    render(<AudioPlayer {...defaultProps} isLooping={true} />);
-    expect(screen.getByTestId("audio-loop-toggle")).toHaveClass("bg-indigo-600");
+    fireEvent.click(screen.getByTestId("audio-restart"));
+    expect(defaultProps.onRestartSegment).toHaveBeenCalledTimes(1);
   });
 
   it("seeks full piece slider position", () => {
@@ -91,8 +55,9 @@ describe("AudioPlayer", () => {
     expect(defaultProps.onSeekSong).toHaveBeenCalledWith(1500);
   });
 
-  it("shows full duration", () => {
+  it("shows absolute current time and full duration", () => {
     render(<AudioPlayer {...defaultProps} />);
+    expect(screen.getByTestId("audio-current-time")).toHaveTextContent("00:02");
     expect(screen.getByTestId("audio-duration")).toHaveTextContent("00:12");
   });
 
@@ -101,71 +66,27 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-segment-window")).toBeInTheDocument();
   });
 
-  it("renders all segment markers and highlights the active one", () => {
-    render(
-      <AudioPlayer
-        {...defaultProps}
-        durationMs={12000}
-        segmentStartMs={4000}
-        segmentEndMs={8000}
-        currentSegmentIndex={1}
-        segments={[
-          { id: "s0", songId: "song", order: 0, label: "A", lyricText: "", startMs: 0, endMs: 4000 },
-          { id: "s1", songId: "song", order: 1, label: "B", lyricText: "", startMs: 4000, endMs: 8000 },
-          { id: "s2", songId: "song", order: 2, label: "C", lyricText: "", startMs: 8000, endMs: 12000 },
-        ]}
-      />
-    );
-
-    // Active segment gets the audio-segment-window testid
-    expect(screen.getByTestId("audio-segment-window")).toBeInTheDocument();
-    // Non-active segments get indexed testids
-    expect(screen.getByTestId("audio-segment-item-0")).toBeInTheDocument();
-    expect(screen.getByTestId("audio-segment-item-2")).toBeInTheDocument();
-  });
-
-  it("renders full-piece mastery chunks and uses fuller color on overlap", () => {
-    render(
-      <AudioPlayer
-        {...defaultProps}
-        durationMs={6000}
-        segmentStartMs={0}
-        segmentEndMs={6000}
-        segments={[
-          { id: "seg-1", songId: "song-1", order: 0, label: "A", lyricText: "", startMs: 0, endMs: 4000 },
-          { id: "seg-2", songId: "song-1", order: 1, label: "B", lyricText: "", startMs: 2000, endMs: 6000 },
-        ]}
-        masteryBySegment={{ "seg-1": 20, "seg-2": 80 }}
-      />
-    );
-
-    expect(screen.getByTestId("audio-piece-mastery-bar")).toBeInTheDocument();
-    expect(screen.getByTestId("audio-piece-mastery-chunk-1")).toHaveStyle({
-      backgroundColor: "rgb(69, 181, 110)",
-    });
-  });
-
   it("shows playback diagnostics", () => {
-    process.env.NEXT_PUBLIC_SHOW_AUDIO_DEBUG = "true";
-    render(<AudioPlayer {...defaultProps} playbackError="Playback failed" />);
+    render(<AudioPlayer {...defaultProps} playbackError="Playback failed" restartLabel="Restart Piece" />);
+    expect(screen.getByTestId("audio-cache-status")).toHaveTextContent("browser HTTP cache");
+    expect(screen.getByTestId("audio-status-message")).toHaveTextContent("Playback failed");
+    expect(screen.getByTestId("audio-restart")).toHaveTextContent("Restart Piece");
     expect(screen.getByTestId("audio-debug-panel")).toBeInTheDocument();
     expect(screen.getByTestId("audio-debug-last-event")).toHaveTextContent("init");
     expect(screen.getByTestId("audio-native-probe-direct")).toBeInTheDocument();
     expect(screen.getByTestId("audio-native-probe-proxy")).toBeInTheDocument();
-    delete process.env.NEXT_PUBLIC_SHOW_AUDIO_DEBUG;
   });
 
   it("disables controls while audio is loading", () => {
     render(<AudioPlayer {...defaultProps} isReady={false} />);
     expect(screen.getByTestId("audio-play-pause")).not.toBeDisabled();
-    expect(screen.getByTestId("audio-skip-back")).toBeDisabled();
-    expect(screen.getByTestId("audio-skip-forward")).toBeDisabled();
-    expect(screen.getByTestId("audio-play-pause")).toHaveTextContent("▶");
+    expect(screen.getByTestId("audio-restart")).toBeDisabled();
+    expect(screen.getByTestId("audio-play-pause")).toHaveTextContent("Play");
+    expect(screen.getByTestId("audio-status-message")).toHaveTextContent("you can tap Play");
     expect(screen.getByTestId("audio-slider")).toBeDisabled();
   });
 
   it("runs reachability check when debug panel opens", async () => {
-    process.env.NEXT_PUBLIC_SHOW_AUDIO_DEBUG = "true";
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ ok: true, meta: { ContentType: "audio/mpeg", ContentLength: 1234 } }),
@@ -184,6 +105,5 @@ describe("AudioPlayer", () => {
 
     await screen.findByText(/reachability: reachable/i);
     vi.unstubAllGlobals();
-    delete process.env.NEXT_PUBLIC_SHOW_AUDIO_DEBUG;
   });
 });

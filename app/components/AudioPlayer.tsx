@@ -3,8 +3,6 @@
 import { useCallback, useMemo, useRef, useState, type MouseEvent, type SyntheticEvent } from "react";
 import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey } from "../lib/audioUrls";
-import type { Segment } from "../types";
-import { buildMasteryTimelineChunks, getMasteryColor } from "../lib/masteryColors";
 
 interface AudioPlayerProps {
   audioUrl: string;
@@ -16,29 +14,19 @@ interface AudioPlayerProps {
   isReady: boolean;
   playbackError?: string | null;
   debugInfo?: AudioDebugInfo;
+  restartLabel?: string;
   transportDebug?: {
     playToggleClicks: number;
-    skipBackClicks: number;
-    skipForwardClicks: number;
-    prevSegmentClicks: number;
-    nextSegmentClicks: number;
+    restartClicks: number;
     seekClicks: number;
     debugPlayTestClicks: number;
     lastAction: string;
     lastActionAt: string;
   };
   onPlayPause: () => void;
-  onSkipBack: () => void;
-  onSkipForward: () => void;
+  onRestartSegment: () => void;
   onSeekSong: (ms: number) => void;
   onDebugPlayTest?: () => void;
-  segments?: Segment[];
-  masteryBySegment?: Record<string, number>;
-  currentSegmentIndex?: number;
-  isLooping?: boolean;
-  onToggleLoop?: () => void;
-  lyricModeLabel?: string;
-  onToggleLyricMode?: () => void;
 }
 
 type ReachabilityState = {
@@ -78,19 +66,12 @@ export function AudioPlayer({
   isReady,
   playbackError,
   debugInfo,
+  restartLabel = "Restart Segment",
   transportDebug,
   onPlayPause,
-  onSkipBack,
-  onSkipForward,
+  onRestartSegment,
   onSeekSong,
   onDebugPlayTest,
-  segments = [],
-  masteryBySegment = {},
-  currentSegmentIndex,
-  isLooping = false,
-  onToggleLoop,
-  lyricModeLabel,
-  onToggleLyricMode,
 }: AudioPlayerProps) {
   const [reachability, setReachability] = useState<ReachabilityState>({
     status: "idle",
@@ -305,147 +286,48 @@ export function AudioPlayer({
   const safeDurationMs = Math.max(durationMs, segmentEndMs);
   const segmentWidth = safeDurationMs > 0 ? ((segmentEndMs - segmentStartMs) / safeDurationMs) * 100 : 0;
   const segmentOffset = safeDurationMs > 0 ? (segmentStartMs / safeDurationMs) * 100 : 0;
-  const masteryChunks = useMemo(
-    () => buildMasteryTimelineChunks(segments, masteryBySegment, safeDurationMs),
-    [segments, masteryBySegment, safeDurationMs]
-  );
-  const showAudioDebug = process.env.NEXT_PUBLIC_SHOW_AUDIO_DEBUG === "true";
 
   return (
-    <div data-testid="audio-player" className="space-y-2">
-      <div className="flex items-center justify-center gap-2">
+    <div data-testid="audio-player" className="space-y-4">
+      <div className="flex items-center justify-center gap-3">
         <button
           type="button"
-          aria-label="Skip backward 5 seconds"
-          onClick={onSkipBack}
-          data-testid="audio-skip-back"
+          onClick={onRestartSegment}
+          data-testid="audio-restart"
           disabled={!isReady}
-          className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+          className="rounded-full border border-indigo-300 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
         >
-          <span className="inline-flex items-center gap-1 text-sm font-semibold">
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 8H5v4" />
-              <path d="M5 12a7 7 0 1 0 2-5" />
-            </svg>
-            <span>-5</span>
-          </span>
+          {restartLabel}
         </button>
         <button
           type="button"
           onClick={handlePlayPauseClick}
-          aria-label={isPlaying ? "Pause" : "Play"}
           data-testid="audio-play-pause"
-          className="h-9 w-[72px] rounded-xl bg-indigo-600 text-lg text-white hover:bg-indigo-700 disabled:opacity-50"
+          className="rounded-full bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
         >
-          {isPlaying ? "⏸" : "▶"}
+          {isPlaying ? "Pause" : "Play"}
         </button>
-        <button
-          type="button"
-          aria-label="Skip forward 5 seconds"
-          onClick={onSkipForward}
-          data-testid="audio-skip-forward"
-          disabled={!isReady}
-          className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-        >
-          <span className="inline-flex items-center gap-1 text-sm font-semibold">
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 8h4v4" />
-              <path d="M19 12a7 7 0 1 1-2-5" />
-            </svg>
-            <span>+5</span>
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-label={isLooping ? "Stop looping" : "Loop segment"}
-          onClick={onToggleLoop}
-          data-testid="audio-loop-toggle"
-          title={isLooping ? "Loop: on (R to toggle)" : "Loop: off (R to toggle)"}
-          className={`flex h-9 w-[84px] items-center justify-center rounded-xl border text-sm transition ${
-            isLooping
-              ? "border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-700"
-              : "border-indigo-300 text-indigo-700 hover:bg-indigo-50"
-          }`}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 2l4 4-4 4" />
-            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-            <path d="M7 22l-4-4 4-4" />
-            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-          </svg>
-        </button>
-        {onToggleLyricMode ? (
-          <div className="ml-1 flex items-center border-l border-slate-300 pl-2">
-            <button
-              type="button"
-              data-testid="audio-lyric-visibility-toggle"
-              aria-label="Toggle lyric visibility"
-              onClick={onToggleLyricMode}
-              className="h-9 rounded-xl border border-slate-300 bg-slate-50 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-            >
-              Lyrics: {lyricModeLabel ?? "Full"}
-            </button>
-          </div>
-        ) : null}
       </div>
 
-      <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
-        <div className="mb-2">
-          <div
-            data-testid="audio-piece-mastery-bar"
-            className="relative h-2.5 overflow-hidden rounded-full border border-emerald-200"
-            style={{ backgroundColor: getMasteryColor(0) }}
-          >
-            {masteryChunks.map((chunk, index) => {
-              const widthPercent = safeDurationMs > 0
-                ? ((chunk.endMs - chunk.startMs) / safeDurationMs) * 100
-                : 0;
-              const leftPercent = safeDurationMs > 0
-                ? (chunk.startMs / safeDurationMs) * 100
-                : 0;
-
-              return (
-                <div
-                  key={`mastery-chunk-${index}-${chunk.startMs}-${chunk.endMs}`}
-                  data-testid={`audio-piece-mastery-chunk-${index}`}
-                  className="absolute inset-y-0"
-                  style={{
-                    left: `${leftPercent}%`,
-                    width: `${widthPercent}%`,
-                    backgroundColor: getMasteryColor(chunk.percent),
-                  }}
-                />
-              );
-            })}
-          </div>
+      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between text-sm text-gray-600">
+          <span>Full Piece Audio</span>
+          <span data-testid="audio-current-time">{formatMs(currentMs)}</span>
         </div>
 
-        <div className="relative mb-1 h-2.5 overflow-hidden rounded-full bg-gray-200">
-          {segments.length > 0 ? (
-            segments.map((segment, index) => {
-              const segWidth = safeDurationMs > 0
-                ? ((segment.endMs - segment.startMs) / safeDurationMs) * 100
-                : 0;
-              const segLeft = safeDurationMs > 0
-                ? (segment.startMs / safeDurationMs) * 100
-                : 0;
-              const isActive = index === currentSegmentIndex;
-              return (
-                <div
-                  key={segment.id}
-                  data-testid={isActive ? "audio-segment-window" : `audio-segment-item-${index}`}
-                  className={`absolute inset-y-0 ${isActive ? "bg-amber-400" : "bg-amber-200/70"}`}
-                  style={{ left: `${segLeft}%`, width: `${segWidth}%` }}
-                />
-              );
-            })
-          ) : (
-            <div
-              data-testid="audio-segment-window"
-              className="absolute top-0 h-2.5 rounded-full bg-amber-300/90"
-              style={{ left: `${segmentOffset}%`, width: `${segmentWidth}%` }}
-            />
-          )}
+        <div className="mb-3 flex items-center justify-between text-xs text-gray-500">
+          <span data-testid="audio-cache-status">Caching uses the browser HTTP cache for this file.</span>
+          <span data-testid="audio-status-message">
+            {playbackError ? playbackError : isReady ? "Ready to play" : "Loading audio source... you can tap Play"}
+          </span>
+        </div>
+
+        <div className="relative mb-2 h-3 rounded-full bg-indigo-100">
+          <div
+            data-testid="audio-segment-window"
+            className="absolute top-0 h-3 rounded-full bg-amber-300/90"
+            style={{ left: `${segmentOffset}%`, width: `${segmentWidth}%` }}
+          />
         </div>
 
         <input
@@ -459,19 +341,18 @@ export function AudioPlayer({
           className="w-full"
         />
 
-        <div className="mt-1 flex justify-between text-xs text-gray-500">
+        <div className="mt-2 flex justify-between text-sm text-gray-500">
           <span>00:00</span>
           <span data-testid="audio-duration">{formatMs(safeDurationMs)}</span>
         </div>
 
-        {showAudioDebug ? (
-          <details
-            data-testid="audio-debug-panel"
-            className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700"
-            onToggle={handleDebugToggle}
-          >
-            <summary className="cursor-pointer font-semibold text-slate-800">Audio Debug</summary>
-            <div className="mt-2 max-h-80 space-y-1 overflow-y-auto pr-1" data-testid="audio-debug-content">
+        <details
+          data-testid="audio-debug-panel"
+          className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700"
+          onToggle={handleDebugToggle}
+        >
+          <summary className="cursor-pointer font-semibold text-slate-800">Audio Debug</summary>
+          <div className="mt-2 max-h-80 space-y-1 overflow-y-auto pr-1" data-testid="audio-debug-content">
             <div className="mb-2 flex gap-2" data-testid="audio-debug-actions-top">
               <button
                 type="button"
@@ -512,10 +393,7 @@ export function AudioPlayer({
             <p data-testid="audio-debug-local-last-ack" className="break-all">localLastAck: {localClickAck.lastAck}</p>
             <p data-testid="audio-debug-local-last-ack-at">localLastAckAt: {localClickAck.lastAckAt}</p>
             <p data-testid="audio-debug-ui-play-toggle-clicks">uiPlayToggleClicks: {transportDebug?.playToggleClicks ?? 0}</p>
-            <p data-testid="audio-debug-ui-skip-back-clicks">uiSkipBackClicks: {transportDebug?.skipBackClicks ?? 0}</p>
-            <p data-testid="audio-debug-ui-skip-forward-clicks">uiSkipForwardClicks: {transportDebug?.skipForwardClicks ?? 0}</p>
-            <p data-testid="audio-debug-ui-prev-segment-clicks">uiPrevSegmentClicks: {transportDebug?.prevSegmentClicks ?? 0}</p>
-            <p data-testid="audio-debug-ui-next-segment-clicks">uiNextSegmentClicks: {transportDebug?.nextSegmentClicks ?? 0}</p>
+            <p data-testid="audio-debug-ui-restart-clicks">uiRestartClicks: {transportDebug?.restartClicks ?? 0}</p>
             <p data-testid="audio-debug-ui-seek-clicks">uiSeekClicks: {transportDebug?.seekClicks ?? 0}</p>
             <p data-testid="audio-debug-ui-debug-play-test-clicks">uiDebugPlayTestClicks: {transportDebug?.debugPlayTestClicks ?? 0}</p>
             <p data-testid="audio-debug-ui-last-action" className="break-all">uiLastAction: {transportDebug?.lastAction ?? "none"}</p>
@@ -566,9 +444,8 @@ export function AudioPlayer({
                 <p data-testid="audio-native-probe-proxy-unavailable">Proxy probe unavailable: could not derive audio key.</p>
               )}
             </div>
-            </div>
-          </details>
-        ) : null}
+          </div>
+        </details>
       </div>
     </div>
   );

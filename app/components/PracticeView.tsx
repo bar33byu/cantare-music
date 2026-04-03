@@ -8,15 +8,11 @@ import SegmentCard from "./SegmentCard";
 import KnowledgeBar from "./KnowledgeBar";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
-import { getMasteryColor, getMasteryPercent } from "../lib/masteryColors";
+import { toPlayableAudioUrl } from "../lib/audioUrls";
 
 interface TransportDebugState {
   playToggleClicks: number;
-  skipBackClicks: number;
-  skipForwardClicks: number;
-  prevSegmentClicks: number;
-  nextSegmentClicks: number;
+  restartClicks: number;
   seekClicks: number;
   debugPlayTestClicks: number;
   lastAction: string;
@@ -26,78 +22,15 @@ interface TransportDebugState {
 interface PracticeViewProps {
   song: Song;
   initialSession: SessionState;
-  onSessionChange?: (session: SessionState) => void;
-  breadcrumbRootLabel?: string;
-  onBreadcrumbRootClick?: () => void;
-  onEditSongClick?: () => void;
 }
 
-type LyricVisibilityMode = "full" | "hint" | "hidden";
-
-const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
-  full: "Full",
-  hint: "Hints",
-  hidden: "Hidden",
-};
-
-const PRACTICED_PLAYBACK_THRESHOLD_MS = 10_000;
-
-function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
-  if (mode === "full") {
-    return "hint";
-  }
-  if (mode === "hint") {
-    return "hidden";
-  }
-  return "full";
-}
-
-const PracticeView: React.FC<PracticeViewProps> = ({
-  song,
-  initialSession,
-  onSessionChange,
-  breadcrumbRootLabel,
-  onBreadcrumbRootClick,
-  onEditSongClick,
-}) => {
+const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => {
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
-  const lastSyncedSegmentIdRef = React.useRef<string | null>(null);
-  const previousSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
-  const lastSavedRatingsRef = React.useRef<string>("unloaded");
-  const [transitionDirection, setTransitionDirection] = React.useState<"forward" | "backward">("forward");
-  const [transitionToken, setTransitionToken] = React.useState(0);
-  const [ratingsLoading, setRatingsLoading] = React.useState(true);
-  const [ratingsError, setRatingsError] = React.useState<string | null>(null);
-  const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
-  const [isLooping, setIsLooping] = React.useState(false);
-  const [useProxyFallback, setUseProxyFallback] = React.useState(false);
-  const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
-  const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
-  const practicedRecordedRef = React.useRef(false);
-  const accumulatedPlaybackMsRef = React.useRef(0);
-  const playbackStartedAtRef = React.useRef<number | null>(null);
-  // True after the user explicitly pauses; cleared when playback restarts.
-  // Used to distinguish a user pause from the hook stopping at a natural segment end.
-  const pausedByUserRef = React.useRef(false);
-  // Skip the isLooping-change effect on the initial mount.
-  const loopEffectMountedRef = React.useRef(false);
-  // Snapshot of the current playback state readable in effects without adding each
-  // value as a dep (used by the isLooping-change effect).
-  const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
-  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(song.audioUrl)), [song.audioUrl]);
-  const playbackAudioUrl = useMemo(() => {
-    if (useProxyFallback && proxyAudioUrl) {
-      return proxyAudioUrl;
-    }
-    return toPlayableAudioUrl(song.audioUrl);
-  }, [proxyAudioUrl, song.audioUrl, useProxyFallback]);
+  const playbackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
   const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
-    skipBackClicks: 0,
-    skipForwardClicks: 0,
-    prevSegmentClicks: 0,
-    nextSegmentClicks: 0,
+    restartClicks: 0,
     seekClicks: 0,
     debugPlayTestClicks: 0,
     lastAction: "init",
@@ -110,209 +43,24 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
-  const pastGhostCount = hasSegments ? Math.min(session.currentSegmentIndex, 7) : 0;
-  const futureGhostCount = hasSegments
-    ? Math.min(song.segments.length - session.currentSegmentIndex - 1, 7)
-    : 0;
-  // Keep snapshot up-to-date every render (before effects run).
-  playbackStateRef.current = { isPlaying, currentMs, currentSegment, durationMs };
-
-  useEffect(() => {
-    // Reset per-song fallback state when switching songs.
-    setUseProxyFallback(false);
-  }, [song.id]);
-
-  const flushPlayedTime = React.useCallback(() => {
-    if (playbackStartedAtRef.current === null) {
-      return;
-    }
-    const now = Date.now();
-    accumulatedPlaybackMsRef.current += Math.max(0, now - playbackStartedAtRef.current);
-    playbackStartedAtRef.current = now;
-  }, []);
-
-  const markPracticedIfNeeded = React.useCallback(() => {
-    if (practicedRecordedRef.current) {
-      return;
-    }
-    if (accumulatedPlaybackMsRef.current < PRACTICED_PLAYBACK_THRESHOLD_MS) {
-      return;
-    }
-
-    practicedRecordedRef.current = true;
-    void fetch(`/api/songs/${song.id}/practice`, { method: "POST" }).catch(() => {
-      practicedRecordedRef.current = false;
-    });
-  }, [song.id]);
-
-  useEffect(() => {
-    practicedRecordedRef.current = false;
-    accumulatedPlaybackMsRef.current = 0;
-    playbackStartedAtRef.current = null;
-  }, [song.id]);
-
-  useEffect(() => {
-    if (!isPlaying) {
-      flushPlayedTime();
-      playbackStartedAtRef.current = null;
-      markPracticedIfNeeded();
-      return;
-    }
-
-    if (playbackStartedAtRef.current === null) {
-      playbackStartedAtRef.current = Date.now();
-    }
-
-    const remainingMs = PRACTICED_PLAYBACK_THRESHOLD_MS - accumulatedPlaybackMsRef.current;
-    if (remainingMs <= 0) {
-      markPracticedIfNeeded();
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      flushPlayedTime();
-      markPracticedIfNeeded();
-    }, remainingMs);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [flushPlayedTime, isPlaying, markPracticedIfNeeded]);
-
-  useEffect(() => {
-    const measureTitleOverflow = () => {
-      const el = songTitleRef.current;
-      if (!el) {
-        setIsSongTitleTruncated(false);
-        return;
-      }
-      setIsSongTitleTruncated(el.scrollWidth > el.clientWidth + 1);
-    };
-
-    measureTitleOverflow();
-
-    if (typeof window === "undefined" || typeof window.ResizeObserver === "undefined") {
-      return;
-    }
-
-    const observer = new window.ResizeObserver(() => {
-      measureTitleOverflow();
-    });
-
-    if (songTitleRef.current) {
-      observer.observe(songTitleRef.current);
-    }
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [song.title, breadcrumbRootLabel]);
-
-  useEffect(() => {
-    if (!playbackError || useProxyFallback || !proxyAudioUrl) {
-      return;
-    }
-    // If direct/public URL fails, transparently retry through same-origin proxy.
-    setUseProxyFallback(true);
-  }, [playbackError, proxyAudioUrl, useProxyFallback]);
 
   useEffect(() => {
     if (!song.audioUrl || !currentSegment) {
       return;
     }
-
-    const hasSegmentChanged = lastSyncedSegmentIdRef.current !== currentSegment.id;
-    if (!hasSegmentChanged) {
-      return;
-    }
-
-    lastSyncedSegmentIdRef.current = currentSegment.id;
-
-    // Avoid interrupting in-flight section transitions while actively playing.
-    if (isPlaying) {
-      return;
-    }
-
+    pause();
     seek(currentSegment.startMs);
-  }, [currentSegment, isPlaying, song.audioUrl, seek]);
+  }, [currentSegment, song.audioUrl, pause, seek]);
 
-  useEffect(() => {
-    if (!hasSegments || !isPlaying) {
-      return;
+  const playbackSegmentIndex = useMemo(() => {
+    if (!hasSegments) {
+      return -1;
     }
-
-    const targetIndex = song.segments.findIndex(
+    const byPlayback = song.segments.findIndex(
       (segment) => currentMs >= segment.startMs && currentMs < segment.endMs
     );
-
-    // When looping, stay on the current segment — don't auto-advance.
-    if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex && !isLooping) {
-      dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
-      return;
-    }
-
-    // In a gap between two segments: first half → show prior, second half → show next
-    if (targetIndex === -1) {
-      const gapBeforeIndex = song.segments.findIndex((seg, i) => {
-        const next = song.segments[i + 1];
-        return next !== undefined && currentMs >= seg.endMs && currentMs < next.startMs;
-      });
-
-      if (gapBeforeIndex !== -1) {
-        const gapStart = song.segments[gapBeforeIndex].endMs;
-        const gapEnd = song.segments[gapBeforeIndex + 1].startMs;
-        const gapMidpoint = (gapStart + gapEnd) / 2;
-        const gapTargetIndex = currentMs < gapMidpoint ? gapBeforeIndex : gapBeforeIndex + 1;
-        if (gapTargetIndex !== session.currentSegmentIndex) {
-          dispatch({ type: "SET_SEGMENT_INDEX", index: gapTargetIndex });
-        }
-        return;
-      }
-    }
-
-    if (currentMs >= song.segments[song.segments.length - 1].endMs && session.currentSegmentIndex !== song.segments.length - 1) {
-      dispatch({ type: "SET_SEGMENT_INDEX", index: song.segments.length - 1 });
-    }
-  }, [currentMs, hasSegments, isLooping, isPlaying, session.currentSegmentIndex, song.segments]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadRatings = async () => {
-      setRatingsLoading(true);
-      setRatingsError(null);
-      try {
-        const response = await fetch(`/api/songs/${song.id}/ratings`);
-        if (!response.ok) {
-          throw new Error(`Failed to load ratings (${response.status})`);
-        }
-
-        const payload = await response.json() as { ratings?: SessionState['ratings'] };
-        if (!cancelled) {
-          const loadedRatings = Array.isArray(payload.ratings) ? payload.ratings : [];
-          dispatch({ type: 'LOAD_RATINGS', ratings: loadedRatings });
-          // Mark what's already on the server so the save effect skips the initial load
-          lastSavedRatingsRef.current = JSON.stringify(loadedRatings);
-        }
-      } catch {
-        if (!cancelled) {
-          // Load failed — treat existing state as already saved to avoid erasing server data
-          lastSavedRatingsRef.current = JSON.stringify(session.ratings);
-          setRatingsError('Could not load previous ratings. Practice is still available.');
-        }
-      } finally {
-        if (!cancelled) {
-          setRatingsLoading(false);
-        }
-      }
-    };
-
-    void loadRatings();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [song.id]);
+    return byPlayback === -1 ? session.currentSegmentIndex : byPlayback;
+  }, [currentMs, hasSegments, session.currentSegmentIndex, song.segments]);
 
   const currentRating: MemoryRating | undefined = (() => {
     if (!currentSegment) {
@@ -325,10 +73,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   })();
 
   const knowledgeScore = computeKnowledgeScore(session, song);
-  const masteryPercentForSegment = React.useCallback(
-    (segmentId: string) => getMasteryPercent(knowledgeScore.bySegment, segmentId),
-    [knowledgeScore.bySegment]
-  );
 
   const jumpToSegment = (targetIndex: number) => {
     if (!hasSegments) {
@@ -352,61 +96,27 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastActionAt: new Date().toISOString(),
     }));
     if (isPlaying) {
-      pausedByUserRef.current = true;
       pause();
       return;
     }
 
-    // When looping, play the current segment from the current position (or start if past the end).
-    if (isLooping && currentSegment) {
-      pausedByUserRef.current = false;
-      const resumeMs = currentMs >= currentSegment.endMs
-        ? currentSegment.startMs
-        : Math.max(currentMs, currentSegment.startMs);
-      play(resumeMs, currentSegment.endMs);
-      return;
-    }
+    // Main play button should drive full-piece playback.
     const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
     const fullPieceResumeMs = durationMs > 0 && currentMs >= durationMs ? 0 : currentMs;
     play(fullPieceResumeMs, effectiveDurationMs);
   };
 
-  const handleSkipBy = (deltaMs: number) => {
-    const nextMs = Math.max(0, Math.min(totalDurationMs, currentMs + deltaMs));
+  const handleRestartSegment = () => {
     setTransportDebug((previous) => ({
       ...previous,
-      skipBackClicks: deltaMs < 0 ? previous.skipBackClicks + 1 : previous.skipBackClicks,
-      skipForwardClicks: deltaMs > 0 ? previous.skipForwardClicks + 1 : previous.skipForwardClicks,
-      lastAction: deltaMs < 0 ? "skip-back-5" : "skip-forward-5",
+      restartClicks: previous.restartClicks + 1,
+      lastAction: "restart-segment",
       lastActionAt: new Date().toISOString(),
     }));
-    handleSeekSong(nextMs);
-  };
-
-  const handlePrevSegment = () => {
-    if (!hasSegments || isFirst) {
-      return;
-    }
-    setTransportDebug((previous) => ({
-      ...previous,
-      prevSegmentClicks: previous.prevSegmentClicks + 1,
-      lastAction: "prev-segment",
-      lastActionAt: new Date().toISOString(),
-    }));
-    jumpToSegment(session.currentSegmentIndex - 1);
-  };
-
-  const handleNextSegment = () => {
-    if (!hasSegments || isLast) {
-      return;
-    }
-    setTransportDebug((previous) => ({
-      ...previous,
-      nextSegmentClicks: previous.nextSegmentClicks + 1,
-      lastAction: "next-segment",
-      lastActionAt: new Date().toISOString(),
-    }));
-    jumpToSegment(session.currentSegmentIndex + 1);
+    const restartMs = currentSegment?.startMs ?? 0;
+    const endMs = currentSegment?.endMs ?? (totalDurationMs || Number.POSITIVE_INFINITY);
+    seek(restartMs);
+    play(restartMs, endMs);
   };
 
   const handleSeekSong = (ms: number) => {
@@ -425,17 +135,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
   };
 
-  const handleRateCurrentSegment = React.useCallback((rating: MemoryRating) => {
-    if (!currentSegment) {
-      return;
-    }
-    if (rating === 1 && currentRating === 1) {
-      dispatch({ type: "CLEAR_SEGMENT_RATING", segmentId: currentSegment.id });
-      return;
-    }
-    dispatch({ type: "RATE_SEGMENT", segmentId: currentSegment.id, rating });
-  }, [currentSegment, currentRating]);
-
   const handleDebugPlayTest = () => {
     setTransportDebug((previous) => ({
       ...previous,
@@ -446,425 +145,158 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     play(0, 10000);
   };
 
-  useEffect(() => {
-    const isTextInputLike = (target: EventTarget | null): boolean => {
-      if (!(target instanceof HTMLElement)) {
-        return false;
-      }
-      if (target.isContentEditable) {
-        return true;
-      }
-      const tagName = target.tagName.toLowerCase();
-      return tagName === "input" || tagName === "textarea" || tagName === "select";
-    };
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey) {
-        return;
-      }
-      if (isTextInputLike(event.target)) {
-        return;
-      }
-
-      if (event.key === " ") {
-        event.preventDefault();
-        handleTogglePlay();
-        return;
-      }
-
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        handleSkipBy(-5000);
-        return;
-      }
-
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        handleSkipBy(5000);
-        return;
-      }
-
-      if (event.key === "PageUp") {
-        event.preventDefault();
-        handlePrevSegment();
-        return;
-      }
-
-      if (event.key === "PageDown") {
-        event.preventDefault();
-        handleNextSegment();
-        return;
-      }
-
-      // J/K/L shuttle controls (J=−5s, K=play-pause, L=+5s)
-      // Shift+J/L for ±15s jumps; U/O for prev/next segment
-      if (event.key === "j" || event.key === "J") {
-        event.preventDefault();
-        handleSkipBy(event.shiftKey ? -15000 : -5000);
-        return;
-      }
-
-      if (event.key === "k") {
-        event.preventDefault();
-        handleTogglePlay();
-        return;
-      }
-
-      if (event.key === "l" || event.key === "L") {
-        event.preventDefault();
-        handleSkipBy(event.shiftKey ? 15000 : 5000);
-        return;
-      }
-
-      if (event.key === "u") {
-        event.preventDefault();
-        handlePrevSegment();
-        return;
-      }
-
-      if (event.key === "o") {
-        event.preventDefault();
-        handleNextSegment();
-        return;
-      }
-
-      if (event.key === "r") {
-        event.preventDefault();
-        setIsLooping((previous) => !previous);
-        return;
-      }
-
-      if (/^[1-5]$/.test(event.key)) {
-        event.preventDefault();
-        handleRateCurrentSegment(Number(event.key) as MemoryRating);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleTogglePlay, setIsLooping]);
-
-  // When isLooping is toggled while audio is already playing, immediately constrain
-  // playback to the current segment (loop on) or release it to full-piece (loop off).
-  useEffect(() => {
-    if (!loopEffectMountedRef.current) {
-      loopEffectMountedRef.current = true;
-      return;
-    }
-    const state = playbackStateRef.current;
-    if (!state.isPlaying) return;
-    if (isLooping) {
-      if (!state.currentSegment) return;
-      const resumeMs = Math.max(state.currentMs, state.currentSegment.startMs);
-      play(resumeMs, state.currentSegment.endMs);
-    } else {
-      const effectiveDurationMs = state.durationMs > 0 ? state.durationMs : Number.POSITIVE_INFINITY;
-      play(state.currentMs, effectiveDurationMs);
-    }
-  }, [isLooping, play]);
-
-  // Restart the segment when playback reaches its natural end while looping.
-  // Uses pausedByUserRef to avoid restarting after an explicit user pause.
-  useEffect(() => {
-    if (!isLooping || !currentSegment) return;
-    if (isPlaying) {
-      // Reset the user-pause flag whenever playback is active.
-      pausedByUserRef.current = false;
-      return;
-    }
-    if (pausedByUserRef.current) return;
-    if (currentMs >= currentSegment.endMs - 50) {
-      play(currentSegment.startMs, currentSegment.endMs);
-    }
-  }, [currentMs, currentSegment, isLooping, isPlaying, play]);
-
-  useEffect(() => {
-    const previousIndex = previousSegmentIndexRef.current;
-    if (session.currentSegmentIndex !== previousIndex) {
-      setTransitionDirection(session.currentSegmentIndex > previousIndex ? "forward" : "backward");
-      setTransitionToken((previous) => previous + 1);
-      previousSegmentIndexRef.current = session.currentSegmentIndex;
-    }
-  }, [session.currentSegmentIndex]);
-
-  useEffect(() => {
-    if (ratingsLoading || lastSavedRatingsRef.current === "unloaded") {
-      return;
-    }
-    const snapshot = JSON.stringify(session.ratings);
-    if (snapshot === lastSavedRatingsRef.current) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      lastSavedRatingsRef.current = snapshot;
-      void fetch(`/api/songs/${song.id}/ratings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ratings: session.ratings.map((r) => ({
-            segmentId: r.segmentId,
-            rating: r.rating,
-            ratedAt: r.ratedAt,
-          })),
-        }),
-      });
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [session.ratings, song.id, ratingsLoading]);
-
-  useEffect(() => {
-    onSessionChange?.(session);
-  }, [session, onSessionChange]);
-
   return (
     <div
       data-testid="practice-layout"
-      className="relative flex h-dvh flex-col overflow-hidden bg-gray-50"
+      className="mx-auto w-full max-w-6xl rounded-[32px] border border-gray-200 bg-gradient-to-b from-white to-indigo-50/30 p-4 shadow-sm md:p-6"
     >
-      <header data-testid="practice-header" className="px-4 pb-2 pt-4 md:px-8">
-        <div className="flex items-start justify-between gap-3">
-          {breadcrumbRootLabel ? (
-            <nav aria-label="Breadcrumb" className="min-w-0" data-testid="practice-breadcrumb">
-              {onBreadcrumbRootClick ? (
-                <button
-                  onClick={onBreadcrumbRootClick}
-                  className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-emerald-500 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                >
-                  <span aria-hidden="true" className="text-base leading-none">&#x2190;</span>
-                  {breadcrumbRootLabel}
-                </button>
-              ) : (
-                <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700">{breadcrumbRootLabel}</span>
-              )}
-              <span className="px-2 text-gray-400" aria-hidden="true">/</span>
-              <span className="group relative inline-flex min-w-0 max-w-[15rem] items-center align-middle sm:max-w-[22rem] md:max-w-[30rem] lg:max-w-[36rem]">
-                <span
-                  ref={songTitleRef}
-                  tabIndex={isSongTitleTruncated ? 0 : -1}
-                  title={isSongTitleTruncated ? song.title : undefined}
-                  className="block truncate text-2xl font-bold tracking-tight text-gray-900 outline-none md:text-3xl"
-                  data-testid="song-title"
-                >
-                  {song.title}
-                </span>
-                {isSongTitleTruncated ? (
-                  <span className="ml-2 shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-600">
-                    full
-                  </span>
-                ) : null}
-                {isSongTitleTruncated ? (
-                  <span
-                    role="tooltip"
-                    className="pointer-events-none absolute left-0 top-full z-10 mt-2 hidden max-w-[min(90vw,36rem)] rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white shadow-lg group-hover:block group-focus-within:block"
-                  >
-                    {song.title}
-                  </span>
-                ) : null}
-              </span>
-            </nav>
-          ) : (
-            <h1 className="min-w-0 max-w-[15rem] text-2xl font-bold tracking-tight text-gray-900 sm:max-w-[22rem] md:max-w-[30rem] md:text-3xl lg:max-w-[36rem]">
-              <span
-                ref={songTitleRef}
-                tabIndex={isSongTitleTruncated ? 0 : -1}
-                title={isSongTitleTruncated ? song.title : undefined}
-                className="group relative block truncate outline-none"
-                data-testid="song-title"
-              >
-                {song.title}
-              </span>
-            </h1>
-          )}
-          {onEditSongClick ? (
-            <button
-              onClick={onEditSongClick}
-              aria-label="Edit song"
-              title="Edit song"
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                className="h-4 w-4"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" />
-              </svg>
-            </button>
-          ) : null}
+      <header data-testid="practice-header" className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900" data-testid="song-title">
+            {song.title}
+          </h1>
+          <p className="text-sm text-gray-500" data-testid="segment-counter">
+            {hasSegments
+              ? `Segment ${session.currentSegmentIndex + 1} of ${song.segments.length}`
+              : "Full piece playback"}
+          </p>
         </div>
-        <p className="sr-only" data-testid="segment-counter">
-          {hasSegments
-            ? `Segment ${session.currentSegmentIndex + 1} of ${song.segments.length}`
-            : "Full piece playback"}
-        </p>
       </header>
 
-      <div className="px-4 md:px-8" data-testid="practice-top-bar">
-        {ratingsLoading ? (
-          <div
-            data-testid="ratings-loading-skeleton"
-            className="h-8 w-full animate-pulse rounded-full bg-gray-200"
-          />
-        ) : (
-          <KnowledgeBar percent={knowledgeScore.overall} label="Piece Knowledge" />
-        )}
-        {ratingsError ? (
-          <p data-testid="ratings-load-error" className="mt-2 text-sm text-amber-700">
-            {ratingsError}
-          </p>
-        ) : null}
+      <div className="mb-8" data-testid="practice-top-bar">
+        <KnowledgeBar percent={knowledgeScore.overall} label="Piece Knowledge" />
       </div>
 
-      <main data-testid="practice-main" className="flex flex-1 justify-center overflow-hidden px-4 pb-44 pt-2 md:px-8 md:pb-48">
-        <section data-testid="practice-focus" className="flex h-full min-h-0 w-full max-w-3xl items-center justify-center gap-4 md:gap-8">
-          <button
-            type="button"
-            aria-label="Previous segment"
-            data-testid="practice-prev-segment"
-            onClick={handlePrevSegment}
-            disabled={!hasSegments || isFirst}
-            className="inline-flex h-[70%] min-h-[220px] max-h-[560px] w-14 shrink-0 items-center justify-center rounded-[28px] border border-indigo-300/80 bg-gradient-to-b from-white via-indigo-50 to-indigo-100 text-indigo-700 shadow-lg shadow-indigo-300/30 transition hover:-translate-y-0.5 hover:from-white hover:to-indigo-200 hover:shadow-xl disabled:opacity-30"
-          >
-            <span aria-hidden="true" className="text-3xl leading-none">&#x2039;</span>
-          </button>
-          <div className="h-full min-h-0 w-full max-w-md">
+      <div data-testid="practice-main" className="space-y-8">
+        <section
+          data-testid="practice-focus"
+          className="flex items-center justify-center gap-4 md:gap-10"
+        >
+          {hasSegments ? (
+            <button
+              data-testid="prev-btn"
+              disabled={isFirst}
+              onClick={() => jumpToSegment(session.currentSegmentIndex - 1)}
+              className="h-16 w-16 rounded-full border border-indigo-200 bg-white text-3xl text-indigo-600 shadow-sm disabled:opacity-40"
+            >
+              &lt;
+            </button>
+          ) : null}
+
+          <div className="w-full max-w-xl">
             {hasSegments && currentSegment ? (
-              <div className="segment-stack-shell relative h-full min-h-0 overflow-visible">
-                {Array.from({ length: pastGhostCount }).map((_, ghostIndex) => {
-                  const depth = ghostIndex + 1;
-                  const segmentIndex = session.currentSegmentIndex - depth;
-                  const ghostSegment = song.segments[segmentIndex];
-                  const ghostMasteryColor = ghostSegment
-                    ? getMasteryColor(masteryPercentForSegment(ghostSegment.id))
-                    : getMasteryColor(0);
-                  const scale = 1 - depth * 0.04;
-                  const translateX = -(depth * 12);
-                  const opacity = Math.max(0.06, 0.75 - depth * 0.09);
-                  const zIndex = 10 - depth;
-                  return (
-                    <div
-                      key={`past-ghost-${depth}`}
-                      className="segment-stack-ghost pointer-events-none absolute inset-0 rounded-2xl border border-slate-300/70 bg-slate-100/65"
-                      style={{
-                        transform: `translateX(${translateX}px) scale(${scale.toFixed(3)})`,
-                        transformOrigin: "center center",
-                        opacity,
-                        zIndex,
-                      }}
-                      aria-hidden="true"
-                    >
-                      <div
-                        className="absolute inset-x-0 top-0 h-4 rounded-t-2xl border-b border-black/5"
-                        style={{ backgroundColor: ghostMasteryColor }}
-                      />
-                    </div>
-                  );
-                })}
-                {Array.from({ length: futureGhostCount }).map((_, ghostIndex) => {
-                  const depth = ghostIndex + 1;
-                  const segmentIndex = session.currentSegmentIndex + depth;
-                  const ghostSegment = song.segments[segmentIndex];
-                  const ghostMasteryColor = ghostSegment
-                    ? getMasteryColor(masteryPercentForSegment(ghostSegment.id))
-                    : getMasteryColor(0);
-                  const scale = 1 - depth * 0.04;
-                  const translateX = depth * 12;
-                  const opacity = Math.max(0.06, 0.75 - depth * 0.09);
-                  const zIndex = 10 - depth;
-                  return (
-                    <div
-                      key={`future-ghost-${depth}`}
-                      className="segment-stack-ghost pointer-events-none absolute inset-0 rounded-2xl border border-indigo-300/70 bg-indigo-50/55"
-                      style={{
-                        transform: `translateX(${translateX}px) scale(${scale.toFixed(3)})`,
-                        transformOrigin: "center center",
-                        opacity,
-                        zIndex,
-                      }}
-                      aria-hidden="true"
-                    >
-                      <div
-                        className="absolute inset-x-0 top-0 h-4 rounded-t-2xl border-b border-black/5"
-                        style={{ backgroundColor: ghostMasteryColor }}
-                      />
-                    </div>
-                  );
-                })}
-                <div
-                  key={`${currentSegment.id}-${transitionToken}`}
-                  className={`relative z-10 h-full min-h-0 ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}
-                >
-                  <SegmentCard
-                    segment={currentSegment}
-                    currentRating={currentRating}
-                    onRate={handleRateCurrentSegment}
-                    playbackMs={currentMs}
-                    onSeek={seek}
-                    masteryPercent={masteryPercentForSegment(currentSegment.id)}
-                    lyricVisibilityMode={lyricVisibilityMode}
-                  />
+              <>
+                <div className="mb-4 flex flex-wrap justify-center gap-2" data-testid="practice-segment-strip">
+                  {song.segments.map((segment, index) => {
+                    const isActive = index === session.currentSegmentIndex;
+                    return (
+                      <button
+                        key={segment.id}
+                        type="button"
+                        data-testid={`jump-segment-${segment.id}`}
+                        onClick={() => jumpToSegment(index)}
+                        className={[
+                          "rounded-full px-3 py-1 text-sm transition-colors",
+                          isActive
+                            ? "bg-indigo-600 text-white"
+                            : "bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50",
+                        ].join(" ")}
+                      >
+                        {segment.label}
+                      </button>
+                    );
+                  })}
                 </div>
-              </div>
+
+                <SegmentCard
+                  segment={currentSegment}
+                  currentRating={currentRating}
+                  onRate={(rating) =>
+                    dispatch({ type: "RATE_SEGMENT", segmentId: currentSegment.id, rating })
+                  }
+                  isLocked={session.isLocked}
+                  onToggleLock={() => dispatch({ type: "TOGGLE_LOCK" })}
+                  playbackMs={currentMs}
+                  onSeek={seek}
+                />
+              </>
             ) : (
               <div
                 data-testid="no-segments"
                 className="rounded-[28px] border border-dashed border-indigo-200 bg-white/90 px-6 py-10 text-center shadow-sm"
               >
-                <p className="text-lg font-semibold text-gray-900">No practice sections yet</p>
+                <p className="text-lg font-semibold text-gray-900">No practice segments yet</p>
                 <p className="mt-2 text-sm text-gray-500">
-                  You can still play the full recording below, then switch to Edit Song when you are ready to mark sections.
+                  You can still play the full recording below, then switch to Edit Segments when you are ready to mark sections.
                 </p>
               </div>
             )}
           </div>
-          <button
-            type="button"
-            aria-label="Next segment"
-            data-testid="practice-next-segment"
-            onClick={handleNextSegment}
-            disabled={!hasSegments || isLast}
-            className="inline-flex h-[70%] min-h-[220px] max-h-[560px] w-14 shrink-0 items-center justify-center rounded-[28px] border border-indigo-300/80 bg-gradient-to-b from-white via-indigo-50 to-indigo-100 text-indigo-700 shadow-lg shadow-indigo-300/30 transition hover:-translate-y-0.5 hover:from-white hover:to-indigo-200 hover:shadow-xl disabled:opacity-30"
-          >
-            <span aria-hidden="true" className="text-3xl leading-none">&#x203A;</span>
-          </button>
-        </section>
-      </main>
 
-      <section
-        data-testid="practice-transport"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
-      >
-        <AudioPlayer
-          audioUrl={song.audioUrl}
-          currentMs={currentMs}
-          durationMs={totalDurationMs}
-          segmentStartMs={activeStartMs}
-          segmentEndMs={activeEndMs}
-          isPlaying={isPlaying}
-          isReady={isReady}
-          playbackError={playbackError}
-          debugInfo={debugInfo}
-          transportDebug={transportDebug}
-          onPlayPause={handleTogglePlay}
-          onSkipBack={() => handleSkipBy(-5000)}
-          onSkipForward={() => handleSkipBy(5000)}
-          onSeekSong={handleSeekSong}
-          onDebugPlayTest={handleDebugPlayTest}
-          segments={song.segments}
-          masteryBySegment={knowledgeScore.bySegment}
-          currentSegmentIndex={session.currentSegmentIndex}
-          isLooping={isLooping}
-          onToggleLoop={() => setIsLooping((prev) => !prev)}
-          lyricModeLabel={LYRIC_MODE_LABELS[lyricVisibilityMode]}
-          onToggleLyricMode={() => setLyricVisibilityMode((previous) => getNextLyricMode(previous))}
-        />
-      </section>
+          {hasSegments ? (
+            <button
+              data-testid="next-btn"
+              disabled={isLast}
+              onClick={() => jumpToSegment(session.currentSegmentIndex + 1)}
+              className="h-16 w-16 rounded-full border border-indigo-200 bg-white text-3xl text-indigo-600 shadow-sm disabled:opacity-40"
+            >
+              &gt;
+            </button>
+          ) : null}
+        </section>
+
+        <section data-testid="practice-queue" className="rounded-2xl border border-indigo-100 bg-white/80 p-4">
+          {hasSegments ? (
+            <div className="grid gap-3 md:grid-cols-3">
+              {song.segments.map((segment, index) => {
+                const isActive = index === playbackSegmentIndex;
+                return (
+                  <div
+                    key={segment.id}
+                    data-testid={`queue-segment-${segment.id}`}
+                    data-highlighted={isActive ? "true" : "false"}
+                    className={[
+                      "rounded-xl border px-4 py-3 text-left transition-colors",
+                      isActive
+                        ? "border-amber-300 bg-amber-50 text-amber-900"
+                        : "border-gray-200 bg-white text-gray-700",
+                    ].join(" ")}
+                  >
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                      Section {index + 1}
+                    </p>
+                    <p className="mt-1 font-medium">{segment.label}</p>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div data-testid="no-segments-queue" className="text-sm text-gray-500">
+              Segment highlights will appear here after you create practice sections.
+            </div>
+          )}
+        </section>
+
+        <section data-testid="practice-transport">
+          <AudioPlayer
+            audioUrl={song.audioUrl}
+            currentMs={currentMs}
+            durationMs={totalDurationMs}
+            segmentStartMs={activeStartMs}
+            segmentEndMs={activeEndMs}
+            isPlaying={isPlaying}
+            isReady={isReady}
+            playbackError={playbackError}
+            debugInfo={debugInfo}
+            restartLabel={hasSegments ? "Restart Segment" : "Restart Piece"}
+            transportDebug={transportDebug}
+            onPlayPause={handleTogglePlay}
+            onRestartSegment={handleRestartSegment}
+            onSeekSong={handleSeekSong}
+            onDebugPlayTest={handleDebugPlayTest}
+          />
+        </section>
+      </div>
     </div>
   );
 };
