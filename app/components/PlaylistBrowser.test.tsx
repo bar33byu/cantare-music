@@ -39,6 +39,14 @@ describe('PlaylistBrowser', () => {
     });
   });
 
+  it('clicking the playlist row opens practice', async () => {
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+    await waitFor(() => expect(screen.getByTestId('playlist-open-pl-1')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('playlist-open-pl-1'));
+    expect(onSelectPlaylist).toHaveBeenCalledWith(expect.objectContaining({ id: 'pl-1', songs: [] }));
+  });
+
   it('toggle archived refetches includeRetired=true', async () => {
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
     await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
@@ -93,6 +101,7 @@ describe('PlaylistBrowser', () => {
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
     await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
 
+    fireEvent.click(screen.getByTestId('playlist-actions-pl-1'));
     mockFetch.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: true, json: async () => ({ playlists: [basePlaylist] }) });
     fireEvent.click(screen.getByTestId('playlist-retire-pl-1'));
 
@@ -105,6 +114,7 @@ describe('PlaylistBrowser', () => {
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
     await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
 
+    fireEvent.click(screen.getByTestId('playlist-actions-pl-1'));
     fireEvent.click(screen.getByTestId('playlist-delete-pl-1'));
     expect(screen.getByTestId('playlist-delete-confirm-pl-1')).toBeInTheDocument();
 
@@ -114,5 +124,15 @@ describe('PlaylistBrowser', () => {
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1', expect.objectContaining({ method: 'DELETE' }));
     });
+  });
+
+  it('actions menu exposes manage action', async () => {
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+    await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('playlist-actions-pl-1'));
+    fireEvent.click(screen.getByTestId('playlist-manage-pl-1'));
+
+    expect(onManagePlaylist).toHaveBeenCalledWith(expect.objectContaining({ id: 'pl-1', songs: [] }));
   });
 });

@@ -27,6 +27,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [openActionsId, setOpenActionsId] = useState<string | null>(null);
 
   const fetchPlaylists = async (includeRetired: boolean) => {
     setLoading(true);
@@ -180,34 +181,79 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
         <div data-testid="playlist-list" className="space-y-3">
           {playlists.map((playlist) => {
             const retiredClass = playlist.isRetired ? 'text-gray-500 italic' : '';
+            const playlistPayload = { ...playlist, songs: playlist.songs ?? [] } as Playlist;
             return (
-              <article key={playlist.id} data-testid={`playlist-row-${playlist.id}`} className={`rounded border border-gray-200 bg-white p-4 ${retiredClass}`}>
+              <article
+                key={playlist.id}
+                data-testid={`playlist-row-${playlist.id}`}
+                className={`rounded border border-gray-200 bg-white p-4 transition hover:border-indigo-300 hover:bg-indigo-50/30 ${retiredClass}`}
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
+                  <button
+                    type="button"
+                    data-testid={`playlist-open-${playlist.id}`}
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => onSelectPlaylist(playlistPayload)}
+                  >
                     <h3 className="font-semibold" data-testid={`playlist-name-${playlist.id}`}>{playlist.name}</h3>
                     {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
                     <p className="text-xs text-gray-500">Songs: {playlist.songCount ?? 0}</p>
                     <p className="text-xs text-indigo-700" data-testid={`playlist-knowledge-${playlist.id}`}>
                       Knowledge: {Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100)}%
                     </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button data-testid={`playlist-practice-${playlist.id}`} className="rounded bg-indigo-600 px-3 py-1 text-white" onClick={() => onSelectPlaylist({ ...playlist, songs: playlist.songs ?? [] } as Playlist)}>Practice</button>
-                    <button data-testid={`playlist-manage-${playlist.id}`} className="rounded border border-indigo-300 px-3 py-1 text-indigo-700" onClick={() => onManagePlaylist({ ...playlist, songs: playlist.songs ?? [] } as Playlist)}>Manage</button>
+                  </button>
+
+                  <div className="relative">
                     <button
-                      data-testid={`playlist-retire-${playlist.id}`}
-                      className="rounded border border-amber-300 px-3 py-1 text-amber-700"
-                      onClick={() => void handleRetireToggle(playlist, !playlist.isRetired)}
+                      type="button"
+                      data-testid={`playlist-actions-${playlist.id}`}
+                      className="rounded border border-gray-300 px-3 py-1 text-gray-700 hover:bg-gray-50"
+                      aria-label={`Playlist actions for ${playlist.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setOpenActionsId((previous) => (previous === playlist.id ? null : playlist.id));
+                      }}
                     >
-                      {playlist.isRetired ? 'Un-retire' : 'Retire'}
+                      •••
                     </button>
-                    <button
-                      data-testid={`playlist-delete-${playlist.id}`}
-                      className="rounded border border-red-300 px-3 py-1 text-red-700"
-                      onClick={() => setDeleteConfirmId(playlist.id)}
-                    >
-                      Delete
-                    </button>
+
+                    {openActionsId === playlist.id ? (
+                      <div
+                        data-testid={`playlist-actions-menu-${playlist.id}`}
+                        className="absolute right-0 z-10 mt-2 min-w-[140px] rounded border border-gray-200 bg-white p-1 shadow-lg"
+                      >
+                        <button
+                          data-testid={`playlist-manage-${playlist.id}`}
+                          className="block w-full rounded px-3 py-2 text-left text-sm text-indigo-700 hover:bg-indigo-50"
+                          onClick={() => {
+                            setOpenActionsId(null);
+                            onManagePlaylist(playlistPayload);
+                          }}
+                        >
+                          Manage
+                        </button>
+                        <button
+                          data-testid={`playlist-retire-${playlist.id}`}
+                          className="block w-full rounded px-3 py-2 text-left text-sm text-amber-700 hover:bg-amber-50"
+                          onClick={() => {
+                            setOpenActionsId(null);
+                            void handleRetireToggle(playlist, !playlist.isRetired);
+                          }}
+                        >
+                          {playlist.isRetired ? 'Un-retire' : 'Retire'}
+                        </button>
+                        <button
+                          data-testid={`playlist-delete-${playlist.id}`}
+                          className="block w-full rounded px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50"
+                          onClick={() => {
+                            setOpenActionsId(null);
+                            setDeleteConfirmId(playlist.id);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
