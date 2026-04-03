@@ -47,6 +47,16 @@ export function buildProxyAudioUrl(audioKey: string | null): string | null {
 }
 
 export function toPlayableAudioUrl(audioUrl: string): string {
+  const trimmed = audioUrl.trim();
+  if (!trimmed) {
+    return audioUrl;
+  }
+
+  // Keep absolute URLs (for example, public R2 objects) untouched.
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
   const audioKey = parseAudioKey(audioUrl);
   return buildProxyAudioUrl(audioKey) ?? audioUrl;
 }
