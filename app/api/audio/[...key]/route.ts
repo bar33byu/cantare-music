@@ -1,8 +1,12 @@
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { NextRequest, NextResponse } from 'next/server';
-import { BUCKET, r2Client } from '../../../../lib/r2';
+import { BUCKET, getPublicUrl, r2Client } from '../../../../lib/r2';
 
 export const runtime = 'nodejs';
+
+const hasR2Credentials =
+  typeof process.env.R2_ACCESS_KEY_ID === 'string' && process.env.R2_ACCESS_KEY_ID.trim().length > 0 &&
+  typeof process.env.R2_SECRET_ACCESS_KEY === 'string' && process.env.R2_SECRET_ACCESS_KEY.trim().length > 0;
 
 function toKey(pathSegments: string[]): string {
   return pathSegments.map((segment) => decodeURIComponent(segment)).join('/');
@@ -19,6 +23,9 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ key: string[] }> }
 ) {
+  const { key: keySegments } = await params;
+  const key = Array.isArray(keySegments) && keySegments.length > 0 ? toKey(keySegments) : null;
+
   // Server-side debug: log environment variable presence (never print secret values)
   const envPresence = {
     R2_ACCOUNT_ID: typeof process.env.R2_ACCOUNT_ID === 'string' && process.env.R2_ACCOUNT_ID.trim().length > 0 ? 'present' : 'missing',
@@ -27,16 +34,37 @@ export async function GET(
     R2_BUCKET_NAME: typeof process.env.R2_BUCKET_NAME === 'string' && process.env.R2_BUCKET_NAME.trim().length > 0 ? 'present' : 'missing',
     R2_PUBLIC_URL: typeof process.env.R2_PUBLIC_URL === 'string' && process.env.R2_PUBLIC_URL.trim().length > 0 ? 'present' : 'missing',
   };
+
+  const tryPublicFallback = (reason: string) => {
+    if (!key) return null;
+    const publicUrl = getPublicUrl(key);
+    if (publicUrl.startsWith('http')) {
+      console.info(`Audio proxy: falling back to public URL (${reason})`);
+      return NextResponse.redirect(publicUrl, { status: 302 });
+    }
+    return null;
+  };
+
   try {
-    const { key: keySegments } = await params;
     console.info('Audio proxy request received');
     console.info('Env presence:', envPresence);
-    if (!Array.isArray(keySegments) || keySegments.length === 0) {
+    if (!key) {
       return NextResponse.json({ error: 'Audio key is required' }, { status: 400 });
     }
 
-    const key = toKey(keySegments);
     console.info('Requested audio key:', key);
+
+    // If a public URL is available, redirect to it directly — no credentials needed.
+    const publicUrl = getPublicUrl(key);
+    if (publicUrl.startsWith('http')) {
+      return NextResponse.redirect(publicUrl, { status: 302 });
+    }
+
+    // No public URL: must proxy through R2. Require credentials.
+    if (!hasR2Credentials) {
+      return NextResponse.json({ error: 'Audio credentials not configured' }, { status: 503 });
+    }
+
     const range = request.headers.get('range') ?? undefined;
 
     const object = await r2Client.send(
@@ -80,6 +108,16 @@ export async function GET(
 
     if (notFound) {
       return NextResponse.json({ error: 'Audio file not found' }, { status: 404 });
+    }
+
+    // Credential/signature errors: fall back to public URL if available.
+    const errorCode = (error as { Code?: string })?.Code ?? '';
+    const isAuthError =
+      /SignatureDoesNotMatch|InvalidAccessKeyId|AccessDenied/.test(errorCode) ||
+      /signature|credentials|access denied|403/i.test(message);
+    if (isAuthError) {
+      return tryPublicFallback('auth error') ??
+        NextResponse.json({ error: 'Audio access denied' }, { status: 403 });
     }
 
     console.error('Audio proxy error:', error);
