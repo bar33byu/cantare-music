@@ -33,11 +33,10 @@ interface ActiveInteraction {
 
 interface SegmentEditorProps {
   songId: string;
-  onBack?: () => void;
   onSongUpdated?: () => void;
 }
 
-export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorProps) {
+export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -105,7 +104,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   const getNextSectionNumber = () => {
     const numbers = segments
       .map((s) => {
-        const match = s.label.match(/Section (\d+)/);
+        const match = s.label.match(/^(?:Section\s+)?(\d+)$/i);
         return match ? parseInt(match[1], 10) : 0;
       })
       .filter((n) => n > 0);
@@ -119,7 +118,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
 
     const payload = {
       id: crypto.randomUUID(),
-      label: `Section ${getNextSectionNumber()}`,
+      label: String(getNextSectionNumber()),
       startMs: Math.round(basePlacement.startMs),
       endMs: Math.round(basePlacement.endMs),
       lyricText: '',
@@ -232,7 +231,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  label: `Section ${i + 1}`,
+                  label: String(i + 1),
                   startMs: timings[i].startMs,
                   endMs: timings[i].endMs,
                   lyricText: sections[i],
@@ -257,7 +256,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 id: crypto.randomUUID(),
-                label: `Section ${i + 1}`,
+                label: String(i + 1),
                 startMs: timings[i].startMs,
                 endMs: timings[i].endMs,
                 lyricText: sections[i],
@@ -594,18 +593,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   return (
     <div className="mx-auto w-full max-w-6xl">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-4">
         <h2 className="text-2xl font-bold text-gray-900">Edit Song</h2>
-        <div className="flex items-center gap-2">
-          {onBack && (
-            <button
-              onClick={onBack}
-              className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-            >
-              ← Back to Practice
-            </button>
-          )}
-        </div>
       </div>
 
       {/* Song title */}
@@ -631,9 +620,19 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
           type="button"
           data-testid="segment-editor-replace-audio-toggle"
           onClick={() => setShowReplaceAudio((previous) => !previous)}
-          className="text-sm text-indigo-600 hover:underline"
+          aria-expanded={showReplaceAudio}
+          className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:underline"
         >
-          {showReplaceAudio ? '▲ Hide audio replacement' : '▼ Replace audio file'}
+          <span
+            aria-hidden="true"
+            className={[
+              'inline-block text-xs transition-transform duration-200',
+              showReplaceAudio ? 'rotate-90' : 'rotate-0',
+            ].join(' ')}
+          >
+            ▶
+          </span>
+          <span>Replace audio file</span>
         </button>
         {showReplaceAudio && (
           <div className="mt-2">
@@ -720,7 +719,10 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
           </div>
         </div>
 
-        <div className="mb-3 flex flex-col items-center gap-2 rounded-lg bg-indigo-50/40 p-3">
+        <div
+          data-testid="segment-editor-playback-controls"
+          className="mb-3 flex flex-col items-center gap-2 rounded-lg bg-indigo-50/40 p-3"
+        >
           <div className="flex items-center justify-center gap-2">
             <button
               type="button"
@@ -918,6 +920,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
                 <div className="relative z-10 flex h-full flex-col gap-2 p-2 pt-9">
                   {editingLabelId === segment.id ? (
                     <input
+                      data-testid="segment-editor-label-input"
                       autoFocus
                       type="text"
                       value={segment.label}

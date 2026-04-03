@@ -362,6 +362,7 @@ describe('SegmentEditor', () => {
 
     const segment = await screen.findByTestId('segment-block-seg-1');
     fireEvent.click(segment);
+    fireEvent.click(screen.getByText('Section 1'));
 
     const labelInput = await screen.findByTestId('segment-editor-label-input');
     fireEvent.change(labelInput, { target: { value: 'Refrain' } });

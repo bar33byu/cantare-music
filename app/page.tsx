@@ -166,7 +166,6 @@ export default function Home() {
           </button>
           <SegmentEditor
             songId={selectedSong.id}
-            onBack={() => void handleExitSongEditor()}
             onSongUpdated={refreshSelectedSong}
           />
         </div>
