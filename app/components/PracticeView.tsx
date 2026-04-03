@@ -22,9 +22,12 @@ interface TransportDebugState {
 interface PracticeViewProps {
   song: Song;
   initialSession: SessionState;
+  breadcrumbRootLabel?: string;
+  onBreadcrumbRootClick?: () => void;
+  onEditSongClick?: () => void;
 }
 
-const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => {
+const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession, breadcrumbRootLabel, onBreadcrumbRootClick, onEditSongClick }) => {
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const playbackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
   const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
@@ -152,6 +155,20 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
     >
       <header data-testid="practice-header" className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
+          {breadcrumbRootLabel && (
+            <nav aria-label="Breadcrumb" data-testid="practice-breadcrumb" className="mb-1">
+              {onBreadcrumbRootClick ? (
+                <button
+                  onClick={onBreadcrumbRootClick}
+                  className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:underline"
+                >
+                  &#x2190; {breadcrumbRootLabel}
+                </button>
+              ) : (
+                <span className="text-sm text-gray-500">{breadcrumbRootLabel}</span>
+              )}
+            </nav>
+          )}
           <h1 className="text-3xl font-bold text-gray-900" data-testid="song-title">
             {song.title}
           </h1>
@@ -161,6 +178,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({ song, initialSession }) => 
               : "Full piece playback"}
           </p>
         </div>
+        {onEditSongClick && (
+          <button
+            onClick={onEditSongClick}
+            aria-label="Edit song"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" />
+            </svg>
+          </button>
+        )}
       </header>
 
       <div className="mb-8" data-testid="practice-top-bar">
