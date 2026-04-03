@@ -338,7 +338,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const targetSegment = song.segments[clamped];
     dispatch({ type: "SET_SEGMENT_INDEX", index: clamped });
     if (isPlaying) {
-      play(targetSegment.startMs, targetSegment.endMs);
+      if (isLooping) {
+        play(targetSegment.startMs, targetSegment.endMs);
+        return;
+      }
+
+      const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
+      play(targetSegment.startMs, effectiveDurationMs);
       return;
     }
     seek(targetSegment.startMs);
@@ -397,9 +403,26 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   };
 
   const handleNextSegment = () => {
-    if (!hasSegments || isLast) {
+    if (!hasSegments) {
       return;
     }
+
+    const firstSegmentStartMs = song.segments[0]?.startMs ?? 0;
+    if (currentMs < firstSegmentStartMs) {
+      setTransportDebug((previous) => ({
+        ...previous,
+        nextSegmentClicks: previous.nextSegmentClicks + 1,
+        lastAction: "next-segment-to-first",
+        lastActionAt: new Date().toISOString(),
+      }));
+      jumpToSegment(0);
+      return;
+    }
+
+    if (isLast) {
+      return;
+    }
+
     setTransportDebug((previous) => ({
       ...previous,
       nextSegmentClicks: previous.nextSegmentClicks + 1,

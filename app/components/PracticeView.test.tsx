@@ -205,6 +205,21 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
   });
 
+  it("clicking transport next before section 1 starts jumps to section 1 start", async () => {
+    const song = makeSong(3);
+    song.segments = song.segments.map((segment, index) => ({
+      ...segment,
+      startMs: 1000 + index * 4000,
+      endMs: 1000 + (index + 1) * 4000,
+    }));
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
+    expect(mockSeek).toHaveBeenCalledWith(1000);
+  });
+
   it("clicking transport previous goes to prior segment", async () => {
     const song = makeSong(3);
     const session = makeSession(song);
@@ -337,7 +352,7 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByTestId("practice-next-segment"));
 
-    expect(mockPlay).toHaveBeenCalledWith(4000, 8000);
+    expect(mockPlay).toHaveBeenCalledWith(4000, 12000);
     expect(mockPause).not.toHaveBeenCalled();
   });
 
