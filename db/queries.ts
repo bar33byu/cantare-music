@@ -17,6 +17,7 @@ export interface PlaylistSongItem {
   title: string;
   artist?: string;
   audioUrl: string;
+  ratingCount: number;
   segments: SegmentRow[];
   createdAt: string;
   updatedAt?: string;
@@ -279,12 +280,20 @@ export async function getRatingsForSong(
     .where(eq(segments.songId, songId))
     .orderBy(desc(practiceRatings.ratedAt));
 
-  return rows.map((row) => ({
-    id: row.id,
-    segmentId: row.segmentId,
-    rating: row.rating as PersistedMemoryRating,
-    ratedAt: row.ratedAt.toISOString(),
-  }));
+  // Keep only the latest rating per segment.
+  const latestBySegment: Record<string, PersistedSegmentRating> = {};
+  for (const row of rows) {
+    if (!latestBySegment[row.segmentId]) {
+      latestBySegment[row.segmentId] = {
+        id: row.id,
+        segmentId: row.segmentId,
+        rating: row.rating as PersistedMemoryRating,
+        ratedAt: row.ratedAt.toISOString(),
+      };
+    }
+  }
+
+  return Object.values(latestBySegment).sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt));
 }
 
 export async function getLatestRatingTimeBySongIds(
@@ -370,17 +379,31 @@ export async function saveRatings(
     return;
   }
 
+  const latestBySegment = new Map<string, { segmentId: string; rating: PersistedMemoryRating; ratedAt: Date }>();
+  for (const rating of ratings) {
+    const existing = latestBySegment.get(rating.segmentId);
+    if (!existing || rating.ratedAt.getTime() >= existing.ratedAt.getTime()) {
+      latestBySegment.set(rating.segmentId, rating);
+    }
+  }
+
+  const uniqueRatings = Array.from(latestBySegment.values());
+  const segmentIds = uniqueRatings.map((rating) => rating.segmentId);
+
+  await db()
+    .delete(practiceRatings)
+    .where(inArray(practiceRatings.segmentId, segmentIds));
+
   await db()
     .insert(practiceRatings)
     .values(
-      ratings.map((rating) => ({
+      uniqueRatings.map((rating) => ({
         id: crypto.randomUUID(),
         segmentId: rating.segmentId,
         rating: rating.rating,
         ratedAt: rating.ratedAt,
       }))
-    )
-    .onConflictDoNothing();
+    );
 }
 
 export async function deleteRatingsForSong(songId: string): Promise<void> {
@@ -466,10 +489,11 @@ export async function getPlaylistById(id: string): Promise<PlaylistDetail | null
     .orderBy(asc(playlistSongs.position));
 
   const songIds = linkedSongs.map((s) => s.songId);
-  const [segmentsBySong, masteryBySong, latestRatingTimes] = await Promise.all([
+  const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts] = await Promise.all([
     Promise.all(linkedSongs.map((s) => getSegmentsBySongId(s.songId))),
     getSongKnowledgeBySongIds(songIds),
     getLatestRatingTimeBySongIds(songIds),
+    getRatingCountBySongIds(songIds),
   ]);
 
   const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow, i) => ({
@@ -477,6 +501,7 @@ export async function getPlaylistById(id: string): Promise<PlaylistDetail | null
     title: songRow.title,
     artist: songRow.artist ?? undefined,
     audioUrl: songRow.audioKey ?? "",
+    ratingCount: ratingCounts[songRow.songId] ?? 0,
     segments: segmentsBySong[i],
     createdAt: toIso(songRow.createdAt),
     updatedAt: toIso(songRow.createdAt),
@@ -493,6 +518,42 @@ export async function getPlaylistById(id: string): Promise<PlaylistDetail | null
     ...mapPlaylistSummary(playlist),
     songs: songsWithSegments,
   };
+}
+
+async function getRatingCountBySongIds(songIds: string[]): Promise<Record<string, number>> {
+  if (songIds.length === 0) {
+    return {};
+  }
+
+  const rows = await db()
+    .select({
+      songId: segments.songId,
+      segmentId: segments.id,
+      ratedAt: practiceRatings.ratedAt,
+    })
+    .from(practiceRatings)
+    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
+    .where(inArray(segments.songId, songIds))
+    .orderBy(desc(practiceRatings.ratedAt));
+
+  const bySong: Record<string, number> = {};
+  const seenBySong = new Map<string, Set<string>>();
+
+  for (const row of rows) {
+    const seenSegments = seenBySong.get(row.songId) ?? new Set<string>();
+    if (!seenBySong.has(row.songId)) {
+      seenBySong.set(row.songId, seenSegments);
+    }
+
+    if (seenSegments.has(row.segmentId)) {
+      continue;
+    }
+
+    seenSegments.add(row.segmentId);
+    bySong[row.songId] = (bySong[row.songId] ?? 0) + 1;
+  }
+
+  return bySong;
 }
 
 export async function createPlaylist(data: {

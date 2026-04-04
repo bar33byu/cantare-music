@@ -336,6 +336,49 @@ describe("getRatingsForSong", () => {
       },
     ]);
   });
+
+  it("dedupes to latest rating per segment", async () => {
+    const rows = [
+      {
+        id: "r-new",
+        segmentId: "seg-1",
+        rating: 5,
+        ratedAt: new Date("2026-04-01T12:00:00.000Z"),
+      },
+      {
+        id: "r-old",
+        segmentId: "seg-1",
+        rating: 2,
+        ratedAt: new Date("2026-03-01T12:00:00.000Z"),
+      },
+      {
+        id: "r-2",
+        segmentId: "seg-2",
+        rating: 3,
+        ratedAt: new Date("2026-03-15T12:00:00.000Z"),
+      },
+    ];
+    const chain = makeChain(rows);
+    selectSpy.mockReturnValue(chain);
+
+    const { getRatingsForSong } = await getQueries();
+    const result = await getRatingsForSong("song-1");
+
+    expect(result).toEqual([
+      {
+        id: "r-new",
+        segmentId: "seg-1",
+        rating: 5,
+        ratedAt: "2026-04-01T12:00:00.000Z",
+      },
+      {
+        id: "r-2",
+        segmentId: "seg-2",
+        rating: 3,
+        ratedAt: "2026-03-15T12:00:00.000Z",
+      },
+    ]);
+  });
 });
 
 describe("getLatestRatingTimeBySongIds", () => {
@@ -407,8 +450,10 @@ describe("getSongKnowledgeBySongIds", () => {
 });
 
 describe("saveRatings", () => {
-  it("inserts all ratings with generated ids and onConflictDoNothing", async () => {
+  it("replaces existing rows per segment with latest ratings", async () => {
+    const deleteChain = makeChain();
     const insertChain = makeChain([]);
+    deleteSpy.mockReturnValue(deleteChain);
     insertSpy.mockReturnValue(insertChain);
 
     const { saveRatings } = await getQueries();
@@ -423,7 +468,16 @@ describe("saveRatings", () => {
         rating: 3,
         ratedAt: new Date("2026-03-31T12:01:00.000Z"),
       },
+      {
+        segmentId: "seg-1",
+        rating: 4,
+        ratedAt: new Date("2026-03-31T12:02:00.000Z"),
+      },
     ]);
+
+    expect(deleteSpy).toHaveBeenCalledWith(practiceRatings);
+    const deleteWhereSpy = (deleteChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(deleteWhereSpy).toHaveBeenCalled();
 
     expect(insertSpy).toHaveBeenCalledWith(practiceRatings);
     const valuesSpy = (insertChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
@@ -431,8 +485,8 @@ describe("saveRatings", () => {
       {
         id: expect.any(String),
         segmentId: "seg-1",
-        rating: 5,
-        ratedAt: new Date("2026-03-31T12:00:00.000Z"),
+        rating: 4,
+        ratedAt: new Date("2026-03-31T12:02:00.000Z"),
       },
       {
         id: expect.any(String),
@@ -441,8 +495,6 @@ describe("saveRatings", () => {
         ratedAt: new Date("2026-03-31T12:01:00.000Z"),
       },
     ]);
-    const onConflictSpy = (insertChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["onConflictDoNothing"];
-    expect(onConflictSpy).toHaveBeenCalled();
   });
 
   it("skips insert when there are no ratings", async () => {

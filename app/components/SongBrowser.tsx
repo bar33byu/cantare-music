@@ -24,6 +24,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   const [songs, setSongs] = useState<SongListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [filterText, setFilterText] = useState('');
@@ -161,6 +162,13 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
         throw new Error(data.error || 'Failed to delete song');
       }
 
+      const hasAudioCleanupWarning = response.headers?.get?.('x-audio-cleanup-warning') === 'true';
+      setWarning(
+        hasAudioCleanupWarning
+          ? 'Song deleted. Audio file cleanup could not be confirmed.'
+          : null
+      );
+
       setSongs((prev) => prev.filter((s) => s.id !== song.id));
       onDeleteSong?.(song.id);
     } catch (err) {
@@ -236,6 +244,15 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
 
   return (
     <div className="space-y-4">
+      {warning ? (
+        <div
+          className="bg-amber-50 border border-amber-300 text-amber-900 px-4 py-3 rounded"
+          data-testid="song-browser-warning"
+        >
+          {warning}
+        </div>
+      ) : null}
+
       <div className="flex items-center gap-2">
         <button
           type="button"

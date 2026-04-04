@@ -40,10 +40,11 @@ export function sessionReducer(
       return { ...state, isLocked: !state.isLocked };
 
     case 'RATE_SEGMENT':
+      const remainingRatings = state.ratings.filter((rating) => rating.segmentId !== action.segmentId);
       return {
         ...state,
         ratings: [
-          ...state.ratings,
+          ...remainingRatings,
           {
             id: crypto.randomUUID(),
             segmentId: action.segmentId,

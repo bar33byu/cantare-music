@@ -31,6 +31,39 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
       return;
     }
     const data = (await response.json()) as Playlist;
+
+    const songsMissingRatingCount = data.songs.filter((song) => song.ratingCount === undefined);
+    if (songsMissingRatingCount.length > 0) {
+      const fallbackCounts = await Promise.all(
+        songsMissingRatingCount.map(async (song) => {
+          try {
+            const ratingsResponse = await fetch(`/api/songs/${song.id}/ratings`);
+            if (!ratingsResponse.ok) {
+              return { songId: song.id, ratingCount: 0 };
+            }
+            const payload = (await ratingsResponse.json()) as { ratings?: Array<unknown> };
+            return {
+              songId: song.id,
+              ratingCount: Array.isArray(payload.ratings) ? payload.ratings.length : 0,
+            };
+          } catch {
+            return { songId: song.id, ratingCount: 0 };
+          }
+        })
+      );
+
+      const countBySongId = new Map(fallbackCounts.map((item) => [item.songId, item.ratingCount]));
+      setPlaylist({
+        ...data,
+        songs: data.songs.map((song) => ({
+          ...song,
+          ratingCount: song.ratingCount ?? countBySongId.get(song.id) ?? 0,
+        })),
+      });
+      setLoading(false);
+      return;
+    }
+
     setPlaylist(data);
     setLoading(false);
   };
@@ -218,6 +251,11 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
   // Get the selected song details for display
   const selectedSong = songs.find((s) => s.id === selectedSongId);
 
+  const formatRatingCount = (value?: number) => {
+    const count = Math.max(0, Math.round(value ?? 0));
+    return `${count} rating${count === 1 ? '' : 's'}`;
+  };
+
   return (
     <section data-testid="playlist-detail" className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -356,6 +394,20 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
             <div>
               <p className="font-medium">{index + 1}. {song.title}</p>
               {song.artist ? <p className="text-sm text-gray-500">{song.artist}</p> : null}
+              <div className="mt-1 flex flex-wrap gap-2 text-xs">
+                <span
+                  data-testid={`playlist-song-ratings-${song.id}`}
+                  className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700"
+                >
+                  {formatRatingCount(song.ratingCount)}
+                </span>
+                <span
+                  data-testid={`playlist-song-audio-${song.id}`}
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${song.audioUrl ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}
+                >
+                  {song.audioUrl ? 'Audio attached' : 'No audio file'}
+                </span>
+              </div>
             </div>
             <button
               data-testid={`playlist-song-remove-${song.id}`}

@@ -24,6 +24,16 @@ describe('RatingBar', () => {
     expect(btn2).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('fills all ratings up to currentRating', () => {
+    render(<RatingBar currentRating={4} onRate={vi.fn()} />);
+
+    expect(screen.getByTestId('rating-button-1').className).toContain('bg-indigo-600');
+    expect(screen.getByTestId('rating-button-2').className).toContain('bg-indigo-600');
+    expect(screen.getByTestId('rating-button-3').className).toContain('bg-indigo-600');
+    expect(screen.getByTestId('rating-button-4').className).toContain('bg-indigo-600');
+    expect(screen.getByTestId('rating-button-5').className).toContain('bg-gray-100');
+  });
+
   it('disabled prop propagates to all buttons', () => {
     render(<RatingBar onRate={vi.fn()} disabled={true} />);
     const buttons = screen.getAllByRole('button');

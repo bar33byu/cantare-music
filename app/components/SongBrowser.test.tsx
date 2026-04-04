@@ -197,6 +197,39 @@ describe('SongBrowser', () => {
     expect(screen.queryByTestId('song-item-song-1')).not.toBeInTheDocument();
   });
 
+  it('shows warning when delete succeeds but audio cleanup warning is returned', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockSongs),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        headers: {
+          get: (name: string) => (name === 'x-audio-cleanup-warning' ? 'true' : null),
+        },
+      });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} onDeleteSong={mockOnDeleteSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-browser-toggle-edit-mode'));
+    fireEvent.click(screen.getByTestId('song-delete-song-1'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-warning')).toHaveTextContent(
+        'Song deleted. Audio file cleanup could not be confirmed.'
+      );
+    });
+
+    expect(mockOnDeleteSong).toHaveBeenCalledWith('song-1');
+    expect(screen.queryByTestId('song-item-song-1')).not.toBeInTheDocument();
+  });
+
   it('does not delete when confirmation is cancelled', async () => {
     (window as any).confirm = vi.fn(() => false);
     mockFetch.mockResolvedValue({

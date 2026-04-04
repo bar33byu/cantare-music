@@ -49,13 +49,12 @@ describe('sessionReducer', () => {
     expect(next.ratings[0].rating).toBe(4);
   });
 
-  it('multiple RATE_SEGMENT dispatches for same segment results in multiple entries', () => {
+  it('multiple RATE_SEGMENT dispatches for same segment keeps only latest entry', () => {
     const state = makeSession({ ratings: [] });
     const s1 = sessionReducer(state, { type: 'RATE_SEGMENT', segmentId: 'seg1', rating: 2 });
     const s2 = sessionReducer(s1, { type: 'RATE_SEGMENT', segmentId: 'seg1', rating: 5 });
-    expect(s2.ratings).toHaveLength(2);
-    expect(s2.ratings[0].rating).toBe(2);
-    expect(s2.ratings[1].rating).toBe(5);
+    expect(s2.ratings).toHaveLength(1);
+    expect(s2.ratings[0].rating).toBe(5);
   });
 
   it('CLEAR_SEGMENT_RATING removes all ratings for target segment only', () => {

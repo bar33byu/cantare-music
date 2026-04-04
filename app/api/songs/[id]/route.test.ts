@@ -108,6 +108,20 @@ describe('DELETE /api/songs/[id]', () => {
     expect(deleteSong).toHaveBeenCalledWith('123');
   });
 
+  it('returns 204 and still deletes song when deleteObject fails', async () => {
+    const mockSong = { id: '123', title: 'Song 1', audioKey: 'key-123' };
+    vi.mocked(getSongById).mockResolvedValue(mockSong);
+    vi.mocked(deleteObject).mockRejectedValueOnce(new Error('SignatureDoesNotMatch'));
+
+    const request = new Request('http://localhost/api/songs/123', { method: 'DELETE' });
+    const response = await DELETE(request as any, { params: Promise.resolve({ id: '123' }) });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('x-audio-cleanup-warning')).toBe('true');
+    expect(deleteObject).toHaveBeenCalledWith('key-123');
+    expect(deleteSong).toHaveBeenCalledWith('123');
+  });
+
   it('returns 404 if song not found', async () => {
     vi.mocked(getSongById).mockResolvedValue(undefined);
 

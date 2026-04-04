@@ -59,16 +59,30 @@ export async function DELETE(
   try {
     const { id } = await params;
     const song = await getSongById(id);
+    let audioCleanupFailed = false;
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
     if (song.audioKey) {
-      await deleteObject(song.audioKey);
+      try {
+        await deleteObject(song.audioKey);
+      } catch (audioDeleteError) {
+        // Remote object cleanup should not block deleting the song record.
+        audioCleanupFailed = true;
+        console.warn('Failed to delete audio object during song delete:', {
+          songId: id,
+          audioKey: song.audioKey,
+          error: audioDeleteError,
+        });
+      }
     }
 
     await deleteSong(id);
-    return new NextResponse(null, { status: 204 });
+    return new NextResponse(null, {
+      status: 204,
+      headers: audioCleanupFailed ? { 'x-audio-cleanup-warning': 'true' } : undefined,
+    });
   } catch (error) {
     console.error('Error deleting song:', error);
     return NextResponse.json(formatError(error), { status: 500 });

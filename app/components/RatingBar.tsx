@@ -18,17 +18,21 @@ const RatingBar: React.FC<RatingBarProps> = ({
 }) => {
   return (
     <div className="flex gap-2 justify-center">
-      {RATINGS.map((rating) => (
+      {RATINGS.map((rating) => {
+        const isExactSelection = currentRating === rating;
+        const isFilled = currentRating !== undefined && rating <= currentRating;
+
+        return (
         <button
           key={rating}
           data-testid={`rating-button-${rating}`}
           onClick={() => onRate(rating)}
           disabled={disabled}
           aria-label={`Rate ${rating}`}
-          aria-pressed={currentRating === rating ? "true" : "false"}
+          aria-pressed={isExactSelection ? "true" : "false"}
           className={[
             "w-10 h-10 rounded-full text-sm font-semibold transition-colors",
-            currentRating === rating
+            isFilled
               ? "bg-indigo-600 text-white"
               : "bg-gray-100 text-gray-700 hover:bg-indigo-100",
             disabled ? "opacity-40 cursor-not-allowed" : "",
@@ -38,7 +42,8 @@ const RatingBar: React.FC<RatingBarProps> = ({
         >
           {rating}
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 };

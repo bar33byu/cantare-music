@@ -12,8 +12,8 @@ const playlistResponse = {
   isRetired: false,
   createdAt: '2026-01-01T00:00:00.000Z',
   songs: [
-    { id: 'song-1', title: 'Song One', artist: 'Artist', audioUrl: '', segments: [], createdAt: '2026-01-01T00:00:00.000Z', position: 0 },
-    { id: 'song-2', title: 'Song Two', artist: 'Artist', audioUrl: '', segments: [], createdAt: '2026-01-01T00:00:00.000Z', position: 1 },
+    { id: 'song-1', title: 'Song One', artist: 'Artist', audioUrl: '/api/audio/audio/song-one.mp3', ratingCount: 7, segments: [], createdAt: '2026-01-01T00:00:00.000Z', position: 0 },
+    { id: 'song-2', title: 'Song Two', artist: 'Artist', audioUrl: '', ratingCount: 0, segments: [], createdAt: '2026-01-01T00:00:00.000Z', position: 1 },
   ],
 };
 
@@ -37,6 +37,43 @@ describe('PlaylistDetail', () => {
     const rows = screen.getAllByRole('listitem');
     expect(rows[0]).toHaveTextContent('1. Song One');
     expect(rows[1]).toHaveTextContent('2. Song Two');
+  });
+
+  it('shows rating and audio metadata for each song row', async () => {
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-song-row-song-1')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('playlist-song-ratings-song-1')).toHaveTextContent('7 ratings');
+    expect(screen.getByTestId('playlist-song-audio-song-1')).toHaveTextContent('Audio attached');
+
+    expect(screen.getByTestId('playlist-song-ratings-song-2')).toHaveTextContent('0 ratings');
+    expect(screen.getByTestId('playlist-song-audio-song-2')).toHaveTextContent('No audio file');
+  });
+
+  it('falls back to ratings API when playlist payload omits ratingCount', async () => {
+    const playlistWithoutCounts = {
+      ...playlistResponse,
+      songs: playlistResponse.songs.map(({ ratingCount, ...song }) => song),
+    };
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => playlistWithoutCounts })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ratings: [{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ratings: [] }) });
+
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-song-row-song-1')).toBeInTheDocument();
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-1/ratings');
+    expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-2/ratings');
+    expect(screen.getByTestId('playlist-song-ratings-song-1')).toHaveTextContent('3 ratings');
+    expect(screen.getByTestId('playlist-song-ratings-song-2')).toHaveTextContent('0 ratings');
   });
 
   it('dragging song calls reorder patch', async () => {
