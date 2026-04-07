@@ -42,14 +42,13 @@ function isMaskableLyricChar(char: string): boolean {
 
 function maskedGlyph(char: string, index: number) {
   return (
-    <span key={`mask-${index}`} className="relative inline-block align-baseline" data-testid="segment-lyric-mask-char">
-      <span aria-hidden="true" className="invisible">
-        {char}
-      </span>
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute bottom-[0.14em] left-0 right-0 border-b-2 border-current"
-      />
+    <span
+      key={`mask-${index}`}
+      data-testid="segment-lyric-mask-char"
+      className="text-transparent underline decoration-2 decoration-current [text-decoration-skip-ink:none]"
+      aria-hidden="true"
+    >
+      {char}
     </span>
   );
 }

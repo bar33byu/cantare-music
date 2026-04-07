@@ -10,6 +10,7 @@ export interface AudioPlayerControls {
   play: (startMs: number, endMs: number) => void;
   pause: () => void;
   seek: (ms: number) => void;
+  setPlaybackEndMs: (endMs: number) => void;
 }
 
 export interface AudioDebugInfo {
@@ -384,5 +385,10 @@ export function useAudioPlayer(
     setCurrentMs(ms);
   }, [applyCurrentTime]);
 
-  return { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek };
+  const setPlaybackEndMs = useCallback((endMs: number) => {
+    endMsRef.current = Number.isFinite(endMs) ? endMs : 0;
+    updateDebugInfo(audioRef.current, 'set-playback-end');
+  }, [updateDebugInfo]);
+
+  return { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs };
 }

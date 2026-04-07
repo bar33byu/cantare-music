@@ -161,7 +161,7 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-play-pause")).not.toBeDisabled();
     expect(screen.getByTestId("audio-skip-back")).toBeDisabled();
     expect(screen.getByTestId("audio-skip-forward")).toBeDisabled();
-    expect(screen.getByTestId("audio-play-pause")).toHaveTextContent("▶");
+    expect(screen.getByTestId("audio-play-pause").querySelector("svg")).toBeTruthy();
     expect(screen.getByTestId("audio-slider")).toBeDisabled();
   });
 

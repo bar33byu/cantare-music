@@ -9,6 +9,7 @@ import { SessionState } from "../lib/sessionReducer";
 const mockPlay = vi.fn();
 const mockPause = vi.fn();
 const mockSeek = vi.fn();
+const mockSetPlaybackEndMs = vi.fn();
 const mockUseAudioPlayer = vi.fn();
 const mockFetch = vi.fn();
 
@@ -103,6 +104,10 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("ratings-loading-skeleton")).not.toBeInTheDocument();
     });
+    mockPlay.mockClear();
+    mockPause.mockClear();
+    mockSeek.mockClear();
+    mockSetPlaybackEndMs.mockClear();
   };
 
   beforeEach(() => {
@@ -118,6 +123,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     });
   });
 
@@ -240,6 +246,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     });
 
     const song = makeSong(3);
@@ -298,6 +305,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     });
 
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
@@ -328,6 +336,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     });
     await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("mock-skip-back"));
@@ -352,6 +361,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     });
 
     const song = makeSong(3);
@@ -374,6 +384,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     });
 
     const song = makeSong(3);
@@ -403,6 +414,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     };
 
     mockUseAudioPlayer.mockImplementation(() => playbackState);
@@ -436,6 +448,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     };
 
     mockUseAudioPlayer.mockImplementation(() => playbackState);
@@ -467,6 +480,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     };
 
     mockUseAudioPlayer.mockImplementation(() => playbackState);
@@ -535,6 +549,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     });
 
     const song = makeSong(3);
@@ -604,6 +619,7 @@ describe("PracticeView", () => {
       play: mockPlay,
       pause: mockPause,
       seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
     };
     mockUseAudioPlayer.mockImplementation(() => playbackState);
 
@@ -626,6 +642,31 @@ describe("PracticeView", () => {
 
     // play should NOT have been called again after the user pause (no loop restart)
     expect(mockPlay.mock.calls.length).toBe(playCallsBeforePause);
+  });
+
+  it("toggling loop while playing keeps the playhead in place", async () => {
+    const playbackState = {
+      isPlaying: true,
+      isReady: true,
+      currentMs: 4500,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+
+    expect(mockPlay).not.toHaveBeenCalled();
+    expect(mockSeek).not.toHaveBeenCalled();
+    expect(mockSetPlaybackEndMs).toHaveBeenCalledWith(8000);
   });
 
   it("auto-saves ratings to the server after a rating change but not during initial load", async () => {

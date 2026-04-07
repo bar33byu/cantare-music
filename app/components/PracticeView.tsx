@@ -9,7 +9,7 @@ import KnowledgeBar from "./KnowledgeBar";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
-import { getMasteryColor, getMasteryPercent } from "../lib/masteryColors";
+import { getMasteryPercent } from "../lib/masteryColors";
 
 interface TransportDebugState {
   playToggleClicks: number;
@@ -42,6 +42,7 @@ const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
 
 const PRACTICED_PLAYBACK_THRESHOLD_MS = 10_000;
 const PREV_SEGMENT_GO_BACK_THRESHOLD_MS = 3_000;
+const OFFLINE_RATING_QUEUE_PREFIX = "cantare:offline-ratings:";
 
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
   if (mode === "full") {
@@ -51,6 +52,10 @@ function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
     return "hidden";
   }
   return "full";
+}
+
+function buildOfflineRatingsQueueKey(songId: string): string {
+  return `${OFFLINE_RATING_QUEUE_PREFIX}${songId}`;
 }
 
 const PracticeView: React.FC<PracticeViewProps> = ({
@@ -87,7 +92,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(song.audioUrl)), [song.audioUrl]);
   const playbackAudioUrl = useMemo(() => proxyAudioUrl ?? toPlayableAudioUrl(song.audioUrl), [proxyAudioUrl, song.audioUrl]);
-  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
+  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(playbackAudioUrl);
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
     skipBackClicks: 0,
@@ -106,10 +111,78 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
-  const pastGhostCount = hasSegments ? Math.min(session.currentSegmentIndex, 7) : 0;
-  const futureGhostCount = hasSegments
-    ? Math.min(song.segments.length - session.currentSegmentIndex - 1, 7)
-    : 0;
+  const hasAutoplayedSongRef = React.useRef<string | null>(null);
+
+  const enqueueOfflineRatings = React.useCallback((snapshot: string) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(buildOfflineRatingsQueueKey(song.id), snapshot);
+    } catch {
+      // Ignore queue persistence failures.
+    }
+  }, [song.id]);
+
+  const dequeueOfflineRatings = React.useCallback((): string | null => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    try {
+      return window.localStorage.getItem(buildOfflineRatingsQueueKey(song.id));
+    } catch {
+      return null;
+    }
+  }, [song.id]);
+
+  const clearOfflineRatingsQueue = React.useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.removeItem(buildOfflineRatingsQueueKey(song.id));
+    } catch {
+      // Ignore queue cleanup failures.
+    }
+  }, [song.id]);
+
+  const postRatingsSnapshot = React.useCallback(async (snapshot: string) => {
+    const ratings = (JSON.parse(snapshot) as SessionState["ratings"])
+      .map((r) => ({
+        segmentId: r.segmentId,
+        rating: r.rating,
+        ratedAt: r.ratedAt,
+      }));
+
+    const response = await fetch(`/api/songs/${song.id}/ratings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ratings }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to save ratings (${response.status})`);
+    }
+  }, [song.id]);
+
+  const flushOfflineRatingsIfPossible = React.useCallback(async () => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      return;
+    }
+
+    const queuedSnapshot = dequeueOfflineRatings();
+    if (!queuedSnapshot) {
+      return;
+    }
+
+    try {
+      await postRatingsSnapshot(queuedSnapshot);
+      lastSavedRatingsRef.current = queuedSnapshot;
+      clearOfflineRatingsQueue();
+    } catch {
+      // Keep queued ratings for a future retry.
+    }
+  }, [clearOfflineRatingsQueue, dequeueOfflineRatings, postRatingsSnapshot]);
 
   const getSegmentIndexAtMs = React.useCallback((ms: number) => {
     // During overlaps, prefer the later segment so rapid next-clicks keep advancing.
@@ -237,6 +310,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [currentSegment, isPlaying, song.audioUrl, seek]);
 
   useEffect(() => {
+    if (!song.audioUrl) {
+      return;
+    }
+    if (hasAutoplayedSongRef.current === song.id) {
+      return;
+    }
+    hasAutoplayedSongRef.current = song.id;
+    seek(0);
+    const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
+    play(0, effectiveDurationMs);
+  }, [durationMs, play, seek, song.audioUrl, song.id]);
+
+  useEffect(() => {
     if (!hasSegments || !isPlaying) {
       return;
     }
@@ -294,8 +380,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         }
       } catch {
         if (!cancelled) {
-          // Load failed — treat existing state as already saved to avoid erasing server data
-          lastSavedRatingsRef.current = JSON.stringify(session.ratings);
+          const queuedSnapshot = dequeueOfflineRatings();
+          if (queuedSnapshot) {
+            try {
+              const queuedRatings = JSON.parse(queuedSnapshot) as SessionState["ratings"];
+              dispatch({ type: "LOAD_RATINGS", ratings: Array.isArray(queuedRatings) ? queuedRatings : [] });
+              lastSavedRatingsRef.current = queuedSnapshot;
+            } catch {
+              lastSavedRatingsRef.current = JSON.stringify(session.ratings);
+            }
+          } else {
+            // Load failed — treat existing state as already saved to avoid erasing server data
+            lastSavedRatingsRef.current = JSON.stringify(session.ratings);
+          }
           setRatingsError('Could not load previous ratings. Practice is still available.');
         }
       } finally {
@@ -310,7 +407,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [song.id]);
+  }, [dequeueOfflineRatings, song.id]);
 
   const currentRating: MemoryRating | undefined = (() => {
     if (!currentSegment) {
@@ -573,8 +670,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => window.removeEventListener("keydown", onKeyDown);
 }, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleTogglePlay, setIsLooping]);
 
-  // When isLooping is toggled while audio is already playing, immediately constrain
-  // playback to the current segment (loop on) or release it to full-piece (loop off).
+  // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
     if (!loopEffectMountedRef.current) {
       loopEffectMountedRef.current = true;
@@ -584,13 +680,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (!state.isPlaying) return;
     if (isLooping) {
       if (!state.currentSegment) return;
-      const resumeMs = Math.max(state.currentMs, state.currentSegment.startMs);
-      play(resumeMs, state.currentSegment.endMs);
+      setPlaybackEndMs(state.currentSegment.endMs);
     } else {
-      const effectiveDurationMs = state.durationMs > 0 ? state.durationMs : Number.POSITIVE_INFINITY;
-      play(state.currentMs, effectiveDurationMs);
+      setPlaybackEndMs(state.durationMs > 0 ? state.durationMs : Number.POSITIVE_INFINITY);
     }
-  }, [isLooping, play]);
+  }, [isLooping, setPlaybackEndMs]);
 
   // Restart the segment when playback reaches its natural end while looping.
   // Uses pausedByUserRef to avoid restarting after an explicit user pause.
@@ -625,21 +719,35 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
     const timer = setTimeout(() => {
-      lastSavedRatingsRef.current = snapshot;
-      void fetch(`/api/songs/${song.id}/ratings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ratings: session.ratings.map((r) => ({
-            segmentId: r.segmentId,
-            rating: r.rating,
-            ratedAt: r.ratedAt,
-          })),
-        }),
-      });
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        enqueueOfflineRatings(snapshot);
+        return;
+      }
+      void postRatingsSnapshot(snapshot)
+        .then(() => {
+          lastSavedRatingsRef.current = snapshot;
+          clearOfflineRatingsQueue();
+        })
+        .catch(() => {
+          enqueueOfflineRatings(snapshot);
+        });
     }, 400);
     return () => clearTimeout(timer);
-  }, [session.ratings, song.id, ratingsLoading]);
+  }, [clearOfflineRatingsQueue, enqueueOfflineRatings, postRatingsSnapshot, ratingsLoading, session.ratings]);
+
+  useEffect(() => {
+    void flushOfflineRatingsIfPossible();
+  }, [flushOfflineRatingsIfPossible]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      void flushOfflineRatingsIfPossible();
+    };
+    window.addEventListener("online", handleOnline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [flushOfflineRatingsIfPossible]);
 
   useEffect(() => {
     onSessionChange?.(session);
@@ -765,66 +873,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           <div className="h-full min-h-0 w-full max-w-md">
             {hasSegments && currentSegment ? (
               <div className="segment-stack-shell relative h-full min-h-0 overflow-visible">
-                {Array.from({ length: pastGhostCount }).map((_, ghostIndex) => {
-                  const depth = ghostIndex + 1;
-                  const segmentIndex = session.currentSegmentIndex - depth;
-                  const ghostSegment = song.segments[segmentIndex];
-                  const ghostMasteryColor = ghostSegment
-                    ? getMasteryColor(masteryPercentForSegment(ghostSegment.id))
-                    : getMasteryColor(0);
-                  const scale = 1 - depth * 0.04;
-                  const translateX = -(depth * 12);
-                  const opacity = Math.max(0.06, 0.75 - depth * 0.09);
-                  const zIndex = 10 - depth;
-                  return (
-                    <div
-                      key={`past-ghost-${depth}`}
-                      className="segment-stack-ghost pointer-events-none absolute inset-0 hidden rounded-2xl border border-slate-300/70 bg-slate-100/65 md:block"
-                      style={{
-                        transform: `translateX(${translateX}px) scale(${scale.toFixed(3)})`,
-                        transformOrigin: "center center",
-                        opacity,
-                        zIndex,
-                      }}
-                      aria-hidden="true"
-                    >
-                      <div
-                        className="absolute inset-x-0 top-0 h-4 rounded-t-2xl border-b border-black/5"
-                        style={{ backgroundColor: ghostMasteryColor }}
-                      />
-                    </div>
-                  );
-                })}
-                {Array.from({ length: futureGhostCount }).map((_, ghostIndex) => {
-                  const depth = ghostIndex + 1;
-                  const segmentIndex = session.currentSegmentIndex + depth;
-                  const ghostSegment = song.segments[segmentIndex];
-                  const ghostMasteryColor = ghostSegment
-                    ? getMasteryColor(masteryPercentForSegment(ghostSegment.id))
-                    : getMasteryColor(0);
-                  const scale = 1 - depth * 0.04;
-                  const translateX = depth * 12;
-                  const opacity = Math.max(0.06, 0.75 - depth * 0.09);
-                  const zIndex = 10 - depth;
-                  return (
-                    <div
-                      key={`future-ghost-${depth}`}
-                      className="segment-stack-ghost pointer-events-none absolute inset-0 hidden rounded-2xl border border-indigo-300/70 bg-indigo-50/55 md:block"
-                      style={{
-                        transform: `translateX(${translateX}px) scale(${scale.toFixed(3)})`,
-                        transformOrigin: "center center",
-                        opacity,
-                        zIndex,
-                      }}
-                      aria-hidden="true"
-                    >
-                      <div
-                        className="absolute inset-x-0 top-0 h-4 rounded-t-2xl border-b border-black/5"
-                        style={{ backgroundColor: ghostMasteryColor }}
-                      />
-                    </div>
-                  );
-                })}
                 <div
                   key={`${currentSegment.id}-${transitionToken}`}
                   className={`relative z-10 h-full min-h-0 ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}

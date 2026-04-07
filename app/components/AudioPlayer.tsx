@@ -334,8 +334,8 @@ export function AudioPlayer({
         >
           <span className="inline-flex items-center gap-1 text-sm font-semibold">
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 8H5v4" />
-              <path d="M5 12a7 7 0 1 0 2-5" />
+              <path d="M9 7L5 11l4 4" />
+              <path d="M6 12a8 8 0 1 0 3.2-6.4" />
             </svg>
             <span>-5</span>
           </span>
@@ -345,9 +345,18 @@ export function AudioPlayer({
           onClick={handlePlayPauseClick}
           aria-label={isPlaying ? "Pause" : "Play"}
           data-testid="audio-play-pause"
-          className="h-9 w-[72px] rounded-xl bg-indigo-600 text-lg text-white hover:bg-indigo-700 disabled:opacity-50"
+          className="flex h-9 w-[72px] items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
         >
-          {isPlaying ? "⏸" : "▶"}
+          {isPlaying ? (
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+              <rect x="6" y="5" width="4" height="14" rx="1" />
+              <rect x="14" y="5" width="4" height="14" rx="1" />
+            </svg>
+          ) : (
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+              <path d="M8 5.5v13l10-6.5z" />
+            </svg>
+          )}
         </button>
         <button
           type="button"
@@ -359,8 +368,8 @@ export function AudioPlayer({
         >
           <span className="inline-flex items-center gap-1 text-sm font-semibold">
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 8h4v4" />
-              <path d="M19 12a7 7 0 1 1-2-5" />
+              <path d="M15 7l4 4-4 4" />
+              <path d="M18 12a8 8 0 1 1-3.2-6.4" />
             </svg>
             <span>+5</span>
           </span>

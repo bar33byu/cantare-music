@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
+import { buildProxyAudioUrl, parseAudioKey } from '../lib/audioUrls';
 
 type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
 interface SortState { key: SortKey; asc: boolean }
@@ -92,6 +93,59 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
     };
     void load();
   }, [playlist.id]);
+
+  useEffect(() => {
+    const maybePrecachePlaylist = async () => {
+      if (typeof window === 'undefined' || !('caches' in window)) {
+        return;
+      }
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return;
+      }
+
+      const connection = (navigator as Navigator & {
+        connection?: { effectiveType?: string; saveData?: boolean };
+      }).connection;
+
+      if (connection?.saveData) {
+        return;
+      }
+
+      const effectiveType = connection?.effectiveType ?? '';
+      if (effectiveType.includes('2g')) {
+        return;
+      }
+
+      try {
+        const cache = await window.caches.open('cantare-playlist-practice-v1');
+
+        await Promise.allSettled(
+          playlist.songs.map(async (song) => {
+            const songRequest = new Request(`/api/songs/${song.id}`);
+            const songResponse = await fetch(songRequest, { cache: 'reload' });
+            if (songResponse.ok) {
+              await cache.put(songRequest, songResponse.clone());
+            }
+
+            const proxyAudioUrl = buildProxyAudioUrl(parseAudioKey(song.audioUrl));
+            if (!proxyAudioUrl) {
+              return;
+            }
+
+            const audioRequest = new Request(proxyAudioUrl);
+            const audioResponse = await fetch(audioRequest, { cache: 'reload' });
+            if (audioResponse.ok) {
+              await cache.put(audioRequest, audioResponse.clone());
+            }
+          })
+        );
+      } catch {
+        // Pre-cache failures should never block practice.
+      }
+    };
+
+    void maybePrecachePlaylist();
+  }, [playlist.songs]);
 
   const displayedSongs = useMemo(() => {
     const dir = sort.asc ? 1 : -1;
