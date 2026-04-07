@@ -259,9 +259,6 @@ export function useAudioPlayer(
     if (typeof pitchPreserveAudio.webkitPreservesPitch !== 'undefined') {
       pitchPreserveAudio.webkitPreservesPitch = true;
     }
-    audio.load?.();
-    updateDebugInfo(audio, 'load-metadata');
-
     const flushPendingPlay = () => {
       if (!pendingPlayRangeRef.current) {
         return;
@@ -352,6 +349,16 @@ export function useAudioPlayer(
     audio.addEventListener('suspend', handleSuspend);
     audio.addEventListener('playing', handlePlaying);
     audio.addEventListener('pause', handlePauseDebug);
+
+    // Register listeners before calling load() so early metadata events are not missed.
+    audio.load?.();
+    updateDebugInfo(audio, 'load-metadata');
+
+    // Handle already-available metadata (for cached audio) without waiting for another event.
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+      setDurationMs(audio.duration * 1000);
+      updateDebugInfo(audio, 'duration-immediate');
+    }
 
     if (pendingSeekMsRef.current !== null) {
       applyCurrentTime(audio, pendingSeekMsRef.current, 'apply-pending-seek');
