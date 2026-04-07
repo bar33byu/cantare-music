@@ -167,7 +167,7 @@ describe('SegmentEditor', () => {
     fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
     fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
       target: {
-        value: ['Line A1', 'Line A2', '***', 'Line B1', 'Line B2'].join('\n'),
+        value: ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n'),
       },
     });
     fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
@@ -285,7 +285,7 @@ describe('SegmentEditor', () => {
     fireEvent.click(screen.getByTestId('segment-editor-bulk-replace'));
     fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
       target: {
-        value: ['Verse 1', '***', 'Verse 2'].join('\n'),
+        value: ['Verse 1', '*', 'Verse 2'].join('\n'),
       },
     });
     fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));

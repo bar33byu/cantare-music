@@ -60,7 +60,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const [stableDurationMs, setStableDurationMs] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
-  const [bulkSeparator, setBulkSeparator] = useState('***');
+  const [bulkSeparator, setBulkSeparator] = useState('*');
   const [replaceExistingOnBulk, setReplaceExistingOnBulk] = useState(true);
   const [bulkImportPending, setBulkImportPending] = useState(false);
   const boardRef = useRef<HTMLDivElement | null>(null);
