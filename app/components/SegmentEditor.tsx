@@ -774,7 +774,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       if (hasAttachedAudio && knownDurationMs <= 0 && playbackAudioUrl) {
         const resolvedDurationMs = await resolveAudioDurationMs(playbackAudioUrl);
         if (resolvedDurationMs && resolvedDurationMs > 0) {
-          setStableDurationMs((previous) => Math.max(previous, resolvedDurationMs));
+          setStableDurationMs(resolvedDurationMs);
           effectiveDurationMs = Math.max(effectiveDurationMs, resolvedDurationMs);
         }
       }
@@ -1030,9 +1030,13 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
 
   useEffect(() => {
     if (durationMs > 0) {
-      setStableDurationMs((previous) => Math.max(previous, durationMs));
+      setStableDurationMs(durationMs);
     }
   }, [durationMs]);
+
+  useEffect(() => {
+    setStableDurationMs(0);
+  }, [playbackAudioUrl]);
 
   useEffect(() => {
     setUseProxyFallback(false);
@@ -1124,7 +1128,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     return () => {
       cancelled = true;
     };
-  }, [songId]);
+  }, [songId, songMetaRefreshToken]);
 
   const saveSongTitle = async () => {
     const trimmed = titleDraft.trim();

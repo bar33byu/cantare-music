@@ -30,7 +30,13 @@ vi.mock('../hooks/useAudioPlayer', () => ({
 }));
 
 vi.mock('./ReplaceAudioForm', () => ({
-  ReplaceAudioForm: () => <div data-testid="replace-audio" />,
+  ReplaceAudioForm: ({ onReplaced }: { onReplaced?: () => void }) => (
+    <div data-testid="replace-audio">
+      <button data-testid="replace-audio-done" onClick={() => onReplaced?.()}>
+        Done
+      </button>
+    </div>
+  ),
 }));
 
 describe('SegmentEditor', () => {
@@ -633,6 +639,55 @@ describe('SegmentEditor', () => {
     });
 
     expect(screen.getByTestId('segment-editor-replace-audio-toggle')).toHaveTextContent('Upload audio file');
+  });
+
+  it('refreshes song metadata after audio replacement and updates displayed file name', async () => {
+    let songFetchCount = 0;
+    const replacementFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        songFetchCount += 1;
+        if (songFetchCount === 1) {
+          return {
+            ok: true,
+            json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/new-upload.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => sampleSegments,
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({ error: 'Unexpected request' }),
+      } as Response;
+    });
+
+    global.fetch = replacementFetch;
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-audio-status-text')).toHaveTextContent('Current file: song.mp3');
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-replace-audio-toggle'));
+    fireEvent.click(screen.getByTestId('replace-audio-done'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-audio-status-text')).toHaveTextContent('Current file: new-upload.mp3');
+    });
   });
 
   it('renders playhead line on the canvas board', async () => {

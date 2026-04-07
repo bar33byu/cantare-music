@@ -407,6 +407,12 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
                 >
                   {song.audioUrl ? 'Audio attached' : 'No audio file'}
                 </span>
+                <span
+                  data-testid={`playlist-song-sections-${song.id}`}
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${song.segments.length > 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'}`}
+                >
+                  {song.segments.length > 0 ? `${song.segments.length} section${song.segments.length === 1 ? '' : 's'}` : 'No sections'}
+                </span>
               </div>
             </div>
             <div className="flex items-center gap-2">

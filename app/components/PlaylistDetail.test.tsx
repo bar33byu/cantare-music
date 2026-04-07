@@ -48,9 +48,11 @@ describe('PlaylistDetail', () => {
 
     expect(screen.getByTestId('playlist-song-ratings-song-1')).toHaveTextContent('7 ratings');
     expect(screen.getByTestId('playlist-song-audio-song-1')).toHaveTextContent('Audio attached');
+    expect(screen.getByTestId('playlist-song-sections-song-1')).toHaveTextContent('No sections');
 
     expect(screen.getByTestId('playlist-song-ratings-song-2')).toHaveTextContent('0 ratings');
     expect(screen.getByTestId('playlist-song-audio-song-2')).toHaveTextContent('No audio file');
+    expect(screen.getByTestId('playlist-song-sections-song-2')).toHaveTextContent('No sections');
   });
 
   it('falls back to ratings API when playlist payload omits ratingCount', async () => {
