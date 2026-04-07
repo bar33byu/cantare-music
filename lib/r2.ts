@@ -1,14 +1,44 @@
 import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
-const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
-const R2_ENDPOINT = process.env.R2_ENDPOINT ?? (R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : undefined);
+function normalizeEnv(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function normalizeEndpoint(value: string | undefined): string | undefined {
+  const normalized = normalizeEnv(value);
+  if (!normalized) return undefined;
+  try {
+    // Keep only scheme + host to avoid accidental bucket/path suffixes in env config.
+    const parsed = new URL(normalized);
+    return parsed.origin;
+  } catch {
+    return normalized;
+  }
+}
+
+const R2_ACCOUNT_ID = normalizeEnv(process.env.R2_ACCOUNT_ID);
+const R2_ENDPOINT = normalizeEndpoint(
+  process.env.R2_ENDPOINT ??
+    (R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : undefined),
+);
+const R2_ACCESS_KEY_ID = normalizeEnv(process.env.R2_ACCESS_KEY_ID) ?? '';
+const R2_SECRET_ACCESS_KEY = normalizeEnv(process.env.R2_SECRET_ACCESS_KEY) ?? '';
 
 export const r2Client = new S3Client({
   endpoint: R2_ENDPOINT,
   region: 'auto',
+  forcePathStyle: true,
   credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID ?? '',
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? '',
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY,
   },
 });
 

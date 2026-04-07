@@ -22,7 +22,7 @@ import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments } f
 describe('GET /api/songs/[id]/segments', () => {
   it('returns segments array', async () => {
     const mockSegments = [{ id: '1', label: 'Verse', order: 1 }];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/123/segments');
     const response = await GET(request as any, { params: Promise.resolve({ id: '123' }) });
@@ -61,8 +61,8 @@ describe('POST /api/songs/[id]/segments', () => {
     ];
     const createdSegment = { ...newSegment, songId: 'song-1', order: 1 };
 
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(existingSegments);
-    vi.mocked(createSegment).mockResolvedValue(createdSegment);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(existingSegments as any);
+    vi.mocked(createSegment).mockResolvedValue(createdSegment as any);
     vi.mocked(reorderSegments).mockResolvedValue(undefined);
 
     const request = new Request('http://localhost/api/songs/song-1/segments', {
@@ -123,8 +123,8 @@ describe('POST /api/songs/[id]/segments', () => {
         lyricText: '',
       },
     ];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(existingSegments);
-    vi.mocked(createSegment).mockResolvedValue({ ...requestBody, songId: 'song-1', order: 1 });
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(existingSegments as any);
+    vi.mocked(createSegment).mockResolvedValue({ ...requestBody, songId: 'song-1', order: 1 } as any);
     vi.mocked(reorderSegments).mockResolvedValue(undefined);
 
     const request = new Request('http://localhost/api/songs/song-1/segments', {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSongById, deleteSong, updateSong, getSegmentsBySongId } from '../../../../db/queries';
+import { getSongById, deleteSong, updateSong, getSegmentsBySongId, recordOrphanedAudioKey } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
 
@@ -70,12 +70,18 @@ export async function DELETE(
         await deleteObject(song.audioKey);
       } catch (audioDeleteError) {
         // Remote object cleanup should not block deleting the song record.
+        // Record the key so it can be retried later.
         audioCleanupFailed = true;
         console.warn('Failed to delete audio object during song delete:', {
           songId: id,
           audioKey: song.audioKey,
           error: audioDeleteError,
         });
+        try {
+          await recordOrphanedAudioKey(crypto.randomUUID(), song.audioKey);
+        } catch (recordError) {
+          console.error('Failed to record orphaned audio key:', recordError);
+        }
       }
     }
 

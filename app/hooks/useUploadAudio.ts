@@ -66,42 +66,63 @@ export function useUploadAudio(): UseUploadAudioReturn {
       const { uploadUrl, key } = await response.json();
 
       // Upload file directly to R2 using the presigned URL
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
 
-        xhr.upload.addEventListener('progress', (event) => {
-          if (event.lengthComputable) {
-            const percentComplete = Math.round((event.loaded / event.total) * 100);
-            setProgress(percentComplete);
+          xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable) {
+              const percentComplete = Math.round((event.loaded / event.total) * 100);
+              setProgress(percentComplete);
+            }
+          });
+
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve();
+            } else {
+              const errorMsg = `Upload failed with status ${xhr.status}: ${xhr.statusText}`;
+              reject(new Error(errorMsg));
+            }
+          });
+
+          xhr.addEventListener('error', () => {
+            reject(new Error('Direct upload failed due to network or CORS'));
+          });
+
+          xhr.addEventListener('abort', () => {
+            reject(new Error('Upload cancelled'));
+          });
+
+          xhr.open('PUT', uploadUrl);
+          xhr.setRequestHeader('Content-Type', file.type);
+          xhr.send(file);
+        });
+      } catch {
+        // CORS or network issues in browser-to-R2 upload fallback to same-origin server upload.
+        const fallbackBody = new FormData();
+        fallbackBody.append('songId', songId);
+        fallbackBody.append('key', key);
+        fallbackBody.append('file', file);
+
+        const fallbackResponse = await fetch('/api/songs/upload', {
+          method: 'POST',
+          body: fallbackBody,
+        });
+
+        if (!fallbackResponse.ok) {
+          const errorText = await fallbackResponse.text();
+          let errorMsg = 'Upload failed in both direct and fallback modes';
+          try {
+            const errorData = JSON.parse(errorText);
+            errorMsg = errorData.error || errorText;
+          } catch {
+            errorMsg = errorText || `Fallback upload failed with status ${fallbackResponse.status}`;
           }
-        });
-
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve();
-          } else {
-            const errorMsg = `Upload failed with status ${xhr.status}: ${xhr.statusText}`;
-            setError(errorMsg);
-            reject(new Error(errorMsg));
-          }
-        });
-
-        xhr.addEventListener('error', () => {
-          const errorMsg = 'Upload failed: network error or CORS issue. Make sure R2 bucket allows cross-origin uploads.';
           setError(errorMsg);
-          reject(new Error(errorMsg));
-        });
-
-        xhr.addEventListener('abort', () => {
-          const errorMsg = 'Upload cancelled';
-          setError(errorMsg);
-          reject(new Error(errorMsg));
-        });
-
-        xhr.open('PUT', uploadUrl);
-        xhr.setRequestHeader('Content-Type', file.type);
-        xhr.send(file);
-      });
+          throw new Error(errorMsg);
+        }
+      }
 
       setProgress(100);
       setUploading(false);

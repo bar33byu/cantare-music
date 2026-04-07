@@ -1,7 +1,7 @@
 import { eq, asc, desc, inArray, and, count } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow } from "./schema";
 
 export type PersistedMemoryRating = 1 | 2 | 3 | 4 | 5;
 
@@ -220,6 +220,18 @@ export async function markSongPracticed(
 
 export async function deleteSong(id: string): Promise<void> {
   await db().delete(songs).where(eq(songs.id, id));
+}
+
+export async function recordOrphanedAudioKey(id: string, audioKey: string): Promise<void> {
+  await db().insert(orphanedAudioKeys).values({ id, audioKey });
+}
+
+export async function getOrphanedAudioKeys(): Promise<OrphanedAudioKeyRow[]> {
+  return db().select().from(orphanedAudioKeys);
+}
+
+export async function deleteOrphanedAudioKey(id: string): Promise<void> {
+  await db().delete(orphanedAudioKeys).where(eq(orphanedAudioKeys.id, id));
 }
 
 // ── Segments ───────────────────────────────────────────────────────────────

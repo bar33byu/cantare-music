@@ -25,7 +25,7 @@ describe('GET /api/songs/[id]/segments/[segmentId]', () => {
       { id: 'seg-1', label: 'Verse 1', order: 1 },
       { id: 'seg-2', label: 'Chorus', order: 2 },
     ];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1');
     const response = await GET(request as any, { params: Promise.resolve({ id: 'song-1', segmentId: 'seg-1' }) });
@@ -38,7 +38,7 @@ describe('GET /api/songs/[id]/segments/[segmentId]', () => {
 
   it('returns 404 when segment not found', async () => {
     const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 1 }];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-2');
     const response = await GET(request as any, { params: Promise.resolve({ id: 'song-1', segmentId: 'seg-2' }) });
@@ -59,7 +59,7 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
       { id: 'seg-1', label: 'Verse 1', order: 1, startMs: 0, endMs: 1000, lyricText: '' },
       { id: 'seg-2', label: 'Verse 2', order: 2, startMs: 2000, endMs: 3000, lyricText: '' },
     ];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
       method: 'PATCH',
@@ -82,7 +82,7 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
       { id: 'seg-1', label: 'Verse 1', order: 0, startMs: 0, endMs: 1000, lyricText: '' },
       { id: 'seg-2', label: 'Verse 2', order: 1, startMs: 2000, endMs: 3000, lyricText: '' },
     ];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
       method: 'PATCH',
@@ -102,7 +102,7 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
 
   it('returns 404 when segment not found', async () => {
     const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 1 }];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-2', {
       method: 'PATCH',
@@ -135,7 +135,7 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
     const mockSegments = [
       { id: 'seg-1', label: 'Verse 1', order: 0, startMs: 0, endMs: 1000, lyricText: '', pitchContourNotes: [] },
     ];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
       method: 'PATCH',
@@ -174,7 +174,7 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
     const mockSegments = [
       { id: 'seg-1', label: 'Verse 1', order: 0, startMs: 0, endMs: 1000, lyricText: '', pitchContourNotes: [] },
     ];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
     vi.mocked(updateSegment).mockRejectedValue({ code: 'PITCH_CONTOUR_MIGRATION_REQUIRED' });
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
@@ -194,7 +194,7 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
 
   it('returns 400 when no valid fields to update', async () => {
     const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 1, startMs: 0, endMs: 1000, lyricText: '' }];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
       method: 'PATCH',
@@ -211,7 +211,7 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
 
   it('does not trigger reorder for label-only update', async () => {
     const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 0, startMs: 0, endMs: 1000, lyricText: '' }];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
     vi.mocked(updateSegment).mockResolvedValue(undefined);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
@@ -231,7 +231,7 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
 describe('DELETE /api/songs/[id]/segments/[segmentId]', () => {
   it('deletes segment successfully', async () => {
     const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 1 }];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
       method: 'DELETE',
@@ -245,7 +245,7 @@ describe('DELETE /api/songs/[id]/segments/[segmentId]', () => {
 
   it('returns 404 when segment not found', async () => {
     const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 1 }];
-    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-2', {
       method: 'DELETE',

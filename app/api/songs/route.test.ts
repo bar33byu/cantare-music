@@ -117,7 +117,7 @@ describe('POST /api/songs', () => {
   });
 
   it('creates song and returns 201', async () => {
-    const mockSong = { id: 'uuid-123', title: 'New Song', artist: 'Artist' };
+    const mockSong = { id: 'uuid-123', title: 'New Song', artist: 'Artist', audioKey: null, createdAt: null, lastPracticedAt: null };
     vi.mocked(createSong).mockResolvedValue(mockSong);
 
     const request = new Request('http://localhost/api/songs', {

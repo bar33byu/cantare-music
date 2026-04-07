@@ -135,10 +135,11 @@ describe('Home page', () => {
     }) as unknown as typeof fetch;
   });
 
-  it('shows library by default and opens song practice when selecting a song', async () => {
+  it('shows playlists by default and opens song practice when selecting a song from library', async () => {
     render(<Home />);
 
     expect(screen.getByText('Cantare Music')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('library-tab'));
     fireEvent.click(screen.getByTestId('mock-select-song'));
 
     await waitFor(() => {
@@ -229,6 +230,7 @@ describe('Home page', () => {
 
     render(<Home />);
 
+    fireEvent.click(screen.getByTestId('library-tab'));
     fireEvent.click(screen.getByTestId('mock-select-song'));
 
     expect(await screen.findByTestId('mock-practice-view')).toHaveTextContent('Segments: 1');
@@ -249,6 +251,7 @@ describe('Home page', () => {
   it('shows breadcrumb root as Songs in song practice and returns to library when clicked', async () => {
     render(<Home />);
 
+    fireEvent.click(screen.getByTestId('library-tab'));
     fireEvent.click(screen.getByTestId('mock-select-song'));
     expect(await screen.findByTestId('mock-practice-view')).toBeInTheDocument();
 
@@ -259,6 +262,7 @@ describe('Home page', () => {
   it('opens segment editor immediately after creating a song', async () => {
     render(<Home />);
 
+    fireEvent.click(screen.getByTestId('library-tab'));
     fireEvent.click(screen.getByTitle('Add Song'));
     expect(await screen.findByTestId('mock-song-form-success')).toBeInTheDocument();
 
@@ -275,9 +279,10 @@ describe('Home page', () => {
     render(<Home />);
 
     await waitFor(() => {
-      expect(window.location.hash).toContain('view=library');
+      expect(window.location.hash).toContain('view=playlists');
     });
 
+    fireEvent.click(screen.getByTestId('library-tab'));
     fireEvent.click(screen.getByTestId('mock-select-song'));
     await waitFor(() => {
       expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();

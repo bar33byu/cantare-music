@@ -12,8 +12,8 @@ const playlistResponse = {
   isRetired: false,
   createdAt: '2026-01-01T00:00:00.000Z',
   songs: [
-    { id: 'song-1', title: 'Song One', artist: 'Artist', audioUrl: '/api/audio/audio/song-one.mp3', ratingCount: 7, segments: [], createdAt: '2026-01-01T00:00:00.000Z', position: 0 },
-    { id: 'song-2', title: 'Song Two', artist: 'Artist', audioUrl: '', ratingCount: 0, segments: [], createdAt: '2026-01-01T00:00:00.000Z', position: 1 },
+    { id: 'song-1', title: 'Song One', artist: 'Artist', audioUrl: '', segments: [], createdAt: '2026-01-01T00:00:00.000Z', position: 0 },
+    { id: 'song-2', title: 'Song Two', artist: 'Artist', audioUrl: '', segments: [], createdAt: '2026-01-01T00:00:00.000Z', position: 1 },
   ],
 };
 
@@ -37,45 +37,6 @@ describe('PlaylistDetail', () => {
     const rows = screen.getAllByRole('listitem');
     expect(rows[0]).toHaveTextContent('1. Song One');
     expect(rows[1]).toHaveTextContent('2. Song Two');
-  });
-
-  it('shows rating and audio metadata for each song row', async () => {
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('playlist-song-row-song-1')).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId('playlist-song-ratings-song-1')).toHaveTextContent('7 ratings');
-    expect(screen.getByTestId('playlist-song-audio-song-1')).toHaveTextContent('Audio attached');
-    expect(screen.getByTestId('playlist-song-sections-song-1')).toHaveTextContent('No sections');
-
-    expect(screen.getByTestId('playlist-song-ratings-song-2')).toHaveTextContent('0 ratings');
-    expect(screen.getByTestId('playlist-song-audio-song-2')).toHaveTextContent('No audio file');
-    expect(screen.getByTestId('playlist-song-sections-song-2')).toHaveTextContent('No sections');
-  });
-
-  it('falls back to ratings API when playlist payload omits ratingCount', async () => {
-    const playlistWithoutCounts = {
-      ...playlistResponse,
-      songs: playlistResponse.songs.map(({ ratingCount, ...song }) => song),
-    };
-
-    mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => playlistWithoutCounts })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ ratings: [{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ ratings: [] }) });
-
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('playlist-song-row-song-1')).toBeInTheDocument();
-    });
-
-    expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-1/ratings');
-    expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-2/ratings');
-    expect(screen.getByTestId('playlist-song-ratings-song-1')).toHaveTextContent('3 ratings');
-    expect(screen.getByTestId('playlist-song-ratings-song-2')).toHaveTextContent('0 ratings');
   });
 
   it('dragging song calls reorder patch', async () => {
@@ -118,7 +79,8 @@ describe('PlaylistDetail', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/songs', expect.objectContaining({ method: 'POST' }));
     });
 
-    expect(onEditSong).toHaveBeenCalledWith('song-3');
+    expect(onEditSong).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('playlist-song-search')).not.toBeInTheDocument();
   });
 
   it('creates a new song inline and adds it to the playlist', async () => {
@@ -143,7 +105,26 @@ describe('PlaylistDetail', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/songs', expect.objectContaining({ method: 'POST' }));
     });
 
-    expect(onEditSong).toHaveBeenCalledWith('song-9');
+    expect(onEditSong).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('playlist-song-search')).not.toBeInTheDocument();
+  });
+
+  it('pressing escape in song search closes the picker', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'song-3', title: 'Song Three' }] });
+
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+
+    await waitFor(() => expect(screen.getByTestId('playlist-add-song')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('playlist-add-song'));
+
+    const searchInput = await screen.findByTestId('playlist-song-search');
+    fireEvent.keyDown(searchInput, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('playlist-song-search')).not.toBeInTheDocument();
+    });
   });
 
   it('remove button calls DELETE', async () => {
@@ -162,55 +143,10 @@ describe('PlaylistDetail', () => {
     });
   });
 
-  it('playlist row edit button opens song editor callback', async () => {
+  it('back button calls onBack', async () => {
     render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('playlist-song-edit-song-2')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('playlist-song-edit-song-2'));
-    expect(onEditSong).toHaveBeenCalledWith('song-2');
-  });
-
-  it('breadcrumb back calls onBack', async () => {
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
-    await waitFor(() => expect(screen.getByTestId('playlist-detail-breadcrumb-back')).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId('playlist-detail-breadcrumb-back'));
+    await waitFor(() => expect(screen.getByTestId('playlist-detail-back')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('playlist-detail-back'));
     expect(onBack).toHaveBeenCalled();
-  });
-
-  it('escape closes the add-song search box', async () => {
-    mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse })
-      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'song-3', title: 'Song Three' }] });
-
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
-
-    await waitFor(() => expect(screen.getByTestId('playlist-add-song')).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId('playlist-add-song'));
-
-    const search = await screen.findByTestId('playlist-song-search');
-    fireEvent.keyDown(search, { key: 'Escape', code: 'Escape' });
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('playlist-song-search')).not.toBeInTheDocument();
-    });
-  });
-
-  it('shows create-new-song action immediately when picker opens', async () => {
-    mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse })
-      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'song-3', title: 'Song Three' }] });
-
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
-
-    await waitFor(() => expect(screen.getByTestId('playlist-add-song')).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId('playlist-add-song'));
-
-    const createButton = await screen.findByTestId('playlist-song-create-submit');
-    expect(createButton).toBeInTheDocument();
-    expect(createButton).toHaveTextContent('Create and Add New Song');
-    expect(createButton).toBeDisabled();
   });
 });

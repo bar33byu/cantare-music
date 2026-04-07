@@ -74,8 +74,15 @@ export const playlistSongs = pgTable(
   })
 );
 
+export const orphanedAudioKeys = pgTable("orphaned_audio_keys", {
+  id: text("id").primaryKey(),
+  audioKey: text("audio_key").notNull(),
+  failedAt: timestamp("failed_at").defaultNow(),
+});
+
 export type SongRow = InferSelectModel<typeof songs>;
 export type SegmentRow = InferSelectModel<typeof segments>;
 export type PracticeRatingRow = InferSelectModel<typeof practiceRatings>;
 export type PlaylistRow = InferSelectModel<typeof playlists>;
 export type PlaylistSongRow = InferSelectModel<typeof playlistSongs>;
+export type OrphanedAudioKeyRow = InferSelectModel<typeof orphanedAudioKeys>;

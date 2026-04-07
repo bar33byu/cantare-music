@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeKnowledgeScore, computePlaylistKnowledge, getSegmentKnowledgePercent } from './knowledgeUtils';
-import { makeSong, makeSession, makeRating } from './factories';
+import { makeSong, makeSegment, makeSession, makeRating } from './factories';
 
 describe('getSegmentKnowledgePercent', () => {
   it('returns rating * 20', () => {
@@ -12,7 +12,7 @@ describe('getSegmentKnowledgePercent', () => {
 
 describe('computeKnowledgeScore', () => {
   it('returns overall 0 and empty bySegment when no ratings', () => {
-    const song = makeSong({ segments: [{ id: 'seg1', label: 'Verse 1', order: 0 }] });
+    const song = makeSong({ segments: [makeSegment({ id: 'seg1', label: 'Verse 1', order: 0 })] });
     const session = makeSession({ songId: song.id, ratings: [] });
     const result = computeKnowledgeScore(session, song);
     expect(result.overall).toBe(0);
@@ -20,7 +20,7 @@ describe('computeKnowledgeScore', () => {
   });
 
   it('returns bySegment with 60 and overall 60 for one segment rated 3', () => {
-    const song = makeSong({ segments: [{ id: 'seg1', label: 'Verse 1', order: 0 }] });
+    const song = makeSong({ segments: [makeSegment({ id: 'seg1', label: 'Verse 1', order: 0 })] });
     const rating = makeRating({ segmentId: 'seg1', rating: 3 });
     const session = makeSession({ songId: song.id, ratings: [rating] });
     const result = computeKnowledgeScore(session, song);
@@ -31,8 +31,8 @@ describe('computeKnowledgeScore', () => {
   it('returns overall 60 for two segments rated 2 and 4', () => {
     const song = makeSong({
       segments: [
-        { id: 'seg1', label: 'Verse 1', order: 0 },
-        { id: 'seg2', label: 'Verse 2', order: 1 },
+        makeSegment({ id: 'seg1', label: 'Verse 1', order: 0 }),
+        makeSegment({ id: 'seg2', label: 'Verse 2', order: 1 }),
       ],
     });
     const r1 = makeRating({ segmentId: 'seg1', rating: 2 });
@@ -47,8 +47,8 @@ describe('computeKnowledgeScore', () => {
   it('treats unrated segments as 0 in overall score', () => {
     const song = makeSong({
       segments: [
-        { id: 'seg1', label: 'Verse 1', order: 0 },
-        { id: 'seg2', label: 'Verse 2', order: 1 },
+        makeSegment({ id: 'seg1', label: 'Verse 1', order: 0 }),
+        makeSegment({ id: 'seg2', label: 'Verse 2', order: 1 }),
       ],
     });
     const r1 = makeRating({ segmentId: 'seg1', rating: 3 });
@@ -61,7 +61,7 @@ describe('computeKnowledgeScore', () => {
   });
 
   it('uses most recent rating when multiple exist for same segment', () => {
-    const song = makeSong({ segments: [{ id: 'seg1', label: 'Verse 1', order: 0 }] });
+    const song = makeSong({ segments: [makeSegment({ id: 'seg1', label: 'Verse 1', order: 0 })] });
     const older = makeRating({
       segmentId: 'seg1',
       rating: 1,
@@ -89,7 +89,7 @@ describe('computePlaylistKnowledge', () => {
       makeSong({
         id: 'song-1',
         segments: [
-          { id: 'seg-1', label: 'Section 1', order: 0, songId: 'song-1' },
+          makeSegment({ id: 'seg-1', label: 'Section 1', order: 0, songId: 'song-1' }),
         ],
       }),
     ];
@@ -101,14 +101,14 @@ describe('computePlaylistKnowledge', () => {
       makeSong({
         id: 'song-1',
         segments: [
-          { id: 'seg-1', label: 'Section 1', order: 0, songId: 'song-1' },
-          { id: 'seg-2', label: 'Section 2', order: 1, songId: 'song-1' },
+          makeSegment({ id: 'seg-1', label: 'Section 1', order: 0, songId: 'song-1' }),
+          makeSegment({ id: 'seg-2', label: 'Section 2', order: 1, songId: 'song-1' }),
         ],
       }),
       makeSong({
         id: 'song-2',
         segments: [
-          { id: 'seg-3', label: 'Section 1', order: 0, songId: 'song-2' },
+          makeSegment({ id: 'seg-3', label: 'Section 1', order: 0, songId: 'song-2' }),
         ],
       }),
     ];

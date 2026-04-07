@@ -20,7 +20,7 @@ function asFiniteNumber(value: unknown, fallback: number): number {
   return value;
 }
 
-export function inferTimelineOrder<T extends TimelineSegment>(segments: T[]): T[] {
+export function inferTimelineOrder<T extends TimelineSegment>(segments: T[]): (T & { order: number })[] {
   return [...segments]
     .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs || a.id.localeCompare(b.id))
     .map((segment, index) => ({

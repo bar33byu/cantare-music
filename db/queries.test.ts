@@ -6,11 +6,11 @@ import { songs, segments, practiceRatings, playlists, playlistSongs } from "./sc
 // Creates a fluent mock object where every method returns itself and
 // the object itself is a Promise resolving to `resolveValue`.
 function makeChain(resolveValue: unknown = []) {
-  const chain: Record<string, unknown> & PromiseLike<unknown> = {
-    then: (res: (v: unknown) => unknown) => Promise.resolve(resolveValue).then(res),
+  const chain = {
+    then: (res: Parameters<Promise<unknown>['then']>[0]) => Promise.resolve(resolveValue).then(res),
     catch: (rej: (e: unknown) => unknown) => Promise.resolve(resolveValue).catch(rej),
     finally: (fn: () => void) => Promise.resolve(resolveValue).finally(fn),
-  };
+  } as Record<string, unknown> & PromiseLike<unknown>;
   const handler: ProxyHandler<typeof chain> = {
     get(target, prop) {
       if (prop in target) return (target as Record<string | symbol, unknown>)[prop];

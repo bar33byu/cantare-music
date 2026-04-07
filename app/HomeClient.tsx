@@ -121,7 +121,7 @@ function UnifiedHeader({
 
 export default function Home() {
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
-  const [activeView, setActiveView] = useState<AppView>("library");
+  const [activeView, setActiveView] = useState<AppView>("playlists");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
@@ -227,7 +227,7 @@ export default function Home() {
     if (currentHash) {
       void applyHashRoute(currentHash);
     } else {
-      window.history.replaceState(null, "", buildHashRoute({ view: "library" }));
+      window.history.replaceState(null, "", buildHashRoute({ view: "playlists" }));
     }
 
     return () => {
@@ -506,20 +506,6 @@ export default function Home() {
         {/* Tab navigation */}
         <div className="flex gap-0 mb-6 border-b border-gray-300">
           <button
-            data-testid="library-tab"
-            onClick={() => {
-              setSelectedPlaylist(null);
-              setActiveView("library");
-            }}
-            className={`px-4 py-3 font-medium transition-colors ${
-              activeView === "library"
-                ? "border-b-2 border-blue-600 text-blue-600"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            Library
-          </button>
-          <button
             data-testid="playlists-tab"
             onClick={() => {
               setSelectedSong(null);
@@ -532,6 +518,20 @@ export default function Home() {
             }`}
           >
             Playlists
+          </button>
+          <button
+            data-testid="library-tab"
+            onClick={() => {
+              setSelectedPlaylist(null);
+              setActiveView("library");
+            }}
+            className={`px-4 py-3 font-medium transition-colors ${
+              activeView === "library"
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+          >
+            Library
           </button>
         </div>
 

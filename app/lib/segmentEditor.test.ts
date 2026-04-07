@@ -189,6 +189,7 @@ describe('segmentEditor', () => {
           startMs: 1000,
           endMs: 2000,
           lyricText: 'test',
+          pitchContourNotes: [],
         },
       ]);
     });
@@ -205,6 +206,7 @@ describe('segmentEditor', () => {
           startMs: 1000,
           endMs: 2000,
           lyricText: 'test',
+          pitchContourNotes: [],
         },
       ];
 
@@ -225,6 +227,7 @@ describe('segmentEditor', () => {
           startMs: 1000,
           endMs: 2000,
           lyricText: null,
+          pitchContourNotes: [],
         },
       ];
 

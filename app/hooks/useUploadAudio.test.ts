@@ -47,6 +47,41 @@ class XMLHttpRequestStub {
 
 global.XMLHttpRequest = XMLHttpRequestStub as any;
 
+class XMLHttpRequestErrorStub {
+  upload = {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
+  listeners: Record<string, Array<(event: any) => void>> = {
+    load: [],
+    error: [],
+    abort: [],
+  };
+  status = 500;
+  statusText = 'Network Error';
+  open = vi.fn();
+  setRequestHeader = vi.fn();
+  send = vi.fn(() => {
+    setTimeout(() => {
+      this.listeners.error.forEach((handler) =>
+        handler({ type: 'error', target: this } as any)
+      );
+    }, 10);
+  });
+
+  addEventListener(event: string, handler: (event: any) => void) {
+    if (this.listeners[event]) {
+      this.listeners[event].push(handler);
+    }
+  }
+
+  removeEventListener(event: string, handler: (event: any) => void) {
+    if (this.listeners[event]) {
+      this.listeners[event] = this.listeners[event].filter((h) => h !== handler);
+    }
+  }
+}
+
 describe('useUploadAudio', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -92,7 +127,7 @@ describe('useUploadAudio', () => {
       json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
     });
 
-    let returnedKey: string;
+    let returnedKey: string | undefined;
     await act(async () => {
       returnedKey = await result.current.upload('song-123', file);
     });
@@ -133,5 +168,36 @@ describe('useUploadAudio', () => {
 
     expect(result.current.error).toBe('API Error');
     expect(result.current.uploading).toBe(false);
+  });
+
+  it('falls back to same-origin upload when direct upload fails', async () => {
+    global.XMLHttpRequest = XMLHttpRequestErrorStub as any;
+
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ key: 'test-key' }),
+      });
+
+    const { result } = renderHook(() => useUploadAudio());
+    const file = new File(['test'], 'test.mp3', { type: 'audio/mpeg' });
+
+    let returnedKey: string | undefined;
+    await act(async () => {
+      returnedKey = await result.current.upload('song-123', file);
+    });
+
+    expect(returnedKey).toBe('test-key');
+    expect(mockFetch).toHaveBeenNthCalledWith(2, '/api/songs/upload', {
+      method: 'POST',
+      body: expect.any(FormData),
+    });
+    expect(result.current.error).toBe(null);
+
+    global.XMLHttpRequest = XMLHttpRequestStub as any;
   });
 });
