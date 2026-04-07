@@ -763,8 +763,8 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       )}
 
       <div className="mb-4 rounded-xl border border-indigo-100 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
             <p className="text-sm font-semibold text-indigo-800">Sections</p>
             <button
               type="button"
@@ -786,9 +786,9 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
               Bulk Lyrics
             </button>
           </div>
-          <div className="flex items-center gap-3">
-            <p className="text-xs text-gray-500">Drag top bar to move · Drag edges to resize</p>
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
+            <p className="w-full text-xs text-gray-500 md:w-auto">Drag top bar to move • Drag edges to resize</p>
+            <div className="ml-auto flex items-center gap-2 md:ml-0">
               <button
                 type="button"
                 data-testid="segment-editor-zoom-out"
@@ -816,7 +816,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           data-testid="segment-editor-playback-controls"
           className="mb-3 flex flex-col items-center gap-2 rounded-lg bg-indigo-50/40 p-3"
         >
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:flex-nowrap">
             <button
               type="button"
               data-testid="segment-editor-skip-back"
@@ -933,7 +933,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           <div
             ref={boardRef}
             data-testid="segment-editor-board"
-            className="relative h-[560px] min-w-full overflow-hidden bg-gradient-to-b from-indigo-50/40 to-white"
+            className="relative h-[560px] min-w-full overflow-hidden bg-gradient-to-b from-indigo-50/40 to-white touch-none"
             style={{ width: `${zoomPercent}%` }}
           >
           {orderedSegments.map((segment, index) => {
@@ -960,8 +960,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                 <button
                   type="button"
                   aria-label={`Move ${segment.label}`}
-                  className="absolute left-0 right-0 top-0 z-20 h-7 cursor-grab border-b border-indigo-300 bg-indigo-100/80 text-xs text-indigo-600/60 select-none"
+                  className="absolute left-0 right-0 top-0 z-20 h-7 cursor-grab border-b border-indigo-300 bg-indigo-100/80 text-xs text-indigo-600/60 select-none touch-none"
                   onPointerDown={(event) => {
+                    event.preventDefault();
+                    if (typeof event.currentTarget.setPointerCapture === 'function') {
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                    }
                     setSelectedSegmentId(segment.id);
                     setActiveInteraction({
                       segmentId: segment.id,
@@ -978,8 +982,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                 <button
                   type="button"
                   aria-label={`Resize start ${segment.label}`}
-                  className="absolute inset-y-0 left-0 z-30 w-3 cursor-col-resize rounded-l bg-indigo-500/35"
+                  className="absolute inset-y-0 left-0 z-30 w-4 cursor-col-resize rounded-l bg-indigo-500/35 touch-none"
                   onPointerDown={(event) => {
+                    event.preventDefault();
+                    if (typeof event.currentTarget.setPointerCapture === 'function') {
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                    }
                     setSelectedSegmentId(segment.id);
                     setActiveInteraction({
                       segmentId: segment.id,
@@ -995,8 +1003,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                 <button
                   type="button"
                   aria-label={`Resize end ${segment.label}`}
-                  className="absolute inset-y-0 right-0 z-30 w-3 cursor-col-resize rounded-r bg-indigo-500/35"
+                  className="absolute inset-y-0 right-0 z-30 w-4 cursor-col-resize rounded-r bg-indigo-500/35 touch-none"
                   onPointerDown={(event) => {
+                    event.preventDefault();
+                    if (typeof event.currentTarget.setPointerCapture === 'function') {
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                    }
                     setSelectedSegmentId(segment.id);
                     setActiveInteraction({
                       segmentId: segment.id,

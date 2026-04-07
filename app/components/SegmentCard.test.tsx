@@ -62,9 +62,9 @@ describe("SegmentCard", () => {
     expect(screen.getByTestId("segment-progress-fill")).toHaveStyle({ width: "50%" });
   });
 
-  it("renders mastery-colored top edge from masteryPercent", () => {
+  it("does not render a top mastery strip", () => {
     render(<SegmentCard {...defaultProps} masteryPercent={100} />);
-    expect(screen.getByTestId("segment-mastery-edge")).toHaveStyle({ backgroundColor: "rgb(79, 70, 229)" });
+    expect(screen.queryByTestId("segment-mastery-edge")).toBeNull();
   });
 
   it("clamps progress to 0 before segment start", () => {
@@ -122,7 +122,7 @@ describe("SegmentCard", () => {
 
   it("selected rating button has selected style", () => {
     render(<SegmentCard {...defaultProps} currentRating={4} />);
-    expect(screen.getByTestId("rating-button-4").className).toContain("bg-indigo-600");
+    expect(screen.getByTestId("rating-button-4").className).toContain("bg-indigo-700");
   });
 
   it("does not render lock toggle", () => {

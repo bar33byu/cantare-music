@@ -3,7 +3,6 @@
 import React from "react";
 import { Segment, MemoryRating } from "../types/index";
 import RatingBar from "./RatingBar";
-import { getMasteryColor } from "../lib/masteryColors";
 
 const LYRIC_FONT_MAX_REM = 2.25; // 36px
 const LYRIC_FONT_MIN_REM = 1.1; // 17.6px
@@ -92,7 +91,6 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   onRate,
   playbackMs,
   onSeek,
-  masteryPercent,
   lyricVisibilityMode = "full",
 }) => {
   const hasLyrics = (segment.lyricText ?? "").trim().length > 0;
@@ -113,8 +111,6 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   );
   const durationMs = Math.max(1, segment.endMs - segment.startMs);
   const progress = Math.min(1, Math.max(0, (clampedPlaybackMs - segment.startMs) / durationMs));
-  const topEdgeColor = getMasteryColor(masteryPercent ?? ((currentRating ?? 0) * 20));
-
   const handleProgressClick = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!onSeek) {
       return;
@@ -133,11 +129,6 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
 
   return (
     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-md flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
-      <div
-        data-testid="segment-mastery-edge"
-        className="absolute inset-x-0 top-0 h-4 rounded-t-2xl border-b border-black/5"
-        style={{ backgroundColor: topEdgeColor }}
-      />
       <div className="mb-3">
         <p className="text-center text-sm text-gray-500" data-testid="segment-label-text">
           {segment.label}

@@ -27,10 +27,14 @@ describe('RatingBar', () => {
   it('fills all ratings up to currentRating', () => {
     render(<RatingBar currentRating={4} onRate={vi.fn()} />);
 
-    expect(screen.getByTestId('rating-button-1').className).toContain('bg-indigo-600');
-    expect(screen.getByTestId('rating-button-2').className).toContain('bg-indigo-600');
-    expect(screen.getByTestId('rating-button-3').className).toContain('bg-indigo-600');
-    expect(screen.getByTestId('rating-button-4').className).toContain('bg-indigo-600');
+    expect(screen.getByTestId('rating-button-1').className).toContain('bg-indigo-200');
+    expect(screen.getByTestId('rating-button-1').className).toContain('text-indigo-950');
+    expect(screen.getByTestId('rating-button-2').className).toContain('bg-indigo-300');
+    expect(screen.getByTestId('rating-button-2').className).toContain('text-indigo-950');
+    expect(screen.getByTestId('rating-button-3').className).toContain('bg-indigo-500');
+    expect(screen.getByTestId('rating-button-3').className).toContain('text-white');
+    expect(screen.getByTestId('rating-button-4').className).toContain('bg-indigo-700');
+    expect(screen.getByTestId('rating-button-4').className).toContain('text-white');
     expect(screen.getByTestId('rating-button-5').className).toContain('bg-gray-100');
   });
 

@@ -11,6 +11,14 @@ interface RatingBarProps {
 
 const RATINGS: MemoryRating[] = [1, 2, 3, 4, 5];
 
+const SELECTED_RATING_CLASS: Record<MemoryRating, string> = {
+  1: "bg-indigo-200 text-indigo-950",
+  2: "bg-indigo-300 text-indigo-950",
+  3: "bg-indigo-500 text-white",
+  4: "bg-indigo-700 text-white",
+  5: "bg-indigo-950 text-white",
+};
+
 const RatingBar: React.FC<RatingBarProps> = ({
   currentRating,
   onRate,
@@ -33,7 +41,7 @@ const RatingBar: React.FC<RatingBarProps> = ({
           className={[
             "w-10 h-10 rounded-full text-sm font-semibold transition-colors",
             isFilled
-              ? "bg-indigo-600 text-white"
+              ? SELECTED_RATING_CLASS[rating]
               : "bg-gray-100 text-gray-700 hover:bg-indigo-100",
             disabled ? "opacity-40 cursor-not-allowed" : "",
           ]
