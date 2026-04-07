@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import PracticeView from "./components/PracticeView";
 import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
@@ -33,18 +33,253 @@ type AppView =
 
 type SongEditorReturnView = "library" | "song_practice" | "playlist_detail";
 
+interface HashRouteState {
+  view: AppView;
+  songId?: string;
+  playlistId?: string;
+  returnView?: SongEditorReturnView;
+}
+
+function parseHashRoute(hash: string): HashRouteState {
+  const params = new URLSearchParams(hash.replace(/^#/, ""));
+  const view = params.get("view") as AppView | null;
+  const songId = params.get("song") ?? undefined;
+  const playlistId = params.get("playlist") ?? undefined;
+  const returnViewParam = params.get("return") as SongEditorReturnView | null;
+
+  const safeView: AppView =
+    view === "song_practice" ||
+    view === "song_segment_editor" ||
+    view === "song_add" ||
+    view === "playlists" ||
+    view === "playlist_detail" ||
+    view === "playlist_practice"
+      ? view
+      : "library";
+
+  return {
+    view: safeView,
+    songId,
+    playlistId,
+    returnView:
+      returnViewParam === "library" ||
+      returnViewParam === "song_practice" ||
+      returnViewParam === "playlist_detail"
+        ? returnViewParam
+        : undefined,
+  };
+}
+
+function buildHashRoute(state: HashRouteState): string {
+  const params = new URLSearchParams();
+  params.set("view", state.view);
+  if (state.songId) {
+    params.set("song", state.songId);
+  }
+  if (state.playlistId) {
+    params.set("playlist", state.playlistId);
+  }
+  if (state.returnView) {
+    params.set("return", state.returnView);
+  }
+  return `#${params.toString()}`;
+}
+
+function UnifiedHeader({
+  breadcrumb,
+  title,
+  action,
+}: {
+  breadcrumb?: { label: string; onClick?: () => void };
+  title: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <div>
+        {breadcrumb ? (
+          <div className="mb-1 flex items-center gap-2 text-sm text-gray-600">
+            {breadcrumb.onClick ? (
+              <button
+                type="button"
+                onClick={breadcrumb.onClick}
+                className="rounded-full border border-gray-300 px-3 py-1 text-gray-700 hover:bg-white"
+              >
+                {breadcrumb.label}
+              </button>
+            ) : (
+              <span className="rounded-full border border-gray-300 px-3 py-1 text-gray-700">{breadcrumb.label}</span>
+            )}
+          </div>
+        ) : null}
+        <h1 className="text-3xl font-bold tracking-tight text-gray-900">{title}</h1>
+      </div>
+      {action ?? null}
+    </div>
+  );
+}
+
 export default function Home() {
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [activeView, setActiveView] = useState<AppView>("library");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
+  const [isHydrated, setIsHydrated] = useState(false);
+  const isApplyingHashRouteRef = useRef(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
+
+  const loadSongById = async (songId: string): Promise<Song | null> => {
+    const response = await fetch(`/api/songs/${songId}`);
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as Song;
+  };
+
+  const loadPlaylistById = async (playlistId: string): Promise<Playlist | null> => {
+    const response = await fetch(`/api/playlists/${playlistId}`);
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as Playlist;
+  };
+
+  const applyHashRoute = async (hash: string) => {
+    isApplyingHashRouteRef.current = true;
+    try {
+      const route = parseHashRoute(hash);
+
+      if (route.view === "library") {
+        setSelectedSong(null);
+        setSelectedPlaylist(null);
+        setActiveView("library");
+        return;
+      }
+
+      if (route.view === "playlists") {
+        setSelectedSong(null);
+        setActiveView("playlists");
+        return;
+      }
+
+      if (route.view === "song_add") {
+        setSelectedSong(null);
+        setActiveView("song_add");
+        return;
+      }
+
+      if (route.view === "playlist_detail" || route.view === "playlist_practice") {
+        if (!route.playlistId) {
+          setActiveView("playlists");
+          return;
+        }
+        const playlist = await loadPlaylistById(route.playlistId);
+        if (!playlist) {
+          setActiveView("playlists");
+          return;
+        }
+        setSelectedPlaylist(playlist);
+        setActiveView(route.view);
+        return;
+      }
+
+      if (route.view === "song_practice" || route.view === "song_segment_editor") {
+        if (!route.songId) {
+          setActiveView("library");
+          return;
+        }
+        const song = await loadSongById(route.songId);
+        if (!song) {
+          setActiveView("library");
+          return;
+        }
+        setSelectedSong(song);
+        if (route.playlistId) {
+          const playlist = await loadPlaylistById(route.playlistId);
+          if (playlist) {
+            setSelectedPlaylist(playlist);
+          }
+        }
+        if (route.view === "song_segment_editor" && route.returnView) {
+          setSongEditorReturnView(route.returnView);
+        }
+        setActiveView(route.view);
+      }
+    } finally {
+      isApplyingHashRouteRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (!isHydrated || typeof window === "undefined") {
+      return;
+    }
+
+    const onHashChange = () => {
+      void applyHashRoute(window.location.hash);
+    };
+    const onPopState = () => {
+      void applyHashRoute(window.location.hash);
+    };
+
+    window.addEventListener("hashchange", onHashChange);
+    window.addEventListener("popstate", onPopState);
+    const currentHash = window.location.hash;
+    if (currentHash) {
+      void applyHashRoute(currentHash);
+    } else {
+      window.history.replaceState(null, "", buildHashRoute({ view: "library" }));
+    }
+
+    return () => {
+      window.removeEventListener("hashchange", onHashChange);
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [isHydrated]);
+
+  const currentHash = useMemo(() => {
+    if (activeView === "song_practice" && selectedSong) {
+      return buildHashRoute({
+        view: "song_practice",
+        songId: selectedSong.id,
+        playlistId: selectedPlaylist?.id,
+      });
+    }
+
+    if (activeView === "song_segment_editor" && selectedSong) {
+      return buildHashRoute({
+        view: "song_segment_editor",
+        songId: selectedSong.id,
+        playlistId: selectedPlaylist?.id,
+        returnView: songEditorReturnView,
+      });
+    }
+
+    if ((activeView === "playlist_detail" || activeView === "playlist_practice") && selectedPlaylist) {
+      return buildHashRoute({ view: activeView, playlistId: selectedPlaylist.id });
+    }
+
+    return buildHashRoute({ view: activeView });
+  }, [activeView, selectedPlaylist, selectedSong, songEditorReturnView]);
+
+  useEffect(() => {
+    if (!isHydrated || typeof window === "undefined" || isApplyingHashRouteRef.current) {
+      return;
+    }
+    if (window.location.hash === currentHash) {
+      return;
+    }
+    window.history.pushState(null, "", currentHash);
+  }, [currentHash, isHydrated]);
 
   const openSongEditor = async (songId: string, returnView: SongEditorReturnView) => {
     try {
-      const response = await fetch(`/api/songs/${songId}`);
-      if (!response.ok) throw new Error("Failed to fetch song");
-      const fullSong: Song = await response.json();
+      const fullSong = await loadSongById(songId);
+      if (!fullSong) throw new Error("Failed to fetch song");
       setSelectedSong(fullSong);
       setSongEditorReturnView(returnView);
       setActiveView("song_segment_editor");
@@ -67,9 +302,8 @@ export default function Home() {
 
   const handleSelectSong = async (song: SongListItem) => {
     try {
-      const response = await fetch(`/api/songs/${song.id}`);
-      if (!response.ok) throw new Error("Failed to fetch song details");
-      const fullSong: Song = await response.json();
+      const fullSong = await loadSongById(song.id);
+      if (!fullSong) throw new Error("Failed to fetch song details");
       setSelectedSong(fullSong);
       setActiveView("song_practice");
     } catch (err) {
@@ -158,12 +392,24 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-4xl mx-auto">
-          <button
-            onClick={() => void handleExitSongEditor()}
-            className="mb-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-          >
-            {backLabel}
-          </button>
+          <UnifiedHeader
+            breadcrumb={{
+              label: songEditorReturnView === "playlist_detail" ? "Playlist" : songEditorReturnView === "song_practice" ? "Practice" : "Songs",
+              onClick: () => {
+                void handleExitSongEditor();
+              },
+            }}
+            title={`Edit ${selectedSong.title}`}
+            action={
+              <button
+                data-testid="song-editor-back"
+                onClick={() => void handleExitSongEditor()}
+                className="rounded bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-800"
+              >
+                {backLabel}
+              </button>
+            }
+          />
           <SegmentEditor
             songId={selectedSong.id}
             onSongUpdated={refreshSelectedSong}
@@ -177,17 +423,17 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-2xl mx-auto">
-          <button
-            onClick={() => {
-              setRefreshTrigger((previous) => previous + 1);
-              setActiveView("library");
+          <UnifiedHeader
+            breadcrumb={{
+              label: "Songs",
+              onClick: () => {
+                setRefreshTrigger((previous) => previous + 1);
+                setActiveView("library");
+              },
             }}
-            className="mb-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-          >
-            ← Back to Songs
-          </button>
+            title="Add New Song"
+          />
           <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-2xl font-bold mb-4">Add New Song</h2>
             <SongForm onSuccess={handleSongCreated} />
           </div>
         </div>
@@ -225,9 +471,8 @@ export default function Home() {
             onManage={() => setActiveView("playlist_detail")}
             onSelectSong={async (songId) => {
               try {
-                const response = await fetch(`/api/songs/${songId}`);
-                if (!response.ok) throw new Error("Failed to fetch song");
-                const fullSong: Song = await response.json();
+                const fullSong = await loadSongById(songId);
+                if (!fullSong) throw new Error("Failed to fetch song");
                 setSelectedSong(fullSong);
                 setActiveView("song_practice");
               } catch (err) {
@@ -243,9 +488,10 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-4xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold">Cantare Music</h1>
-        </div>
+        <UnifiedHeader
+          breadcrumb={{ label: "Cantare" }}
+          title="Cantare Music"
+        />
 
         {/* Tab navigation */}
         <div className="flex gap-0 mb-6 border-b border-gray-300">

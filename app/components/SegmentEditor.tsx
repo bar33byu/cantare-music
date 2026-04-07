@@ -699,19 +699,26 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     return new Promise<number | null>((resolve) => {
       const probe = new Audio();
       probe.preload = 'metadata';
+      const timeoutId = window.setTimeout(() => {
+        cleanup();
+        resolve(null);
+      }, 4000);
 
       const cleanup = () => {
         probe.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        probe.removeEventListener('loadeddata', handleLoadedMetadata);
+        probe.removeEventListener('durationchange', handleLoadedMetadata);
+        probe.removeEventListener('canplay', handleLoadedMetadata);
         probe.removeEventListener('error', handleError);
+        window.clearTimeout(timeoutId);
       };
 
       const handleLoadedMetadata = () => {
-        cleanup();
         if (Number.isFinite(probe.duration) && probe.duration > 0) {
+          cleanup();
           resolve(Math.round(probe.duration * 1000));
           return;
         }
-        resolve(null);
       };
 
       const handleError = () => {
@@ -720,11 +727,34 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       };
 
       probe.addEventListener('loadedmetadata', handleLoadedMetadata);
+      probe.addEventListener('loadeddata', handleLoadedMetadata);
+      probe.addEventListener('durationchange', handleLoadedMetadata);
+      probe.addEventListener('canplay', handleLoadedMetadata);
       probe.addEventListener('error', handleError);
       probe.src = sourceUrl;
       probe.load();
     });
   };
+
+  useEffect(() => {
+    if (!hasAttachedAudio || !playbackAudioUrl) {
+      return;
+    }
+
+    let cancelled = false;
+    const loadDuration = async () => {
+      const resolvedDurationMs = await resolveAudioDurationMs(playbackAudioUrl);
+      if (!cancelled && resolvedDurationMs && resolvedDurationMs > 0) {
+        setStableDurationMs(resolvedDurationMs);
+      }
+    };
+
+    void loadDuration();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasAttachedAudio, playbackAudioUrl]);
 
   const handleBulkImport = async () => {
     setDeleteError(null);

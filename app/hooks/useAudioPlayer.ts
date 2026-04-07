@@ -93,6 +93,7 @@ export function useAudioPlayer(
   const [isReady, setIsReady] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
+  const [playbackRate, setPlaybackRateState] = useState(1);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<AudioDebugInfo>(() => makeDefaultDebugInfo(audioUrl));
 
@@ -171,6 +172,7 @@ export function useAudioPlayer(
     }));
 
     try {
+      audio.playbackRate = playbackRate;
       const result = audio.play();
       if (result instanceof Promise) {
         result.then(() => {
@@ -206,7 +208,7 @@ export function useAudioPlayer(
       }));
       updateDebugInfo(audio, 'play-throw');
     }
-  }, [applyCurrentTime, updateDebugInfo]);
+  }, [applyCurrentTime, playbackRate, updateDebugInfo]);
 
   useEffect(() => {
     audioInitRunsRef.current += 1;
@@ -235,9 +237,27 @@ export function useAudioPlayer(
     updateDebugInfo(audio, 'audio-created');
 
     if ('preload' in audio) {
-      // Avoid eager decode/network churn before user interaction.
-      audio.preload = 'none';
+      // Load metadata early so duration is known before first user play.
+      audio.preload = 'metadata';
     }
+
+    audio.playbackRate = playbackRate;
+    const pitchPreserveAudio = audio as HTMLAudioElement & {
+      preservesPitch?: boolean;
+      mozPreservesPitch?: boolean;
+      webkitPreservesPitch?: boolean;
+    };
+    if (typeof pitchPreserveAudio.preservesPitch !== 'undefined') {
+      pitchPreserveAudio.preservesPitch = true;
+    }
+    if (typeof pitchPreserveAudio.mozPreservesPitch !== 'undefined') {
+      pitchPreserveAudio.mozPreservesPitch = true;
+    }
+    if (typeof pitchPreserveAudio.webkitPreservesPitch !== 'undefined') {
+      pitchPreserveAudio.webkitPreservesPitch = true;
+    }
+    audio.load?.();
+    updateDebugInfo(audio, 'load-metadata');
 
     const flushPendingPlay = () => {
       if (!pendingPlayRangeRef.current) {
@@ -266,6 +286,12 @@ export function useAudioPlayer(
       setIsReady(true);
       updateDebugInfo(audio, 'canplay');
       flushPendingPlay();
+    };
+    const handleDurationChange = () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        setDurationMs(audio.duration * 1000);
+      }
+      updateDebugInfo(audio, 'durationchange');
     };
     const handleLoadedMetadata = () => {
       if (Number.isFinite(audio.duration)) {
@@ -313,6 +339,8 @@ export function useAudioPlayer(
     audio.addEventListener('pause', handlePause);
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('canplay', handleCanPlay);
+    audio.addEventListener('loadeddata', handleDurationChange);
+    audio.addEventListener('durationchange', handleDurationChange);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('error', handleError);
     audio.addEventListener('loadstart', handleLoadStart);
@@ -344,6 +372,8 @@ export function useAudioPlayer(
       audio.removeEventListener('pause', handlePause);
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('canplay', handleCanPlay);
+      audio.removeEventListener('loadeddata', handleDurationChange);
+      audio.removeEventListener('durationchange', handleDurationChange);
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('error', handleError);
       audio.removeEventListener('loadstart', handleLoadStart);
@@ -355,6 +385,26 @@ export function useAudioPlayer(
       audio.pause();
     };
   }, [audioUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    audio.playbackRate = playbackRate;
+    updateDebugInfo(audio, `playback-rate-${playbackRate.toFixed(2)}`);
+  }, [playbackRate, updateDebugInfo]);
+
+  const setPlaybackRate = useCallback((rate: number) => {
+    const nextRate = Math.min(1, Math.max(0.5, Number(rate)));
+    setPlaybackRateState(nextRate);
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    audio.playbackRate = nextRate;
+    updateDebugInfo(audio, `playback-rate-${nextRate.toFixed(2)}`);
+  }, [updateDebugInfo]);
 
   const play = useCallback((startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;
@@ -386,5 +436,17 @@ export function useAudioPlayer(
     setCurrentMs(ms);
   }, [applyCurrentTime]);
 
-  return { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek };
+  return {
+    isPlaying,
+    isReady,
+    currentMs,
+    durationMs,
+    playbackRate,
+    playbackError,
+    debugInfo,
+    play,
+    pause,
+    seek,
+    setPlaybackRate,
+  };
 }
