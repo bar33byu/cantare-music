@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Segment, MemoryRating } from "../types/index";
+import { Segment, MemoryRating, PitchContourNote } from "../types/index";
 import RatingBar from "./RatingBar";
 import { getMasteryColor } from "../lib/masteryColors";
 
@@ -34,6 +34,8 @@ interface SegmentCardProps {
   onSeek?: (ms: number) => void;
   masteryPercent?: number;
   lyricVisibilityMode?: "full" | "hint" | "hidden";
+  pitchContourNotes?: PitchContourNote[];
+  pitchContourStatuses?: Record<string, "correct" | "weak">;
 }
 
 function isMaskableLyricChar(char: string): boolean {

@@ -138,6 +138,7 @@ export function editorSegmentsToRows(segments: EditorSegment[], songId: string):
     startMs: segment.startMs,
     endMs: segment.endMs,
     lyricText: segment.lyricText,
+    pitchContourNotes: [],
   }));
 }
 

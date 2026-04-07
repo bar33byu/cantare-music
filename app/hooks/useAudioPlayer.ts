@@ -5,11 +5,13 @@ export interface AudioPlayerControls {
   isReady: boolean;
   currentMs: number;
   durationMs: number;
+  playbackRate?: number;
   playbackError: string | null;
   debugInfo: AudioDebugInfo;
   play: (startMs: number, endMs: number) => void;
   pause: () => void;
   seek: (ms: number) => void;
+  setPlaybackRate?: (rate: number) => void;
 }
 
 export interface AudioDebugInfo {
