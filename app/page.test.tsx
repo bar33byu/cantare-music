@@ -105,8 +105,11 @@ vi.mock('./components/PlaylistDetail', () => ({
 }));
 
 vi.mock('./components/PlaylistPracticeView', () => ({
-  PlaylistPracticeView: ({ onExit }: { onExit: () => void }) => (
+  PlaylistPracticeView: ({ onExit, onSelectSong }: { onExit: () => void; onSelectSong?: (songId: string) => void }) => (
     <div data-testid="mock-playlist-practice-view">
+      <button data-testid="mock-playlist-select-song" onClick={() => onSelectSong?.('song-1')}>
+        Select Playlist Song
+      </button>
       <button data-testid="mock-playlist-exit" onClick={onExit}>
         Exit Playlist
       </button>
@@ -287,5 +290,78 @@ describe('Home page', () => {
     await waitFor(() => {
       expect(screen.getByTestId('mock-select-song')).toBeInTheDocument();
     });
+  });
+
+  it('refreshes playlist data when returning from song practice to playlist practice', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/playlists/playlist-1') {
+        return {
+          ok: true,
+          json: async () => ({
+            ...samplePlaylist,
+            songs: [
+              {
+                ...samplePlaylist.songs[0],
+                masteryPercent: 88,
+              },
+            ],
+          }),
+        };
+      }
+
+      if (url === '/api/songs/song-1') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'song-1',
+            title: 'Song One',
+            artist: 'Artist One',
+            audioUrl: 'https://example.com/one.mp3',
+            segments: [],
+            createdAt: '2025-01-01T00:00:00.000Z',
+            masteryPercent: 50,
+          }),
+        };
+      }
+
+      if (url === '/api/playlists/playlist-1/knowledge') {
+        return {
+          ok: true,
+          json: async () => ({ score: 88 }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          id: 'song-1',
+          title: 'Song One',
+          artist: 'Artist One',
+          audioUrl: 'https://example.com/one.mp3',
+          segments: [],
+          createdAt: '2025-01-01T00:00:00.000Z',
+        }),
+      };
+    });
+
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('playlists-tab'));
+    fireEvent.click(await screen.findByTestId('mock-playlist-practice'));
+    expect(await screen.findByTestId('mock-playlist-practice-view')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-playlist-select-song'));
+    expect(await screen.findByTestId('mock-practice-view')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set A' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-playlist-practice-view')).toBeInTheDocument();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/playlists/playlist-1');
   });
 });
