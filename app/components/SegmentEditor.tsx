@@ -1516,7 +1516,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
                   left: `${left}%`,
                   width: `${width}%`,
                   top: lane === 0 ? '24px' : '56px',
-                  height: lane === 0 ? 'calc(100% - 44px)' : 'calc(100% - 76px)',
+                  height: 'calc(100% - 80px)',
                 }}
                 onClick={() => setSelectedSegmentId(segment.id)}
               >
