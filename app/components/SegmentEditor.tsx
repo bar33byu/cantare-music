@@ -812,6 +812,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
         }
       }
 
+      // Ensure duration is an integer to prevent float values in database
+      effectiveDurationMs = Math.round(effectiveDurationMs);
       const timings = buildBulkTimings(sections.length, effectiveDurationMs);
 
       if (replaceExistingOnBulk) {
@@ -1070,7 +1072,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
 
   useEffect(() => {
     if (durationMs > 0) {
-      setStableDurationMs(durationMs);
+      setStableDurationMs(Math.round(durationMs));
     }
   }, [durationMs]);
 
