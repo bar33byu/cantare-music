@@ -241,6 +241,9 @@ export function useAudioPlayer(
       audio.preload = 'metadata';
     }
 
+    // Enable CORS for cross-origin audio (e.g., Cloudflare R2)
+    audio.crossOrigin = 'anonymous';
+
     audio.playbackRate = playbackRate;
     const pitchPreserveAudio = audio as HTMLAudioElement & {
       preservesPitch?: boolean;

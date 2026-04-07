@@ -699,6 +699,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     return new Promise<number | null>((resolve) => {
       const probe = new Audio();
       probe.preload = 'metadata';
+      probe.crossOrigin = 'anonymous';
       const timeoutId = window.setTimeout(() => {
         cleanup();
         resolve(null);
