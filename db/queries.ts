@@ -457,6 +457,24 @@ export async function getSongKnowledgeBySongIds(
     return {};
   }
 
+  // Get all segments for these songs (including unrated)
+  const allSegmentRows = await db()
+    .select({
+      songId: segments.songId,
+      segmentId: segments.id,
+    })
+    .from(segments)
+    .where(inArray(segments.songId, songIds));
+
+  const allSegmentsBySong: Record<string, Set<string>> = {};
+  for (const row of allSegmentRows) {
+    if (!allSegmentsBySong[row.songId]) {
+      allSegmentsBySong[row.songId] = new Set();
+    }
+    allSegmentsBySong[row.songId].add(row.segmentId);
+  }
+
+  // Get ratings for segments in these songs
   const rows = await db()
     .select({
       songId: segments.songId,
@@ -482,13 +500,17 @@ export async function getSongKnowledgeBySongIds(
   }
 
   const knowledgeBySong: Record<string, number> = {};
-  for (const songId of Object.keys(latestBySongSegment)) {
-    const segmentRatings = Object.values(latestBySongSegment[songId]);
-    if (segmentRatings.length === 0) {
+  for (const songId of songIds) {
+    const segments = allSegmentsBySong[songId];
+    if (!segments || segments.size === 0) {
       knowledgeBySong[songId] = 0;
       continue;
     }
-    const averageRating = segmentRatings.reduce((sum, rating) => sum + rating, 0) / segmentRatings.length;
+    // Calculate average rating across ALL segments (including unrated as 0)
+    const totalRating = Array.from(segments).reduce((sum, segmentId) => {
+      return sum + (latestBySongSegment[songId]?.[segmentId] ?? 0);
+    }, 0);
+    const averageRating = totalRating / segments.size;
     knowledgeBySong[songId] = Math.round(averageRating * 20);
   }
 
