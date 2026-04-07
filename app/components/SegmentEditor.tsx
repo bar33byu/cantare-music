@@ -768,6 +768,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
 
     setBulkImportPending(true);
     let successfulOperations = 0;
+    let failureReason = '';
+    let failingSegmentIndex: number | null = null;
 
     const readErrorMessage = async (response: Response, fallback: string) => {
       try {
@@ -837,6 +839,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
                 patchResponse,
                 `Failed to update section ${i + 1}.`
               );
+              failingSegmentIndex = i + 1;
+              failureReason = message;
               throw new Error(message);
             }
             successfulOperations += 1;
@@ -862,6 +866,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
               createResponse,
               `Failed to create section ${i + 1}.`
             );
+            failingSegmentIndex = i + 1;
+            failureReason = message;
             throw new Error(message);
           }
           successfulOperations += 1;
@@ -900,6 +906,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
               createResponse,
               `Failed to create section ${i + 1}.`
             );
+            failingSegmentIndex = i + 1;
+            failureReason = message;
             throw new Error(message);
           }
           successfulOperations += 1;
@@ -912,7 +920,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       setSelectedSegmentId(null);
     } catch (error) {
       if (successfulOperations > 0) {
-        setDeleteError('Bulk import partially completed. New sections were created; reloading timeline.');
+        const errorDetail = failureReason ? ` Section ${failingSegmentIndex} failed: ${failureReason}` : '';
+        setDeleteError(`Bulk import partially completed. ${successfulOperations} of ${sections.length} sections created.${errorDetail} Reloading timeline.`);
         setShowBulkImport(false);
         setRefreshKey((previous) => previous + 1);
       } else {
