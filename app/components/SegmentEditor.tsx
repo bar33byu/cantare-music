@@ -151,11 +151,11 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     }
   }, [audioUrl, parsedAudioKey]);
   const playbackAudioUrl = useMemo(() => {
-    if (useProxyFallback && proxyAudioUrl) {
+    if (proxyAudioUrl) {
       return proxyAudioUrl;
     }
     return toPlayableAudioUrl(audioUrl);
-  }, [audioUrl, proxyAudioUrl, useProxyFallback]);
+  }, [audioUrl, proxyAudioUrl]);
 
   const {
     isPlaying,
