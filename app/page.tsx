@@ -351,6 +351,23 @@ export default function Home() {
     setActiveView("library");
   };
 
+  if (!isHydrated) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4">
+        <div className="max-w-4xl mx-auto">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="mb-1 flex items-center gap-2 text-sm text-gray-600">
+                <span className="rounded-full border border-gray-300 px-3 py-1 text-gray-700">Cantare</span>
+              </div>
+              <h1 className="text-3xl font-bold tracking-tight text-gray-900">Cantare Music</h1>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (activeView === "song_practice" && selectedSong) {
     const session = makeSession({ songId: selectedSong.id });
     const breadcrumbRootLabel = selectedPlaylist?.name ?? "Songs";

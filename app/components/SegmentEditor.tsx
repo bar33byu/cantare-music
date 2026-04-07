@@ -700,86 +700,115 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       const probe = new Audio();
       probe.preload = 'metadata';
       probe.crossOrigin = 'anonymous';
-      
+
       let lastReportedDuration: number | null = null;
       let stabilityCheckTimeoutId: number | null = null;
-      let hasResolvedCanPlay = false;
+      let endSeekFallbackTimeoutId: number | null = null;
+      let hasAttemptedEndSeek = false;
+      let resolved = false;
 
       const timeoutId = window.setTimeout(() => {
-        cleanup();
-        resolve(null);
+        finalize(null);
       }, 5000);
 
+      const finalize = (durationSeconds: number | null) => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
+        cleanup();
+        if (durationSeconds && Number.isFinite(durationSeconds) && durationSeconds > 0) {
+          resolve(Math.round(durationSeconds * 1000));
+          return;
+        }
+        resolve(null);
+      };
+
       const cleanup = () => {
-        probe.removeEventListener('loadedmetadata', handleMetadataLoaded);
+        probe.removeEventListener('loadedmetadata', handleDurationSignal);
         probe.removeEventListener('durationchange', handleDurationChange);
-        probe.removeEventListener('canplay', handleCanPlay);
+        probe.removeEventListener('canplay', handleDurationSignal);
+        probe.removeEventListener('seeked', handleDurationSignal);
+        probe.removeEventListener('timeupdate', handleDurationSignal);
         probe.removeEventListener('error', handleError);
         window.clearTimeout(timeoutId);
         if (stabilityCheckTimeoutId) {
           window.clearTimeout(stabilityCheckTimeoutId);
         }
+        if (endSeekFallbackTimeoutId) {
+          window.clearTimeout(endSeekFallbackTimeoutId);
+        }
         probe.src = '';
       };
 
-      const handleCanPlay = () => {
-        // canplay means the browser has enough data to play and duration is reliable
-        if (Number.isFinite(probe.duration) && probe.duration > 0) {
-          cleanup();
-          hasResolvedCanPlay = true;
-          resolve(Math.round(probe.duration * 1000));
+      const scheduleStableResolve = () => {
+        if (stabilityCheckTimeoutId) {
+          window.clearTimeout(stabilityCheckTimeoutId);
         }
+        stabilityCheckTimeoutId = window.setTimeout(() => {
+          if (Number.isFinite(probe.duration) && probe.duration > 0) {
+            finalize(probe.duration);
+          }
+        }, 250);
       };
 
-      const handleDurationChange = () => {
-        if (hasResolvedCanPlay) return;
+      const maybeForceEndSeek = (currentDuration: number) => {
+        if (hasAttemptedEndSeek) {
+          return;
+        }
+        hasAttemptedEndSeek = true;
+        try {
+          const nearEnd = Math.max(0, currentDuration - 0.25);
+          if (nearEnd > 0) {
+            probe.currentTime = nearEnd;
+          }
+        } catch {
+          // If seeking is unavailable yet, stability checks can still resolve duration.
+        }
 
+        if (endSeekFallbackTimeoutId) {
+          window.clearTimeout(endSeekFallbackTimeoutId);
+        }
+        endSeekFallbackTimeoutId = window.setTimeout(() => {
+          if (Number.isFinite(probe.duration) && probe.duration > 0) {
+            scheduleStableResolve();
+          }
+        }, 350);
+      };
+
+      const handleDurationSignal = () => {
         const currentDuration = probe.duration;
         if (!Number.isFinite(currentDuration) || currentDuration <= 0) {
           return;
         }
 
-        if (lastReportedDuration === null) {
-          // First valid duration report
-          lastReportedDuration = currentDuration;
-          // Wait 200ms to see if duration changes again
-          if (stabilityCheckTimeoutId) {
-            window.clearTimeout(stabilityCheckTimeoutId);
-          }
-          stabilityCheckTimeoutId = window.setTimeout(() => {
-            // If duration hasn't changed, it's stable enough
-            if (probe.duration === lastReportedDuration) {
-              cleanup();
-              resolve(Math.round(probe.duration * 1000));
-            }
-          }, 200);
-        } else if (currentDuration !== lastReportedDuration) {
-          // Duration changed, reset stability check
-          lastReportedDuration = currentDuration;
-          if (stabilityCheckTimeoutId) {
-            window.clearTimeout(stabilityCheckTimeoutId);
-          }
-          stabilityCheckTimeoutId = window.setTimeout(() => {
-            if (probe.duration === lastReportedDuration) {
-              cleanup();
-              resolve(Math.round(probe.duration * 1000));
-            }
-          }, 200);
-        }
+        maybeForceEndSeek(currentDuration);
+        scheduleStableResolve();
       };
 
-      const handleMetadataLoaded = () => {
-        // loadedmetadata is early; let durationchange/canplay take precedence
+      const handleDurationChange = () => {
+        const currentDuration = probe.duration;
+        if (!Number.isFinite(currentDuration) || currentDuration <= 0) {
+          return;
+        }
+
+        if (lastReportedDuration === null || currentDuration !== lastReportedDuration) {
+          lastReportedDuration = currentDuration;
+        }
+
+        maybeForceEndSeek(currentDuration);
+        scheduleStableResolve();
       };
 
       const handleError = () => {
-        cleanup();
-        resolve(null);
+        finalize(null);
       };
 
-      probe.addEventListener('loadedmetadata', handleMetadataLoaded);
+      probe.addEventListener('loadedmetadata', handleDurationSignal);
       probe.addEventListener('durationchange', handleDurationChange);
-      probe.addEventListener('canplay', handleCanPlay);
+      probe.addEventListener('canplay', handleDurationSignal);
+      probe.addEventListener('seeked', handleDurationSignal);
+      probe.addEventListener('timeupdate', handleDurationSignal);
       probe.addEventListener('error', handleError);
       probe.src = sourceUrl;
       probe.load();
