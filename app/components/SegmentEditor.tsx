@@ -1077,7 +1077,9 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   }, [durationMs]);
 
   useEffect(() => {
-    setStableDurationMs(0);
+    if (!playbackAudioUrl) {
+      setStableDurationMs(0);
+    }
   }, [playbackAudioUrl]);
 
   useEffect(() => {
