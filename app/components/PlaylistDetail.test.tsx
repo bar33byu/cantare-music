@@ -160,6 +160,17 @@ describe('PlaylistDetail', () => {
     });
   });
 
+  it('playlist row edit button opens song editor callback', async () => {
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-song-edit-song-2')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('playlist-song-edit-song-2'));
+    expect(onEditSong).toHaveBeenCalledWith('song-2');
+  });
+
   it('breadcrumb back calls onBack', async () => {
     render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
     await waitFor(() => expect(screen.getByTestId('playlist-detail-breadcrumb-back')).toBeInTheDocument());

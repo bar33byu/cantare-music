@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.hoisted(() => {
+  process.env.R2_ACCESS_KEY_ID = 'test-access-key';
+  process.env.R2_SECRET_ACCESS_KEY = 'test-secret-key';
+});
+
 const { sendMock, getObjectCommandCalls } = vi.hoisted(() => ({
   sendMock: vi.fn(),
   getObjectCommandCalls: [] as unknown[],
@@ -18,6 +23,7 @@ vi.mock('@aws-sdk/client-s3', () => ({
 
 vi.mock('../../../../lib/r2', () => ({
   BUCKET: 'cantare-audio',
+  getPublicUrl: vi.fn(() => '/api/audio/mock-key'),
   r2Client: {
     send: sendMock,
   },

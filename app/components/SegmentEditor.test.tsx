@@ -167,7 +167,7 @@ describe('SegmentEditor', () => {
     fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
     fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
       target: {
-        value: ['Line A1', 'Line A2', '***', 'Line B1', 'Line B2'].join('\n'),
+        value: ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n'),
       },
     });
     fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
@@ -230,6 +230,7 @@ describe('SegmentEditor', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('segment-editor-playback-controls')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-audio-status-badge')).toHaveTextContent('Attached');
     });
 
     fireEvent.click(screen.getByTestId('segment-editor-play-toggle'));
@@ -268,6 +269,7 @@ describe('SegmentEditor', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('segment-editor-play-toggle')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-audio-status-badge')).toHaveTextContent('Attached');
     });
 
     fireEvent.click(screen.getByTestId('segment-editor-play-toggle'));
@@ -370,6 +372,24 @@ describe('SegmentEditor', () => {
     await waitFor(() => {
       const patchCall = mockFetch.mock.calls.find(
         ([url, init]) => String(url).includes('/api/songs/song-1/segments/seg-1') && init?.method === 'PATCH'
+      );
+      expect(patchCall).toBeTruthy();
+    });
+  });
+
+  it('saves inline segment label changes without selecting a segment', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const inlineLabel = await screen.findByTestId('segment-inline-label-input-seg-1');
+    fireEvent.change(inlineLabel, { target: { value: 'Section Inline' } });
+    fireEvent.blur(inlineLabel);
+
+    await waitFor(() => {
+      const patchCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('Section Inline')
       );
       expect(patchCall).toBeTruthy();
     });
@@ -649,5 +669,529 @@ describe('SegmentEditor', () => {
     const style = playhead.getAttribute('style') ?? '';
     expect(style).toMatch(/left/);
     expect(style).not.toBe('left: 0%');
+  });
+
+  it('captures a pitch contour note from the tap zone for the selected section', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-block-seg-1')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-pitch-tap-zone')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-block-seg-1'));
+
+    const tapZone = screen.getByTestId('segment-editor-pitch-tap-zone');
+    Object.defineProperty(tapZone, 'getBoundingClientRect', {
+      value: () => ({ top: 0, left: 0, width: 88, height: 200, right: 88, bottom: 200 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(tapZone, { pointerId: 1, clientY: 40 });
+    fireEvent.pointerUp(tapZone, { pointerId: 1, clientY: 40 });
+
+    await waitFor(() => {
+      const patchCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(patchCall).toBeTruthy();
+      const body = JSON.parse(String(patchCall?.[1]?.body ?? '{}'));
+      expect(body.pitchContourNotes).toHaveLength(1);
+      expect(body.pitchContourNotes[0].timeOffsetMs).toBe(1500);
+      expect(body.pitchContourNotes[0].durationMs).toBeGreaterThanOrEqual(120);
+      expect(body.pitchContourNotes[0].lane).toBeCloseTo(0.8, 1);
+    });
+
+    expect(screen.getByTestId('segment-editor-pitch-count')).toHaveTextContent('1 notes');
+  });
+
+  it('captures a pitch contour note when tapping in the preview bar', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-block-seg-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-block-seg-1'));
+
+    const preview = screen.getByTestId('segment-editor-pitch-preview');
+    Object.defineProperty(preview, 'getBoundingClientRect', {
+      value: () => ({ top: 0, left: 0, width: 200, height: 200, right: 200, bottom: 200 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(preview, { pointerId: 4, clientX: 100, clientY: 30 });
+    fireEvent.pointerUp(preview, { pointerId: 4, clientX: 100, clientY: 30 });
+
+    await waitFor(() => {
+      const patchCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(patchCall).toBeTruthy();
+      const body = JSON.parse(String(patchCall?.[1]?.body ?? '{}'));
+      expect(body.pitchContourNotes.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('changes playback speed from speed controls', async () => {
+    const setPlaybackRate = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 1500,
+      durationMs: 60000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackRate,
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-speed-50')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-speed-50'));
+    fireEvent.click(screen.getByTestId('segment-editor-speed-75'));
+
+    expect(setPlaybackRate).toHaveBeenNthCalledWith(1, 0.5);
+    expect(setPlaybackRate).toHaveBeenNthCalledWith(2, 0.75);
+  });
+
+  it('clears captured pitch contour notes', async () => {
+    const segmentsWithContour: Segment[] = [
+      {
+        ...sampleSegments[0],
+        pitchContourNotes: [{ id: 'note-1', timeOffsetMs: 1000, durationMs: 250, lane: 0.6 }],
+      },
+      sampleSegments[1],
+    ];
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => segmentsWithContour,
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments/') && method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-block-seg-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-block-seg-1'));
+    fireEvent.click(screen.getByTestId('segment-editor-pitch-clear'));
+
+    await waitFor(() => {
+      const patchCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(patchCall).toBeTruthy();
+      const body = JSON.parse(String(patchCall?.[1]?.body ?? '{}'));
+      expect(body.pitchContourNotes).toEqual([]);
+    });
+  });
+
+  it('renders song-level pitch strip entries from saved contour notes', async () => {
+    const segmentsWithContour: Segment[] = [
+      {
+        ...sampleSegments[0],
+        pitchContourNotes: [{ id: 'note-1', timeOffsetMs: 1000, durationMs: 250, lane: 0.6 }],
+      },
+      {
+        ...sampleSegments[1],
+        pitchContourNotes: [{ id: 'note-2', timeOffsetMs: 500, durationMs: 400, lane: 0.2 }],
+      },
+    ];
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => segmentsWithContour,
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-song-pitch-strip')).toBeInTheDocument();
+      expect(screen.getByTestId('song-pitch-note-seg-1-note-1')).toBeInTheDocument();
+      expect(screen.getByTestId('song-pitch-note-seg-2-note-2')).toBeInTheDocument();
+    });
+  });
+
+  it('captures song-level pitch without selecting a segment', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const strip = await screen.findByTestId('segment-editor-song-pitch-strip');
+    const stripInner = strip.querySelector('div.relative.h-full.min-w-full') as HTMLDivElement;
+    Object.defineProperty(stripInner, 'getBoundingClientRect', {
+      value: () => ({ top: 0, left: 0, width: 300, height: 48, right: 300, bottom: 48 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(strip, { pointerId: 15, clientY: 8 });
+    fireEvent.pointerUp(strip, { pointerId: 15, clientY: 8 });
+
+    await waitFor(() => {
+      const pitchPatchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(pitchPatchCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(String(pitchPatchCalls[pitchPatchCalls.length - 1][1]?.body ?? '{}'));
+      expect(body.pitchContourNotes.length).toBeGreaterThan(0);
+      expect(body.pitchContourNotes[0].lane).toBeGreaterThan(0.75);
+    });
+  });
+
+  it('captures from the main pitch panel into the playback segment without selecting a section', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 25000,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-pitch-target-label')).toHaveTextContent('Section 2');
+    });
+
+    const tapZone = screen.getByTestId('segment-editor-pitch-tap-zone');
+    Object.defineProperty(tapZone, 'getBoundingClientRect', {
+      value: () => ({ top: 0, left: 0, width: 88, height: 200, right: 88, bottom: 200 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(tapZone, { pointerId: 21, clientY: 50 });
+    fireEvent.pointerUp(tapZone, { pointerId: 21, clientY: 50 });
+
+    await waitFor(() => {
+      const pitchPatchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-2') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(pitchPatchCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(String(pitchPatchCalls[pitchPatchCalls.length - 1][1]?.body ?? '{}'));
+      expect(body.pitchContourNotes).toHaveLength(1);
+      expect(body.pitchContourNotes[0].timeOffsetMs).toBe(5000);
+    });
+  });
+
+  it('prevents contour overlap by clamping note end before the next note', async () => {
+    const segmentsWithContour: Segment[] = [
+      {
+        ...sampleSegments[0],
+        pitchContourNotes: [{ id: 'existing', timeOffsetMs: 1800, durationMs: 250, lane: 0.4 }],
+      },
+      sampleSegments[1],
+    ];
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => segmentsWithContour,
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments/') && method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy.mockReturnValueOnce(1000).mockReturnValueOnce(5000);
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-block-seg-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-block-seg-1'));
+
+    const tapZone = screen.getByTestId('segment-editor-pitch-tap-zone');
+    Object.defineProperty(tapZone, 'getBoundingClientRect', {
+      value: () => ({ top: 0, left: 0, width: 88, height: 200, right: 88, bottom: 200 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(tapZone, { pointerId: 1, clientY: 40 });
+    fireEvent.pointerUp(tapZone, { pointerId: 1, clientY: 40 });
+
+    await waitFor(() => {
+      const patchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(String(patchCalls[patchCalls.length - 1][1]?.body ?? '{}'));
+      const created = body.pitchContourNotes.find((note: { id: string }) => note.id !== 'existing');
+      expect(created).toBeTruthy();
+      expect(created.timeOffsetMs + created.durationMs).toBeLessThanOrEqual(1800);
+    });
+
+    nowSpy.mockRestore();
+  });
+
+  it('drags an existing contour note and saves updated timing and lane', async () => {
+    const segmentsWithContour: Segment[] = [
+      {
+        ...sampleSegments[0],
+        pitchContourNotes: [{ id: 'note-1', timeOffsetMs: 1000, durationMs: 250, lane: 0.6 }],
+      },
+      sampleSegments[1],
+    ];
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => segmentsWithContour,
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments/') && method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-block-seg-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-block-seg-1'));
+
+    const preview = await screen.findByTestId('segment-editor-pitch-preview');
+    Object.defineProperty(preview, 'getBoundingClientRect', {
+      value: () => ({ top: 0, left: 0, width: 200, height: 200, right: 200, bottom: 200 }),
+      configurable: true,
+    });
+
+    const note = screen.getByTestId('segment-editor-pitch-note-move-note-1');
+    fireEvent.pointerDown(note, { pointerId: 7, clientX: 10, clientY: 80 });
+    fireEvent.pointerMove(window, { pointerId: 7, clientX: 100, clientY: 20 });
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 100, clientY: 20 });
+
+    await waitFor(() => {
+      const pitchPatchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(pitchPatchCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(String(pitchPatchCalls[pitchPatchCalls.length - 1][1]?.body ?? '{}'));
+      expect(body.pitchContourNotes[0].timeOffsetMs).toBe(10000);
+      expect(body.pitchContourNotes[0].lane).toBeCloseTo(0.9, 1);
+    });
+  });
+
+  it('resizes an existing contour note duration from the end handle', async () => {
+    const segmentsWithContour: Segment[] = [
+      {
+        ...sampleSegments[0],
+        pitchContourNotes: [{ id: 'note-1', timeOffsetMs: 1000, durationMs: 250, lane: 0.6 }],
+      },
+      sampleSegments[1],
+    ];
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => segmentsWithContour,
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments/') && method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-block-seg-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-block-seg-1'));
+
+    const preview = await screen.findByTestId('segment-editor-pitch-preview');
+    Object.defineProperty(preview, 'getBoundingClientRect', {
+      value: () => ({ top: 0, left: 0, width: 200, height: 200, right: 200, bottom: 200 }),
+      configurable: true,
+    });
+
+    const endHandle = screen.getByTestId('segment-editor-pitch-note-end-note-1');
+    fireEvent.pointerDown(endHandle, { pointerId: 8, clientX: 20, clientY: 80 });
+    fireEvent.pointerMove(window, { pointerId: 8, clientX: 80, clientY: 80 });
+    fireEvent.pointerUp(window, { pointerId: 8, clientX: 80, clientY: 80 });
+
+    await waitFor(() => {
+      const pitchPatchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(pitchPatchCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(String(pitchPatchCalls[pitchPatchCalls.length - 1][1]?.body ?? '{}'));
+      expect(body.pitchContourNotes[0].timeOffsetMs).toBe(1000);
+      expect(body.pitchContourNotes[0].durationMs).toBe(6250);
+    });
   });
 });

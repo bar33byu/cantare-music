@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments } from '../../../../../db/queries';
 import { inferTimelineOrder } from '../../../../lib/segmentTiming';
+import { validatePitchContourNotes } from '../../../../lib/pitchContour';
 
 export async function GET(
   request: NextRequest,
@@ -28,7 +29,7 @@ export async function POST(
   try {
     const { id: songId } = await params;
     const body = await request.json();
-    const { id, label, startMs, endMs, lyricText } = body;
+    const { id, label, startMs, endMs, lyricText, pitchContourNotes } = body;
 
     if (!id || typeof id !== 'string') {
       return NextResponse.json({ error: 'Segment ID is required and must be a string' }, { status: 400 });
@@ -44,6 +45,11 @@ export async function POST(
     }
     if (lyricText === undefined || typeof lyricText !== 'string') {
       return NextResponse.json({ error: 'Lyric text is required and must be a string' }, { status: 400 });
+    }
+
+    const pitchContourValidation = validatePitchContourNotes(pitchContourNotes);
+    if (!pitchContourValidation.ok) {
+      return NextResponse.json({ error: pitchContourValidation.error }, { status: 400 });
     }
 
     const existingSegments = await getSegmentsBySongId(songId);
@@ -65,6 +71,7 @@ export async function POST(
       startMs,
       endMs,
       lyricText,
+      pitchContourNotes,
     });
 
     await reorderSegments(timelineOrdered.map((segment, order) => ({ id: segment.id, order })));
@@ -95,6 +102,11 @@ export async function PUT(
     }
 
     for (const segment of segments) {
+      const pitchContourValidation = validatePitchContourNotes(segment.pitchContourNotes);
+      if (!pitchContourValidation.ok) {
+        return NextResponse.json({ error: pitchContourValidation.error }, { status: 400 });
+      }
+
       if (
         typeof segment.id !== 'string' ||
         typeof segment.label !== 'string' ||

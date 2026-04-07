@@ -409,13 +409,24 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
                 </span>
               </div>
             </div>
-            <button
-              data-testid={`playlist-song-remove-${song.id}`}
-              className="rounded border border-red-300 px-3 py-1 text-red-700"
-              onClick={() => void handleRemoveSong(song.id)}
-            >
-              Remove
-            </button>
+            <div className="flex items-center gap-2">
+              {onEditSong ? (
+                <button
+                  data-testid={`playlist-song-edit-${song.id}`}
+                  className="rounded border border-indigo-300 px-3 py-1 text-indigo-700"
+                  onClick={() => onEditSong(song.id)}
+                >
+                  Edit song
+                </button>
+              ) : null}
+              <button
+                data-testid={`playlist-song-remove-${song.id}`}
+                className="rounded border border-red-300 px-3 py-1 text-red-700"
+                onClick={() => void handleRemoveSong(song.id)}
+              >
+                Remove
+              </button>
+            </div>
           </li>
         ))}
       </ul>

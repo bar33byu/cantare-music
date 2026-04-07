@@ -8,6 +8,7 @@ const makeAudioStub = () => {
     src: '',
     currentTime: 0,
     duration: 12,
+    playbackRate: 1,
     preload: 'none',
     readyState: 0,
     play: vi.fn().mockResolvedValue(undefined),
@@ -143,5 +144,16 @@ describe('useAudioPlayer', () => {
     });
 
     expect(result.current.playbackError).toBeNull();
+  });
+
+  it('updates playback rate and keeps it on the audio element', () => {
+    const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
+
+    act(() => {
+      result.current.setPlaybackRate?.(0.75);
+    });
+
+    expect(result.current.playbackRate).toBe(0.75);
+    expect(stub.playbackRate).toBe(0.75);
   });
 });

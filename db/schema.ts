@@ -4,9 +4,17 @@ import {
   integer,
   timestamp,
   boolean,
+  jsonb,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import { InferSelectModel } from "drizzle-orm";
+import { InferSelectModel, sql } from "drizzle-orm";
+
+export interface SegmentPitchContourPoint {
+  id: string;
+  timeOffsetMs: number;
+  lane: number;
+  durationMs: number;
+}
 
 export const songs = pgTable("songs", {
   id: text("id").primaryKey(),
@@ -27,6 +35,10 @@ export const segments = pgTable("segments", {
   startMs: integer("start_ms").notNull().default(0),
   endMs: integer("end_ms").notNull().default(0),
   lyricText: text("lyric_text").default(""),
+  pitchContourNotes: jsonb("pitch_contour_notes")
+    .$type<SegmentPitchContourPoint[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
 });
 
 export const practiceRatings = pgTable("practice_ratings", {

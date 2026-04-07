@@ -39,6 +39,7 @@ export async function GET(
         lyricText: segment.lyricText,
         startMs: segment.startMs,
         endMs: segment.endMs,
+        pitchContourNotes: segment.pitchContourNotes ?? [],
       })),
       createdAt: song.createdAt,
       lastPracticedAt: song.lastPracticedAt,

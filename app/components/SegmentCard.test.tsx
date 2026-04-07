@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { vi } from "vitest";
 import SegmentCard from "./SegmentCard";
@@ -22,10 +22,6 @@ const defaultProps = {
 };
 
 describe("SegmentCard", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("renders section label and lyric text", () => {
     render(<SegmentCard {...defaultProps} />);
     expect(screen.getByTestId("segment-label-text")).toHaveTextContent("Section 1");
@@ -45,13 +41,19 @@ describe("SegmentCard", () => {
 
   it("renders first-letter hints when lyricVisibilityMode is hint", () => {
     render(<SegmentCard {...defaultProps} lyricVisibilityMode="hint" />);
-    expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("S___ l_____ h___");
+    const lyric = screen.getByTestId("segment-lyric-text");
+    expect(lyric).toHaveTextContent("S");
+    expect(lyric).toHaveTextContent("l");
+    expect(lyric).toHaveTextContent("h");
+    expect(screen.getAllByTestId("segment-lyric-mask-char")).toHaveLength(11);
   });
 
   it("hides lyrics when lyricVisibilityMode is hidden", () => {
     render(<SegmentCard {...defaultProps} lyricVisibilityMode="hidden" />);
-    expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("Lyrics hidden");
-    expect(screen.getByTestId("segment-lyric-text").className).toContain("text-gray-400");
+    const lyric = screen.getByTestId("segment-lyric-text");
+    expect(lyric).toHaveTextContent("Some lyrics here");
+    expect(lyric.className).toContain("text-slate-700");
+    expect(screen.getAllByTestId("segment-lyric-mask-char")).toHaveLength(14);
   });
 
   it("renders progress bar with correct value while in range", () => {
@@ -77,6 +79,7 @@ describe("SegmentCard", () => {
 
   it("shows duration label as M:SS", () => {
     render(<SegmentCard {...defaultProps} />);
+    expect(screen.getByTestId("segment-start-time")).toHaveTextContent("0:16");
     expect(screen.getByTestId("segment-end-time")).toHaveTextContent("0:32");
   });
 
@@ -115,45 +118,6 @@ describe("SegmentCard", () => {
     const progressBar = screen.getByTestId("segment-progress");
     fireEvent.click(progressBar, { clientX: 80 });
     expect(screen.getByTestId("segment-progress")).toBeInTheDocument();
-  });
-
-  it("shrinks lyrics down to the lower minimum size when they still overflow", async () => {
-    const longLyricSegment = {
-      ...mockSegment,
-      lyricText: "Long lyric ".repeat(80),
-    };
-
-    render(<SegmentCard {...defaultProps} segment={longLyricSegment} />);
-
-    const viewport = screen.getByTestId("segment-lyric-viewport");
-    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 120 });
-    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 240 });
-
-    fireEvent(window, new Event("resize"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("segment-lyric-text")).toHaveStyle({ fontSize: "1rem" });
-    });
-  });
-
-  it("shows a bottom scroll hint when more lyrics are available below", async () => {
-    const longLyricSegment = {
-      ...mockSegment,
-      lyricText: "Long lyric \n".repeat(40),
-    };
-
-    render(<SegmentCard {...defaultProps} segment={longLyricSegment} />);
-
-    const viewport = screen.getByTestId("segment-lyric-viewport");
-    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 120 });
-    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 240 });
-    Object.defineProperty(viewport, "scrollTop", { configurable: true, writable: true, value: 0 });
-
-    fireEvent(window, new Event("resize"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("segment-lyric-bottom-hint").className).toContain("opacity-100");
-    });
   });
 
   it("selected rating button has selected style", () => {

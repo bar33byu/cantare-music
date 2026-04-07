@@ -118,6 +118,7 @@ describe('Home page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     practiceViewMock.mockReset();
+    window.history.replaceState(null, '', '/');
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -265,5 +266,26 @@ describe('Home page', () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith('/api/songs/song-1');
+  });
+
+  it('writes hash route on navigation and supports browser back', async () => {
+    render(<Home />);
+
+    await waitFor(() => {
+      expect(window.location.hash).toContain('view=library');
+    });
+
+    fireEvent.click(screen.getByTestId('mock-select-song'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
+    });
+    expect(window.location.hash).toContain('view=song_practice');
+
+    window.location.hash = '#view=library';
+    fireEvent(window, new HashChangeEvent('hashchange'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-select-song')).toBeInTheDocument();
+    });
   });
 });

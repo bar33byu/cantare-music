@@ -256,6 +256,15 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
         {displayedSongs.map((song) => {
           const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
           const masteryColor = getMasteryColor(mastery);
+          const hasAudio = Boolean(song.audioUrl?.trim());
+          const hasSegments = song.segments.length > 0;
+          const readinessNotes: string[] = [];
+          if (!hasAudio) {
+            readinessNotes.push('Missing audio');
+          }
+          if (!hasSegments) {
+            readinessNotes.push('Missing segments');
+          }
           return (
             <div
               key={song.id}
@@ -272,6 +281,18 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
               <p className="absolute right-2 top-1 text-[11px] font-semibold text-gray-700">{mastery}%</p>
               <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
               {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
+              {readinessNotes.length > 0 ? (
+                <div data-testid={`playlist-practice-song-status-${song.id}`} className="mb-2 flex flex-wrap gap-1">
+                  {readinessNotes.map((note) => (
+                    <span
+                      key={`${song.id}-${note}`}
+                      className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"
+                    >
+                      {note}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <p className="text-xs text-gray-500 mt-2">{getLastPracticedLabel(song.lastPracticedAt)}</p>
             </div>
           );

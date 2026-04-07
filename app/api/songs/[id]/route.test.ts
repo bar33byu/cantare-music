@@ -35,7 +35,7 @@ describe('GET /api/songs/[id]', () => {
       createdAt: '2023-01-01',
       lastPracticedAt: '2023-01-04',
     };
-    const mockSegments = [{ id: 'seg1', songId: '123', label: 'Verse', order: 0, startMs: 0, endMs: 1000, lyricText: 'lyrics' }];
+    const mockSegments = [{ id: 'seg1', songId: '123', label: 'Verse', order: 0, startMs: 0, endMs: 1000, lyricText: 'lyrics', pitchContourNotes: [] }];
     vi.mocked(getSongById).mockResolvedValue(mockSong);
     vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
     vi.mocked(getPublicUrl).mockReturnValue('https://example.com/key.mp3');
@@ -58,6 +58,7 @@ describe('GET /api/songs/[id]', () => {
         lyricText: 'lyrics',
         startMs: 0,
         endMs: 1000,
+        pitchContourNotes: [],
       }],
       createdAt: '2023-01-01',
       lastPracticedAt: '2023-01-04',

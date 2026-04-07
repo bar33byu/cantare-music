@@ -131,6 +131,67 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
     expect(data.error).toBe('Label must be a string');
   });
 
+  it('updates pitch contour notes successfully', async () => {
+    const mockSegments = [
+      { id: 'seg-1', label: 'Verse 1', order: 0, startMs: 0, endMs: 1000, lyricText: '', pitchContourNotes: [] },
+    ];
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+
+    const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 100, durationMs: 400, lane: 0.65 }],
+      }),
+    });
+
+    const response = await PATCH(request as any, { params: Promise.resolve({ id: 'song-1', segmentId: 'seg-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(updateSegment).toHaveBeenCalledWith('seg-1', {
+      pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 100, durationMs: 400, lane: 0.65 }],
+    });
+    expect(reorderSegments).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for invalid pitch contour notes', async () => {
+    const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pitchContourNotes: [{ id: 'n-1', timeOffsetMs: -2, durationMs: 10, lane: 0.4 }],
+      }),
+    });
+
+    const response = await PATCH(request as any, { params: Promise.resolve({ id: 'song-1', segmentId: 'seg-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toContain('Each pitch contour note must include');
+  });
+
+  it('returns 409 when pitch contour migration is required', async () => {
+    const mockSegments = [
+      { id: 'seg-1', label: 'Verse 1', order: 0, startMs: 0, endMs: 1000, lyricText: '', pitchContourNotes: [] },
+    ];
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(updateSegment).mockRejectedValue({ code: 'PITCH_CONTOUR_MIGRATION_REQUIRED' });
+
+    const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 100, durationMs: 400, lane: 0.65 }],
+      }),
+    });
+
+    const response = await PATCH(request as any, { params: Promise.resolve({ id: 'song-1', segmentId: 'seg-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(data.error).toContain('migration 0004_song_pitch_contour.sql');
+  });
+
   it('returns 400 when no valid fields to update', async () => {
     const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 1, startMs: 0, endMs: 1000, lyricText: '' }];
     vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
@@ -151,6 +212,7 @@ describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
   it('does not trigger reorder for label-only update', async () => {
     const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 0, startMs: 0, endMs: 1000, lyricText: '' }];
     vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(updateSegment).mockResolvedValue(undefined);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
       method: 'PATCH',

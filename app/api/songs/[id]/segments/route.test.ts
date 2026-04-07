@@ -46,6 +46,7 @@ describe('POST /api/songs/[id]/segments', () => {
       startMs: 0,
       endMs: 1000,
       lyricText: 'Lyrics here',
+      pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 100, durationMs: 300, lane: 0.7 }],
     };
     const existingSegments = [
       {
@@ -84,6 +85,7 @@ describe('POST /api/songs/[id]/segments', () => {
       startMs: 0,
       endMs: 1000,
       lyricText: 'Lyrics here',
+      pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 100, durationMs: 300, lane: 0.7 }],
     });
     expect(reorderSegments).toHaveBeenCalledWith([
       { id: 'seg-older', order: 0 },
@@ -183,6 +185,27 @@ describe('POST /api/songs/[id]/segments', () => {
     expect(response.status).toBe(400);
     expect(data.error).toBe('Start time is required and must be a number');
   });
+
+  it('returns 400 for invalid pitch contour notes', async () => {
+    const request = new Request('http://localhost/api/songs/song-1/segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'seg-1',
+        label: 'Verse 1',
+        startMs: 0,
+        endMs: 1000,
+        lyricText: 'Lyrics here',
+        pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 10, durationMs: 20, lane: 2 }],
+      }),
+    });
+
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'song-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toContain('Each pitch contour note must include');
+  });
 });
 
 describe('PUT /api/songs/[id]/segments', () => {
@@ -199,6 +222,7 @@ describe('PUT /api/songs/[id]/segments', () => {
         startMs: 0,
         endMs: 1000,
         lyricText: 'Lyrics here',
+        pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 50, durationMs: 80, lane: 0.4 }],
       },
     ];
 
@@ -212,6 +236,32 @@ describe('PUT /api/songs/[id]/segments', () => {
 
     expect(response.status).toBe(200);
     expect(upsertSegments).toHaveBeenCalledWith('123', segments);
+  });
+
+  it('returns 400 for invalid pitch contour notes in PUT payload', async () => {
+    const request = new Request('http://localhost/api/songs/123/segments', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        segments: [
+          {
+            id: 'seg-1',
+            label: 'Verse 1',
+            order: 1,
+            startMs: 0,
+            endMs: 1000,
+            lyricText: 'Lyrics here',
+            pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 50, durationMs: -10, lane: 0.4 }],
+          },
+        ],
+      }),
+    });
+
+    const response = await PUT(request as any, { params: Promise.resolve({ id: '123' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toContain('Each pitch contour note must include');
   });
 
   it('returns 400 for invalid segments', async () => {

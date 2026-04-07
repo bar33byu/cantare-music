@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSegmentsBySongId, updateSegment, deleteSegment, reorderSegments } from '../../../../../../db/queries';
 import { inferTimelineOrder } from '../../../../../lib/segmentTiming';
+import { validatePitchContourNotes } from '../../../../../lib/pitchContour';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -40,7 +41,7 @@ export async function PATCH(
   try {
     const { id: songId, segmentId } = await params;
     const body = await request.json();
-    const { label, startMs, endMs, lyricText } = body;
+    const { label, startMs, endMs, lyricText, pitchContourNotes } = body;
 
     // Validate input
     if (label !== undefined && typeof label !== 'string') {
@@ -54,6 +55,10 @@ export async function PATCH(
     }
     if (lyricText !== undefined && typeof lyricText !== 'string') {
       return NextResponse.json({ error: 'Lyric text must be a string' }, { status: 400 });
+    }
+    const pitchContourValidation = validatePitchContourNotes(pitchContourNotes);
+    if (!pitchContourValidation.ok) {
+      return NextResponse.json({ error: pitchContourValidation.error }, { status: 400 });
     }
 
     // Check if segment exists
@@ -70,6 +75,7 @@ export async function PATCH(
     if (startMs !== undefined) updates.startMs = startMs;
     if (endMs !== undefined) updates.endMs = endMs;
     if (lyricText !== undefined) updates.lyricText = lyricText;
+    if (pitchContourNotes !== undefined) updates.pitchContourNotes = pitchContourNotes;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
@@ -96,6 +102,13 @@ export async function PATCH(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const errorCode = (error as { code?: string })?.code;
+    if (errorCode === 'PITCH_CONTOUR_MIGRATION_REQUIRED') {
+      return NextResponse.json(
+        { error: 'Pitch contour saving is unavailable until migration 0004_song_pitch_contour.sql is applied.' },
+        { status: 409 }
+      );
+    }
     console.error('Error updating segment:', error);
     return NextResponse.json(formatError(error), { status: 500 });
   }

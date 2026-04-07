@@ -1,3 +1,10 @@
+export interface PitchContourNote {
+  id: string;
+  timeOffsetMs: number;
+  lane: number;
+  durationMs: number;
+}
+
 export interface Segment {
   id: string;
   songId: string;
@@ -6,6 +13,7 @@ export interface Segment {
   lyricText: string;
   startMs: number;
   endMs: number;
+  pitchContourNotes?: PitchContourNote[];
 }
 
 export interface Song {

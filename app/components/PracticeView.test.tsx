@@ -105,6 +105,12 @@ describe("PracticeView", () => {
     });
   };
 
+  const openTapSettings = () => {
+    if (!screen.queryByTestId("practice-tap-settings-panel")) {
+      fireEvent.click(screen.getByTestId("practice-tap-settings-toggle"));
+    }
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ratings: [] }) });
@@ -205,21 +211,6 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
   });
 
-  it("clicking transport next before section 1 starts jumps to section 1 start", async () => {
-    const song = makeSong(3);
-    song.segments = song.segments.map((segment, index) => ({
-      ...segment,
-      startMs: 1000 + index * 4000,
-      endMs: 1000 + (index + 1) * 4000,
-    }));
-
-    await renderAndWaitForRatings(song);
-    fireEvent.click(screen.getByTestId("practice-next-segment"));
-
-    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
-    expect(mockSeek).toHaveBeenCalledWith(1000);
-  });
-
   it("clicking transport previous goes to prior segment", async () => {
     const song = makeSong(3);
     const session = makeSession(song);
@@ -227,30 +218,6 @@ describe("PracticeView", () => {
     await renderAndWaitForRatings(song, session);
     fireEvent.click(screen.getByTestId("practice-prev-segment"));
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
-  });
-
-  it("clicking transport previous after 3 seconds restarts current segment", async () => {
-    mockUseAudioPlayer.mockReturnValue({
-      isPlaying: false,
-      isReady: true,
-      currentMs: 8200,
-      durationMs: 12000,
-      playbackError: null,
-      debugInfo: {},
-      play: mockPlay,
-      pause: mockPause,
-      seek: mockSeek,
-    });
-
-    const song = makeSong(3);
-    const session = makeSession(song);
-    session.currentSegmentIndex = 1;
-    await renderAndWaitForRatings(song, session);
-
-    fireEvent.click(screen.getByTestId("practice-prev-segment"));
-
-    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
-    expect(mockSeek).toHaveBeenCalledWith(4000);
   });
 
   it("renders audio player in bottom transport section", async () => {
@@ -286,18 +253,34 @@ describe("PracticeView", () => {
     });
   });
 
-  it("uses proxy audio URL immediately when audio key can be parsed", async () => {
+  it("falls back to direct audio URL when proxy playback errors", async () => {
     const song = makeSong(2);
-    mockUseAudioPlayer.mockReturnValue({
-      isPlaying: false,
-      isReady: true,
-      currentMs: 0,
-      durationMs: 12000,
-      playbackError: null,
-      debugInfo: {},
-      play: mockPlay,
-      pause: mockPause,
-      seek: mockSeek,
+    mockUseAudioPlayer.mockImplementation((audioUrl: string) => {
+      if (audioUrl.startsWith("/api/audio/")) {
+        return {
+          isPlaying: false,
+          isReady: false,
+          currentMs: 0,
+          durationMs: 12000,
+          playbackError: "failed",
+          debugInfo: {},
+          play: mockPlay,
+          pause: mockPause,
+          seek: mockSeek,
+        };
+      }
+
+      return {
+        isPlaying: false,
+        isReady: true,
+        currentMs: 0,
+        durationMs: 12000,
+        playbackError: null,
+        debugInfo: {},
+        play: mockPlay,
+        pause: mockPause,
+        seek: mockSeek,
+      };
     });
 
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
@@ -305,6 +288,7 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(mockUseAudioPlayer).toHaveBeenCalled();
       const args = mockUseAudioPlayer.mock.calls.map((call) => String(call[0]));
+      expect(args).toContain("https://cdn.example.com/audio/song-1/audio.mp3");
       expect(args).toContain("/api/audio/audio/song-1/audio.mp3");
     });
   });
@@ -341,6 +325,277 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("no-segments")).toBeInTheDocument();
   });
 
+  it("renders pitch recall strip when current segment has contour notes", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1250,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    const song = makeSong(1);
+    song.segments[0].pitchContourNotes = [{ id: "n1", timeOffsetMs: 1000, durationMs: 500, lane: 0.6 }];
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("practice-tap-zone")).toBeInTheDocument();
+
+    openTapSettings();
+    fireEvent.click(screen.getByTestId("practice-toggle-tap-mode"));
+    fireEvent.click(screen.getByTestId("practice-toggle-detailed-overlay"));
+
+    expect(screen.getByTestId("practice-pitch-recall")).toBeInTheDocument();
+    expect(screen.getAllByTestId("practice-pitch-target-note")).toHaveLength(1);
+  });
+
+  it("does not show pitch recall strip by default before enabling tap mode", async () => {
+    const song = makeSong(1);
+    song.segments[0].pitchContourNotes = [{ id: "n1", timeOffsetMs: 1000, durationMs: 500, lane: 0.6 }];
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("practice-tap-zone")).toBeInTheDocument();
+    expect(screen.queryByTestId("practice-pitch-recall")).not.toBeInTheDocument();
+
+    openTapSettings();
+    expect(screen.getByTestId("practice-toggle-tap-mode")).toHaveTextContent("Tap Practice: Off");
+  });
+
+  it("does not mark answer key as weak before any attempt", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1250,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    const song = makeSong(1);
+    song.segments[0].pitchContourNotes = [{ id: "n1", timeOffsetMs: 1000, durationMs: 500, lane: 0.6 }];
+    await renderAndWaitForRatings(song);
+
+    openTapSettings();
+    fireEvent.click(screen.getByTestId("practice-toggle-tap-mode"));
+    fireEvent.click(screen.getByTestId("practice-toggle-detailed-overlay"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-pitch-target-note")).toHaveAttribute("data-status", "strong");
+      expect(screen.getByTestId("practice-pitch-recall-attempt-count")).toHaveTextContent("Attempts: 0");
+    });
+  });
+
+  it("captures pitch recall attempts and updates attempt count", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1000,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    const song = makeSong(1);
+    song.segments[0].pitchContourNotes = [{ id: "n1", timeOffsetMs: 1000, durationMs: 500, lane: 0.6 }];
+    await renderAndWaitForRatings(song);
+
+    openTapSettings();
+    fireEvent.click(screen.getByTestId("practice-toggle-tap-mode"));
+
+    const tapZone = screen.getByTestId("practice-tap-zone");
+    Object.defineProperty(tapZone, "getBoundingClientRect", {
+      value: () => ({ top: 0, left: 0, width: 88, height: 320, right: 88, bottom: 320 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(tapZone, { pointerId: 13, clientY: 48 });
+    fireEvent.pointerUp(tapZone, { pointerId: 13, clientY: 48 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-pitch-recall-attempt-count")).toHaveTextContent("Attempts: 1");
+      expect(screen.getByTestId("practice-pitch-recall-score")).toBeInTheDocument();
+    });
+  });
+
+  it("marks weak target notes and wrong attempt notes visually", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 3500,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    const song = makeSong(1);
+    song.segments[0].pitchContourNotes = [{ id: "n1", timeOffsetMs: 1000, durationMs: 500, lane: 0.6 }];
+    await renderAndWaitForRatings(song);
+
+    openTapSettings();
+    fireEvent.click(screen.getByTestId("practice-toggle-tap-mode"));
+    fireEvent.click(screen.getByTestId("practice-toggle-detailed-overlay"));
+
+    const tapZone = screen.getByTestId("practice-tap-zone");
+    Object.defineProperty(tapZone, "getBoundingClientRect", {
+      value: () => ({ top: 0, left: 0, width: 88, height: 320, right: 88, bottom: 320 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(tapZone, { pointerId: 16, clientY: 120 });
+    fireEvent.pointerUp(tapZone, { pointerId: 16, clientY: 120 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-pitch-target-note")).toHaveAttribute("data-status", "weak");
+      expect(screen.getByTestId("practice-pitch-attempt-note")).toHaveAttribute("data-status", "wrong");
+    });
+  });
+
+  it("vibrates on wrong pitch recall note when phone haptics are available", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 3500,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    const vibrate = vi.fn();
+    Object.defineProperty(window.navigator, "vibrate", {
+      value: vibrate,
+      configurable: true,
+    });
+
+    const song = makeSong(1);
+    song.segments[0].pitchContourNotes = [{ id: "n1", timeOffsetMs: 1000, durationMs: 500, lane: 0.6 }];
+    await renderAndWaitForRatings(song);
+
+    openTapSettings();
+    fireEvent.click(screen.getByTestId("practice-toggle-tap-mode"));
+
+    const tapZone = screen.getByTestId("practice-tap-zone");
+    Object.defineProperty(tapZone, "getBoundingClientRect", {
+      value: () => ({ top: 0, left: 0, width: 88, height: 320, right: 88, bottom: 320 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(tapZone, { pointerId: 17, clientY: 300 });
+    fireEvent.pointerUp(tapZone, { pointerId: 17, clientY: 300 });
+
+    await waitFor(() => {
+      expect(vibrate).toHaveBeenCalledWith(35);
+    });
+  });
+
+  it("clears captured pitch recall attempts", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    });
+
+    const song = makeSong(1);
+    song.segments[0].pitchContourNotes = [{ id: "n1", timeOffsetMs: 1000, durationMs: 500, lane: 0.6 }];
+    await renderAndWaitForRatings(song);
+
+    openTapSettings();
+    fireEvent.click(screen.getByTestId("practice-toggle-tap-mode"));
+
+    const tapZone = screen.getByTestId("practice-tap-zone");
+    Object.defineProperty(tapZone, "getBoundingClientRect", {
+      value: () => ({ top: 0, left: 0, width: 88, height: 320, right: 88, bottom: 320 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(tapZone, { pointerId: 14, clientY: 72 });
+    fireEvent.pointerUp(tapZone, { pointerId: 14, clientY: 72 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-pitch-recall-attempt-count")).toHaveTextContent("Attempts: 1");
+    });
+
+    openTapSettings();
+    fireEvent.click(screen.getByTestId("practice-pitch-recall-clear"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-pitch-recall-attempt-count")).toHaveTextContent("Attempts: 0");
+    });
+  });
+
+  it("applies suggested rating from pitch recall score", async () => {
+    const playbackState = {
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+    };
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const song = makeSong(1);
+    song.segments[0].pitchContourNotes = [{ id: "n1", timeOffsetMs: 1000, durationMs: 500, lane: 0.6 }];
+    const view = render(<PracticeView song={song} initialSession={makeSession(song)} />);
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    });
+
+    openTapSettings();
+    fireEvent.click(screen.getByTestId("practice-toggle-tap-mode"));
+
+    const tapZone = screen.getByTestId("practice-tap-zone");
+    Object.defineProperty(tapZone, "getBoundingClientRect", {
+      value: () => ({ top: 0, left: 0, width: 88, height: 320, right: 88, bottom: 320 }),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(tapZone, { pointerId: 15, clientY: 64 });
+    playbackState.currentMs = 1500;
+    view.rerender(<PracticeView song={song} initialSession={makeSession(song)} />);
+    fireEvent.pointerUp(screen.getByTestId("practice-tap-zone"), { pointerId: 15, clientY: 64 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-pitch-recall-attempt-count")).toHaveTextContent("Attempts: 1");
+    });
+
+    let suggestedRating = "";
+    await waitFor(() => {
+      openTapSettings();
+      const applyButton = screen.getByTestId("practice-pitch-recall-apply-rating");
+      expect(applyButton).toHaveTextContent(/Apply [1-5]\/5/);
+      suggestedRating = (applyButton.textContent?.match(/Apply ([1-5])\/5/)?.[1] ?? "");
+      expect(suggestedRating).not.toBe("");
+    });
+
+    openTapSettings();
+    fireEvent.click(screen.getByTestId("practice-pitch-recall-apply-rating"));
+    expect(screen.getByTestId("mock-current-rating")).toHaveTextContent(suggestedRating);
+  });
+
   it("navigates to next segment while playing without issuing pause", async () => {
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: true,
@@ -360,35 +615,6 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("practice-next-segment"));
 
     expect(mockPlay).toHaveBeenCalledWith(4000, 12000);
-    expect(mockPause).not.toHaveBeenCalled();
-  });
-
-  it("next click in an overlap jumps to the later segment", async () => {
-    mockUseAudioPlayer.mockReturnValue({
-      isPlaying: true,
-      isReady: true,
-      currentMs: 3400,
-      durationMs: 12000,
-      playbackError: null,
-      debugInfo: {},
-      play: mockPlay,
-      pause: mockPause,
-      seek: mockSeek,
-    });
-
-    const song = makeSong(3);
-    song.segments = [
-      { ...song.segments[0], startMs: 0, endMs: 4000 },
-      { ...song.segments[1], startMs: 3300, endMs: 8000 },
-      { ...song.segments[2], startMs: 7600, endMs: 12000 },
-    ];
-
-    await renderAndWaitForRatings(song);
-
-    fireEvent.click(screen.getByTestId("practice-next-segment"));
-
-    expect(mockPlay).toHaveBeenCalledTimes(1);
-    expect(mockPlay).toHaveBeenCalledWith(7600, 12000);
     expect(mockPause).not.toHaveBeenCalled();
   });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Segment } from '../types/index';
+import { PitchContourNote, Segment } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
@@ -37,6 +37,66 @@ interface SegmentEditorProps {
   onSongUpdated?: () => void;
 }
 
+interface ActiveContourCapture {
+  pointerId: number;
+  startedAt: number;
+  startedCurrentMs: number;
+  lane: number;
+}
+
+interface ActiveContourDrag {
+  pointerId: number;
+  segmentId: string;
+  noteId: string;
+  mode: 'move' | 'resize-start' | 'resize-end';
+  startClientX: number;
+  initialTimeOffsetMs: number;
+  initialDurationMs: number;
+}
+
+const MIN_CONTOUR_NOTE_MS = 120;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function constrainMonophonicPlacement(
+  notes: PitchContourNote[],
+  noteId: string,
+  proposedStartMs: number,
+  proposedDurationMs: number,
+  segmentDurationMs: number
+): { timeOffsetMs: number; durationMs: number } {
+  const safeDuration = Math.max(MIN_CONTOUR_NOTE_MS, segmentDurationMs);
+  const others = notes
+    .filter((note) => note.id !== noteId)
+    .slice()
+    .sort((left, right) => left.timeOffsetMs - right.timeOffsetMs || left.id.localeCompare(right.id));
+
+  let insertIndex = others.findIndex((note) => proposedStartMs < note.timeOffsetMs);
+  if (insertIndex === -1) {
+    insertIndex = others.length;
+  }
+
+  const previous = insertIndex > 0 ? others[insertIndex - 1] : null;
+  const next = insertIndex < others.length ? others[insertIndex] : null;
+
+  const minStartMs = previous
+    ? previous.timeOffsetMs + Math.max(MIN_CONTOUR_NOTE_MS, previous.durationMs)
+    : 0;
+  const maxEndMs = next ? next.timeOffsetMs : safeDuration;
+  const maxStartMs = Math.max(minStartMs, maxEndMs - MIN_CONTOUR_NOTE_MS);
+
+  const timeOffsetMs = clamp(Math.round(proposedStartMs), minStartMs, maxStartMs);
+  const maxDurationMs = Math.max(MIN_CONTOUR_NOTE_MS, maxEndMs - timeOffsetMs);
+  const durationMs = clamp(Math.round(proposedDurationMs), MIN_CONTOUR_NOTE_MS, maxDurationMs);
+
+  return {
+    timeOffsetMs,
+    durationMs,
+  };
+}
+
 export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -56,11 +116,17 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   const [stableDurationMs, setStableDurationMs] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
-  const [bulkSeparator, setBulkSeparator] = useState('***');
+  const [bulkSeparator, setBulkSeparator] = useState('*');
   const [replaceExistingOnBulk, setReplaceExistingOnBulk] = useState(true);
   const [bulkImportPending, setBulkImportPending] = useState(false);
   const [songMetaRefreshToken, setSongMetaRefreshToken] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
+  const contourZoneRef = useRef<HTMLDivElement | null>(null);
+  const [activeContourCapture, setActiveContourCapture] = useState<ActiveContourCapture | null>(null);
+  const contourPreviewRef = useRef<HTMLDivElement | null>(null);
+  const [activeContourDrag, setActiveContourDrag] = useState<ActiveContourDrag | null>(null);
+  const songPitchStripRef = useRef<HTMLDivElement | null>(null);
+  const [activeSongContourCapture, setActiveSongContourCapture] = useState<ActiveContourCapture | null>(null);
 
   const parsedAudioKey = useMemo(() => parseAudioKey(audioUrl), [audioUrl]);
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parsedAudioKey), [parsedAudioKey]);
@@ -91,12 +157,99 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     return toPlayableAudioUrl(audioUrl);
   }, [audioUrl, proxyAudioUrl, useProxyFallback]);
 
-  const { isPlaying, isReady, currentMs, durationMs, playbackError, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
+  const {
+    isPlaying,
+    isReady,
+    currentMs,
+    durationMs,
+    playbackRate = 1,
+    playbackError,
+    play,
+    pause,
+    seek,
+    setPlaybackRate,
+  } = useAudioPlayer(playbackAudioUrl);
+
+  const timelineDurationMs = useMemo(() => {
+    const maxEnd = Math.max(0, ...segments.map((segment) => segment.endMs));
+    const maxPlaybackDuration = Math.max(0, durationMs, stableDurationMs);
+    const candidate = Math.max(maxEnd, maxPlaybackDuration);
+    return candidate > 0 ? candidate : 60000;
+  }, [durationMs, segments, stableDurationMs]);
+
+  const orderedSegments = useMemo(
+    () => [...segments].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs || a.id.localeCompare(b.id)),
+    [segments]
+  );
 
   const selectedSegment = useMemo(
     () => segments.find((segment) => segment.id === selectedSegmentId) ?? null,
     [segments, selectedSegmentId]
   );
+  const playbackPositionSegment = useMemo(() => {
+    if (orderedSegments.length === 0) {
+      return null;
+    }
+
+    const exact = orderedSegments.find((segment) => currentMs >= segment.startMs && currentMs < segment.endMs);
+    if (exact) {
+      return exact;
+    }
+
+    if (currentMs < orderedSegments[0].startMs) {
+      return orderedSegments[0];
+    }
+
+    return orderedSegments[orderedSegments.length - 1];
+  }, [currentMs, orderedSegments]);
+  const contourPanelSegment = isPlaying ? playbackPositionSegment : selectedSegment ?? playbackPositionSegment;
+  const contourPanelDurationMs = contourPanelSegment
+    ? Math.max(MIN_SEGMENT_MS, contourPanelSegment.endMs - contourPanelSegment.startMs)
+    : MIN_SEGMENT_MS;
+
+  const contourPanelContourNotes = useMemo(
+    () => contourPanelSegment?.pitchContourNotes ?? [],
+    [contourPanelSegment]
+  );
+
+  const plottedContourNotes = useMemo(() => {
+    if (!contourPanelSegment) {
+      return [];
+    }
+
+    const durationMs = Math.max(1, contourPanelSegment.endMs - contourPanelSegment.startMs);
+    return contourPanelContourNotes.map((note) => {
+      const leftPercent = clamp((note.timeOffsetMs / durationMs) * 100, 0, 100);
+      const widthPercent = clamp((note.durationMs / durationMs) * 100, 1.5, 100 - leftPercent);
+      return {
+        ...note,
+        leftPercent,
+        widthPercent,
+        topPercent: (1 - clamp(note.lane, 0, 1)) * 100,
+      };
+    });
+  }, [contourPanelContourNotes, contourPanelSegment]);
+
+  const plottedSongContourNotes = useMemo(() => {
+    if (timelineDurationMs <= 0) {
+      return [];
+    }
+
+    return orderedSegments.flatMap((segment) => {
+      const segmentDurationMs = Math.max(1, segment.endMs - segment.startMs);
+      return (segment.pitchContourNotes ?? []).map((note) => {
+        const absoluteStartMs = segment.startMs + note.timeOffsetMs;
+        return {
+          id: note.id,
+          segmentId: segment.id,
+          leftPercent: clamp((absoluteStartMs / timelineDurationMs) * 100, 0, 100),
+          widthPercent: clamp((note.durationMs / timelineDurationMs) * 100, 0.5, 100),
+          topPercent: (1 - clamp(note.lane, 0, 1)) * 100,
+          segmentDurationMs,
+        };
+      });
+    });
+  }, [orderedSegments, timelineDurationMs]);
 
   const updateLocalSegment = (segmentId: string, updates: Partial<Segment>) => {
     setSegments((previous) =>
@@ -104,7 +257,347 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     );
   };
 
-  const saveSegmentPatch = async (segmentId: string, updates: Partial<Segment>) => {
+  const updateLocalPitchContourNotes = (segmentId: string, notes: PitchContourNote[]) => {
+    updateLocalSegment(segmentId, { pitchContourNotes: notes });
+  };
+
+  const savePitchContourNotes = async (segmentId: string, notes: PitchContourNote[]) => {
+    updateLocalPitchContourNotes(segmentId, notes);
+    try {
+      await saveSegmentPatch(segmentId, { pitchContourNotes: notes }, { refresh: false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save pitch contour notes. Please try again.';
+      setDeleteError(message);
+    }
+  };
+
+  const getSegmentAtMs = (ms: number): Segment | null => {
+    if (orderedSegments.length === 0) {
+      return null;
+    }
+
+    const exact = orderedSegments.find((segment) => ms >= segment.startMs && ms < segment.endMs);
+    if (exact) {
+      return exact;
+    }
+
+    if (ms < orderedSegments[0].startMs) {
+      return orderedSegments[0];
+    }
+
+    return orderedSegments[orderedSegments.length - 1];
+  };
+
+  const getLaneFromClientY = (clientY: number, rect: DOMRect): number => {
+    if (!rect || rect.height <= 0) {
+      return 0.5;
+    }
+
+    const ratio = clamp((clientY - rect.top) / rect.height, 0, 1);
+    return Number((1 - ratio).toFixed(3));
+  };
+
+  const commitContourCapture = async (capture: ActiveContourCapture, endedCurrentMs: number) => {
+    const targetSegment = getSegmentAtMs(capture.startedCurrentMs);
+    if (!targetSegment) {
+      return;
+    }
+
+    const existingNotes = targetSegment.pitchContourNotes ?? [];
+    const segmentDurationMs = Math.max(1, targetSegment.endMs - targetSegment.startMs);
+    const startedCurrentMs = clamp(capture.startedCurrentMs, targetSegment.startMs, targetSegment.endMs);
+    const timeOffsetMs = clamp(startedCurrentMs - targetSegment.startMs, 0, segmentDurationMs);
+    const endedMs = clamp(endedCurrentMs, targetSegment.startMs, targetSegment.endMs);
+    const timelineHeldMs = Math.max(0, endedMs - startedCurrentMs);
+    const wallHeldMs = Math.max(0, Math.round((Date.now() - capture.startedAt) * playbackRate));
+    const elapsedMs = Math.max(MIN_CONTOUR_NOTE_MS, timelineHeldMs > 0 ? timelineHeldMs : wallHeldMs);
+    const nextNote: PitchContourNote = {
+      id: crypto.randomUUID(),
+      timeOffsetMs,
+      durationMs: elapsedMs,
+      lane: capture.lane,
+    };
+    const placement = constrainMonophonicPlacement(
+      existingNotes,
+      nextNote.id,
+      nextNote.timeOffsetMs,
+      nextNote.durationMs,
+      segmentDurationMs
+    );
+    const nextNotes = [...existingNotes, {
+      ...nextNote,
+      ...placement,
+    }].sort((left, right) => left.timeOffsetMs - right.timeOffsetMs || left.id.localeCompare(right.id));
+    await savePitchContourNotes(targetSegment.id, nextNotes);
+  };
+
+  const handleContourPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (orderedSegments.length === 0) {
+      return;
+    }
+
+    const rect = contourZoneRef.current?.getBoundingClientRect();
+    if (!rect) {
+      return;
+    }
+
+    const lane = getLaneFromClientY(event.clientY, rect);
+    setActiveContourCapture({
+      pointerId: event.pointerId,
+      startedAt: Date.now(),
+      startedCurrentMs: currentMs,
+      lane,
+    });
+
+    if (typeof event.currentTarget.setPointerCapture === 'function') {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+  };
+
+  const handleContourPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!activeContourCapture || activeContourCapture.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (typeof event.currentTarget.releasePointerCapture === 'function') {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const capture = activeContourCapture;
+    setActiveContourCapture(null);
+    void commitContourCapture(capture, currentMs);
+  };
+
+  const handleContourPreviewPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (orderedSegments.length === 0) {
+      return;
+    }
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    const rect = contourPreviewRef.current?.getBoundingClientRect();
+    if (!rect) {
+      return;
+    }
+
+    const lane = getLaneFromClientY(event.clientY, rect);
+    setActiveContourCapture({
+      pointerId: event.pointerId,
+      startedAt: Date.now(),
+      startedCurrentMs: currentMs,
+      lane,
+    });
+
+    if (typeof event.currentTarget.setPointerCapture === 'function') {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+  };
+
+  const handleContourPreviewPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!activeContourCapture || activeContourCapture.pointerId !== event.pointerId) {
+      return;
+    }
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    if (typeof event.currentTarget.releasePointerCapture === 'function') {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const capture = activeContourCapture;
+    setActiveContourCapture(null);
+    void commitContourCapture(capture, currentMs);
+  };
+
+  const commitSongContourCapture = async (capture: ActiveContourCapture, endedCurrentMs: number) => {
+    const targetSegment = getSegmentAtMs(capture.startedCurrentMs);
+    if (!targetSegment) {
+      return;
+    }
+
+    const segmentDurationMs = Math.max(1, targetSegment.endMs - targetSegment.startMs);
+    const startedCurrentMs = clamp(capture.startedCurrentMs, targetSegment.startMs, targetSegment.endMs);
+    const endedMs = clamp(endedCurrentMs, targetSegment.startMs, targetSegment.endMs);
+    const timeOffsetMs = clamp(startedCurrentMs - targetSegment.startMs, 0, segmentDurationMs);
+    const timelineHeldMs = Math.max(0, endedMs - startedCurrentMs);
+    const wallHeldMs = Math.max(0, Math.round((Date.now() - capture.startedAt) * playbackRate));
+    const elapsedMs = Math.max(MIN_CONTOUR_NOTE_MS, timelineHeldMs > 0 ? timelineHeldMs : wallHeldMs);
+    const nextNote: PitchContourNote = {
+      id: crypto.randomUUID(),
+      timeOffsetMs,
+      durationMs: elapsedMs,
+      lane: capture.lane,
+    };
+    const existingNotes = targetSegment.pitchContourNotes ?? [];
+    const placement = constrainMonophonicPlacement(
+      existingNotes,
+      nextNote.id,
+      nextNote.timeOffsetMs,
+      nextNote.durationMs,
+      segmentDurationMs
+    );
+    const nextNotes = [...existingNotes, {
+      ...nextNote,
+      ...placement,
+    }].sort((left, right) => left.timeOffsetMs - right.timeOffsetMs || left.id.localeCompare(right.id));
+    await savePitchContourNotes(targetSegment.id, nextNotes);
+  };
+
+  const handleSongPitchPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (orderedSegments.length === 0) {
+      return;
+    }
+
+    const rect = songPitchStripRef.current?.getBoundingClientRect();
+    if (!rect) {
+      return;
+    }
+
+    const lane = getLaneFromClientY(event.clientY, rect);
+    setActiveSongContourCapture({
+      pointerId: event.pointerId,
+      startedAt: Date.now(),
+      startedCurrentMs: currentMs,
+      lane,
+    });
+
+    if (typeof event.currentTarget.setPointerCapture === 'function') {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+  };
+
+  const handleSongPitchPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!activeSongContourCapture || activeSongContourCapture.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (typeof event.currentTarget.releasePointerCapture === 'function') {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const capture = activeSongContourCapture;
+    setActiveSongContourCapture(null);
+    void commitSongContourCapture(capture, currentMs);
+  };
+
+  const handleUndoLastContourNote = async () => {
+    if (!contourPanelSegment || contourPanelContourNotes.length === 0) {
+      return;
+    }
+
+    await savePitchContourNotes(contourPanelSegment.id, contourPanelContourNotes.slice(0, -1));
+  };
+
+  const handleClearContourNotes = async () => {
+    if (!contourPanelSegment || contourPanelContourNotes.length === 0) {
+      return;
+    }
+
+    await savePitchContourNotes(contourPanelSegment.id, []);
+  };
+
+  const updateContourNoteFromPointer = (clientX: number, clientY: number) => {
+    if (!activeContourDrag) {
+      return;
+    }
+
+    const draggedSegment = segments.find((segment) => segment.id === activeContourDrag.segmentId);
+    if (!draggedSegment) {
+      return;
+    }
+
+    const previewRect = contourPreviewRef.current?.getBoundingClientRect();
+    if (!previewRect || previewRect.width <= 0 || previewRect.height <= 0) {
+      return;
+    }
+
+    const durationMs = Math.max(1, draggedSegment.endMs - draggedSegment.startMs);
+    const deltaRatioX = (clientX - activeContourDrag.startClientX) / previewRect.width;
+    const deltaMs = Math.round(deltaRatioX * durationMs);
+    const ratioY = clamp((clientY - previewRect.top) / previewRect.height, 0, 1);
+    const nextLane = Number((1 - ratioY).toFixed(3));
+    const allNotes = draggedSegment.pitchContourNotes ?? [];
+    const nextNotes = allNotes.map((note) => {
+      if (note.id !== activeContourDrag.noteId) {
+        return note;
+      }
+
+      let proposedStartMs = note.timeOffsetMs;
+      let proposedDurationMs = note.durationMs;
+
+      if (activeContourDrag.mode === 'move') {
+        proposedStartMs = activeContourDrag.initialTimeOffsetMs + deltaMs;
+        proposedDurationMs = activeContourDrag.initialDurationMs;
+      } else if (activeContourDrag.mode === 'resize-start') {
+        const endMs = activeContourDrag.initialTimeOffsetMs + activeContourDrag.initialDurationMs;
+        proposedStartMs = activeContourDrag.initialTimeOffsetMs + deltaMs;
+        proposedDurationMs = Math.max(MIN_CONTOUR_NOTE_MS, endMs - proposedStartMs);
+      } else {
+        proposedStartMs = activeContourDrag.initialTimeOffsetMs;
+        proposedDurationMs = activeContourDrag.initialDurationMs + deltaMs;
+      }
+
+      const placement = constrainMonophonicPlacement(
+        allNotes,
+        note.id,
+        proposedStartMs,
+        proposedDurationMs,
+        durationMs
+      );
+
+      return {
+        ...note,
+        ...placement,
+        lane: activeContourDrag.mode === 'move' ? nextLane : note.lane,
+      };
+    });
+    updateLocalPitchContourNotes(draggedSegment.id, nextNotes);
+  };
+
+  useEffect(() => {
+    if (!activeContourDrag) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerId !== activeContourDrag.pointerId) {
+        return;
+      }
+      updateContourNoteFromPointer(event.clientX, event.clientY);
+    };
+
+    const handlePointerDone = (event: PointerEvent) => {
+      if (event.pointerId !== activeContourDrag.pointerId) {
+        return;
+      }
+
+      const draggedSegment = segments.find((segment) => segment.id === activeContourDrag.segmentId);
+      setActiveContourDrag(null);
+      if (!draggedSegment) {
+        return;
+      }
+      void savePitchContourNotes(activeContourDrag.segmentId, draggedSegment.pitchContourNotes ?? []);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerDone);
+    window.addEventListener('pointercancel', handlePointerDone);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerDone);
+      window.removeEventListener('pointercancel', handlePointerDone);
+    };
+  }, [activeContourDrag, segments]);
+
+  const saveSegmentPatch = async (
+    segmentId: string,
+    updates: Partial<Segment>,
+    options: { refresh?: boolean } = {}
+  ) => {
+    const shouldRefresh = options.refresh ?? true;
     try {
       setSavingSegmentId(segmentId);
       const response = await fetch(`/api/songs/${songId}/segments/${segmentId}`, {
@@ -114,10 +607,21 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       });
 
       if (!response.ok) {
-        throw new Error('Patch failed');
+        let errorMessage = 'Patch failed';
+        try {
+          const payload = await response.json() as { error?: string };
+          if (payload.error) {
+            errorMessage = payload.error;
+          }
+        } catch {
+          // Ignore JSON parse errors and keep fallback message.
+        }
+        throw new Error(errorMessage);
       }
 
-      setRefreshKey((previous) => previous + 1);
+      if (shouldRefresh) {
+        setRefreshKey((previous) => previous + 1);
+      }
     } finally {
       setSavingSegmentId(null);
     }
@@ -187,6 +691,41 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     });
   };
 
+  const resolveAudioDurationMs = async (sourceUrl: string): Promise<number | null> => {
+    if (!sourceUrl || typeof window === 'undefined') {
+      return null;
+    }
+
+    return new Promise<number | null>((resolve) => {
+      const probe = new Audio();
+      probe.preload = 'metadata';
+
+      const cleanup = () => {
+        probe.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        probe.removeEventListener('error', handleError);
+      };
+
+      const handleLoadedMetadata = () => {
+        cleanup();
+        if (Number.isFinite(probe.duration) && probe.duration > 0) {
+          resolve(Math.round(probe.duration * 1000));
+          return;
+        }
+        resolve(null);
+      };
+
+      const handleError = () => {
+        cleanup();
+        resolve(null);
+      };
+
+      probe.addEventListener('loadedmetadata', handleLoadedMetadata);
+      probe.addEventListener('error', handleError);
+      probe.src = sourceUrl;
+      probe.load();
+    });
+  };
+
   const handleBulkImport = async () => {
     setDeleteError(null);
 
@@ -229,7 +768,18 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     };
 
     try {
-      const timings = buildBulkTimings(sections.length, timelineDurationMs);
+      let effectiveDurationMs = timelineDurationMs;
+      const knownDurationMs = Math.max(durationMs, stableDurationMs);
+
+      if (hasAttachedAudio && knownDurationMs <= 0 && playbackAudioUrl) {
+        const resolvedDurationMs = await resolveAudioDurationMs(playbackAudioUrl);
+        if (resolvedDurationMs && resolvedDurationMs > 0) {
+          setStableDurationMs((previous) => Math.max(previous, resolvedDurationMs));
+          effectiveDurationMs = Math.max(effectiveDurationMs, resolvedDurationMs);
+        }
+      }
+
+      const timings = buildBulkTimings(sections.length, effectiveDurationMs);
 
       if (replaceExistingOnBulk) {
         const orderedExisting = [...segments].sort((a, b) => a.order - b.order);
@@ -382,6 +932,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
           startMs: Math.round(restored.startMs),
           endMs: Math.round(restored.endMs),
           lyricText: restored.lyricText,
+          pitchContourNotes: restored.pitchContourNotes ?? [],
         }),
       });
       if (!response.ok) throw new Error('Restore failed');
@@ -392,19 +943,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
     }
   };
 
-  const timelineDurationMs = useMemo(() => {
-    const maxEnd = Math.max(0, ...segments.map((segment) => segment.endMs));
-    const maxPlaybackDuration = Math.max(0, durationMs, stableDurationMs);
-    const candidate = Math.max(maxEnd, maxPlaybackDuration);
-    return candidate > 0 ? candidate : 60000;
-  }, [durationMs, segments, stableDurationMs]);
-
   const zoomPercent = Math.round(zoom * 100);
-
-  const orderedSegments = useMemo(
-    () => [...segments].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs || a.id.localeCompare(b.id)),
-    [segments]
-  );
 
   const msFromClientX = (clientX: number): number => {
     const rect = boardRef.current?.getBoundingClientRect();
@@ -514,6 +1053,10 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
   }, [undoDismissTimer]);
 
   const handleTogglePlay = () => {
+    if (!hasAttachedAudio) {
+      return;
+    }
+
     if (isPlaying) {
       pause();
       return;
@@ -771,7 +1314,7 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
                   value={bulkSeparator}
                   onChange={(event) => setBulkSeparator(event.target.value)}
                   className="mt-1 w-full rounded border border-indigo-300 bg-white px-2 py-1 text-sm"
-                  placeholder="***"
+                  placeholder="*"
                 />
               </label>
               <label className="mt-5 inline-flex items-center gap-2 text-xs text-indigo-900">
@@ -792,14 +1335,14 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
               placeholder={[
                 'Verse 1 line 1',
                 'Verse 1 line 2',
-                '***',
+                '*',
                 'Verse 2 line 1',
                 'Verse 2 line 2',
               ].join('\n')}
               className="mt-1 h-36 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm"
             />
             <p className="mt-1 text-xs text-indigo-700">
-              Default separator is <strong>***</strong>. Each block becomes one section, spaced evenly across the full song.
+              Default separator is <strong>*</strong>. Each block becomes one section, spaced evenly across the full song.
             </p>
             <div className="mt-3 flex gap-2">
               <button
@@ -905,7 +1448,15 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
                 />
 
                 <div className="relative z-10 flex h-full flex-col gap-2 p-2 pt-9">
-                  <label className="text-center text-sm font-semibold text-indigo-900">{segment.label}</label>
+                  <input
+                    data-testid={`segment-inline-label-input-${segment.id}`}
+                    value={segment.label}
+                    onChange={(event) => updateLocalSegment(segment.id, { label: event.target.value })}
+                    onBlur={() => {
+                      void saveSegmentPatch(segment.id, { label: segment.label });
+                    }}
+                    className="w-full rounded border border-indigo-200 bg-white px-2 py-1 text-center text-sm font-semibold text-indigo-900"
+                  />
                   <textarea
                     value={segment.lyricText}
                     onChange={(event) => updateLocalSegment(segment.id, { lyricText: event.target.value })}
@@ -951,6 +1502,35 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
         </div>
 
         <div data-testid="segment-editor-song-timeline" className="mt-4 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-3">
+          <div
+            data-testid="segment-editor-song-pitch-strip"
+            className="relative mb-3 h-12 overflow-x-auto rounded bg-emerald-50"
+            onPointerDown={handleSongPitchPointerDown}
+            onPointerUp={handleSongPitchPointerUp}
+            onPointerCancel={() => setActiveSongContourCapture(null)}
+          >
+            <div ref={songPitchStripRef} className="relative h-full min-w-full" style={{ width: `${zoomPercent}%` }}>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={`song-pitch-grid-${index}`}
+                  className="absolute inset-x-0 border-t border-emerald-200"
+                  style={{ top: `${index * 50}%` }}
+                />
+              ))}
+              {plottedSongContourNotes.map((note) => (
+                <div
+                  key={`song-pitch-${note.segmentId}-${note.id}`}
+                  data-testid={`song-pitch-note-${note.segmentId}-${note.id}`}
+                  className="absolute h-1.5 rounded-full bg-emerald-500/80"
+                  style={{
+                    left: `${note.leftPercent}%`,
+                    width: `${note.widthPercent}%`,
+                    top: `calc(${note.topPercent}% - 0.1875rem)`,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <div className="relative h-5 min-w-full rounded bg-indigo-100" style={{ width: `${zoomPercent}%` }}>
             {orderedSegments.map((segment) => {
@@ -993,6 +1573,20 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       </div>
 
       <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" data-testid="segment-editor-playback-controls">
+        <div className="mb-3 flex items-center justify-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Speed</span>
+          {[0.5, 0.75, 1].map((rate) => (
+            <button
+              key={`speed-${rate}`}
+              type="button"
+              data-testid={`segment-editor-speed-${Math.round(rate * 100)}`}
+              onClick={() => setPlaybackRate?.(rate)}
+              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${Math.abs(playbackRate - rate) < 0.01 ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-indigo-300 text-indigo-700 hover:bg-indigo-50'}`}
+            >
+              {rate}x
+            </button>
+          ))}
+        </div>
         <div className="mb-2 flex items-center justify-center gap-2">
           <button
             type="button"
@@ -1015,7 +1609,8 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
             data-testid="segment-editor-play-toggle"
             onClick={handleTogglePlay}
             aria-label={isPlaying ? 'Pause' : 'Play'}
-            className="h-9 w-[72px] rounded-xl bg-indigo-600 text-lg text-white hover:bg-indigo-700"
+            disabled={!hasAttachedAudio}
+            className="h-9 w-[72px] rounded-xl bg-indigo-600 text-lg text-white hover:bg-indigo-700 disabled:opacity-40"
           >
             {isPlaying ? '⏸' : '▶'}
           </button>
@@ -1058,6 +1653,167 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
         ) : (
           <p className="text-sm text-gray-500">Select a section block to edit its label and lyrics.</p>
         )}
+      </div>
+
+      <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm" data-testid="segment-editor-pitch-panel">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-emerald-900">Pitch contour authoring</h3>
+            <p className="text-sm text-emerald-700">
+              {contourPanelSegment
+                ? `Capture follows the playback position across the full song. Notes currently land in ${contourPanelSegment.label}.`
+                : 'Add sections to begin capturing pitch contour notes.'}
+            </p>
+            {contourPanelSegment ? (
+              <p data-testid="segment-editor-pitch-target-label" className="mt-1 text-xs font-medium uppercase tracking-wide text-emerald-600">
+                Current target: {contourPanelSegment.label}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="segment-editor-pitch-undo"
+              onClick={() => { void handleUndoLastContourNote(); }}
+              disabled={!contourPanelSegment || contourPanelContourNotes.length === 0}
+              className="rounded border border-emerald-300 px-3 py-1.5 text-sm text-emerald-800 disabled:opacity-40"
+            >
+              Undo last
+            </button>
+            <button
+              type="button"
+              data-testid="segment-editor-pitch-clear"
+              onClick={() => { void handleClearContourNotes(); }}
+              disabled={!contourPanelSegment || contourPanelContourNotes.length === 0}
+              className="rounded border border-emerald-300 px-3 py-1.5 text-sm text-emerald-800 disabled:opacity-40"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_88px]">
+          <div>
+            <div
+              ref={contourPreviewRef}
+              data-testid="segment-editor-pitch-preview"
+              className="relative h-52 overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50 via-white to-emerald-50"
+              onPointerDown={handleContourPreviewPointerDown}
+              onPointerUp={handleContourPreviewPointerUp}
+              onPointerCancel={() => setActiveContourCapture(null)}
+            >
+              <div className="absolute inset-0">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div
+                    key={`pitch-grid-${index}`}
+                    className="absolute inset-x-0 border-t border-emerald-200/80"
+                    style={{ top: `${index * 25}%` }}
+                  />
+                ))}
+              </div>
+              {contourPanelSegment ? (
+                <>
+                  {plottedContourNotes.map((note) => (
+                    <div
+                      key={note.id}
+                      data-testid={`segment-editor-pitch-note-${note.id}`}
+                      className="absolute h-4"
+                      style={{
+                        left: `${note.leftPercent}%`,
+                        width: `${note.widthPercent}%`,
+                        top: `calc(${note.topPercent}% - 0.5rem)`,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        data-testid={`segment-editor-pitch-note-start-${note.id}`}
+                        aria-label={`Resize contour note start ${note.id}`}
+                        className="absolute inset-y-0 left-0 w-2 rounded-l-full bg-emerald-800/90"
+                        onPointerDown={(event) => {
+                          setActiveContourDrag({
+                            pointerId: event.pointerId,
+                            segmentId: contourPanelSegment.id,
+                            noteId: note.id,
+                            mode: 'resize-start',
+                            startClientX: event.clientX,
+                            initialTimeOffsetMs: note.timeOffsetMs,
+                            initialDurationMs: note.durationMs,
+                          });
+                        }}
+                      />
+                      <button
+                        type="button"
+                        data-testid={`segment-editor-pitch-note-move-${note.id}`}
+                        aria-label={`Adjust contour note at ${note.timeOffsetMs}ms`}
+                        className="absolute inset-y-0 left-2 right-2 cursor-grab rounded-full bg-emerald-600/80"
+                        onPointerDown={(event) => {
+                          setActiveContourDrag({
+                            pointerId: event.pointerId,
+                            segmentId: contourPanelSegment.id,
+                            noteId: note.id,
+                            mode: 'move',
+                            startClientX: event.clientX,
+                            initialTimeOffsetMs: note.timeOffsetMs,
+                            initialDurationMs: note.durationMs,
+                          });
+                        }}
+                        onDoubleClick={() => {
+                          const nextNotes = contourPanelContourNotes.filter((entry) => entry.id !== note.id);
+                          void savePitchContourNotes(contourPanelSegment.id, nextNotes);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        data-testid={`segment-editor-pitch-note-end-${note.id}`}
+                        aria-label={`Resize contour note end ${note.id}`}
+                        className="absolute inset-y-0 right-0 w-2 rounded-r-full bg-emerald-800/90"
+                        onPointerDown={(event) => {
+                          setActiveContourDrag({
+                            pointerId: event.pointerId,
+                            segmentId: contourPanelSegment.id,
+                            noteId: note.id,
+                            mode: 'resize-end',
+                            startClientX: event.clientX,
+                            initialTimeOffsetMs: note.timeOffsetMs,
+                            initialDurationMs: note.durationMs,
+                          });
+                        }}
+                      />
+                    </div>
+                  ))}
+                  <div
+                    data-testid="segment-editor-pitch-playhead"
+                    className="pointer-events-none absolute inset-y-0 w-0.5 bg-rose-500"
+                    style={{
+                      left: `${clamp(((currentMs - contourPanelSegment.startMs) / contourPanelDurationMs) * 100, 0, 100)}%`,
+                    }}
+                  />
+                </>
+              ) : null}
+            </div>
+            <div className="mt-2 flex items-center justify-between text-xs text-emerald-800">
+              <span>Low</span>
+              <span data-testid="segment-editor-pitch-count">{contourPanelContourNotes.length} notes</span>
+              <span>High</span>
+            </div>
+            <p className="mt-1 text-xs text-emerald-700">Tip: Hold longer to create longer notes. You can still drag note bodies/handles to refine.</p>
+          </div>
+
+          <div
+            ref={contourZoneRef}
+            data-testid="segment-editor-pitch-tap-zone"
+            className={`relative rounded-2xl border-2 border-dashed px-3 py-4 text-center ${contourPanelSegment ? 'border-emerald-400 bg-emerald-50 text-emerald-800' : 'border-gray-300 bg-gray-50 text-gray-400'}`}
+            onPointerDown={handleContourPointerDown}
+            onPointerUp={handleContourPointerUp}
+            onPointerCancel={() => setActiveContourCapture(null)}
+          >
+            <div className="pointer-events-none flex h-full min-h-[208px] flex-col items-center justify-between text-xs font-semibold uppercase tracking-[0.18em]">
+              <span>High</span>
+              <span className="max-w-[4rem] leading-4">Tap and hold</span>
+              <span>Low</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

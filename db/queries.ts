@@ -70,6 +70,32 @@ function isMissingLastPracticedColumnError(error: unknown): boolean {
   return false;
 }
 
+function isMissingPitchContourNotesColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("pitch_contour_notes") && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (causeMessage.includes("pitch_contour_notes") && causeMessage.includes("does not exist")) {
+      return true;
+    }
+    if (causeCode === "42703" && message.includes("pitch_contour_notes")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // ── Songs ──────────────────────────────────────────────────────────────────
 
 export async function getAllSongs(): Promise<SongRow[]> {
@@ -201,11 +227,42 @@ export async function deleteSong(id: string): Promise<void> {
 export async function getSegmentsBySongId(
   songId: string
 ): Promise<SegmentRow[]> {
-  return db()
-    .select()
-    .from(segments)
-    .where(eq(segments.songId, songId))
-    .orderBy(asc(segments.order));
+  let primaryError: unknown;
+  try {
+    return await db()
+      .select()
+      .from(segments)
+      .where(eq(segments.songId, songId))
+      .orderBy(asc(segments.order));
+  } catch (error) {
+    primaryError = error;
+    if (!isMissingPitchContourNotesColumnError(error)) {
+      throw error;
+    }
+  }
+
+  try {
+    const legacyRows = await db()
+      .select({
+        id: segments.id,
+        songId: segments.songId,
+        label: segments.label,
+        order: segments.order,
+        startMs: segments.startMs,
+        endMs: segments.endMs,
+        lyricText: segments.lyricText,
+      })
+      .from(segments)
+      .where(eq(segments.songId, songId))
+      .orderBy(asc(segments.order));
+
+    return legacyRows.map((row) => ({
+      ...row,
+      pitchContourNotes: [],
+    } as SegmentRow));
+  } catch {
+    throw primaryError;
+  }
 }
 
 export async function upsertSegments(
@@ -217,13 +274,31 @@ export async function upsertSegments(
     startMs: number;
     endMs: number;
     lyricText: string;
+    pitchContourNotes?: SegmentRow["pitchContourNotes"];
   }>
 ): Promise<void> {
   await db().delete(segments).where(eq(segments.songId, songId));
   if (newSegments.length > 0) {
-    await db().insert(segments).values(
-      newSegments.map((s) => ({ ...s, songId }))
-    );
+    try {
+      await db().insert(segments).values(
+        newSegments.map((s) => ({
+          ...s,
+          songId,
+          pitchContourNotes: s.pitchContourNotes ?? [],
+        }))
+      );
+    } catch (error) {
+      if (!isMissingPitchContourNotesColumnError(error)) {
+        throw error;
+      }
+
+      await db().insert(segments).values(
+        newSegments.map(({ pitchContourNotes: _pitchContourNotes, ...segment }) => ({
+          ...segment,
+          songId,
+        }))
+      );
+    }
   }
 }
 
@@ -235,22 +310,62 @@ export async function createSegment(data: {
   startMs: number;
   endMs: number;
   lyricText: string;
+  pitchContourNotes?: SegmentRow["pitchContourNotes"];
 }): Promise<SegmentRow> {
-  const rows = await db()
-    .insert(segments)
-    .values(data)
-    .returning();
-  return rows[0];
+  try {
+    const rows = await db()
+      .insert(segments)
+      .values({
+        ...data,
+        pitchContourNotes: data.pitchContourNotes ?? [],
+      })
+      .returning();
+    return rows[0];
+  } catch (error) {
+    if (!isMissingPitchContourNotesColumnError(error)) {
+      throw error;
+    }
+
+    const { pitchContourNotes: _pitchContourNotes, ...legacyData } = data;
+    const rows = await db()
+      .insert(segments)
+      .values(legacyData)
+      .returning();
+    return {
+      ...rows[0],
+      pitchContourNotes: [],
+    } as SegmentRow;
+  }
 }
 
 export async function updateSegment(
   id: string,
-  updates: Partial<Pick<SegmentRow, 'label' | 'order' | 'startMs' | 'endMs' | 'lyricText'>>
+  updates: Partial<Pick<SegmentRow, 'label' | 'order' | 'startMs' | 'endMs' | 'lyricText' | 'pitchContourNotes'>>
 ): Promise<void> {
-  await db()
-    .update(segments)
-    .set(updates)
-    .where(eq(segments.id, id));
+  try {
+    await db()
+      .update(segments)
+      .set(updates)
+      .where(eq(segments.id, id));
+  } catch (error) {
+    if (!isMissingPitchContourNotesColumnError(error)) {
+      throw error;
+    }
+
+    const { pitchContourNotes: _pitchContourNotes, ...legacyUpdates } = updates;
+    if (Object.keys(legacyUpdates).length === 0) {
+      const migrationError = new Error(
+        'Pitch contour notes require database migration 0004_song_pitch_contour.sql before they can be saved.'
+      ) as Error & { code?: string };
+      migrationError.code = 'PITCH_CONTOUR_MIGRATION_REQUIRED';
+      throw migrationError;
+    }
+
+    await db()
+      .update(segments)
+      .set(legacyUpdates)
+      .where(eq(segments.id, id));
+  }
 }
 
 export async function reorderSegments(

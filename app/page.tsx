@@ -159,7 +159,6 @@ export default function Home() {
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-4xl mx-auto">
           <button
-            data-testid="song-editor-back"
             onClick={() => void handleExitSongEditor()}
             className="mb-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
           >

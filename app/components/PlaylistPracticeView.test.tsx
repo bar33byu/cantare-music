@@ -14,7 +14,17 @@ const playlist: Playlist = {
       title: 'Alpha',
       artist: 'A',
       audioUrl: 'https://example.com/alpha.mp3',
-      segments: [],
+      segments: [
+        {
+          id: 'seg-1',
+          songId: 'song-1',
+          order: 0,
+          label: 'Section 1',
+          lyricText: 'Alpha line',
+          startMs: 0,
+          endMs: 1000,
+        },
+      ],
       createdAt: '2025-01-01T00:00:00.000Z',
       position: 0,
     },
@@ -23,7 +33,17 @@ const playlist: Playlist = {
       title: 'Beta',
       artist: 'B',
       audioUrl: 'https://example.com/beta.mp3',
-      segments: [],
+      segments: [
+        {
+          id: 'seg-2',
+          songId: 'song-2',
+          order: 0,
+          label: 'Section 1',
+          lyricText: 'Beta line',
+          startMs: 0,
+          endMs: 1000,
+        },
+      ],
       createdAt: '2025-01-01T00:00:00.000Z',
       position: 1,
     },
@@ -74,5 +94,55 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-empty')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('playlist-practice-manage'));
     expect(onManage).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows readiness tags for songs missing audio and/or segments', async () => {
+    const mixedPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        playlist.songs[0],
+        { ...playlist.songs[1], audioUrl: '' },
+        {
+          ...playlist.songs[1],
+          id: 'song-3',
+          title: 'Gamma',
+          audioUrl: 'https://example.com/gamma.mp3',
+          segments: [],
+        },
+      ],
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={mixedPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('playlist-practice-song-song-2')).toBeInTheDocument();
+    expect(screen.getByTestId('playlist-practice-song-song-3')).toBeInTheDocument();
+
+    expect(screen.getByTestId('playlist-practice-song-status-song-2')).toHaveTextContent('Missing audio');
+    expect(screen.getByTestId('playlist-practice-song-status-song-3')).toHaveTextContent('Missing segments');
+  });
+
+  it('shows both readiness tags when both audio and segments are missing', async () => {
+    const notReadyPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        { ...playlist.songs[0], audioUrl: '', segments: [] },
+      ],
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={notReadyPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('playlist-practice-song-status-song-1')).toHaveTextContent('Missing audio');
+    expect(screen.getByTestId('playlist-practice-song-status-song-1')).toHaveTextContent('Missing segments');
   });
 });

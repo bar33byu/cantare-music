@@ -165,7 +165,7 @@ describe("upsertSegments", () => {
     expect(insertSpy).toHaveBeenCalledWith(segments);
     const valuesSpy = (insertChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
     expect(valuesSpy).toHaveBeenCalledWith(
-      [{ ...newSegs[0], songId: "song-1" }]
+      [{ ...newSegs[0], songId: "song-1", pitchContourNotes: [] }]
     );
   });
 
@@ -178,6 +178,30 @@ describe("upsertSegments", () => {
 
     expect(deleteSpy).toHaveBeenCalledWith(segments);
     expect(insertSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back when pitch_contour_notes column is missing", async () => {
+    const deleteChain = makeChain();
+    const missingColumnChain = {
+      values: vi.fn(() => {
+        throw new Error('column "pitch_contour_notes" does not exist');
+      }),
+    };
+    const fallbackInsertChain = makeChain([]);
+    deleteSpy.mockReturnValue(deleteChain);
+    insertSpy
+      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
+      .mockReturnValueOnce(fallbackInsertChain);
+
+    const { upsertSegments } = await getQueries();
+    await upsertSegments("song-1", [
+      { id: "s1", label: "Verse 1", order: 0, startMs: 0, endMs: 1000, lyricText: "Hello" },
+    ]);
+
+    const fallbackValuesSpy = (fallbackInsertChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
+    expect(fallbackValuesSpy).toHaveBeenCalledWith([
+      { id: "s1", label: "Verse 1", order: 0, startMs: 0, endMs: 1000, lyricText: "Hello", songId: "song-1" },
+    ]);
   });
 });
 
@@ -259,6 +283,7 @@ describe("createSegment", () => {
       startMs: 0,
       endMs: 1000,
       lyricText: "Lyrics here",
+      pitchContourNotes: [],
     };
     const chain = makeChain([mockSegment]);
     insertSpy.mockReturnValue(chain);
@@ -272,6 +297,89 @@ describe("createSegment", () => {
     const returningSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["returning"];
     expect(returningSpy).toHaveBeenCalled();
     expect(result).toEqual(mockSegment);
+  });
+
+  it("defaults pitchContourNotes to empty array when omitted", async () => {
+    const mockSegment = {
+      id: "seg-1",
+      songId: "song-1",
+      label: "Verse 1",
+      order: 1,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: "Lyrics here",
+      pitchContourNotes: [],
+    };
+    const chain = makeChain([mockSegment]);
+    insertSpy.mockReturnValue(chain);
+
+    const { createSegment } = await getQueries();
+    await createSegment({
+      id: "seg-1",
+      songId: "song-1",
+      label: "Verse 1",
+      order: 1,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: "Lyrics here",
+    });
+
+    const valuesSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
+    expect(valuesSpy).toHaveBeenCalledWith({
+      id: "seg-1",
+      songId: "song-1",
+      label: "Verse 1",
+      order: 1,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: "Lyrics here",
+      pitchContourNotes: [],
+    });
+  });
+
+  it("falls back when pitch_contour_notes column is missing", async () => {
+    const missingColumnChain = {
+      values: vi.fn(() => {
+        throw new Error('column "pitch_contour_notes" does not exist');
+      }),
+    };
+    const fallbackRows = [{
+      id: "seg-1",
+      songId: "song-1",
+      label: "Verse 1",
+      order: 1,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: "Lyrics here",
+    }];
+    const fallbackChain = makeChain(fallbackRows);
+    insertSpy
+      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
+      .mockReturnValueOnce(fallbackChain);
+
+    const { createSegment } = await getQueries();
+    const result = await createSegment({
+      id: "seg-1",
+      songId: "song-1",
+      label: "Verse 1",
+      order: 1,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: "Lyrics here",
+      pitchContourNotes: [{ id: "n-1", timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
+    });
+
+    const fallbackValuesSpy = (fallbackChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
+    expect(fallbackValuesSpy).toHaveBeenCalledWith({
+      id: "seg-1",
+      songId: "song-1",
+      label: "Verse 1",
+      order: 1,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: "Lyrics here",
+    });
+    expect(result).toEqual({ ...fallbackRows[0], pitchContourNotes: [] });
   });
 });
 
@@ -288,6 +396,82 @@ describe("updateSegment", () => {
     expect(setSpy).toHaveBeenCalledWith({ label: "Chorus", startMs: 500 });
     const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
     expect(whereSpy).toHaveBeenCalledWith(eq(segments.id, "seg-1"));
+  });
+
+  it("falls back when pitch_contour_notes column is missing", async () => {
+    const missingColumnChain = {
+      set: vi.fn(() => ({
+        where: vi.fn(() => {
+          throw new Error('column "pitch_contour_notes" does not exist');
+        }),
+      })),
+    };
+    const fallbackChain = makeChain();
+    updateSpy
+      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
+      .mockReturnValueOnce(fallbackChain);
+
+    const { updateSegment } = await getQueries();
+    await updateSegment("seg-1", {
+      label: "Chorus",
+      pitchContourNotes: [{ id: "n-1", timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
+    });
+
+    const fallbackSetSpy = (fallbackChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
+    expect(fallbackSetSpy).toHaveBeenCalledWith({ label: "Chorus" });
+  });
+
+  it("throws migration-required error when only pitch contour notes are updated on a legacy schema", async () => {
+    const missingColumnChain = {
+      set: vi.fn(() => ({
+        where: vi.fn(() => {
+          throw new Error('column "pitch_contour_notes" does not exist');
+        }),
+      })),
+    };
+    updateSpy.mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>);
+
+    const { updateSegment } = await getQueries();
+    await expect(updateSegment("seg-1", {
+      pitchContourNotes: [{ id: "n-1", timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
+    })).rejects.toMatchObject({ code: "PITCH_CONTOUR_MIGRATION_REQUIRED" });
+
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getSegmentsBySongId", () => {
+  it("falls back when pitch_contour_notes column is missing", async () => {
+    const missingColumnChain = {
+      from: vi.fn(() => {
+        throw new Error('column "pitch_contour_notes" does not exist');
+      }),
+    };
+    const fallbackRows = [
+      {
+        id: "seg-1",
+        songId: "song-1",
+        label: "Verse 1",
+        order: 0,
+        startMs: 0,
+        endMs: 1000,
+        lyricText: "Lyrics here",
+      },
+    ];
+    const fallbackChain = makeChain(fallbackRows);
+    selectSpy
+      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
+      .mockReturnValueOnce(fallbackChain);
+
+    const { getSegmentsBySongId } = await getQueries();
+    const result = await getSegmentsBySongId("song-1");
+
+    expect(result).toEqual([
+      {
+        ...fallbackRows[0],
+        pitchContourNotes: [],
+      },
+    ]);
   });
 });
 

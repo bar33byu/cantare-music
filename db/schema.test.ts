@@ -21,6 +21,7 @@ describe("schema tables", () => {
     expect(cols).toContain("startMs");
     expect(cols).toContain("endMs");
     expect(cols).toContain("lyricText");
+    expect(cols).toContain("pitchContourNotes");
   });
 
   it("practiceRatings table has expected columns", () => {
