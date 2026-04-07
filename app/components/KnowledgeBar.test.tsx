@@ -32,4 +32,9 @@ describe("KnowledgeBar", () => {
     const outer = screen.getByRole("progressbar");
     expect(outer).toHaveAttribute("aria-valuenow", "75");
   });
+
+  it("renders memorization percentage text inside the bar", () => {
+    render(<KnowledgeBar percent={63.4} />);
+    expect(screen.getByTestId("knowledge-bar-percent")).toHaveTextContent("63% memorized");
+  });
 });

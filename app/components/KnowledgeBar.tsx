@@ -21,17 +21,23 @@ const KnowledgeBar: React.FC<KnowledgeBarProps> = ({ percent, label }) => {
         </p>
       )}
       <div
-        className="w-full bg-gray-200 rounded h-3"
+        className="relative h-4 w-full overflow-hidden rounded bg-indigo-100"
         role="progressbar"
         aria-valuenow={clampedPercent}
         aria-valuemin={0}
         aria-valuemax={100}
       >
         <div
-          className="bg-indigo-500 rounded h-3 transition-all"
+          className="h-4 rounded bg-indigo-600 transition-all"
           style={{ width: `${clampedPercent}%` }}
           data-testid="knowledge-bar-fill"
         />
+        <span
+          data-testid="knowledge-bar-percent"
+          className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] font-semibold text-indigo-950"
+        >
+          {Math.round(clampedPercent)}% memorized
+        </span>
       </div>
     </div>
   );

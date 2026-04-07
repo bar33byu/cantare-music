@@ -64,7 +64,7 @@ describe("SegmentCard", () => {
 
   it("renders mastery-colored top edge from masteryPercent", () => {
     render(<SegmentCard {...defaultProps} masteryPercent={100} />);
-    expect(screen.getByTestId("segment-mastery-edge")).toHaveStyle({ backgroundColor: "rgb(22, 163, 74)" });
+    expect(screen.getByTestId("segment-mastery-edge")).toHaveStyle({ backgroundColor: "rgb(79, 70, 229)" });
   });
 
   it("clamps progress to 0 before segment start", () => {

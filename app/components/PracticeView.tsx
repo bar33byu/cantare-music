@@ -765,7 +765,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               {onBreadcrumbRootClick ? (
                 <button
                   onClick={onBreadcrumbRootClick}
-                  className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-emerald-500 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                  className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-indigo-500 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 >
                   <span aria-hidden="true" className="text-base leading-none">&#x2190;</span>
                   {breadcrumbRootLabel}
@@ -779,7 +779,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   ref={songTitleRef}
                   tabIndex={isSongTitleTruncated ? 0 : -1}
                   title={isSongTitleTruncated ? song.title : undefined}
-                  className="block truncate text-2xl font-bold tracking-tight text-gray-900 outline-none md:text-3xl"
+                  className="block truncate text-xl font-medium tracking-tight text-gray-900 outline-none md:text-3xl md:font-bold"
                   data-testid="song-title"
                 >
                   {song.title}
@@ -800,7 +800,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               </span>
             </nav>
           ) : (
-            <h1 className="min-w-0 max-w-[15rem] text-2xl font-bold tracking-tight text-gray-900 sm:max-w-[22rem] md:max-w-[30rem] md:text-3xl lg:max-w-[36rem]">
+            <h1 className="min-w-0 max-w-[15rem] text-xl font-medium tracking-tight text-gray-900 sm:max-w-[22rem] md:max-w-[30rem] md:text-3xl md:font-bold lg:max-w-[36rem]">
               <span
                 ref={songTitleRef}
                 tabIndex={isSongTitleTruncated ? 0 : -1}
@@ -817,7 +817,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               onClick={onEditSongClick}
               aria-label="Edit song"
               title="Edit song"
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700"
             >
               <svg
                 aria-hidden="true"
@@ -849,7 +849,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             className="h-8 w-full animate-pulse rounded-full bg-gray-200"
           />
         ) : (
-          <KnowledgeBar percent={knowledgeScore.overall} label="Piece Knowledge" />
+          <KnowledgeBar percent={knowledgeScore.overall} />
         )}
         {ratingsError ? (
           <p data-testid="ratings-load-error" className="mt-2 text-sm text-amber-700">
@@ -859,16 +859,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       </div>
 
       <main data-testid="practice-main" className="flex flex-1 justify-center overflow-hidden px-4 pb-44 pt-2 md:px-8 md:pb-48">
-        <section data-testid="practice-focus" className="flex h-full min-h-0 w-full max-w-3xl items-center justify-center gap-4 md:gap-8">
+        <section data-testid="practice-focus" className="flex h-full min-h-0 w-full max-w-3xl items-center justify-center gap-2 md:gap-3">
           <button
             type="button"
             aria-label="Previous segment"
             data-testid="practice-prev-segment"
             onClick={handlePrevSegment}
             disabled={!hasSegments || isFirst}
-            className="inline-flex h-[70%] min-h-[220px] max-h-[560px] w-14 shrink-0 items-center justify-center rounded-[28px] border border-indigo-300/80 bg-gradient-to-b from-white via-indigo-50 to-indigo-100 text-indigo-700 shadow-lg shadow-indigo-300/30 transition hover:-translate-y-0.5 hover:from-white hover:to-indigo-200 hover:shadow-xl disabled:opacity-30"
+            className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
           >
-            <span aria-hidden="true" className="text-3xl leading-none">&#x2039;</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 12H6" />
+              <path d="M10 8l-4 4 4 4" />
+            </svg>
           </button>
           <div className="h-full min-h-0 w-full max-w-md">
             {hasSegments && currentSegment ? (
@@ -906,9 +909,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             data-testid="practice-next-segment"
             onClick={handleNextSegment}
             disabled={!hasSegments || isLast}
-            className="inline-flex h-[70%] min-h-[220px] max-h-[560px] w-14 shrink-0 items-center justify-center rounded-[28px] border border-indigo-300/80 bg-gradient-to-b from-white via-indigo-50 to-indigo-100 text-indigo-700 shadow-lg shadow-indigo-300/30 transition hover:-translate-y-0.5 hover:from-white hover:to-indigo-200 hover:shadow-xl disabled:opacity-30"
+            className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
           >
-            <span aria-hidden="true" className="text-3xl leading-none">&#x203A;</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 12h12" />
+              <path d="M14 8l4 4-4 4" />
+            </svg>
           </button>
         </section>
       </main>

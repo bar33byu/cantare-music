@@ -1,7 +1,7 @@
 import type { Segment } from "../types";
 
 const EMPTY_COLOR = { r: 255, g: 255, b: 255 };
-const FULL_COLOR = { r: 22, g: 163, b: 74 };
+const FULL_COLOR = { r: 79, g: 70, b: 229 };
 
 function clamp01(value: number): number {
   if (Number.isNaN(value)) {

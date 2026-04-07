@@ -142,7 +142,7 @@ describe("AudioPlayer", () => {
 
     expect(screen.getByTestId("audio-piece-mastery-bar")).toBeInTheDocument();
     expect(screen.getByTestId("audio-piece-mastery-chunk-1")).toHaveStyle({
-      backgroundColor: "rgb(69, 181, 110)",
+      backgroundColor: "rgb(114, 107, 234)",
     });
   });
 

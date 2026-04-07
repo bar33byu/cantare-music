@@ -45,7 +45,7 @@ function maskedGlyph(char: string, index: number) {
     <span
       key={`mask-${index}`}
       data-testid="segment-lyric-mask-char"
-      className="text-transparent underline decoration-2 decoration-current [text-decoration-skip-ink:none]"
+      className="text-transparent underline decoration-2 decoration-slate-500 [text-decoration-skip-ink:none]"
       aria-hidden="true"
     >
       {char}

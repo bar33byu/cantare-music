@@ -416,7 +416,7 @@ export function AudioPlayer({
         >
           <div
             data-testid="audio-piece-mastery-bar"
-            className="pointer-events-none absolute inset-x-0 top-0 h-1 overflow-hidden rounded-full border border-emerald-200"
+            className="pointer-events-none absolute inset-x-0 top-0 h-1 overflow-hidden rounded-full border border-indigo-200"
             style={{ backgroundColor: getMasteryColor(0) }}
           >
             {masteryChunks.map((chunk, index) => {

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { buildMasteryTimelineChunks, getMasteryColor } from "./masteryColors";
 
 describe("getMasteryColor", () => {
-  it("maps 0 to white and 100 to full green", () => {
+  it("maps 0 to white and 100 to full indigo", () => {
     expect(getMasteryColor(0)).toBe("rgb(255, 255, 255)");
-    expect(getMasteryColor(100)).toBe("rgb(22, 163, 74)");
+    expect(getMasteryColor(100)).toBe("rgb(79, 70, 229)");
   });
 });
 
