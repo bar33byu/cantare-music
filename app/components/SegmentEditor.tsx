@@ -700,26 +700,76 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
       const probe = new Audio();
       probe.preload = 'metadata';
       probe.crossOrigin = 'anonymous';
+      
+      let lastReportedDuration: number | null = null;
+      let stabilityCheckTimeoutId: number | null = null;
+      let hasResolvedCanPlay = false;
+
       const timeoutId = window.setTimeout(() => {
         cleanup();
         resolve(null);
-      }, 4000);
+      }, 5000);
 
       const cleanup = () => {
-        probe.removeEventListener('loadedmetadata', handleLoadedMetadata);
-        probe.removeEventListener('loadeddata', handleLoadedMetadata);
-        probe.removeEventListener('durationchange', handleLoadedMetadata);
-        probe.removeEventListener('canplay', handleLoadedMetadata);
+        probe.removeEventListener('loadedmetadata', handleMetadataLoaded);
+        probe.removeEventListener('durationchange', handleDurationChange);
+        probe.removeEventListener('canplay', handleCanPlay);
         probe.removeEventListener('error', handleError);
         window.clearTimeout(timeoutId);
+        if (stabilityCheckTimeoutId) {
+          window.clearTimeout(stabilityCheckTimeoutId);
+        }
+        probe.src = '';
       };
 
-      const handleLoadedMetadata = () => {
+      const handleCanPlay = () => {
+        // canplay means the browser has enough data to play and duration is reliable
         if (Number.isFinite(probe.duration) && probe.duration > 0) {
           cleanup();
+          hasResolvedCanPlay = true;
           resolve(Math.round(probe.duration * 1000));
+        }
+      };
+
+      const handleDurationChange = () => {
+        if (hasResolvedCanPlay) return;
+
+        const currentDuration = probe.duration;
+        if (!Number.isFinite(currentDuration) || currentDuration <= 0) {
           return;
         }
+
+        if (lastReportedDuration === null) {
+          // First valid duration report
+          lastReportedDuration = currentDuration;
+          // Wait 200ms to see if duration changes again
+          if (stabilityCheckTimeoutId) {
+            window.clearTimeout(stabilityCheckTimeoutId);
+          }
+          stabilityCheckTimeoutId = window.setTimeout(() => {
+            // If duration hasn't changed, it's stable enough
+            if (probe.duration === lastReportedDuration) {
+              cleanup();
+              resolve(Math.round(probe.duration * 1000));
+            }
+          }, 200);
+        } else if (currentDuration !== lastReportedDuration) {
+          // Duration changed, reset stability check
+          lastReportedDuration = currentDuration;
+          if (stabilityCheckTimeoutId) {
+            window.clearTimeout(stabilityCheckTimeoutId);
+          }
+          stabilityCheckTimeoutId = window.setTimeout(() => {
+            if (probe.duration === lastReportedDuration) {
+              cleanup();
+              resolve(Math.round(probe.duration * 1000));
+            }
+          }, 200);
+        }
+      };
+
+      const handleMetadataLoaded = () => {
+        // loadedmetadata is early; let durationchange/canplay take precedence
       };
 
       const handleError = () => {
@@ -727,10 +777,9 @@ export function SegmentEditor({ songId, onBack, onSongUpdated }: SegmentEditorPr
         resolve(null);
       };
 
-      probe.addEventListener('loadedmetadata', handleLoadedMetadata);
-      probe.addEventListener('loadeddata', handleLoadedMetadata);
-      probe.addEventListener('durationchange', handleLoadedMetadata);
-      probe.addEventListener('canplay', handleLoadedMetadata);
+      probe.addEventListener('loadedmetadata', handleMetadataLoaded);
+      probe.addEventListener('durationchange', handleDurationChange);
+      probe.addEventListener('canplay', handleCanPlay);
       probe.addEventListener('error', handleError);
       probe.src = sourceUrl;
       probe.load();
