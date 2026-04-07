@@ -301,7 +301,10 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
       </div>
 
       <ul data-testid="playlist-song-list" className="space-y-2">
-        {sortedSongs.map((song, index) => (
+        {sortedSongs.map((song, index) => {
+          const hasAudio = Boolean(song.audioUrl?.trim());
+          const hasSegments = song.segments.length > 0;
+          return (
           <li
             key={song.id}
             data-testid={`playlist-song-row-${song.id}`}
@@ -314,6 +317,20 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
             <div>
               <p className="font-medium">{index + 1}. {song.title}</p>
               {song.artist ? <p className="text-sm text-gray-500">{song.artist}</p> : null}
+              {(!hasAudio || !hasSegments) ? (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {!hasAudio ? (
+                    <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                      Missing audio
+                    </span>
+                  ) : null}
+                  {!hasSegments ? (
+                    <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                      Missing segments
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <button
               data-testid={`playlist-song-remove-${song.id}`}
@@ -323,7 +340,8 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
               Remove
             </button>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </section>
   );
