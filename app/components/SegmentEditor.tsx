@@ -365,7 +365,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 id: crypto.randomUUID(),
-                label: `Section ${i + 1}`,
+                label: String(i + 1),
                 startMs: timings[i].startMs,
                 endMs: timings[i].endMs,
                 lyricText: sections[i],
