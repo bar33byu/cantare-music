@@ -103,6 +103,26 @@ function parseStoredSettings(raw: string | null): UserSettings {
   }
 }
 
+function mergeUsersWithDatabase(cachedUsers: KnownUser[], dbUsers: KnownUser[]): KnownUser[] {
+  const merged = new Map<string, KnownUser>();
+
+  for (const user of cachedUsers) {
+    const id = normalizeUserId(user.id);
+    merged.set(id, { id, name: user.name.trim() || id });
+  }
+
+  for (const user of dbUsers) {
+    const id = normalizeUserId(user.id);
+    merged.set(id, { id, name: user.name.trim() || id });
+  }
+
+  if (!merged.has(DEFAULT_USER_ID)) {
+    merged.set(DEFAULT_USER_ID, { id: DEFAULT_USER_ID, name: "Default User" });
+  }
+
+  return Array.from(merged.values());
+}
+
 function parseHashRoute(hash: string): HashRouteState {
   const params = new URLSearchParams(hash.replace(/^#/, ""));
   const view = params.get("view") as AppView | null;
@@ -192,6 +212,7 @@ export default function Home() {
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [newUserName, setNewUserName] = useState("");
   const settingsLoadedRef = useRef(false);
+  const usersHydratedFromDbRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
   const activeUserId = userSettings.currentUserId;
   const scopedUserId = activeUserId === DEFAULT_USER_ID ? undefined : activeUserId;
@@ -235,6 +256,56 @@ export default function Home() {
     document.cookie = `${USER_COOKIE_NAME}=${cookieValue}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
   }, [userSettings]);
 
+  useEffect(() => {
+    if (!settingsOpen || usersHydratedFromDbRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const hydrateUsersFromDatabase = async () => {
+      try {
+        const response = await fetch('/api/users');
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as { users?: KnownUser[] };
+        if (!Array.isArray(payload.users) || payload.users.length === 0) {
+          return;
+        }
+
+        const dbUsers = normalizeKnownUsers(payload.users);
+        if (cancelled) {
+          return;
+        }
+
+        setUserSettings((previous) => {
+          const users = mergeUsersWithDatabase(previous.users, dbUsers);
+          const currentUserId = users.some((user) => user.id === previous.currentUserId)
+            ? previous.currentUserId
+            : DEFAULT_USER_ID;
+
+          return {
+            ...previous,
+            users,
+            currentUserId,
+          };
+        });
+      } catch {
+        // Keep local cache fallback when DB users endpoint is unavailable.
+      } finally {
+        usersHydratedFromDbRef.current = true;
+      }
+    };
+
+    void hydrateUsersFromDatabase();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsOpen]);
+
   const handleSwitchUser = (nextUserId: string) => {
     const normalized = normalizeUserId(nextUserId);
     setUserSettings((previous) => ({ ...previous, currentUserId: normalized }));
@@ -244,7 +315,7 @@ export default function Home() {
     setActiveView("playlists");
   };
 
-  const handleAddUser = () => {
+  const handleAddUser = async () => {
     const trimmed = newUserName.trim();
     if (!trimmed) {
       return;
@@ -268,6 +339,17 @@ export default function Home() {
     setSelectedPlaylist(null);
     setRefreshTrigger((previous) => previous + 1);
     setActiveView("playlists");
+
+    try {
+      await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, name: trimmed }),
+      });
+      usersHydratedFromDbRef.current = false;
+    } catch {
+      // Local cache already has the user; DB sync can retry later.
+    }
   };
 
   const loadSongById = async (songId: string): Promise<Song | null> => {
@@ -749,7 +831,9 @@ export default function Home() {
                     />
                     <button
                       type="button"
-                      onClick={handleAddUser}
+                      onClick={() => {
+                        void handleAddUser();
+                      }}
                       className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100"
                     >
                       Add

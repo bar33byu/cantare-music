@@ -1,6 +1,6 @@
 import { eq, asc, desc, inArray, and, count } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow } from "./schema";
 
 const DEFAULT_QUERY_USER_ID = "default";
@@ -122,6 +122,68 @@ function isMissingUserIdColumnError(error: unknown): boolean {
   }
 
   return false;
+}
+
+function isMissingUsersTableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes('relation "users" does not exist') || (message.includes("users") && message.includes("does not exist"))) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (causeMessage.includes('relation "users" does not exist')) {
+      return true;
+    }
+    if (causeCode === "42P01" && causeMessage.includes("users")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────
+
+export async function getAllUsers(): Promise<Array<{ id: string; name: string }>> {
+  try {
+    const rows = await db().select({ id: users.id, name: users.name }).from(users).orderBy(asc(users.name));
+    if (rows.length === 0) {
+      return [{ id: DEFAULT_QUERY_USER_ID, name: "Default User" }];
+    }
+    return rows;
+  } catch (error) {
+    if (!isMissingUsersTableError(error)) {
+      throw error;
+    }
+    return [{ id: DEFAULT_QUERY_USER_ID, name: "Default User" }];
+  }
+}
+
+export async function upsertUser(data: { id: string; name: string }): Promise<{ id: string; name: string }> {
+  try {
+    const rows = await db()
+      .insert(users)
+      .values({ id: data.id, name: data.name })
+      .onConflictDoUpdate({
+        target: users.id,
+        set: { name: data.name },
+      })
+      .returning({ id: users.id, name: users.name });
+    return rows[0] ?? data;
+  } catch (error) {
+    if (!isMissingUsersTableError(error)) {
+      throw error;
+    }
+    return data;
+  }
 }
 
 // ── Songs ──────────────────────────────────────────────────────────────────
