@@ -15,6 +15,6 @@ describe('DELETE /api/playlists/[id]/songs/[songId]', () => {
     const response = await DELETE(request as any, { params: Promise.resolve({ id: 'pl-1', songId: 'song-1' }) });
 
     expect(response.status).toBe(204);
-    expect(removeSongFromPlaylist).toHaveBeenCalledWith('pl-1', 'song-1');
+    expect(removeSongFromPlaylist).toHaveBeenCalledWith('pl-1', 'song-1', 'default');
   });
 });

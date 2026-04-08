@@ -6,6 +6,7 @@ import {
   boolean,
   jsonb,
   primaryKey,
+  index,
 } from "drizzle-orm/pg-core";
 import { InferSelectModel, sql } from "drizzle-orm";
 
@@ -16,14 +17,28 @@ export interface SegmentPitchContourPoint {
   durationMs: number;
 }
 
-export const songs = pgTable("songs", {
+export const users = pgTable("users", {
   id: text("id").primaryKey(),
-  title: text("title").notNull(),
-  artist: text("artist"),
-  audioKey: text("audio_key"),
+  name: text("name").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
-  lastPracticedAt: timestamp("last_practiced_at"),
 });
+
+export const songs = pgTable(
+  "songs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().default("default"),
+    title: text("title").notNull(),
+    artist: text("artist"),
+    audioKey: text("audio_key"),
+    createdAt: timestamp("created_at").defaultNow(),
+    lastPracticedAt: timestamp("last_practiced_at"),
+  },
+  (table) => ({
+    userIdIdx: index("idx_songs_user_id").on(table.userId),
+    userCreatedAtIdx: index("idx_songs_user_created_at").on(table.userId, table.createdAt),
+  })
+);
 
 export const segments = pgTable("segments", {
   id: text("id").primaryKey(),
@@ -50,13 +65,21 @@ export const practiceRatings = pgTable("practice_ratings", {
   ratedAt: timestamp("rated_at").notNull(),
 });
 
-export const playlists = pgTable("playlists", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  eventDate: text("event_date"),
-  isRetired: boolean("is_retired").notNull().default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+export const playlists = pgTable(
+  "playlists",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().default("default"),
+    name: text("name").notNull(),
+    eventDate: text("event_date"),
+    isRetired: boolean("is_retired").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => ({
+    userIdIdx: index("idx_playlists_user_id").on(table.userId),
+    userCreatedAtIdx: index("idx_playlists_user_created_at").on(table.userId, table.createdAt),
+  })
+);
 
 export const playlistSongs = pgTable(
   "playlist_songs",
@@ -76,10 +99,12 @@ export const playlistSongs = pgTable(
 
 export const orphanedAudioKeys = pgTable("orphaned_audio_keys", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull().default("default"),
   audioKey: text("audio_key").notNull(),
   failedAt: timestamp("failed_at").defaultNow(),
 });
 
+export type UserRow = InferSelectModel<typeof users>;
 export type SongRow = InferSelectModel<typeof songs>;
 export type SegmentRow = InferSelectModel<typeof segments>;
 export type PracticeRatingRow = InferSelectModel<typeof practiceRatings>;

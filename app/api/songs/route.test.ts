@@ -33,7 +33,8 @@ describe('GET /api/songs', () => {
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({ '1': 65 });
 
-    const response = await GET();
+    const request = new Request('http://localhost/api/songs');
+    const response = await GET(request as any);
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -45,9 +46,9 @@ describe('GET /api/songs', () => {
         masteryPercent: 65,
       },
     ]);
-    expect(getAllSongs).toHaveBeenCalled();
-    expect(getLatestRatingTimeBySongIds).toHaveBeenCalledWith(['1']);
-    expect(getSongKnowledgeBySongIds).toHaveBeenCalledWith(['1']);
+    expect(getAllSongs).toHaveBeenCalledWith('default');
+    expect(getLatestRatingTimeBySongIds).toHaveBeenCalledWith(['1'], 'default');
+    expect(getSongKnowledgeBySongIds).toHaveBeenCalledWith(['1'], 'default');
   });
 
   it('handles string timestamps from the database', async () => {
@@ -63,7 +64,8 @@ describe('GET /api/songs', () => {
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
 
-    const response = await GET();
+    const request = new Request('http://localhost/api/songs');
+    const response = await GET(request as any);
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -80,7 +82,8 @@ describe('GET /api/songs', () => {
   it('returns empty list when database is not configured', async () => {
     vi.mocked(getAllSongs).mockRejectedValue(new Error('DATABASE_URL environment variable is not set'));
 
-    const response = await GET();
+    const request = new Request('http://localhost/api/songs');
+    const response = await GET(request as any);
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -102,7 +105,8 @@ describe('GET /api/songs', () => {
     });
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({ 'song-9': 40 });
 
-    const response = await GET();
+    const request = new Request('http://localhost/api/songs');
+    const response = await GET(request as any);
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -133,6 +137,7 @@ describe('POST /api/songs', () => {
     expect(data).toEqual(mockSong);
     expect(createSong).toHaveBeenCalledWith({
       id: expect.any(String),
+      userId: 'default',
       title: 'New Song',
       artist: 'Artist',
     });

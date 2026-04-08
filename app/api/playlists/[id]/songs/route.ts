@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addSongToPlaylist, getPlaylistById, reorderPlaylistSongs } from '../../../../../db/queries';
+import { resolveRequestUserId } from '../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -15,8 +16,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const existing = await getPlaylistById(id);
+    const existing = await getPlaylistById(id, userId);
     if (!existing) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
@@ -32,7 +34,7 @@ export async function POST(
       return NextResponse.json({ error: 'position must be a number' }, { status: 400 });
     }
 
-    await addSongToPlaylist(id, songId, position);
+    await addSongToPlaylist(id, songId, position, userId);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error adding song to playlist:', error);
@@ -45,8 +47,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const existing = await getPlaylistById(id);
+    const existing = await getPlaylistById(id, userId);
     if (!existing) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
@@ -58,7 +61,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'orderedSongIds must be a string array' }, { status: 400 });
     }
 
-    await reorderPlaylistSongs(id, orderedSongIds);
+    await reorderPlaylistSongs(id, orderedSongIds, userId);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error reordering playlist songs:', error);

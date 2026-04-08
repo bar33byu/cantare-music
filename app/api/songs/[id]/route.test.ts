@@ -65,7 +65,7 @@ describe('GET /api/songs/[id]', () => {
       lastPracticedAt: '2023-01-04T00:00:00.000Z',
       updatedAt: '2023-01-01T00:00:00.000Z',
     });
-    expect(getSongById).toHaveBeenCalledWith('123');
+    expect(getSongById).toHaveBeenCalledWith('123', 'default');
     expect(getSegmentsBySongId).toHaveBeenCalledWith('123');
   });
 
@@ -95,7 +95,7 @@ describe('DELETE /api/songs/[id]', () => {
 
     expect(response.status).toBe(204);
     expect(deleteObject).toHaveBeenCalledWith('key-123');
-    expect(deleteSong).toHaveBeenCalledWith('123');
+    expect(deleteSong).toHaveBeenCalledWith('123', 'default');
   });
 
   it('returns 204 without calling deleteObject if no audioKey', async () => {
@@ -107,7 +107,7 @@ describe('DELETE /api/songs/[id]', () => {
 
     expect(response.status).toBe(204);
     expect(deleteObject).not.toHaveBeenCalled();
-    expect(deleteSong).toHaveBeenCalledWith('123');
+    expect(deleteSong).toHaveBeenCalledWith('123', 'default');
   });
 
   it('returns 204 and still deletes song when deleteObject fails', async () => {
@@ -121,7 +121,7 @@ describe('DELETE /api/songs/[id]', () => {
     expect(response.status).toBe(204);
     expect(response.headers.get('x-audio-cleanup-warning')).toBe('true');
     expect(deleteObject).toHaveBeenCalledWith('key-123');
-    expect(deleteSong).toHaveBeenCalledWith('123');
+    expect(deleteSong).toHaveBeenCalledWith('123', 'default');
   });
 
   it('returns 404 if song not found', async () => {
@@ -153,7 +153,7 @@ describe('PATCH /api/songs/[id]', () => {
     const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
 
     expect(response.status).toBe(200);
-    expect(updateSong).toHaveBeenCalledWith('123', { audioKey: 'new-key' });
+    expect(updateSong).toHaveBeenCalledWith('123', { audioKey: 'new-key' }, 'default');
     expect(deleteObject).toHaveBeenCalledWith('old-key');
   });
 

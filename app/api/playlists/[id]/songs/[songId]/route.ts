@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { removeSongFromPlaylist } from '../../../../../../db/queries';
+import { resolveRequestUserId } from '../../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -15,8 +16,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; songId: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id, songId } = await params;
-    await removeSongFromPlaylist(id, songId);
+    await removeSongFromPlaylist(id, songId, userId);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error removing song from playlist:', error);

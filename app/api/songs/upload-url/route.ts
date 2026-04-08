@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { generateUploadKey, r2Client, BUCKET } from '../../../../lib/r2';
+import { resolveRequestUserId } from '../../_user';
+import { getSongById } from '../../../../db/queries';
 
 type UploadRequestBody = {
   songId?: string;
@@ -15,6 +17,7 @@ const ALLOWED_CONTENT_TYPES = new Set(['audio/mpeg', 'audio/mp3']);
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = resolveRequestUserId(request);
     const body = (await request.json().catch(() => null)) as UploadRequestBody | null;
 
     if (
@@ -35,7 +38,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
-    const key = generateUploadKey(body.songId, body.filename);
+    const song = await getSongById(body.songId, userId);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
+
+    const key = generateUploadKey(userId, body.songId, body.filename);
 
     const command = new PutObjectCommand({
       Bucket: BUCKET,

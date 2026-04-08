@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllSongs, createSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds } from '../../../db/queries';
+import { resolveRequestUserId } from '../_user';
 
 function toIsoString(value: unknown): string | null {
   if (!value) {
@@ -30,13 +31,14 @@ function isMissingDatabaseConfigError(error: unknown): boolean {
   return error instanceof Error && error.message.includes('DATABASE_URL environment variable is not set');
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const songs = await getAllSongs();
+    const userId = resolveRequestUserId(request);
+    const songs = await getAllSongs(userId);
     const songIds = songs.map((song) => song.id);
     const [ratingFallbackBySongId, knowledgeBySongId] = await Promise.all([
-      getLatestRatingTimeBySongIds(songIds),
-      getSongKnowledgeBySongIds(songIds),
+      getLatestRatingTimeBySongIds(songIds, userId),
+      getSongKnowledgeBySongIds(songIds, userId),
     ]);
     return NextResponse.json(
       songs.map((song) => ({
@@ -58,6 +60,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = resolveRequestUserId(request);
     const body = await request.json();
     const { title, artist } = body;
 
@@ -70,7 +73,7 @@ export async function POST(request: NextRequest) {
     }
 
     const id = crypto.randomUUID();
-    const song = await createSong({ id, title, artist });
+    const song = await createSong({ id, userId, title, artist });
 
     return NextResponse.json(song, { status: 201 });
   } catch (error) {

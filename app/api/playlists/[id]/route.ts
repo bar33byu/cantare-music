@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deletePlaylist, getPlaylistById, updatePlaylist } from '../../../../db/queries';
+import { resolveRequestUserId } from '../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -15,8 +16,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const playlist = await getPlaylistById(id);
+    const playlist = await getPlaylistById(id, userId);
 
     if (!playlist) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
@@ -34,8 +36,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const existing = await getPlaylistById(id);
+    const existing = await getPlaylistById(id, userId);
     if (!existing) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
@@ -53,7 +56,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'isRetired must be a boolean' }, { status: 400 });
     }
 
-    await updatePlaylist(id, { name, eventDate, isRetired });
+    await updatePlaylist(id, { name, eventDate, isRetired }, userId);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error updating playlist:', error);
@@ -66,13 +69,14 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const existing = await getPlaylistById(id);
+    const existing = await getPlaylistById(id, userId);
     if (!existing) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
 
-    await deletePlaylist(id);
+    await deletePlaylist(id, userId);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error deleting playlist:', error);

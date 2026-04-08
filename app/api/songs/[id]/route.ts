@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSongById, deleteSong, updateSong, getSegmentsBySongId, recordOrphanedAudioKey } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
+import { resolveRequestUserId } from '../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -17,8 +18,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const song = await getSongById(id);
+    const song = await getSongById(id, userId);
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
@@ -58,8 +60,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const song = await getSongById(id);
+    const song = await getSongById(id, userId);
     let audioCleanupFailed = false;
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
@@ -78,14 +81,14 @@ export async function DELETE(
           error: audioDeleteError,
         });
         try {
-          await recordOrphanedAudioKey(crypto.randomUUID(), song.audioKey);
+          await recordOrphanedAudioKey(crypto.randomUUID(), song.audioKey, userId);
         } catch (recordError) {
           console.error('Failed to record orphaned audio key:', recordError);
         }
       }
     }
 
-    await deleteSong(id);
+    await deleteSong(id, userId);
     return new NextResponse(null, {
       status: 204,
       headers: audioCleanupFailed ? { 'x-audio-cleanup-warning': 'true' } : undefined,
@@ -101,11 +104,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
     const body = await request.json();
     const { audioKey, title, artist } = body;
 
-    const existingSong = await getSongById(id);
+    const existingSong = await getSongById(id, userId);
     if (!existingSong) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
@@ -127,7 +131,7 @@ export async function PATCH(
       await deleteObject(existingSong.audioKey);
     }
 
-    await updateSong(id, updates);
+    await updateSong(id, updates, userId);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error updating song:', error);

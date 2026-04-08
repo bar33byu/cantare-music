@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments } from '../../../../../db/queries';
+import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments, getSongById } from '../../../../../db/queries';
 import { inferTimelineOrder } from '../../../../lib/segmentTiming';
 import { validatePitchContourNotes } from '../../../../lib/pitchContour';
+import { resolveRequestUserId } from '../../../_user';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
+    const song = await getSongById(id, userId);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
     const segments = await getSegmentsBySongId(id);
     return NextResponse.json(segments);
   } catch (error) {
@@ -27,7 +33,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id: songId } = await params;
+    const song = await getSongById(songId, userId);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
     const body = await request.json();
     const { id, label, startMs, endMs, lyricText, pitchContourNotes } = body;
 
@@ -93,7 +104,12 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
+    const song = await getSongById(id, userId);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
     const body = await request.json();
     const { segments } = body;
 
@@ -137,7 +153,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await params;
+    const userId = resolveRequestUserId(request);
+    const { id } = await params;
+    const song = await getSongById(id, userId);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
     const body = await request.json();
 
     if (!Array.isArray(body)) {

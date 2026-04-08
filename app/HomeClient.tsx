@@ -10,6 +10,7 @@ import { SongBrowser } from "./components/SongBrowser";
 import { SegmentEditor } from "./components/SegmentEditor";
 import { makeSession } from "./lib/factories";
 import type { Playlist, Song } from "./types";
+import { createUserIdFromName, DEFAULT_USER_ID, normalizeUserId, type KnownUser, USER_COOKIE_NAME } from "./lib/userContext";
 
 interface SongListItem {
   id: string;
@@ -42,12 +43,39 @@ interface HashRouteState {
 
 interface UserSettings {
   segmentPrerollMs: number;
+  currentUserId: string;
+  users: KnownUser[];
 }
 
 const SETTINGS_STORAGE_KEY = "cantare:user-settings";
 const DEFAULT_USER_SETTINGS: UserSettings = {
   segmentPrerollMs: 500,
+  currentUserId: DEFAULT_USER_ID,
+  users: [{ id: DEFAULT_USER_ID, name: "Default User" }],
 };
+
+function normalizeKnownUsers(users: KnownUser[] | undefined): KnownUser[] {
+  if (!Array.isArray(users)) {
+    return DEFAULT_USER_SETTINGS.users;
+  }
+
+  const deduped = new Map<string, KnownUser>();
+  for (const user of users) {
+    if (!user || typeof user.id !== "string" || typeof user.name !== "string") {
+      continue;
+    }
+    const id = normalizeUserId(user.id);
+    if (!deduped.has(id)) {
+      deduped.set(id, { id, name: user.name.trim() || id });
+    }
+  }
+
+  if (!deduped.has(DEFAULT_USER_ID)) {
+    deduped.set(DEFAULT_USER_ID, { id: DEFAULT_USER_ID, name: "Default User" });
+  }
+
+  return Array.from(deduped.values());
+}
 
 function clampSegmentPrerollMs(value: number): number {
   if (!Number.isFinite(value)) {
@@ -63,8 +91,12 @@ function parseStoredSettings(raw: string | null): UserSettings {
 
   try {
     const parsed = JSON.parse(raw) as Partial<UserSettings>;
+    const users = normalizeKnownUsers(parsed.users);
+    const currentUserId = normalizeUserId(parsed.currentUserId ?? DEFAULT_USER_SETTINGS.currentUserId);
     return {
       segmentPrerollMs: clampSegmentPrerollMs(parsed.segmentPrerollMs ?? DEFAULT_USER_SETTINGS.segmentPrerollMs),
+      currentUserId: users.some((user) => user.id === currentUserId) ? currentUserId : DEFAULT_USER_ID,
+      users,
     };
   } catch {
     return DEFAULT_USER_SETTINGS;
@@ -158,6 +190,7 @@ export default function Home() {
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [newUserName, setNewUserName] = useState("");
   const settingsLoadedRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
 
@@ -177,7 +210,44 @@ export default function Home() {
     }
 
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(userSettings));
+    const cookieValue = encodeURIComponent(userSettings.currentUserId);
+    document.cookie = `${USER_COOKIE_NAME}=${cookieValue}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
   }, [userSettings]);
+
+  const handleSwitchUser = (nextUserId: string) => {
+    const normalized = normalizeUserId(nextUserId);
+    setUserSettings((previous) => ({ ...previous, currentUserId: normalized }));
+    setSelectedSong(null);
+    setSelectedPlaylist(null);
+    setRefreshTrigger((previous) => previous + 1);
+    setActiveView("playlists");
+  };
+
+  const handleAddUser = () => {
+    const trimmed = newUserName.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const id = createUserIdFromName(trimmed);
+    setUserSettings((previous) => {
+      const existing = previous.users.find((user) => user.name.toLowerCase() === trimmed.toLowerCase());
+      if (existing) {
+        return { ...previous, currentUserId: existing.id };
+      }
+
+      return {
+        ...previous,
+        currentUserId: id,
+        users: [...previous.users, { id, name: trimmed }],
+      };
+    });
+    setNewUserName("");
+    setSelectedSong(null);
+    setSelectedPlaylist(null);
+    setRefreshTrigger((previous) => previous + 1);
+    setActiveView("playlists");
+  };
 
   const loadSongById = async (songId: string): Promise<Song | null> => {
     const response = await fetch(`/api/songs/${songId}`);
@@ -630,7 +700,39 @@ export default function Home() {
                 </div>
 
                 <div className="rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500">
-                  More settings coming soon.
+                  <h3 className="text-sm font-semibold text-gray-800">User</h3>
+                  <label htmlFor="active-user" className="mt-3 block text-sm text-gray-700">
+                    Active user
+                  </label>
+                  <select
+                    id="active-user"
+                    data-testid="active-user-select"
+                    value={userSettings.currentUserId}
+                    onChange={(event) => handleSwitchUser(event.target.value)}
+                    className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-800"
+                  >
+                    {userSettings.users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="text"
+                      value={newUserName}
+                      onChange={(event) => setNewUserName(event.target.value)}
+                      placeholder="Add user name"
+                      className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddUser}
+                      className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      Add
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>

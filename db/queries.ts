@@ -3,6 +3,8 @@ import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow } from "./schema";
 
+const DEFAULT_QUERY_USER_ID = "default";
+
 export type PersistedMemoryRating = 1 | 2 | 3 | 4 | 5;
 
 export interface PersistedSegmentRating {
@@ -98,10 +100,14 @@ function isMissingPitchContourNotesColumnError(error: unknown): boolean {
 
 // ── Songs ──────────────────────────────────────────────────────────────────
 
-export async function getAllSongs(): Promise<SongRow[]> {
+export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promise<SongRow[]> {
   let primaryError: unknown;
   try {
-    return await db().select().from(songs).orderBy(desc(songs.createdAt));
+    return await db()
+      .select()
+      .from(songs)
+      .where(eq(songs.userId, userId))
+      .orderBy(desc(songs.createdAt));
   } catch (error) {
     primaryError = error;
   }
@@ -110,12 +116,14 @@ export async function getAllSongs(): Promise<SongRow[]> {
     const legacyRows = await db()
       .select({
         id: songs.id,
+        userId: songs.userId,
         title: songs.title,
         artist: songs.artist,
         audioKey: songs.audioKey,
         createdAt: songs.createdAt,
       })
       .from(songs)
+      .where(eq(songs.userId, userId))
       .orderBy(desc(songs.createdAt));
 
     return legacyRows.map((row) => ({ ...row, lastPracticedAt: null } as SongRow));
@@ -125,14 +133,15 @@ export async function getAllSongs(): Promise<SongRow[]> {
 }
 
 export async function getSongById(
-  id: string
+  id: string,
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<SongRow | undefined> {
   let primaryError: unknown;
   try {
     const rows = await db()
       .select()
       .from(songs)
-      .where(eq(songs.id, id))
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
       .limit(1);
     return rows[0];
   } catch (error) {
@@ -143,13 +152,14 @@ export async function getSongById(
     const rows = await db()
       .select({
         id: songs.id,
+        userId: songs.userId,
         title: songs.title,
         artist: songs.artist,
         audioKey: songs.audioKey,
         createdAt: songs.createdAt,
       })
       .from(songs)
-      .where(eq(songs.id, id))
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
       .limit(1);
 
     const row = rows[0];
@@ -165,6 +175,7 @@ export async function getSongById(
 
 export async function createSong(data: {
   id: string;
+  userId: string;
   title: string;
   artist?: string;
   audioKey?: string;
@@ -173,6 +184,7 @@ export async function createSong(data: {
     .insert(songs)
     .values({
       id: data.id,
+      userId: data.userId,
       title: data.title,
       artist: data.artist ?? null,
       audioKey: data.audioKey ?? null,
@@ -183,33 +195,38 @@ export async function createSong(data: {
 
 export async function updateSongAudioKey(
   id: string,
-  audioKey: string
+  audioKey: string,
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
   await db()
     .update(songs)
     .set({ audioKey })
-    .where(eq(songs.id, id));
+    .where(and(eq(songs.id, id), eq(songs.userId, userId)));
 }
 
 export async function updateSong(
   id: string,
-  updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist'>>
+  updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist'>>,
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
   await db()
     .update(songs)
     .set(updates)
-    .where(eq(songs.id, id));
+    .where(and(eq(songs.id, id), eq(songs.userId, userId)));
 }
 
 export async function markSongPracticed(
   id: string,
-  practicedAt: Date = new Date()
+  userIdOrPracticedAt: string | Date = DEFAULT_QUERY_USER_ID,
+  maybePracticedAt: Date = new Date()
 ): Promise<void> {
+  const userId = typeof userIdOrPracticedAt === "string" ? userIdOrPracticedAt : DEFAULT_QUERY_USER_ID;
+  const practicedAt = userIdOrPracticedAt instanceof Date ? userIdOrPracticedAt : maybePracticedAt;
   try {
     await db()
       .update(songs)
       .set({ lastPracticedAt: practicedAt })
-      .where(eq(songs.id, id));
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)));
   } catch (error) {
     if (isMissingLastPracticedColumnError(error)) {
       return;
@@ -218,20 +235,26 @@ export async function markSongPracticed(
   }
 }
 
-export async function deleteSong(id: string): Promise<void> {
-  await db().delete(songs).where(eq(songs.id, id));
+export async function deleteSong(id: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<void> {
+  await db().delete(songs).where(and(eq(songs.id, id), eq(songs.userId, userId)));
 }
 
-export async function recordOrphanedAudioKey(id: string, audioKey: string): Promise<void> {
-  await db().insert(orphanedAudioKeys).values({ id, audioKey });
+export async function recordOrphanedAudioKey(
+  id: string,
+  audioKey: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<void> {
+  await db().insert(orphanedAudioKeys).values({ id, audioKey, userId });
 }
 
-export async function getOrphanedAudioKeys(): Promise<OrphanedAudioKeyRow[]> {
-  return db().select().from(orphanedAudioKeys);
+export async function getOrphanedAudioKeys(userId: string = DEFAULT_QUERY_USER_ID): Promise<OrphanedAudioKeyRow[]> {
+  return db().select().from(orphanedAudioKeys).where(eq(orphanedAudioKeys.userId, userId));
 }
 
-export async function deleteOrphanedAudioKey(id: string): Promise<void> {
-  await db().delete(orphanedAudioKeys).where(eq(orphanedAudioKeys.id, id));
+export async function deleteOrphanedAudioKey(id: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<void> {
+  await db()
+    .delete(orphanedAudioKeys)
+    .where(and(eq(orphanedAudioKeys.id, id), eq(orphanedAudioKeys.userId, userId)));
 }
 
 // ── Segments ───────────────────────────────────────────────────────────────
@@ -393,7 +416,8 @@ export async function deleteSegment(id: string): Promise<void> {
 // ── Practice Ratings ──────────────────────────────────────────────────────
 
 export async function getRatingsForSong(
-  songId: string
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedSegmentRating[]> {
   const rows = await db()
     .select({
@@ -404,7 +428,8 @@ export async function getRatingsForSong(
     })
     .from(practiceRatings)
     .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
-    .where(eq(segments.songId, songId))
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(eq(segments.songId, songId), eq(songs.userId, userId)))
     .orderBy(desc(practiceRatings.ratedAt));
 
   // Keep only the latest rating per segment.
@@ -424,7 +449,8 @@ export async function getRatingsForSong(
 }
 
 export async function getLatestRatingTimeBySongIds(
-  songIds: string[]
+  songIds: string[],
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<Record<string, Date>> {
   if (songIds.length === 0) {
     return {};
@@ -437,7 +463,8 @@ export async function getLatestRatingTimeBySongIds(
     })
     .from(practiceRatings)
     .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
-    .where(inArray(segments.songId, songIds))
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(inArray(segments.songId, songIds), eq(songs.userId, userId)))
     .orderBy(desc(practiceRatings.ratedAt));
 
   const bySong: Record<string, Date> = {};
@@ -451,7 +478,8 @@ export async function getLatestRatingTimeBySongIds(
 }
 
 export async function getSongKnowledgeBySongIds(
-  songIds: string[]
+  songIds: string[],
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<Record<string, number>> {
   if (songIds.length === 0) {
     return {};
@@ -464,7 +492,8 @@ export async function getSongKnowledgeBySongIds(
       segmentId: segments.id,
     })
     .from(segments)
-    .where(inArray(segments.songId, songIds));
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(inArray(segments.songId, songIds), eq(songs.userId, userId)));
 
   const allSegmentsBySong: Record<string, Set<string>> = {};
   for (const row of allSegmentRows) {
@@ -484,7 +513,8 @@ export async function getSongKnowledgeBySongIds(
     })
     .from(practiceRatings)
     .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
-    .where(inArray(segments.songId, songIds))
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(inArray(segments.songId, songIds), eq(songs.userId, userId)))
     .orderBy(desc(practiceRatings.ratedAt));
 
   const latestBySongSegment: Record<string, Record<string, number>> = {};
@@ -518,12 +548,38 @@ export async function getSongKnowledgeBySongIds(
 }
 
 export async function saveRatings(
-  ratings: Array<{
+  songIdOrRatings: string | Array<{
+    segmentId: string;
+    rating: PersistedMemoryRating;
+    ratedAt: Date;
+  }>,
+  userIdOrRatings?: string | Array<{
+    segmentId: string;
+    rating: PersistedMemoryRating;
+    ratedAt: Date;
+  }>,
+  maybeRatings?: Array<{
     segmentId: string;
     rating: PersistedMemoryRating;
     ratedAt: Date;
   }>
 ): Promise<void> {
+  let songId: string | undefined;
+  let userId = DEFAULT_QUERY_USER_ID;
+  let ratings: Array<{ segmentId: string; rating: PersistedMemoryRating; ratedAt: Date }>;
+
+  if (Array.isArray(songIdOrRatings)) {
+    ratings = songIdOrRatings;
+  } else {
+    songId = songIdOrRatings;
+    if (Array.isArray(userIdOrRatings)) {
+      ratings = userIdOrRatings;
+    } else {
+      userId = userIdOrRatings ?? DEFAULT_QUERY_USER_ID;
+      ratings = maybeRatings ?? [];
+    }
+  }
+
   if (ratings.length === 0) {
     return;
   }
@@ -539,14 +595,30 @@ export async function saveRatings(
   const uniqueRatings = Array.from(latestBySegment.values());
   const segmentIds = uniqueRatings.map((rating) => rating.segmentId);
 
+  let filteredRatings = uniqueRatings;
+  if (songId) {
+    const allowedSegments = await db()
+      .select({ id: segments.id })
+      .from(segments)
+      .innerJoin(songs, eq(segments.songId, songs.id))
+      .where(and(eq(segments.songId, songId), eq(songs.userId, userId), inArray(segments.id, segmentIds)));
+
+    const allowedSegmentIds = new Set(allowedSegments.map((segment) => segment.id));
+    filteredRatings = uniqueRatings.filter((rating) => allowedSegmentIds.has(rating.segmentId));
+  }
+
+  if (filteredRatings.length === 0) {
+    return;
+  }
+
   await db()
     .delete(practiceRatings)
-    .where(inArray(practiceRatings.segmentId, segmentIds));
+    .where(inArray(practiceRatings.segmentId, filteredRatings.map((rating) => rating.segmentId)));
 
   await db()
     .insert(practiceRatings)
     .values(
-      uniqueRatings.map((rating) => ({
+      filteredRatings.map((rating) => ({
         id: crypto.randomUUID(),
         segmentId: rating.segmentId,
         rating: rating.rating,
@@ -555,11 +627,15 @@ export async function saveRatings(
     );
 }
 
-export async function deleteRatingsForSong(songId: string): Promise<void> {
+export async function deleteRatingsForSong(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<void> {
   const songSegments = await db()
     .select({ id: segments.id })
     .from(segments)
-    .where(eq(segments.songId, songId));
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(eq(segments.songId, songId), eq(songs.userId, userId)));
 
   if (songSegments.length === 0) {
     return;
@@ -587,11 +663,21 @@ function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSu
   };
 }
 
-export async function getAllPlaylists(includeRetired = false): Promise<PlaylistSummary[]> {
+export async function getAllPlaylists(
+  userIdOrIncludeRetired: string | boolean = DEFAULT_QUERY_USER_ID,
+  maybeIncludeRetired = false
+): Promise<PlaylistSummary[]> {
+  const legacyMode = typeof userIdOrIncludeRetired === "boolean";
+  const userId = typeof userIdOrIncludeRetired === "string" ? userIdOrIncludeRetired : DEFAULT_QUERY_USER_ID;
+  const includeRetired = typeof userIdOrIncludeRetired === "boolean" ? userIdOrIncludeRetired : maybeIncludeRetired;
   const baseQuery = db().select().from(playlists).orderBy(desc(playlists.createdAt));
-  const rows = includeRetired
-    ? await baseQuery
-    : await baseQuery.where(eq(playlists.isRetired, false));
+  const rows = legacyMode
+    ? includeRetired
+      ? await baseQuery
+      : await baseQuery.where(eq(playlists.isRetired, false))
+    : includeRetired
+      ? await baseQuery.where(eq(playlists.userId, userId))
+      : await baseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
 
   // Get song counts for each playlist
   const songCounts = await db()
@@ -609,11 +695,14 @@ export async function getAllPlaylists(includeRetired = false): Promise<PlaylistS
   return rows.map((row) => mapPlaylistSummary(row, countMap[row.id] ?? 0));
 }
 
-export async function getPlaylistById(id: string): Promise<PlaylistDetail | null> {
+export async function getPlaylistById(
+  id: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PlaylistDetail | null> {
   const playlistRows = await db()
     .select()
     .from(playlists)
-    .where(eq(playlists.id, id))
+    .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
     .limit(1);
 
   const playlist = playlistRows[0];
@@ -634,15 +723,15 @@ export async function getPlaylistById(id: string): Promise<PlaylistDetail | null
     })
     .from(playlistSongs)
     .innerJoin(songs, eq(playlistSongs.songId, songs.id))
-    .where(eq(playlistSongs.playlistId, id))
+    .where(and(eq(playlistSongs.playlistId, id), eq(songs.userId, playlist.userId)))
     .orderBy(asc(playlistSongs.position));
 
   const songIds = linkedSongs.map((s) => s.songId);
   const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts] = await Promise.all([
     Promise.all(linkedSongs.map((s) => getSegmentsBySongId(s.songId))),
-    getSongKnowledgeBySongIds(songIds),
-    getLatestRatingTimeBySongIds(songIds),
-    getRatingCountBySongIds(songIds),
+    getSongKnowledgeBySongIds(songIds, playlist.userId),
+    getLatestRatingTimeBySongIds(songIds, playlist.userId),
+    getRatingCountBySongIds(songIds, playlist.userId),
   ]);
 
   const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow, i) => ({
@@ -669,7 +758,10 @@ export async function getPlaylistById(id: string): Promise<PlaylistDetail | null
   };
 }
 
-async function getRatingCountBySongIds(songIds: string[]): Promise<Record<string, number>> {
+async function getRatingCountBySongIds(
+  songIds: string[],
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<Record<string, number>> {
   if (songIds.length === 0) {
     return {};
   }
@@ -682,7 +774,8 @@ async function getRatingCountBySongIds(songIds: string[]): Promise<Record<string
     })
     .from(practiceRatings)
     .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
-    .where(inArray(segments.songId, songIds))
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(inArray(segments.songId, songIds), eq(songs.userId, userId)))
     .orderBy(desc(practiceRatings.ratedAt));
 
   const bySong: Record<string, number> = {};
@@ -706,6 +799,7 @@ async function getRatingCountBySongIds(songIds: string[]): Promise<Record<string
 }
 
 export async function createPlaylist(data: {
+  userId: string;
   name: string;
   eventDate?: string;
 }): Promise<PlaylistSummary> {
@@ -713,6 +807,7 @@ export async function createPlaylist(data: {
     .insert(playlists)
     .values({
       id: crypto.randomUUID(),
+      userId: data.userId,
       name: data.name,
       eventDate: data.eventDate ?? null,
     })
@@ -723,7 +818,8 @@ export async function createPlaylist(data: {
 
 export async function updatePlaylist(
   id: string,
-  data: { name?: string; eventDate?: string; isRetired?: boolean }
+  data: { name?: string; eventDate?: string; isRetired?: boolean },
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
   const updates: Partial<Pick<PlaylistRow, "name" | "eventDate" | "isRetired">> = {};
   if (data.name !== undefined) updates.name = data.name;
@@ -734,17 +830,21 @@ export async function updatePlaylist(
     return;
   }
 
-  await db().update(playlists).set(updates).where(eq(playlists.id, id));
+  await db()
+    .update(playlists)
+    .set(updates)
+    .where(and(eq(playlists.id, id), eq(playlists.userId, userId)));
 }
 
-export async function deletePlaylist(id: string): Promise<void> {
-  await db().delete(playlists).where(eq(playlists.id, id));
+export async function deletePlaylist(id: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<void> {
+  await db().delete(playlists).where(and(eq(playlists.id, id), eq(playlists.userId, userId)));
 }
 
 export async function addSongToPlaylist(
   playlistId: string,
   songId: string,
-  position?: number
+  position?: number,
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
   let nextPosition = position;
   if (nextPosition === undefined) {
@@ -767,7 +867,11 @@ export async function addSongToPlaylist(
     .onConflictDoNothing();
 }
 
-export async function removeSongFromPlaylist(playlistId: string, songId: string): Promise<void> {
+export async function removeSongFromPlaylist(
+  playlistId: string,
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<void> {
   await db()
     .delete(playlistSongs)
     .where(and(eq(playlistSongs.playlistId, playlistId), eq(playlistSongs.songId, songId)));
@@ -775,7 +879,8 @@ export async function removeSongFromPlaylist(playlistId: string, songId: string)
 
 export async function reorderPlaylistSongs(
   playlistId: string,
-  orderedSongIds: string[]
+  orderedSongIds: string[],
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
   await Promise.all(
     orderedSongIds.map((songId, position) =>

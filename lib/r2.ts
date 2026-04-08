@@ -71,8 +71,8 @@ export function getPublicUrl(key: string): string {
   return `${configuredPublicUrl.replace(/\/$/, '')}/${encodedKey}`;
 }
 
-export function generateUploadKey(songId: string, filename: string): string {
-  return `audio/${songId}/${Date.now()}-${filename}`;
+export function generateUploadKey(userId: string, songId: string, filename: string): string {
+  return `users/${userId}/audio/${songId}/${Date.now()}-${filename}`;
 }
 
 export async function deleteObject(key: string): Promise<void> {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPlaylistById, getRatingsForSong } from '../../../../../db/queries';
 import { computePlaylistKnowledge } from '../../../../lib/knowledgeUtils';
 import type { Song } from '../../../../types';
+import { resolveRequestUserId } from '../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -17,15 +18,16 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const playlist = await getPlaylistById(id);
+    const playlist = await getPlaylistById(id, userId);
 
     if (!playlist) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
 
     const ratingsBySong = await Promise.all(
-      playlist.songs.map((song) => getRatingsForSong(song.id))
+      playlist.songs.map((song) => getRatingsForSong(song.id, userId))
     );
 
     const ratings = ratingsBySong.flat();
