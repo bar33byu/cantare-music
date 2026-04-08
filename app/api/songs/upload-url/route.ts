@@ -50,14 +50,7 @@ export async function POST(request: NextRequest) {
     } catch (corsError) {
       const corsMessage =
         corsError instanceof Error ? corsError.message : 'Unknown storage CORS setup error';
-      return NextResponse.json(
-        {
-          error:
-            'Storage CORS configuration failed. Direct browser uploads are unavailable until this is fixed.',
-          detail: corsMessage,
-        },
-        { status: 500 },
-      );
+      console.warn('[Upload] Could not auto-configure R2 CORS; continuing with signed URL:', corsMessage);
     }
 
     const command = new PutObjectCommand({
