@@ -140,7 +140,19 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
 
   if (isMissingUserIdColumnError(primaryError)) {
     try {
-      return await db().select().from(songs).orderBy(desc(songs.createdAt));
+      const legacyRows = await db()
+        .select({
+          id: songs.id,
+          title: songs.title,
+          artist: songs.artist,
+          audioKey: songs.audioKey,
+          createdAt: songs.createdAt,
+          lastPracticedAt: songs.lastPracticedAt,
+        })
+        .from(songs)
+        .orderBy(desc(songs.createdAt));
+
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID } as SongRow));
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -200,11 +212,22 @@ export async function getSongById(
   if (isMissingUserIdColumnError(primaryError)) {
     try {
       const rows = await db()
-        .select()
+        .select({
+          id: songs.id,
+          title: songs.title,
+          artist: songs.artist,
+          audioKey: songs.audioKey,
+          createdAt: songs.createdAt,
+          lastPracticedAt: songs.lastPracticedAt,
+        })
         .from(songs)
         .where(eq(songs.id, id))
         .limit(1);
-      return rows[0];
+      const row = rows[0];
+      if (!row) {
+        return undefined;
+      }
+      return { ...row, userId: DEFAULT_QUERY_USER_ID } as SongRow;
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -785,9 +808,23 @@ export async function getAllPlaylists(
     if (!isMissingUserIdColumnError(error)) {
       throw error;
     }
-    rows = includeRetired
-      ? await baseQuery
-      : await baseQuery.where(eq(playlists.isRetired, false));
+
+    const legacyBaseQuery = db()
+      .select({
+        id: playlists.id,
+        name: playlists.name,
+        eventDate: playlists.eventDate,
+        isRetired: playlists.isRetired,
+        createdAt: playlists.createdAt,
+      })
+      .from(playlists)
+      .orderBy(desc(playlists.createdAt));
+
+    const legacyRows = includeRetired
+      ? await legacyBaseQuery
+      : await legacyBaseQuery.where(eq(playlists.isRetired, false));
+
+    rows = legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID } as PlaylistRow));
   }
 
   // Get song counts for each playlist
@@ -823,10 +860,18 @@ export async function getPlaylistById(
     }
 
     playlistRows = await db()
-      .select()
+      .select({
+        id: playlists.id,
+        name: playlists.name,
+        eventDate: playlists.eventDate,
+        isRetired: playlists.isRetired,
+        createdAt: playlists.createdAt,
+      })
       .from(playlists)
       .where(eq(playlists.id, id))
       .limit(1);
+
+    playlistRows = playlistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID } as PlaylistRow));
   }
 
   const playlist = playlistRows[0];
