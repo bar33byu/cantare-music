@@ -85,13 +85,17 @@ export async function deleteObject(key: string): Promise<void> {
 }
 
 // Lazily ensure the R2 bucket has CORS configured to allow direct browser uploads.
-// Called from the upload-url route so it runs once per cold start without blocking startup.
+// This must succeed before issuing signed upload URLs, otherwise browser PUTs fail.
 let corsConfigured = false;
 let corsConfigPromise: Promise<void> | null = null;
 
 export function ensureBucketCors(): Promise<void> {
-  if (corsConfigured) return Promise.resolve();
-  if (corsConfigPromise) return corsConfigPromise;
+  if (corsConfigured) {
+    return Promise.resolve();
+  }
+  if (corsConfigPromise) {
+    return corsConfigPromise;
+  }
 
   corsConfigPromise = r2Client
     .send(
@@ -101,8 +105,8 @@ export function ensureBucketCors(): Promise<void> {
           CORSRules: [
             {
               AllowedOrigins: ['*'],
-              AllowedMethods: ['PUT'],
-              AllowedHeaders: ['Content-Type', 'Content-Length'],
+              AllowedMethods: ['PUT', 'GET', 'HEAD'],
+              AllowedHeaders: ['*'],
               MaxAgeSeconds: 3600,
             },
           ],
@@ -113,8 +117,8 @@ export function ensureBucketCors(): Promise<void> {
       corsConfigured = true;
     })
     .catch((err: unknown) => {
-      console.warn('[R2] Could not configure bucket CORS:', err instanceof Error ? err.message : err);
       corsConfigPromise = null; // allow retry on next request
+      throw err;
     });
 
   return corsConfigPromise;

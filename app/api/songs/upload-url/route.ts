@@ -45,8 +45,20 @@ export async function POST(request: NextRequest) {
 
     const key = generateUploadKey(userId, body.songId, body.filename);
 
-    // Ensure the bucket has CORS configured so the browser can PUT directly to R2.
-    void ensureBucketCors();
+    try {
+      await ensureBucketCors();
+    } catch (corsError) {
+      const corsMessage =
+        corsError instanceof Error ? corsError.message : 'Unknown storage CORS setup error';
+      return NextResponse.json(
+        {
+          error:
+            'Storage CORS configuration failed. Direct browser uploads are unavailable until this is fixed.',
+          detail: corsMessage,
+        },
+        { status: 500 },
+      );
+    }
 
     const command = new PutObjectCommand({
       Bucket: BUCKET,
