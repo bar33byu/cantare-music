@@ -859,7 +859,7 @@ export async function getPlaylistById(
       throw error;
     }
 
-    playlistRows = await db()
+    const legacyPlaylistRows = await db()
       .select({
         id: playlists.id,
         name: playlists.name,
@@ -871,7 +871,7 @@ export async function getPlaylistById(
       .where(eq(playlists.id, id))
       .limit(1);
 
-    playlistRows = playlistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID } as PlaylistRow));
+    playlistRows = legacyPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID } as PlaylistRow));
   }
 
   const playlist = playlistRows[0];
