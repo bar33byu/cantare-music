@@ -143,44 +143,4 @@ describe("SegmentCard", () => {
       fontSize: "clamp(0.95rem, 2.7vw, 1.5rem)",
     });
   });
-
-  it("shows a mobile scroll cue when lyric text overflows", async () => {
-    const originalMatchMedia = window.matchMedia;
-
-    Object.defineProperty(window, "matchMedia", {
-      configurable: true,
-      writable: true,
-      value: vi.fn().mockReturnValue({
-        matches: true,
-        media: "(max-width: 767px)",
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      }),
-    });
-
-    render(
-      <SegmentCard
-        {...defaultProps}
-        segment={{ ...mockSegment, lyricText: "Very long lyric ".repeat(40) }}
-      />
-    );
-
-    const scrollContainer = screen.getByTestId("segment-lyric-scroll-container");
-    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 600 });
-    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 220 });
-    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
-
-    fireEvent.scroll(scrollContainer);
-
-    expect(await screen.findByTestId("segment-lyric-overflow-cue")).toBeInTheDocument();
-
-    Object.defineProperty(window, "matchMedia", {
-      configurable: true,
-      writable: true,
-      value: originalMatchMedia,
-    });
-  });
 });

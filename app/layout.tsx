@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Cantare Music | Segment Practice",
   description: "Practice songs by segment, track confidence ratings, and rehearse playlists for performance.",
+  icons: {
+    icon: "/favicon.png",
+  },
 };
 
 export default function RootLayout({
