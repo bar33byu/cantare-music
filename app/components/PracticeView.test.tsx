@@ -96,8 +96,12 @@ const makeSession = (song: Song): SessionState => ({
 });
 
 describe("PracticeView", () => {
-  const renderAndWaitForRatings = async (song: Song, session: SessionState = makeSession(song)) => {
-    render(<PracticeView song={song} initialSession={session} />);
+  const renderAndWaitForRatings = async (
+    song: Song,
+    session: SessionState = makeSession(song),
+    segmentPrerollMs = 500
+  ) => {
+    render(<PracticeView song={song} initialSession={session} segmentPrerollMs={segmentPrerollMs} />);
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
     });
@@ -369,8 +373,30 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByTestId("practice-next-segment"));
 
-    expect(mockPlay).toHaveBeenCalledWith(4000, 12000);
+    expect(mockPlay).toHaveBeenCalledWith(3500, 12000);
     expect(mockPause).not.toHaveBeenCalled();
+  });
+
+  it("applies custom segment preroll when jumping segments while playing", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song, makeSession(song), 1000);
+
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+
+    expect(mockPlay).toHaveBeenCalledWith(3000, 12000);
   });
 
   it("next click in an overlap jumps to the later segment", async () => {
@@ -399,7 +425,7 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("practice-next-segment"));
 
     expect(mockPlay).toHaveBeenCalledTimes(1);
-    expect(mockPlay).toHaveBeenCalledWith(7600, 12000);
+    expect(mockPlay).toHaveBeenCalledWith(7100, 12000);
     expect(mockPause).not.toHaveBeenCalled();
   });
 

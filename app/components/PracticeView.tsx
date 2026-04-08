@@ -30,6 +30,7 @@ interface PracticeViewProps {
   breadcrumbRootLabel?: string;
   onBreadcrumbRootClick?: () => void;
   onEditSongClick?: () => void;
+  segmentPrerollMs?: number;
 }
 
 type LyricVisibilityMode = "full" | "hint" | "hidden";
@@ -65,7 +66,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   breadcrumbRootLabel,
   onBreadcrumbRootClick,
   onEditSongClick,
+  segmentPrerollMs = 500,
 }) => {
+  const effectiveSegmentPrerollMs = Math.max(0, segmentPrerollMs);
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const initialSegmentId = song.segments[initialSession.currentSegmentIndex]?.id ?? null;
   const lastSyncedSegmentIdRef = React.useRef<string | null>(initialSegmentId);
@@ -194,6 +197,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     return -1;
   }, [song.segments]);
+
+  const getSegmentStartWithPreroll = React.useCallback((startMs: number) => {
+    return Math.max(0, startMs - effectiveSegmentPrerollMs);
+  }, [effectiveSegmentPrerollMs]);
 
   // Keep snapshot up-to-date every render (before effects run).
   playbackStateRef.current = { isPlaying, currentMs, currentSegment, durationMs };
@@ -433,13 +440,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const targetSegment = song.segments[clamped];
     dispatch({ type: "SET_SEGMENT_INDEX", index: clamped });
     if (isPlaying) {
+      const targetStartWithPreroll = getSegmentStartWithPreroll(targetSegment.startMs);
       if (isLooping) {
-        play(targetSegment.startMs, targetSegment.endMs);
+        play(targetStartWithPreroll, targetSegment.endMs);
         return;
       }
 
       const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
-      play(targetSegment.startMs, effectiveDurationMs);
+      play(targetStartWithPreroll, effectiveDurationMs);
       return;
     }
     seek(targetSegment.startMs);
@@ -461,9 +469,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     // When looping, play the current segment from the current position (or start if past the end).
     if (isLooping && currentSegment) {
       pausedByUserRef.current = false;
+      const segmentStartWithPreroll = getSegmentStartWithPreroll(currentSegment.startMs);
       const resumeMs = currentMs >= currentSegment.endMs
-        ? currentSegment.startMs
-        : Math.max(currentMs, currentSegment.startMs);
+        ? segmentStartWithPreroll
+        : Math.max(currentMs, segmentStartWithPreroll);
       play(resumeMs, currentSegment.endMs);
       return;
     }
@@ -697,9 +706,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     if (pausedByUserRef.current) return;
     if (currentMs >= currentSegment.endMs - 50) {
-      play(currentSegment.startMs, currentSegment.endMs);
+      play(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
-  }, [currentMs, currentSegment, isLooping, isPlaying, play]);
+  }, [currentMs, currentSegment, getSegmentStartWithPreroll, isLooping, isPlaying, play]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;

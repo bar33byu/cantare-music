@@ -28,13 +28,15 @@ vi.mock('./components/PracticeView', () => ({
     breadcrumbRootLabel,
     onBreadcrumbRootClick,
     onEditSongClick,
+    segmentPrerollMs,
   }: {
     song: { segments: Array<unknown> };
     breadcrumbRootLabel?: string;
     onBreadcrumbRootClick?: () => void;
     onEditSongClick?: () => void;
+    segmentPrerollMs?: number;
   }) => {
-    practiceViewMock(song);
+    practiceViewMock({ song, segmentPrerollMs });
     return (
       <div data-testid="mock-practice-view">
         Segments: {song.segments.length}
@@ -145,6 +147,24 @@ describe('Home page', () => {
     await waitFor(() => {
       expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
     });
+  });
+
+  it('allows updating segment preroll from settings panel', async () => {
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    const slider = screen.getByTestId('segment-preroll-slider');
+    fireEvent.change(slider, { target: { value: '1000' } });
+
+    fireEvent.click(screen.getByTestId('library-tab'));
+    fireEvent.click(screen.getByTestId('mock-select-song'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
+    });
+
+    const lastCall = practiceViewMock.mock.calls.at(-1)?.[0] as { segmentPrerollMs?: number } | undefined;
+    expect(lastCall?.segmentPrerollMs).toBe(1000);
   });
 
   it('switches to playlists and starts playlist practice', async () => {

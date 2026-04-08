@@ -5,21 +5,21 @@ import { Segment, MemoryRating } from "../types/index";
 import RatingBar from "./RatingBar";
 
 const LYRIC_FONT_MAX_REM = 2.25; // 36px
-const LYRIC_FONT_MIN_REM = 1.1; // 17.6px
+const LYRIC_FONT_MIN_REM = 0.95; // 15.2px
 
 function getAdaptiveLyricFontSize(text: string): string {
   const length = text.trim().length;
 
   if (length <= 80) {
-    return `clamp(1.75rem, 4.4vw, ${LYRIC_FONT_MAX_REM}rem)`;
+    return `clamp(1.4rem, 4.4vw, ${LYRIC_FONT_MAX_REM}rem)`;
   }
 
   if (length <= 180) {
-    return "clamp(1.4rem, 3.6vw, 2rem)";
+    return "clamp(1.2rem, 3.6vw, 2rem)";
   }
 
   if (length <= 320) {
-    return "clamp(1.2rem, 3vw, 1.75rem)";
+    return "clamp(1rem, 3vw, 1.75rem)";
   }
 
   return `clamp(${LYRIC_FONT_MIN_REM}rem, 2.7vw, 1.5rem)`;
@@ -93,6 +93,9 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   onSeek,
   lyricVisibilityMode = "full",
 }) => {
+  const lyricScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const [isMobileViewport, setIsMobileViewport] = React.useState(false);
+  const [showLyricOverflowCue, setShowLyricOverflowCue] = React.useState(false);
   const hasLyrics = (segment.lyricText ?? "").trim().length > 0;
   const lyricFontSize = React.useMemo(
     () => getAdaptiveLyricFontSize(segment.lyricText || ""),
@@ -127,6 +130,63 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
     onSeek(seekMs);
   };
 
+  const updateLyricOverflowCue = React.useCallback(() => {
+    const container = lyricScrollRef.current;
+    if (!container || !isMobileViewport) {
+      setShowLyricOverflowCue(false);
+      return;
+    }
+
+    const hasOverflow = container.scrollHeight > container.clientHeight + 4;
+    const hasMoreToRead = container.scrollTop + container.clientHeight < container.scrollHeight - 8;
+    setShowLyricOverflowCue(hasOverflow && hasMoreToRead);
+  }, [isMobileViewport]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsMobileViewport(event.matches);
+    };
+
+    setIsMobileViewport(mediaQuery.matches);
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
+
+  React.useEffect(() => {
+    updateLyricOverflowCue();
+  }, [displayLyricContent, lyricFontSize, updateLyricOverflowCue]);
+
+  React.useEffect(() => {
+    const container = lyricScrollRef.current;
+    if (!container || typeof window === "undefined") {
+      return;
+    }
+
+    const onResize = () => updateLyricOverflowCue();
+    window.addEventListener("resize", onResize);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof window.ResizeObserver !== "undefined") {
+      observer = new window.ResizeObserver(() => updateLyricOverflowCue());
+      observer.observe(container);
+    }
+
+    return () => {
+      window.removeEventListener("resize", onResize);
+      observer?.disconnect();
+    };
+  }, [updateLyricOverflowCue]);
+
   return (
     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-md flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
       <div className="mb-3">
@@ -134,14 +194,31 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
           {segment.label}
         </p>
       </div>
-      <div className="mb-4 min-h-0 flex-1 overflow-y-auto pr-2">
-        <p
-          data-testid="segment-lyric-text"
-          className={`whitespace-pre-wrap text-center ${hasLyrics ? "text-slate-700" : "text-gray-400"}`}
-          style={{ fontSize: lyricFontSize, lineHeight: 1.4 }}
+      <div className="relative mb-4 min-h-0 flex-1">
+        <div
+          ref={lyricScrollRef}
+          className="h-full overflow-y-auto pr-2"
+          onScroll={updateLyricOverflowCue}
+          data-testid="segment-lyric-scroll-container"
         >
-          {displayLyricContent}
-        </p>
+          <p
+            data-testid="segment-lyric-text"
+            className={`whitespace-pre-wrap text-center ${hasLyrics ? "text-slate-700" : "text-gray-400"}`}
+            style={{ fontSize: lyricFontSize, lineHeight: 1.4 }}
+          >
+            {displayLyricContent}
+          </p>
+        </div>
+        {showLyricOverflowCue ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-center bg-gradient-to-t from-white via-white/90 to-transparent pb-1 pt-8 md:hidden"
+            data-testid="segment-lyric-overflow-cue"
+          >
+            <span className="rounded-full border border-gray-300 bg-white/95 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-600 shadow-sm">
+              Scroll for more
+            </span>
+          </div>
+        ) : null}
       </div>
       <div className="mb-3">
         <div

@@ -40,6 +40,37 @@ interface HashRouteState {
   returnView?: SongEditorReturnView;
 }
 
+interface UserSettings {
+  segmentPrerollMs: number;
+}
+
+const SETTINGS_STORAGE_KEY = "cantare:user-settings";
+const DEFAULT_USER_SETTINGS: UserSettings = {
+  segmentPrerollMs: 500,
+};
+
+function clampSegmentPrerollMs(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_USER_SETTINGS.segmentPrerollMs;
+  }
+  return Math.max(0, Math.min(2000, Math.round(value)));
+}
+
+function parseStoredSettings(raw: string | null): UserSettings {
+  if (!raw) {
+    return DEFAULT_USER_SETTINGS;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<UserSettings>;
+    return {
+      segmentPrerollMs: clampSegmentPrerollMs(parsed.segmentPrerollMs ?? DEFAULT_USER_SETTINGS.segmentPrerollMs),
+    };
+  } catch {
+    return DEFAULT_USER_SETTINGS;
+  }
+}
+
 function parseHashRoute(hash: string): HashRouteState {
   const params = new URLSearchParams(hash.replace(/^#/, ""));
   const view = params.get("view") as AppView | null;
@@ -125,7 +156,28 @@ export default function Home() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const settingsLoadedRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
+    setUserSettings(storedSettings);
+    settingsLoadedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !settingsLoadedRef.current) {
+      return;
+    }
+
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(userSettings));
+  }, [userSettings]);
 
   const loadSongById = async (songId: string): Promise<Song | null> => {
     const response = await fetch(`/api/songs/${songId}`);
@@ -382,6 +434,7 @@ export default function Home() {
             initialSession={session}
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
+            segmentPrerollMs={userSettings.segmentPrerollMs}
             onEditSongClick={() => {
               setSongEditorReturnView("song_practice");
               setActiveView("song_segment_editor");
@@ -501,7 +554,88 @@ export default function Home() {
         <UnifiedHeader
           breadcrumb={{ label: "Cantare" }}
           title="Cantare Music"
+          action={
+            <button
+              type="button"
+              data-testid="home-settings-toggle"
+              aria-label="Open settings"
+              onClick={() => setSettingsOpen(true)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:border-gray-400 hover:text-gray-900"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 8.92 4a1.65 1.65 0 0 0 1-1.51V2a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.66.26 1.09.9 1.09 1.61V11a2 2 0 0 1 0 2v.39c0 .71-.43 1.35-1.09 1.61z" />
+              </svg>
+            </button>
+          }
         />
+
+        {settingsOpen ? (
+          <div className="fixed inset-0 z-40" data-testid="settings-overlay">
+            <button
+              type="button"
+              aria-label="Close settings"
+              onClick={() => setSettingsOpen(false)}
+              className="absolute inset-0 bg-black/20"
+            />
+            <section
+              aria-label="Settings"
+              className="absolute right-4 top-20 w-[min(92vw,24rem)] rounded-xl border border-gray-200 bg-white p-4 shadow-xl"
+              data-testid="settings-panel"
+            >
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900">Settings</h2>
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(false)}
+                  className="rounded border border-gray-300 px-2 py-1 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <h3 className="text-sm font-semibold text-gray-800">Playback</h3>
+                  <label htmlFor="segment-preroll-slider" className="mt-3 block text-sm text-gray-700">
+                    Segment preroll: <span className="font-semibold">{(userSettings.segmentPrerollMs / 1000).toFixed(1)}s</span>
+                  </label>
+                  <input
+                    id="segment-preroll-slider"
+                    data-testid="segment-preroll-slider"
+                    type="range"
+                    min={0}
+                    max={2000}
+                    step={50}
+                    value={userSettings.segmentPrerollMs}
+                    onChange={(event) => {
+                      const nextValue = clampSegmentPrerollMs(Number(event.target.value));
+                      setUserSettings((previous) => ({ ...previous, segmentPrerollMs: nextValue }));
+                    }}
+                    className="mt-2 w-full"
+                  />
+                  <p className="mt-2 text-xs text-gray-600">
+                    Starts segment playback slightly early to avoid clipped phrase starts on some devices.
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500">
+                  More settings coming soon.
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : null}
 
         {/* Tab navigation */}
         <div className="flex gap-0 mb-6 border-b border-gray-300">
