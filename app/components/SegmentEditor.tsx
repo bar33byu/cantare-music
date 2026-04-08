@@ -63,6 +63,8 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const [bulkSeparator, setBulkSeparator] = useState('*');
   const [replaceExistingOnBulk, setReplaceExistingOnBulk] = useState(true);
   const [bulkImportPending, setBulkImportPending] = useState(false);
+  const [songLoaded, setSongLoaded] = useState(false);
+  const [songLoadKey, setSongLoadKey] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
 
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(audioUrl)), [audioUrl]);
@@ -649,10 +651,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           setAudioUrl(data.audioUrl ?? '');
           setSongTitle(data.title ?? '');
           setTitleDraft(data.title ?? '');
+          setSongLoaded(true);
         }
       } catch {
         if (!cancelled) {
           setAudioUrl('');
+          setSongLoaded(true);
         }
       }
     };
@@ -662,7 +666,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, [songId]);
+  }, [songId, songLoadKey]);
+
+  const handleAudioUploaded = () => {
+    setSongLoadKey((previous) => previous + 1);
+    onSongUpdated?.();
+  };
 
   const saveSongTitle = async () => {
     const trimmed = titleDraft.trim();
@@ -682,6 +691,32 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       setSavingTitle(false);
     }
   };
+
+  if (songLoaded && !audioUrl) {
+    return (
+      <div className="mx-auto w-full max-w-6xl">
+        <div className="mb-4">
+          <h2 className="text-2xl font-bold text-gray-900">Edit Song</h2>
+        </div>
+        <div className="mb-4 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
+          <label className="block text-xs font-semibold text-indigo-700 mb-1">Song title</label>
+          <div className="flex items-center gap-2">
+            <input
+              data-testid="segment-editor-title-input"
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onBlur={() => { void saveSongTitle(); }}
+              onKeyDown={(event) => { if (event.key === 'Enter') { void saveSongTitle(); } }}
+              className="flex-1 rounded border border-indigo-200 px-3 py-1.5 text-base font-medium text-gray-900"
+              placeholder="Song title"
+            />
+            {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
+          </div>
+        </div>
+        <ReplaceAudioForm songId={songId} onReplaced={handleAudioUploaded} mode="upload" />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-6xl">

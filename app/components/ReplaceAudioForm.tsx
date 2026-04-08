@@ -6,13 +6,16 @@ import { useUploadAudio } from "../hooks/useUploadAudio";
 interface ReplaceAudioFormProps {
   songId: string;
   onReplaced?: () => void;
+  mode?: 'upload' | 'replace';
 }
 
-export function ReplaceAudioForm({ songId, onReplaced }: ReplaceAudioFormProps) {
+export function ReplaceAudioForm({ songId, onReplaced, mode = 'replace' }: ReplaceAudioFormProps) {
   const { upload, uploading, progress, error: uploadError } = useUploadAudio();
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const isUpload = mode === 'upload';
 
   const handleSubmit = async () => {
     if (!file) {
@@ -36,7 +39,7 @@ export function ReplaceAudioForm({ songId, onReplaced }: ReplaceAudioFormProps) 
         throw new Error(data.error || "Failed to update song audio");
       }
 
-      setSuccess("Audio replaced successfully.");
+      setSuccess(isUpload ? "Audio uploaded successfully." : "Audio replaced successfully.");
       setFile(null);
       onReplaced?.();
     } catch (err) {
@@ -46,9 +49,9 @@ export function ReplaceAudioForm({ songId, onReplaced }: ReplaceAudioFormProps) 
 
   return (
     <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="replace-audio-card">
-      <h3 className="text-lg font-semibold text-gray-900">Replace Audio</h3>
+      <h3 className="text-lg font-semibold text-gray-900">{isUpload ? 'Upload Audio' : 'Replace Audio'}</h3>
       <p className="mt-1 text-sm text-gray-500">
-        Upload a new MP3 while keeping segment boundaries and lyrics.
+        {isUpload ? 'Upload an MP3 file to enable segment editing.' : 'Upload a new MP3 while keeping segment boundaries and lyrics.'}
       </p>
 
       <div className="mt-3">

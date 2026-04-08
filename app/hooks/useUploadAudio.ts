@@ -65,64 +65,39 @@ export function useUploadAudio(): UseUploadAudioReturn {
 
       const { uploadUrl, key } = await response.json();
 
-      // Upload file directly to R2 using the presigned URL
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
+      // Upload file directly to R2 using the presigned URL.
+      // Files are sent straight to R2, bypassing Vercel's 4.5 MB function payload limit.
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
 
-          xhr.upload.addEventListener('progress', (event) => {
-            if (event.lengthComputable) {
-              const percentComplete = Math.round((event.loaded / event.total) * 100);
-              setProgress(percentComplete);
-            }
-          });
-
-          xhr.addEventListener('load', () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve();
-            } else {
-              const errorMsg = `Upload failed with status ${xhr.status}: ${xhr.statusText}`;
-              reject(new Error(errorMsg));
-            }
-          });
-
-          xhr.addEventListener('error', () => {
-            reject(new Error('Direct upload failed due to network or CORS'));
-          });
-
-          xhr.addEventListener('abort', () => {
-            reject(new Error('Upload cancelled'));
-          });
-
-          xhr.open('PUT', uploadUrl);
-          xhr.setRequestHeader('Content-Type', file.type);
-          xhr.send(file);
-        });
-      } catch {
-        // CORS or network issues in browser-to-R2 upload fallback to same-origin server upload.
-        const fallbackBody = new FormData();
-        fallbackBody.append('songId', songId);
-        fallbackBody.append('key', key);
-        fallbackBody.append('file', file);
-
-        const fallbackResponse = await fetch('/api/songs/upload', {
-          method: 'POST',
-          body: fallbackBody,
-        });
-
-        if (!fallbackResponse.ok) {
-          const errorText = await fallbackResponse.text();
-          let errorMsg = 'Upload failed in both direct and fallback modes';
-          try {
-            const errorData = JSON.parse(errorText);
-            errorMsg = errorData.error || errorText;
-          } catch {
-            errorMsg = errorText || `Fallback upload failed with status ${fallbackResponse.status}`;
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = Math.round((event.loaded / event.total) * 100);
+            setProgress(percentComplete);
           }
-          setError(errorMsg);
-          throw new Error(errorMsg);
-        }
-      }
+        });
+
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            const errorMsg = `Upload failed with status ${xhr.status}: ${xhr.statusText}`;
+            reject(new Error(errorMsg));
+          }
+        });
+
+        xhr.addEventListener('error', () => {
+          reject(new Error('Direct upload to storage failed. This is usually a CORS or network issue.'));
+        });
+
+        xhr.addEventListener('abort', () => {
+          reject(new Error('Upload cancelled'));
+        });
+
+        xhr.open('PUT', uploadUrl);
+        xhr.setRequestHeader('Content-Type', file.type);
+        xhr.send(file);
+      });
 
       setProgress(100);
       setUploading(false);

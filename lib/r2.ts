@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutBucketCorsCommand, S3Client } from '@aws-sdk/client-s3';
 
 function normalizeEnv(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -82,4 +82,40 @@ export async function deleteObject(key: string): Promise<void> {
       Key: key,
     }),
   );
+}
+
+// Lazily ensure the R2 bucket has CORS configured to allow direct browser uploads.
+// Called from the upload-url route so it runs once per cold start without blocking startup.
+let corsConfigured = false;
+let corsConfigPromise: Promise<void> | null = null;
+
+export function ensureBucketCors(): Promise<void> {
+  if (corsConfigured) return Promise.resolve();
+  if (corsConfigPromise) return corsConfigPromise;
+
+  corsConfigPromise = r2Client
+    .send(
+      new PutBucketCorsCommand({
+        Bucket: BUCKET,
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedOrigins: ['*'],
+              AllowedMethods: ['PUT'],
+              AllowedHeaders: ['Content-Type', 'Content-Length'],
+              MaxAgeSeconds: 3600,
+            },
+          ],
+        },
+      }),
+    )
+    .then(() => {
+      corsConfigured = true;
+    })
+    .catch((err: unknown) => {
+      console.warn('[R2] Could not configure bucket CORS:', err instanceof Error ? err.message : err);
+      corsConfigPromise = null; // allow retry on next request
+    });
+
+  return corsConfigPromise;
 }

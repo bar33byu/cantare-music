@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { generateUploadKey, r2Client, BUCKET } from '../../../../lib/r2';
+import { ensureBucketCors, generateUploadKey, r2Client, BUCKET } from '../../../../lib/r2';
 import { resolveRequestUserId } from '../../_user';
 import { getSongById } from '../../../../db/queries';
 
@@ -44,6 +44,9 @@ export async function POST(request: NextRequest) {
     }
 
     const key = generateUploadKey(userId, body.songId, body.filename);
+
+    // Ensure the bucket has CORS configured so the browser can PUT directly to R2.
+    void ensureBucketCors();
 
     const command = new PutObjectCommand({
       Bucket: BUCKET,

@@ -170,33 +170,26 @@ describe('useUploadAudio', () => {
     expect(result.current.uploading).toBe(false);
   });
 
-  it('falls back to same-origin upload when direct upload fails', async () => {
+  it('surfaces error when direct upload to R2 fails', async () => {
     global.XMLHttpRequest = XMLHttpRequestErrorStub as any;
 
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ key: 'test-key' }),
-      });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
+    });
 
     const { result } = renderHook(() => useUploadAudio());
     const file = new File(['test'], 'test.mp3', { type: 'audio/mpeg' });
 
-    let returnedKey: string | undefined;
     await act(async () => {
-      returnedKey = await result.current.upload('song-123', file);
+      await expect(result.current.upload('song-123', file)).rejects.toThrow(
+        'Direct upload to storage failed',
+      );
     });
 
-    expect(returnedKey).toBe('test-key');
-    expect(mockFetch).toHaveBeenNthCalledWith(2, '/api/songs/upload', {
-      method: 'POST',
-      body: expect.any(FormData),
-    });
-    expect(result.current.error).toBe(null);
+    expect(result.current.error).toMatch('Direct upload to storage failed');
+    // Should NOT have made a second fetch call to the fallback route
+    expect(mockFetch).toHaveBeenCalledTimes(1);
 
     global.XMLHttpRequest = XMLHttpRequestStub as any;
   });
