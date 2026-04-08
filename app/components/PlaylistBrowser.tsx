@@ -16,9 +16,11 @@ type PlaylistListItem = {
 interface PlaylistBrowserProps {
   onSelectPlaylist: (playlist: Playlist) => void;
   onManagePlaylist: (playlist: Playlist) => void;
+  userId?: string;
+  refreshTrigger?: number;
 }
 
-export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: PlaylistBrowserProps) {
+export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, refreshTrigger }: PlaylistBrowserProps) {
   const [playlists, setPlaylists] = useState<PlaylistListItem[]>([]);
   const [knowledgeByPlaylist, setKnowledgeByPlaylist] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -29,12 +31,31 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
 
+  const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
+    if (!userId) {
+      return init;
+    }
+
+    return {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        'X-User-ID': userId,
+      },
+    };
+  };
+
+  const request = (url: string, init?: RequestInit) => {
+    const scopedInit = withUserHeader(init);
+    return scopedInit ? fetch(url, scopedInit) : fetch(url);
+  };
+
   const fetchPlaylists = async (includeRetired: boolean) => {
     setLoading(true);
     setError(null);
     try {
       const query = includeRetired ? '?includeRetired=true' : '';
-      const response = await fetch(`/api/playlists${query}`);
+      const response = await request(`/api/playlists${query}`);
       if (!response.ok) {
         throw new Error('Failed to load playlists');
       }
@@ -44,7 +65,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
 
       const knowledgeEntries = await Promise.all(
         list.map(async (playlist) => {
-          const knowledgeResponse = await fetch(`/api/playlists/${playlist.id}/knowledge`);
+          const knowledgeResponse = await request(`/api/playlists/${playlist.id}/knowledge`);
           if (!knowledgeResponse.ok) {
             return [playlist.id, 0] as const;
           }
@@ -64,7 +85,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
 
   useEffect(() => {
     void fetchPlaylists(showArchived);
-  }, [showArchived]);
+  }, [showArchived, refreshTrigger, userId]);
 
   const handleCreate = async () => {
     if (!createName.trim()) {
@@ -72,7 +93,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
       return;
     }
 
-    const response = await fetch('/api/playlists', {
+    const response = await request('/api/playlists', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -93,7 +114,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
   };
 
   const handleRetireToggle = async (playlist: PlaylistListItem, isRetired: boolean) => {
-    const response = await fetch(`/api/playlists/${playlist.id}`, {
+    const response = await request(`/api/playlists/${playlist.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isRetired }),
@@ -108,7 +129,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist }: Playlist
   };
 
   const handleDelete = async (playlistId: string) => {
-    const response = await fetch(`/api/playlists/${playlistId}`, {
+    const response = await request(`/api/playlists/${playlistId}`, {
       method: 'DELETE',
     });
 

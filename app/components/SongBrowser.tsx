@@ -18,9 +18,10 @@ interface SongBrowserProps {
   onDeleteSong?: (songId: string) => void;
   selectedSongId?: string | null;
   refreshTrigger?: number; // Increment this to trigger refresh
+  userId?: string;
 }
 
-export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refreshTrigger }: SongBrowserProps) {
+export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refreshTrigger, userId }: SongBrowserProps) {
   const [songs, setSongs] = useState<SongListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +38,20 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
 
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
+
+  const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
+    if (!userId) {
+      return init;
+    }
+
+    return {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        'X-User-ID': userId,
+      },
+    };
+  };
 
   // Load persisted sort from localStorage on mount
   useEffect(() => {
@@ -117,14 +132,14 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
 
   useEffect(() => {
     fetchSongs();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, userId]);
 
   const fetchSongs = async () => {
     try {
       setLoading(true);
       setError(null);
       const cacheVersion = refreshTrigger ?? 0;
-      const response = await fetch(`/api/songs?v=${cacheVersion}`);
+      const response = await fetch(`/api/songs?v=${cacheVersion}`, withUserHeader());
       if (!response.ok) {
         const serverError = await response
           .json()
@@ -153,9 +168,9 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
 
     setDeletingSongId(song.id);
     try {
-      const response = await fetch(`/api/songs/${song.id}`, {
+      const response = await fetch(`/api/songs/${song.id}`, withUserHeader({
         method: 'DELETE',
-      });
+      }));
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({ error: 'Failed to delete song' }));

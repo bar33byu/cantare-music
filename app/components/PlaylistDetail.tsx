@@ -8,9 +8,10 @@ interface PlaylistDetailProps {
   onBack: () => void;
   onPractice: (playlist: Playlist) => void;
   onEditSong?: (songId: string) => void;
+  userId?: string;
 }
 
-export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: PlaylistDetailProps) {
+export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, userId }: PlaylistDetailProps) {
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [selectedSongId, setSelectedSongId] = useState('');
@@ -22,8 +23,27 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
   const [inlineCreatePending, setInlineCreatePending] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
 
+  const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
+    if (!userId) {
+      return init;
+    }
+
+    return {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        'X-User-ID': userId,
+      },
+    };
+  };
+
+  const request = (url: string, init?: RequestInit) => {
+    const scopedInit = withUserHeader(init);
+    return scopedInit ? fetch(url, scopedInit) : fetch(url);
+  };
+
   const fetchPlaylist = async () => {
-    const response = await fetch(`/api/playlists/${playlistId}`);
+    const response = await request(`/api/playlists/${playlistId}`);
     if (!response.ok) {
       setPlaylist(null);
       setLoading(false);
@@ -36,12 +56,12 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
 
   useEffect(() => {
     void fetchPlaylist();
-  }, [playlistId]);
+  }, [playlistId, userId]);
 
   const openSongPicker = async () => {
     setPickerError(null);
     setPickerOpen(true);
-    const response = await fetch('/api/songs');
+    const response = await request('/api/songs');
     if (!response.ok) {
       setPickerError('Unable to load songs right now.');
       return;
@@ -80,7 +100,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
     if (!selectedSongId) {
       return;
     }
-    const response = await fetch(`/api/playlists/${playlistId}/songs`, {
+    const response = await request(`/api/playlists/${playlistId}/songs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ songId: selectedSongId }),
@@ -106,7 +126,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
     setPickerError(null);
 
     try {
-      const createResponse = await fetch('/api/songs', {
+      const createResponse = await request('/api/songs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
@@ -118,7 +138,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
 
       const createdSong = (await createResponse.json()) as Song;
 
-      const addResponse = await fetch(`/api/playlists/${playlistId}/songs`, {
+      const addResponse = await request(`/api/playlists/${playlistId}/songs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ songId: createdSong.id }),
@@ -142,7 +162,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
   };
 
   const handleRemoveSong = async (songId: string) => {
-    const response = await fetch(`/api/playlists/${playlistId}/songs/${songId}`, {
+    const response = await request(`/api/playlists/${playlistId}/songs/${songId}`, {
       method: 'DELETE',
     });
     if (response.ok) {
@@ -173,7 +193,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong }: P
       songs: reordered.map((song, index) => ({ ...song, position: index })),
     });
 
-    await fetch(`/api/playlists/${playlistId}/songs`, {
+    await request(`/api/playlists/${playlistId}/songs`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orderedSongIds: reordered.map((song) => song.id) }),

@@ -193,6 +193,27 @@ export default function Home() {
   const [newUserName, setNewUserName] = useState("");
   const settingsLoadedRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
+  const activeUserId = userSettings.currentUserId;
+  const scopedUserId = activeUserId === DEFAULT_USER_ID ? undefined : activeUserId;
+
+  const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
+    if (!scopedUserId) {
+      return init;
+    }
+
+    return {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        "X-User-ID": scopedUserId,
+      },
+    };
+  };
+
+  const request = (url: string, init?: RequestInit) => {
+    const scopedInit = withUserHeader(init);
+    return scopedInit ? fetch(url, scopedInit) : fetch(url);
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -250,7 +271,7 @@ export default function Home() {
   };
 
   const loadSongById = async (songId: string): Promise<Song | null> => {
-    const response = await fetch(`/api/songs/${songId}`);
+    const response = await request(`/api/songs/${songId}`);
     if (!response.ok) {
       return null;
     }
@@ -258,7 +279,7 @@ export default function Home() {
   };
 
   const loadPlaylistById = async (playlistId: string): Promise<Playlist | null> => {
-    const response = await fetch(`/api/playlists/${playlistId}`);
+    const response = await request(`/api/playlists/${playlistId}`);
     if (!response.ok) {
       return null;
     }
@@ -437,7 +458,7 @@ export default function Home() {
   const refreshSelectedSong = async () => {
     if (!selectedSong) return;
     try {
-      const response = await fetch(`/api/songs/${selectedSong.id}`);
+      const response = await request(`/api/songs/${selectedSong.id}`);
       if (!response.ok) throw new Error("Failed to refresh song");
       const fullSong: Song = await response.json();
       setSelectedSong(fullSong);
@@ -449,7 +470,7 @@ export default function Home() {
   const refreshSelectedPlaylist = async () => {
     if (!selectedPlaylist) return;
     try {
-      const response = await fetch(`/api/playlists/${selectedPlaylist.id}`);
+      const response = await request(`/api/playlists/${selectedPlaylist.id}`);
       if (!response.ok) throw new Error("Failed to refresh playlist");
       const fullPlaylist: Playlist = await response.json();
       setSelectedPlaylist(fullPlaylist);
@@ -580,6 +601,7 @@ export default function Home() {
         <div className="mx-auto max-w-4xl">
           <PlaylistDetail
             playlistId={selectedPlaylist.id}
+            userId={scopedUserId}
             onBack={() => setActiveView("playlists")}
             onPractice={(playlist) => {
               setSelectedPlaylist(playlist);
@@ -778,6 +800,7 @@ export default function Home() {
               onDeleteSong={handleSongDeleted}
               selectedSongId={selectedSong?.id || null}
               refreshTrigger={refreshTrigger}
+              userId={scopedUserId}
             />
             {/* Plus button for adding songs */}
             <button
@@ -804,9 +827,11 @@ export default function Home() {
 
         {activeView === "playlists" ? (
           <PlaylistBrowser
+            userId={scopedUserId}
+            refreshTrigger={refreshTrigger}
             onSelectPlaylist={async (playlist) => {
               try {
-                const response = await fetch(`/api/playlists/${playlist.id}`);
+                const response = await request(`/api/playlists/${playlist.id}`);
                 if (!response.ok) throw new Error("Failed to fetch playlist");
                 const fullPlaylist: Playlist = await response.json();
                 setSelectedPlaylist(fullPlaylist);
