@@ -98,6 +98,32 @@ function isMissingPitchContourNotesColumnError(error: unknown): boolean {
   return false;
 }
 
+function isMissingUserIdColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("user_id") && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (causeMessage.includes("user_id") && causeMessage.includes("does not exist")) {
+      return true;
+    }
+    if (causeCode === "42703" && message.includes("user_id")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // ── Songs ──────────────────────────────────────────────────────────────────
 
 export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promise<SongRow[]> {
@@ -110,6 +136,29 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
       .orderBy(desc(songs.createdAt));
   } catch (error) {
     primaryError = error;
+  }
+
+  if (isMissingUserIdColumnError(primaryError)) {
+    try {
+      return await db().select().from(songs).orderBy(desc(songs.createdAt));
+    } catch (legacyError) {
+      if (!isMissingLastPracticedColumnError(legacyError)) {
+        throw legacyError;
+      }
+
+      const legacyRows = await db()
+        .select({
+          id: songs.id,
+          title: songs.title,
+          artist: songs.artist,
+          audioKey: songs.audioKey,
+          createdAt: songs.createdAt,
+        })
+        .from(songs)
+        .orderBy(desc(songs.createdAt));
+
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null } as SongRow));
+    }
   }
 
   try {
@@ -148,6 +197,40 @@ export async function getSongById(
     primaryError = error;
   }
 
+  if (isMissingUserIdColumnError(primaryError)) {
+    try {
+      const rows = await db()
+        .select()
+        .from(songs)
+        .where(eq(songs.id, id))
+        .limit(1);
+      return rows[0];
+    } catch (legacyError) {
+      if (!isMissingLastPracticedColumnError(legacyError)) {
+        throw legacyError;
+      }
+
+      const rows = await db()
+        .select({
+          id: songs.id,
+          title: songs.title,
+          artist: songs.artist,
+          audioKey: songs.audioKey,
+          createdAt: songs.createdAt,
+        })
+        .from(songs)
+        .where(eq(songs.id, id))
+        .limit(1);
+
+      const row = rows[0];
+      if (!row) {
+        return undefined;
+      }
+
+      return { ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null } as SongRow;
+    }
+  }
+
   try {
     const rows = await db()
       .select({
@@ -180,17 +263,35 @@ export async function createSong(data: {
   artist?: string;
   audioKey?: string;
 }): Promise<SongRow> {
-  const rows = await db()
-    .insert(songs)
-    .values({
-      id: data.id,
-      userId: data.userId,
-      title: data.title,
-      artist: data.artist ?? null,
-      audioKey: data.audioKey ?? null,
-    })
-    .returning();
-  return rows[0];
+  try {
+    const rows = await db()
+      .insert(songs)
+      .values({
+        id: data.id,
+        userId: data.userId,
+        title: data.title,
+        artist: data.artist ?? null,
+        audioKey: data.audioKey ?? null,
+      })
+      .returning();
+    return rows[0];
+  } catch (error) {
+    if (!isMissingUserIdColumnError(error)) {
+      throw error;
+    }
+
+    const rows = await db()
+      .insert(songs)
+      .values({
+        id: data.id,
+        title: data.title,
+        artist: data.artist ?? null,
+        audioKey: data.audioKey ?? null,
+      })
+      .returning();
+
+    return { ...rows[0], userId: DEFAULT_QUERY_USER_ID } as SongRow;
+  }
 }
 
 export async function updateSongAudioKey(
@@ -671,13 +772,23 @@ export async function getAllPlaylists(
   const userId = typeof userIdOrIncludeRetired === "string" ? userIdOrIncludeRetired : DEFAULT_QUERY_USER_ID;
   const includeRetired = typeof userIdOrIncludeRetired === "boolean" ? userIdOrIncludeRetired : maybeIncludeRetired;
   const baseQuery = db().select().from(playlists).orderBy(desc(playlists.createdAt));
-  const rows = legacyMode
-    ? includeRetired
+  let rows: PlaylistRow[];
+  try {
+    rows = legacyMode
+      ? includeRetired
+        ? await baseQuery
+        : await baseQuery.where(eq(playlists.isRetired, false))
+      : includeRetired
+        ? await baseQuery.where(eq(playlists.userId, userId))
+        : await baseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
+  } catch (error) {
+    if (!isMissingUserIdColumnError(error)) {
+      throw error;
+    }
+    rows = includeRetired
       ? await baseQuery
-      : await baseQuery.where(eq(playlists.isRetired, false))
-    : includeRetired
-      ? await baseQuery.where(eq(playlists.userId, userId))
-      : await baseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
+      : await baseQuery.where(eq(playlists.isRetired, false));
+  }
 
   // Get song counts for each playlist
   const songCounts = await db()
@@ -699,32 +810,77 @@ export async function getPlaylistById(
   id: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PlaylistDetail | null> {
-  const playlistRows = await db()
-    .select()
-    .from(playlists)
-    .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
-    .limit(1);
+  let playlistRows: PlaylistRow[];
+  try {
+    playlistRows = await db()
+      .select()
+      .from(playlists)
+      .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
+      .limit(1);
+  } catch (error) {
+    if (!isMissingUserIdColumnError(error)) {
+      throw error;
+    }
+
+    playlistRows = await db()
+      .select()
+      .from(playlists)
+      .where(eq(playlists.id, id))
+      .limit(1);
+  }
 
   const playlist = playlistRows[0];
   if (!playlist) {
     return null;
   }
 
-  const linkedSongs = await db()
-    .select({
-      playlistId: playlistSongs.playlistId,
-      songId: playlistSongs.songId,
-      position: playlistSongs.position,
-      title: songs.title,
-      artist: songs.artist,
-      audioKey: songs.audioKey,
-      createdAt: songs.createdAt,
-      lastPracticedAt: songs.lastPracticedAt,
-    })
-    .from(playlistSongs)
-    .innerJoin(songs, eq(playlistSongs.songId, songs.id))
-    .where(and(eq(playlistSongs.playlistId, id), eq(songs.userId, playlist.userId)))
-    .orderBy(asc(playlistSongs.position));
+  let linkedSongs: Array<{
+    playlistId: string;
+    songId: string;
+    position: number;
+    title: string;
+    artist: string | null;
+    audioKey: string | null;
+    createdAt: Date | null;
+    lastPracticedAt: Date | null;
+  }>;
+  try {
+    linkedSongs = await db()
+      .select({
+        playlistId: playlistSongs.playlistId,
+        songId: playlistSongs.songId,
+        position: playlistSongs.position,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        createdAt: songs.createdAt,
+        lastPracticedAt: songs.lastPracticedAt,
+      })
+      .from(playlistSongs)
+      .innerJoin(songs, eq(playlistSongs.songId, songs.id))
+      .where(and(eq(playlistSongs.playlistId, id), eq(songs.userId, playlist.userId)))
+      .orderBy(asc(playlistSongs.position));
+  } catch (error) {
+    if (!isMissingUserIdColumnError(error)) {
+      throw error;
+    }
+
+    linkedSongs = await db()
+      .select({
+        playlistId: playlistSongs.playlistId,
+        songId: playlistSongs.songId,
+        position: playlistSongs.position,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        createdAt: songs.createdAt,
+        lastPracticedAt: songs.lastPracticedAt,
+      })
+      .from(playlistSongs)
+      .innerJoin(songs, eq(playlistSongs.songId, songs.id))
+      .where(eq(playlistSongs.playlistId, id))
+      .orderBy(asc(playlistSongs.position));
+  }
 
   const songIds = linkedSongs.map((s) => s.songId);
   const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts] = await Promise.all([
@@ -803,17 +959,34 @@ export async function createPlaylist(data: {
   name: string;
   eventDate?: string;
 }): Promise<PlaylistSummary> {
-  const rows = await db()
-    .insert(playlists)
-    .values({
-      id: crypto.randomUUID(),
-      userId: data.userId,
-      name: data.name,
-      eventDate: data.eventDate ?? null,
-    })
-    .returning();
+  try {
+    const rows = await db()
+      .insert(playlists)
+      .values({
+        id: crypto.randomUUID(),
+        userId: data.userId,
+        name: data.name,
+        eventDate: data.eventDate ?? null,
+      })
+      .returning();
 
-  return mapPlaylistSummary(rows[0]);
+    return mapPlaylistSummary(rows[0]);
+  } catch (error) {
+    if (!isMissingUserIdColumnError(error)) {
+      throw error;
+    }
+
+    const rows = await db()
+      .insert(playlists)
+      .values({
+        id: crypto.randomUUID(),
+        name: data.name,
+        eventDate: data.eventDate ?? null,
+      })
+      .returning();
+
+    return mapPlaylistSummary(rows[0]);
+  }
 }
 
 export async function updatePlaylist(
