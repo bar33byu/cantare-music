@@ -31,6 +31,7 @@ interface PracticeViewProps {
   onBreadcrumbRootClick?: () => void;
   onEditSongClick?: () => void;
   segmentPrerollMs?: number;
+  collapseLyricLineBreaks?: boolean;
 }
 
 type LyricVisibilityMode = "full" | "hint" | "hidden";
@@ -67,6 +68,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   onBreadcrumbRootClick,
   onEditSongClick,
   segmentPrerollMs = 500,
+  collapseLyricLineBreaks = false,
 }) => {
   const effectiveSegmentPrerollMs = Math.max(0, segmentPrerollMs);
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
@@ -897,6 +899,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     onSeek={seek}
                     masteryPercent={masteryPercentForSegment(currentSegment.id)}
                     lyricVisibilityMode={lyricVisibilityMode}
+                    collapseLyricLineBreaks={collapseLyricLineBreaks}
                   />
                 </div>
               </div>

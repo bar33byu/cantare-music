@@ -43,6 +43,7 @@ interface HashRouteState {
 
 interface UserSettings {
   segmentPrerollMs: number;
+  collapseLyricLineBreaks: boolean;
   currentUserId: string;
   users: KnownUser[];
 }
@@ -50,6 +51,7 @@ interface UserSettings {
 const SETTINGS_STORAGE_KEY = "cantare:user-settings";
 const DEFAULT_USER_SETTINGS: UserSettings = {
   segmentPrerollMs: 500,
+  collapseLyricLineBreaks: false,
   currentUserId: DEFAULT_USER_ID,
   users: [{ id: DEFAULT_USER_ID, name: "Default User" }],
 };
@@ -95,6 +97,7 @@ function parseStoredSettings(raw: string | null): UserSettings {
     const currentUserId = normalizeUserId(parsed.currentUserId ?? DEFAULT_USER_SETTINGS.currentUserId);
     return {
       segmentPrerollMs: clampSegmentPrerollMs(parsed.segmentPrerollMs ?? DEFAULT_USER_SETTINGS.segmentPrerollMs),
+      collapseLyricLineBreaks: Boolean(parsed.collapseLyricLineBreaks),
       currentUserId: users.some((user) => user.id === currentUserId) ? currentUserId : DEFAULT_USER_ID,
       users,
     };
@@ -608,6 +611,7 @@ export default function Home() {
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
             segmentPrerollMs={userSettings.segmentPrerollMs}
+            collapseLyricLineBreaks={userSettings.collapseLyricLineBreaks}
             onEditSongClick={() => {
               setSongEditorReturnView("song_practice");
               setActiveView("song_segment_editor");
@@ -800,6 +804,22 @@ export default function Home() {
                   />
                   <p className="mt-2 text-xs text-gray-600">
                     Starts segment playback slightly early to avoid clipped phrase starts on some devices.
+                  </p>
+
+                  <label className="mt-4 flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      data-testid="settings-collapse-line-breaks-toggle"
+                      type="checkbox"
+                      checked={userSettings.collapseLyricLineBreaks}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setUserSettings((previous) => ({ ...previous, collapseLyricLineBreaks: checked }));
+                      }}
+                    />
+                    Compact lyric wrapping (ignore pasted line breaks)
+                  </label>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Shows lyrics as a continuous paragraph to reduce vertical scrolling during practice.
                   </p>
                 </div>
 

@@ -33,6 +33,7 @@ interface SegmentCardProps {
   onSeek?: (ms: number) => void;
   masteryPercent?: number;
   lyricVisibilityMode?: "full" | "hint" | "hidden";
+  collapseLyricLineBreaks?: boolean;
 }
 
 function isMaskableLyricChar(char: string): boolean {
@@ -92,18 +93,28 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   playbackMs,
   onSeek,
   lyricVisibilityMode = "full",
+  collapseLyricLineBreaks = false,
 }) => {
-  const hasLyrics = (segment.lyricText ?? "").trim().length > 0;
+  const lyricText = React.useMemo(() => {
+    const base = segment.lyricText ?? "";
+    if (!collapseLyricLineBreaks) {
+      return base;
+    }
+
+    return base.replace(/\r?\n+/g, " ").replace(/[ \t]{2,}/g, " ").trim();
+  }, [collapseLyricLineBreaks, segment.lyricText]);
+
+  const hasLyrics = lyricText.trim().length > 0;
   const lyricFontSize = React.useMemo(
-    () => getAdaptiveLyricFontSize(segment.lyricText || ""),
-    [segment.lyricText]
+    () => getAdaptiveLyricFontSize(lyricText),
+    [lyricText]
   );
   const displayLyricContent = React.useMemo(() => {
     if (!hasLyrics) {
       return "No lyrics for this segment yet.";
     }
-    return renderLyricWithStableMask(segment.lyricText, lyricVisibilityMode);
-  }, [hasLyrics, lyricVisibilityMode, segment.lyricText]);
+    return renderLyricWithStableMask(lyricText, lyricVisibilityMode);
+  }, [hasLyrics, lyricText, lyricVisibilityMode]);
 
   const clampedPlaybackMs = Math.min(
     segment.endMs,

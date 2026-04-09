@@ -152,4 +152,16 @@ describe("SegmentCard", () => {
     expect(container.className).not.toContain("[&::-webkit-scrollbar]:md:w-0");
     expect(container.className).not.toContain("md:[scrollbar-width:none]");
   });
+
+  it("optionally collapses lyric line breaks for compact display", () => {
+    render(
+      <SegmentCard
+        {...defaultProps}
+        collapseLyricLineBreaks
+        segment={{ ...mockSegment, lyricText: "Line one\nLine two\n\nLine three" }}
+      />
+    );
+
+    expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("Line one Line two Line three");
+  });
 });

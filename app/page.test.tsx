@@ -29,14 +29,16 @@ vi.mock('./components/PracticeView', () => ({
     onBreadcrumbRootClick,
     onEditSongClick,
     segmentPrerollMs,
+    collapseLyricLineBreaks,
   }: {
     song: { segments: Array<unknown> };
     breadcrumbRootLabel?: string;
     onBreadcrumbRootClick?: () => void;
     onEditSongClick?: () => void;
     segmentPrerollMs?: number;
+    collapseLyricLineBreaks?: boolean;
   }) => {
-    practiceViewMock({ song, segmentPrerollMs });
+    practiceViewMock({ song, segmentPrerollMs, collapseLyricLineBreaks });
     return (
       <div data-testid="mock-practice-view">
         Segments: {song.segments.length}
@@ -165,6 +167,23 @@ describe('Home page', () => {
 
     const lastCall = practiceViewMock.mock.calls.at(-1)?.[0] as { segmentPrerollMs?: number } | undefined;
     expect(lastCall?.segmentPrerollMs).toBe(1000);
+  });
+
+  it('passes compact lyric wrapping setting into practice view', async () => {
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    fireEvent.click(screen.getByTestId('settings-collapse-line-breaks-toggle'));
+
+    fireEvent.click(screen.getByTestId('library-tab'));
+    fireEvent.click(screen.getByTestId('mock-select-song'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
+    });
+
+    const lastCall = practiceViewMock.mock.calls.at(-1)?.[0] as { collapseLyricLineBreaks?: boolean } | undefined;
+    expect(lastCall?.collapseLyricLineBreaks).toBe(true);
   });
 
   it('switches to playlists and starts playlist practice', async () => {
