@@ -143,4 +143,13 @@ describe("SegmentCard", () => {
       fontSize: "clamp(0.95rem, 2.7vw, 1.5rem)",
     });
   });
+
+  it("keeps lyric scrollbar visible on larger screens", () => {
+    render(<SegmentCard {...defaultProps} />);
+    const container = screen.getByTestId("segment-lyric-scroll-container");
+
+    expect(container.className).toContain("[scrollbar-width:thin]");
+    expect(container.className).not.toContain("[&::-webkit-scrollbar]:md:w-0");
+    expect(container.className).not.toContain("md:[scrollbar-width:none]");
+  });
 });

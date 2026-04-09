@@ -136,7 +136,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
       </div>
       <div className="mb-4 min-h-0 flex-1">
         <div
-          className="h-full overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:md:w-0 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full md:[scrollbar-width:none]"
+          className="h-full overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
           data-testid="segment-lyric-scroll-container"
         >
           <p
