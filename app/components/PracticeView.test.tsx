@@ -483,6 +483,41 @@ describe("PracticeView", () => {
     expect(mockPlay).toHaveBeenNthCalledWith(2, 7500, 12000);
   });
 
+  it("keeps next segment card selected during preroll window", async () => {
+    const playbackState = {
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const song = makeSong(3);
+    const view = render(<PracticeView song={song} initialSession={makeSession(song)} segmentPrerollMs={500} />);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    });
+
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
+
+    // 3600ms is after preroll start (3500ms) but before segment start (4000ms).
+    playbackState.currentMs = 3600;
+    view.rerender(<PracticeView song={song} initialSession={makeSession(song)} segmentPrerollMs={500} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
+    });
+  });
+
   it("does not reset playhead to segment start after pause", async () => {
     const playbackState = {
       isPlaying: false,

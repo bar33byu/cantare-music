@@ -482,7 +482,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         targetStartWithPreroll = Math.max(currentMs, targetStartWithPreroll);
         navigationGuardRef.current = {
           index: clamped,
-          releaseAtMs: targetStartWithPreroll,
+          releaseAtMs: targetSegment.startMs,
           createdAtMs: Date.now(),
         };
       }
