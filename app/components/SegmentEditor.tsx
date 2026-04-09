@@ -223,13 +223,29 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     });
   };
 
+  const probeAudioDurationCandidatesMs = async (candidates: Array<string | null | undefined>): Promise<number | null> => {
+    for (const candidate of candidates) {
+      const normalized = candidate?.trim();
+      if (!normalized) {
+        continue;
+      }
+
+      const duration = await probeAudioDurationMs(normalized);
+      if (duration && duration > 0) {
+        return duration;
+      }
+    }
+
+    return null;
+  };
+
   const resolveBulkDurationMs = async (): Promise<number> => {
     const knownDuration = Math.max(durationMs, stableDurationMs);
     if (knownDuration > 0) {
       return knownDuration;
     }
 
-    const probedDuration = playbackAudioUrl ? await probeAudioDurationMs(playbackAudioUrl) : null;
+    const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl, proxyAudioUrl]);
     if (probedDuration && probedDuration > 0) {
       setStableDurationMs((previous) => Math.max(previous, probedDuration));
       return probedDuration;
@@ -565,7 +581,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         return;
       }
 
-      const probedDuration = await probeAudioDurationMs(playbackAudioUrl);
+      const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl, proxyAudioUrl]);
       if (!cancelled && probedDuration && probedDuration > 0) {
         setStableDurationMs((previous) => Math.max(previous, probedDuration));
       }
@@ -576,7 +592,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, [durationMs, playbackAudioUrl, stableDurationMs]);
+  }, [durationMs, playbackAudioUrl, proxyAudioUrl, stableDurationMs]);
 
   useEffect(() => {
     setUseProxyFallback(false);

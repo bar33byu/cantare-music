@@ -308,6 +308,102 @@ describe('SegmentEditor', () => {
     vi.stubGlobal('Audio', originalAudio);
   });
 
+  it('probes proxy audio URL for duration before first play when direct probe fails', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: false,
+      currentMs: 0,
+      durationMs: 0,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({
+            audioUrl: 'https://pub-example.r2.dev/users/default/audio/song-1/test.mp3',
+            title: 'My Song',
+          }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    const originalAudio = globalThis.Audio;
+
+    class FallbackProbeAudio extends EventTarget {
+      duration = 0;
+      preload = 'none';
+      src: string;
+
+      constructor(src: string) {
+        super();
+        this.src = src;
+      }
+
+      load() {
+        if (this.src.includes('/api/audio/')) {
+          this.duration = 180;
+          this.dispatchEvent(new Event('loadedmetadata'));
+          return;
+        }
+
+        this.dispatchEvent(new Event('error'));
+      }
+
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject | null) {
+        super.addEventListener(type, listener as EventListener);
+      }
+
+      removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null) {
+        super.removeEventListener(type, listener as EventListener);
+      }
+    }
+
+    vi.stubGlobal('Audio', FallbackProbeAudio as unknown as typeof Audio);
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('03:00')).toBeInTheDocument();
+    });
+
+    vi.stubGlobal('Audio', originalAudio);
+  });
+
   it('plays from current transport position', async () => {
     const play = vi.fn();
     vi.mocked(useAudioPlayer).mockReturnValue({
