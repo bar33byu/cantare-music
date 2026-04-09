@@ -178,17 +178,45 @@ describe('useUploadAudio', () => {
       json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
     });
 
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ key: 'fallback-key' }),
+    });
+
     const { result } = renderHook(() => useUploadAudio());
     const file = new File(['test'], 'test.mp3', { type: 'audio/mpeg' });
 
     await act(async () => {
+      await expect(result.current.upload('song-123', file)).resolves.toBe('fallback-key');
+    });
+
+    expect(result.current.error).toBe(null);
+    expect(mockFetch).toHaveBeenNthCalledWith(2, '/api/songs/upload', {
+      method: 'POST',
+      body: expect.any(FormData),
+    });
+
+    global.XMLHttpRequest = XMLHttpRequestStub as any;
+  });
+
+  it('surfaces the direct upload error when the file is too large for server fallback', async () => {
+    global.XMLHttpRequest = XMLHttpRequestErrorStub as any;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
+    });
+
+    const { result } = renderHook(() => useUploadAudio());
+    const file = new File(['x'.repeat(4_100_000)], 'test.mp3', { type: 'audio/mpeg' });
+
+    await act(async () => {
       await expect(result.current.upload('song-123', file)).rejects.toThrow(
-        'Direct upload to storage failed',
+        'Server fallback is limited to files up to 4 MB on this deployment.',
       );
     });
 
-    expect(result.current.error).toMatch('Direct upload to storage failed');
-    // Should NOT have made a second fetch call to the fallback route
+    expect(result.current.error).toMatch('Server fallback is limited to files up to 4 MB on this deployment.');
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     global.XMLHttpRequest = XMLHttpRequestStub as any;

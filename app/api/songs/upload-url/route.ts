@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { ensureBucketCors, generateUploadKey, r2Client, BUCKET } from '../../../../lib/r2';
+import { generateUploadKey, r2Client, BUCKET } from '../../../../lib/r2';
 import { resolveRequestUserId } from '../../_user';
 import { getSongById } from '../../../../db/queries';
 
@@ -44,14 +44,6 @@ export async function POST(request: NextRequest) {
     }
 
     const key = generateUploadKey(userId, body.songId, body.filename);
-
-    try {
-      await ensureBucketCors();
-    } catch (corsError) {
-      const corsMessage =
-        corsError instanceof Error ? corsError.message : 'Unknown storage CORS setup error';
-      console.warn('[Upload] Could not auto-configure R2 CORS; continuing with signed URL:', corsMessage);
-    }
 
     const command = new PutObjectCommand({
       Bucket: BUCKET,
