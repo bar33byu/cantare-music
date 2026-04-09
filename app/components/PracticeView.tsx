@@ -73,6 +73,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const effectiveSegmentPrerollMs = Math.max(0, segmentPrerollMs);
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const initialSegmentId = song.segments[initialSession.currentSegmentIndex]?.id ?? null;
+  const segmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
   const lastSyncedSegmentIdRef = React.useRef<string | null>(initialSegmentId);
   const previousSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
   const lastSavedRatingsRef = React.useRef<string>("unloaded");
@@ -117,6 +118,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
   const hasAutoplayedSongRef = React.useRef<string | null>(null);
+  const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
 
   const enqueueOfflineRatings = React.useCallback((snapshot: string) => {
     if (typeof window === "undefined") {
@@ -211,6 +213,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     // On song change, avoid forcing an initial jump to the first section start.
     lastSyncedSegmentIdRef.current = song.segments[session.currentSegmentIndex]?.id ?? null;
   }, [session.currentSegmentIndex, song.id, song.segments]);
+
+  useEffect(() => {
+    segmentIndexRef.current = session.currentSegmentIndex;
+  }, [session.currentSegmentIndex]);
 
   const flushPlayedTime = React.useCallback(() => {
     if (playbackStartedAtRef.current === null) {
@@ -336,10 +342,31 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
 
+    const activeGuard = navigationGuardRef.current;
+    if (activeGuard) {
+      const guardExpired = Date.now() - activeGuard.createdAtMs > 1500;
+      if (guardExpired) {
+        navigationGuardRef.current = null;
+      } else {
+        if (session.currentSegmentIndex !== activeGuard.index) {
+          segmentIndexRef.current = activeGuard.index;
+          dispatch({ type: "SET_SEGMENT_INDEX", index: activeGuard.index });
+          return;
+        }
+
+        if (currentMs < activeGuard.releaseAtMs) {
+          return;
+        }
+
+        navigationGuardRef.current = null;
+      }
+    }
+
     const targetIndex = getSegmentIndexAtMs(currentMs);
 
     // When looping, stay on the current segment — don't auto-advance.
     if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex && !isLooping) {
+      segmentIndexRef.current = targetIndex;
       dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
       return;
     }
@@ -357,6 +384,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         const gapMidpoint = (gapStart + gapEnd) / 2;
         const gapTargetIndex = currentMs < gapMidpoint ? gapBeforeIndex : gapBeforeIndex + 1;
         if (gapTargetIndex !== session.currentSegmentIndex) {
+          segmentIndexRef.current = gapTargetIndex;
           dispatch({ type: "SET_SEGMENT_INDEX", index: gapTargetIndex });
         }
         return;
@@ -364,6 +392,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     if (currentMs >= song.segments[song.segments.length - 1].endMs && session.currentSegmentIndex !== song.segments.length - 1) {
+      segmentIndexRef.current = song.segments.length - 1;
       dispatch({ type: "SET_SEGMENT_INDEX", index: song.segments.length - 1 });
     }
   }, [currentMs, getSegmentIndexAtMs, hasSegments, isLooping, isPlaying, session.currentSegmentIndex, song.segments]);
@@ -434,15 +463,29 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     [knowledgeScore.bySegment]
   );
 
-  const jumpToSegment = (targetIndex: number) => {
+  const jumpToSegment = (
+    targetIndex: number,
+    options?: {
+      preventBackwardWhilePlaying?: boolean;
+    }
+  ) => {
     if (!hasSegments) {
       return;
     }
     const clamped = Math.max(0, Math.min(song.segments.length - 1, targetIndex));
     const targetSegment = song.segments[clamped];
+    segmentIndexRef.current = clamped;
     dispatch({ type: "SET_SEGMENT_INDEX", index: clamped });
     if (isPlaying) {
-      const targetStartWithPreroll = getSegmentStartWithPreroll(targetSegment.startMs);
+      let targetStartWithPreroll = getSegmentStartWithPreroll(targetSegment.startMs);
+      if (options?.preventBackwardWhilePlaying) {
+        targetStartWithPreroll = Math.max(currentMs, targetStartWithPreroll);
+        navigationGuardRef.current = {
+          index: clamped,
+          releaseAtMs: targetStartWithPreroll,
+          createdAtMs: Date.now(),
+        };
+      }
       if (isLooping) {
         play(targetStartWithPreroll, targetSegment.endMs);
         return;
@@ -500,8 +543,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
 
-    const elapsedInSegmentMs = currentMs - currentSegment.startMs;
-    const shouldGoToPreviousSegment = elapsedInSegmentMs <= PREV_SEGMENT_GO_BACK_THRESHOLD_MS && !isFirst;
+    const activeIndex = segmentIndexRef.current;
+    const activeSegment = song.segments[activeIndex] ?? currentSegment;
+    const elapsedInSegmentMs = currentMs - activeSegment.startMs;
+    const shouldGoToPreviousSegment = elapsedInSegmentMs <= PREV_SEGMENT_GO_BACK_THRESHOLD_MS && activeIndex > 0;
 
     setTransportDebug((previous) => ({
       ...previous,
@@ -511,11 +556,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }));
 
     if (shouldGoToPreviousSegment) {
-      jumpToSegment(session.currentSegmentIndex - 1);
+      jumpToSegment(activeIndex - 1);
       return;
     }
 
-    jumpToSegment(session.currentSegmentIndex);
+    jumpToSegment(activeSegment ? activeIndex : session.currentSegmentIndex);
   };
 
   const handleNextSegment = () => {
@@ -535,7 +580,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
 
-    if (isLast) {
+    const activeIndex = segmentIndexRef.current;
+    if (activeIndex >= song.segments.length - 1) {
       return;
     }
 
@@ -545,7 +591,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastAction: "next-segment",
       lastActionAt: new Date().toISOString(),
     }));
-    jumpToSegment(session.currentSegmentIndex + 1);
+    jumpToSegment(activeIndex + 1, { preventBackwardWhilePlaying: true });
   };
 
   const handleSeekSong = (ms: number) => {
@@ -555,9 +601,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastAction: `seek-song-${ms}`,
       lastActionAt: new Date().toISOString(),
     }));
+    navigationGuardRef.current = null;
     seek(ms);
     const targetIndex = getSegmentIndexAtMs(ms);
     if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex) {
+      segmentIndexRef.current = targetIndex;
       dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
     }
   };

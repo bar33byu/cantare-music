@@ -429,6 +429,60 @@ describe("PracticeView", () => {
     expect(mockPause).not.toHaveBeenCalled();
   });
 
+  it("next click in overlap prefers the later segment and does not move backward", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 3900,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(3);
+    song.segments = [
+      { ...song.segments[0], startMs: 0, endMs: 4000 },
+      { ...song.segments[1], startMs: 3300, endMs: 8000 },
+      { ...song.segments[2], startMs: 7600, endMs: 12000 },
+    ];
+
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+    expect(mockPlay).toHaveBeenCalledWith(7100, 12000);
+  });
+
+  it("rapid double-next clicks advance to later segments in order", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+
+    expect(mockPlay).toHaveBeenCalledTimes(2);
+    expect(mockPlay).toHaveBeenNthCalledWith(1, 3500, 12000);
+    expect(mockPlay).toHaveBeenNthCalledWith(2, 7500, 12000);
+  });
+
   it("does not reset playhead to segment start after pause", async () => {
     const playbackState = {
       isPlaying: false,
