@@ -3,6 +3,7 @@
 import React from "react";
 import { Segment, MemoryRating } from "../types/index";
 import RatingBar from "./RatingBar";
+import { PitchContourThumbnail } from "./PitchContourThumbnail";
 
 const LYRIC_FONT_MAX_REM = 2.25; // 36px
 const LYRIC_FONT_MIN_REM = 0.95; // 15.2px
@@ -34,6 +35,7 @@ interface SegmentCardProps {
   masteryPercent?: number;
   lyricVisibilityMode?: "full" | "hint" | "hidden";
   collapseLyricLineBreaks?: boolean;
+  showContourMap?: boolean;
 }
 
 function isMaskableLyricChar(char: string): boolean {
@@ -94,6 +96,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   onSeek,
   lyricVisibilityMode = "full",
   collapseLyricLineBreaks = false,
+  showContourMap = false,
 }) => {
   const lyricText = React.useMemo(() => {
     const base = segment.lyricText ?? "";
@@ -180,6 +183,15 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
           <span data-testid="segment-end-time">{formatMs(segment.endMs)}</span>
         </div>
       </div>
+
+      {showContourMap ? (
+        <div className="mb-3" data-testid="segment-card-contour-map">
+          <PitchContourThumbnail
+            notes={segment.pitchContourNotes ?? []}
+            segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
+          />
+        </div>
+      ) : null}
 
       <p className="mb-2 text-sm text-gray-500">Level of knowledge</p>
       <RatingBar

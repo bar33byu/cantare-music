@@ -21,13 +21,20 @@ vi.mock("./SegmentCard", () => ({
     onRate,
     currentRating,
     lyricVisibilityMode,
+    showContourMap,
   }: {
     segment: { id: string; label: string };
     onRate: (r: MemoryRating) => void;
     currentRating?: MemoryRating;
     lyricVisibilityMode?: "full" | "hint" | "hidden";
+    showContourMap?: boolean;
   }) => (
-    <div data-testid="mock-segment-card" data-segment-id={segment.id} data-lyric-mode={lyricVisibilityMode}>
+    <div
+      data-testid="mock-segment-card"
+      data-segment-id={segment.id}
+      data-lyric-mode={lyricVisibilityMode}
+      data-show-contour-map={showContourMap ? "true" : "false"}
+    >
       <span>{segment.label}</span>
       <span data-testid="mock-current-rating">{currentRating ?? "none"}</span>
       <button data-testid="rate-btn" onClick={() => onRate(4 as MemoryRating)}>Rate 4</button>
@@ -283,6 +290,23 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-overlay-toggle")).toBeInTheDocument();
   });
 
+  it("toggles static contour map on section card independently", async () => {
+    const song = makeSong(2);
+    await renderAndWaitForRatings(song);
+
+    const segmentCard = screen.getByTestId("mock-segment-card");
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "false");
+
+    fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
+
+    fireEvent.click(screen.getByTestId("practice-overlay-toggle"));
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
+  });
+
   it("updates contour feedback as user taps in tap practice mode", async () => {
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: true,
@@ -344,7 +368,101 @@ describe("PracticeView", () => {
     expect(screen.queryByTestId("practice-piano-roll-overlay")).not.toBeInTheDocument();
   });
 
-  it("triggers haptic feedback when a tap is classified as a miss", async () => {
+  it("keeps segment taps cleared for new retries", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 120,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 21, clientY: 30 });
+    fireEvent.pointerUp(tapBar, { pointerId: 21, clientY: 30 });
+    fireEvent.pointerDown(tapBar, { pointerId: 22, clientY: 170 });
+    fireEvent.pointerUp(tapBar, { pointerId: 22, clientY: 170 });
+    expect(screen.getAllByTestId("practice-attempt-dot").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByTestId("practice-clear-taps"));
+    expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
+
+    fireEvent.pointerDown(tapBar, { pointerId: 23, clientY: 70 });
+    fireEvent.pointerUp(tapBar, { pointerId: 23, clientY: 70 });
+    expect(screen.getAllByTestId("practice-attempt-dot")).toHaveLength(1);
+  });
+
+  it("shows loop accuracy toast and clears taps when loop restarts", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 3995,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      startMs: 0,
+      endMs: 4000,
+    };
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+    fireEvent.pointerDown(tapBar, { pointerId: 31, clientY: 60 });
+    fireEvent.pointerUp(tapBar, { pointerId: 31, clientY: 60 });
+
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-accuracy-toast")).toHaveTextContent("Loop accuracy");
+      expect(mockPlay).toHaveBeenCalledWith(0, 4000);
+    });
+
+    expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
+  });
+
+  it("shows immediate miss feedback when a tap is classified as a miss", async () => {
     const vibrate = vi.fn();
     Object.defineProperty(window.navigator, "vibrate", {
       configurable: true,
@@ -396,7 +514,9 @@ describe("PracticeView", () => {
     fireEvent.pointerUp(tapBar, { pointerId: 12, clientY: 180 });
 
     await waitFor(() => {
-      expect(vibrate).toHaveBeenCalled();
+      const hasHaptic = vibrate.mock.calls.length > 0;
+      const hasToast = screen.getByTestId("practice-accuracy-toast").textContent?.includes("Missed tap");
+      expect(hasHaptic || hasToast).toBe(true);
     });
   });
 

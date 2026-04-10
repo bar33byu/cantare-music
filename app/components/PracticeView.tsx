@@ -95,8 +95,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(false);
   const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
+  const [showCardContourMap, setShowCardContourMap] = React.useState(false);
   const [showTapOverlay, setShowTapOverlay] = React.useState(true);
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
+  const [accuracyToast, setAccuracyToast] = React.useState<{ text: string; visible: boolean } | null>(null);
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
   const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
   const practicedRecordedRef = React.useRef(false);
@@ -128,6 +130,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
   const tapBarRef = React.useRef<HTMLDivElement | null>(null);
   const activeTapCaptureRef = React.useRef<ActiveTapCapture | null>(null);
+  const toastTimerRef = React.useRef<number | null>(null);
+  const loopHandledRef = React.useRef<string | null>(null);
+  const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
@@ -651,6 +656,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return 1 - ratio;
   }, []);
 
+  const showAccuracyToast = React.useCallback((text: string) => {
+    setAccuracyToast({ text, visible: true });
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setAccuracyToast(null);
+      toastTimerRef.current = null;
+    }, 1600);
+  }, []);
+
   const finalizeTapCapture = React.useCallback((endLane?: number) => {
     const capture = activeTapCaptureRef.current;
     if (!capture || !currentSegment) {
@@ -675,26 +691,30 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lane: Math.min(1, Math.max(0, typeof endLane === "number" ? endLane : capture.lane)),
     };
 
-    const nextSegmentNotes = [...currentAttemptNotes, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+    const segmentId = currentSegment.id;
+    const latestForSegment = tapAttemptsRef.current[segmentId] ?? [];
+    const nextSegmentNotes = [...latestForSegment, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
     const immediateMatch = compareContourAttemptDetailed(
       currentSegment.pitchContourNotes ?? [],
       nextSegmentNotes,
       { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
     );
-    if (immediateMatch.attemptNoteStatuses[note.id] === "mismatched" && typeof navigator !== "undefined" && "vibrate" in navigator) {
-      navigator.vibrate(35);
+    const missedTap = immediateMatch.attemptNoteStatuses[note.id] === "mismatched";
+
+    setTapAttemptsBySegment((previous) => ({
+      ...previous,
+      [segmentId]: nextSegmentNotes,
+    }));
+
+    if (missedTap) {
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+        navigator.vibrate([35, 20, 35]);
+      }
+      showAccuracyToast("Missed tap");
     }
 
-    setTapAttemptsBySegment((previous) => {
-      const segmentId = currentSegment.id;
-      return {
-        ...previous,
-        [segmentId]: nextSegmentNotes,
-      };
-    });
-
     activeTapCaptureRef.current = null;
-  }, [currentAttemptNotes, currentMs, currentSegment]);
+  }, [currentMs, currentSegment, showAccuracyToast]);
 
   const clearCurrentSegmentTaps = React.useCallback(() => {
     if (!currentSegment) {
@@ -863,13 +883,39 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (isPlaying) {
       // Reset the user-pause flag whenever playback is active.
       pausedByUserRef.current = false;
+      loopHandledRef.current = null;
       return;
     }
     if (pausedByUserRef.current) return;
     if (currentMs >= currentSegment.endMs - 50) {
+      const loopKey = `${currentSegment.id}:${Math.floor(currentMs)}`;
+      if (loopHandledRef.current === loopKey) {
+        return;
+      }
+      loopHandledRef.current = loopKey;
+      const loopMatch = compareContourAttemptDetailed(
+        currentSegment.pitchContourNotes ?? [],
+        tapAttemptsBySegment[currentSegment.id] ?? [],
+        { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
+      );
+      showAccuracyToast(`Loop accuracy ${Math.round(loopMatch.score * 100)}%`);
+      setTapAttemptsBySegment((previous) => ({
+        ...previous,
+        [currentSegment.id]: [],
+      }));
+      activeTapCaptureRef.current = null;
       play(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
-  }, [currentMs, currentSegment, getSegmentStartWithPreroll, isLooping, isPlaying, play]);
+  }, [
+    currentMs,
+    currentSegment,
+    getSegmentStartWithPreroll,
+    isLooping,
+    isPlaying,
+    play,
+    showAccuracyToast,
+    tapAttemptsBySegment,
+  ]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;
@@ -881,15 +927,34 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [session.currentSegmentIndex]);
 
   useEffect(() => {
+    tapAttemptsRef.current = tapAttemptsBySegment;
+  }, [tapAttemptsBySegment]);
+
+  useEffect(() => {
     activeTapCaptureRef.current = null;
   }, [currentSegment?.id]);
 
   useEffect(() => {
     setTapAttemptsBySegment({});
     setIsTapPracticeMode(false);
+    setShowCardContourMap(false);
     setShowTapOverlay(true);
+    setAccuracyToast(null);
     activeTapCaptureRef.current = null;
+    loopHandledRef.current = null;
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
   }, [song.id]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (ratingsLoading || lastSavedRatingsRef.current === "unloaded") {
@@ -939,6 +1004,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       data-testid="practice-layout"
       className="relative flex h-dvh flex-col overflow-hidden bg-gray-50"
     >
+      {accuracyToast?.visible ? (
+        <div
+          data-testid="practice-accuracy-toast"
+          className="pointer-events-none fixed left-1/2 top-16 z-[120] -translate-x-1/2 rounded-full bg-slate-900/90 px-3 py-1.5 text-xs font-semibold text-white shadow-lg"
+        >
+          {accuracyToast.text}
+        </div>
+      ) : null}
       <header data-testid="practice-header" className="px-4 pb-2 pt-4 md:px-8">
         <div className="flex items-start justify-between gap-3">
           {breadcrumbRootLabel ? (
@@ -1033,6 +1106,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           <KnowledgeBar percent={knowledgeScore.overall} />
         )}
         <div className="mt-2 flex items-center gap-2">
+          {hasSegments && currentSegment ? (
+            <button
+              type="button"
+              data-testid="practice-card-contour-toggle"
+              onClick={() => setShowCardContourMap((previous) => !previous)}
+              className="rounded-full border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+            >
+              Card contour: {showCardContourMap ? "On" : "Off"}
+            </button>
+          ) : null}
           <button
             type="button"
             data-testid="practice-tap-mode-toggle"
@@ -1118,6 +1201,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     masteryPercent={masteryPercentForSegment(currentSegment.id)}
                     lyricVisibilityMode={lyricVisibilityMode}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
+                    showContourMap={showCardContourMap}
                   />
                 </div>
                 {isTapPracticeMode && hasSegments && currentSegment && showTapOverlay ? (
