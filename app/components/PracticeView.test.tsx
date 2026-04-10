@@ -271,6 +271,66 @@ describe("PracticeView", () => {
     expect(within(transport).getByTestId("mock-audio-player")).toBeInTheDocument();
   });
 
+  it("hides segment arrows and shows tap bar in tap practice mode", async () => {
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    expect(screen.queryByTestId("practice-prev-segment")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("practice-next-segment")).not.toBeInTheDocument();
+    expect(screen.getByTestId("practice-tap-bar")).toBeInTheDocument();
+  });
+
+  it("updates contour feedback as user taps in tap practice mode", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      pitchContourNotes: [
+        { id: "k1", timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
+        { id: "k2", timeOffsetMs: 10, durationMs: 100, lane: 0.8 },
+      ],
+    };
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 1, clientY: 180 });
+    fireEvent.pointerUp(tapBar, { pointerId: 1, clientY: 180 });
+    fireEvent.pointerDown(tapBar, { pointerId: 2, clientY: 20 });
+    fireEvent.pointerUp(tapBar, { pointerId: 2, clientY: 20 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-tap-feedback")).toHaveTextContent("100%");
+    });
+  });
+
   it("fetches historical ratings on mount", async () => {
     const song = makeSong(2);
     render(<PracticeView song={song} initialSession={makeSession(song)} />);

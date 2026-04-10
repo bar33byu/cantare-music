@@ -146,6 +146,7 @@ describe('SegmentEditor integration', () => {
     });
 
     fireEvent.click(screen.getByTestId('segment-block-seg-1'));
+    fireEvent.click(screen.getByText('Section 1'));
     const labelInput = await screen.findByTestId('segment-editor-label-input');
     fireEvent.change(labelInput, { target: { value: 'Section A' } });
     fireEvent.blur(labelInput);

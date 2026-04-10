@@ -5,12 +5,14 @@ export interface AudioPlayerControls {
   isReady: boolean;
   currentMs: number;
   durationMs: number;
+  playbackRate?: number;
   playbackError: string | null;
   debugInfo: AudioDebugInfo;
   play: (startMs: number, endMs: number) => void;
   pause: () => void;
   seek: (ms: number) => void;
   setPlaybackEndMs: (endMs: number) => void;
+  setPlaybackRate?: (rate: number) => void;
 }
 
 export interface AudioDebugInfo {
@@ -86,12 +88,14 @@ export function useAudioPlayer(
   const endMsRef = useRef<number>(0);
   const pendingSeekMsRef = useRef<number | null>(null);
   const pendingPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
+  const playbackRateRef = useRef(1);
   const hasUserPlayIntentRef = useRef(false);
   const lastErrorRef = useRef<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
+  const [playbackRate, setPlaybackRateState] = useState(1);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<AudioDebugInfo>(() => makeDefaultDebugInfo(audioUrl));
 
@@ -158,6 +162,7 @@ export function useAudioPlayer(
       audio.load?.();
       updateDebugInfo(audio, 'load');
     }
+    audio.playbackRate = playbackRateRef.current;
     applyCurrentTime(audio, startMs, 'seek-before-play');
     setCurrentMs(startMs);
     updateDebugInfo(audio, 'play-attempt');
@@ -234,9 +239,10 @@ export function useAudioPlayer(
     updateDebugInfo(audio, 'audio-created');
 
     if ('preload' in audio) {
-      // Avoid eager decode/network churn before user interaction.
-      audio.preload = 'none';
+      audio.preload = 'metadata';
     }
+    audio.load?.();
+    audio.playbackRate = playbackRateRef.current;
 
     const flushPendingPlay = () => {
       if (!pendingPlayRangeRef.current) {
@@ -390,5 +396,28 @@ export function useAudioPlayer(
     updateDebugInfo(audioRef.current, 'set-playback-end');
   }, [updateDebugInfo]);
 
-  return { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs };
+  const setPlaybackRate = useCallback((rate: number) => {
+    const nextRate = Math.min(2, Math.max(0.25, rate));
+    playbackRateRef.current = nextRate;
+    setPlaybackRateState(nextRate);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextRate;
+      updateDebugInfo(audioRef.current, 'set-playback-rate');
+    }
+  }, [updateDebugInfo]);
+
+  return {
+    isPlaying,
+    isReady,
+    currentMs,
+    durationMs,
+    playbackRate,
+    playbackError,
+    debugInfo,
+    play,
+    pause,
+    seek,
+    setPlaybackEndMs,
+    setPlaybackRate,
+  };
 }

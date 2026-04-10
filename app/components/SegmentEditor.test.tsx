@@ -810,4 +810,105 @@ describe('SegmentEditor', () => {
     expect(style).toMatch(/left/);
     expect(style).not.toBe('left: 0%');
   });
+
+  it('updates playback rate from answer-key controls', async () => {
+    const setPlaybackRate = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 10000,
+      durationMs: 60000,
+      playbackRate: 1,
+      setPlaybackRate,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-playback-rate')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('segment-editor-playback-rate'), { target: { value: '0.5' } });
+    expect(setPlaybackRate).toHaveBeenCalledWith(0.5);
+  });
+
+  it('records contour taps and saves them to the matching segment', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackRate: 1,
+      setPlaybackRate: vi.fn(),
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+
+    const tapBar = screen.getByTestId('segment-editor-contour-tapbar');
+    fireEvent.pointerDown(tapBar, { pointerId: 31, clientY: 40 });
+    fireEvent.pointerUp(tapBar, { pointerId: 31, clientY: 44 });
+
+    expect(screen.getByTestId('segment-editor-contour-draft-count')).toHaveTextContent('1');
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-save'));
+
+    await waitFor(() => {
+      const contourPatchCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(contourPatchCall).toBeTruthy();
+      const body = JSON.parse(String(contourPatchCall?.[1]?.body ?? '{}'));
+      expect(Array.isArray(body.pitchContourNotes)).toBe(true);
+      expect(body.pitchContourNotes.length).toBe(1);
+      expect(body.pitchContourNotes[0].timeOffsetMs).toBe(5000);
+      expect(body.pitchContourNotes[0].durationMs).toBe(80);
+    });
+  });
 });

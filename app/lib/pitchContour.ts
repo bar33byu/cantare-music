@@ -2,6 +2,24 @@ import { PitchContourNote } from "../types/index";
 
 const MAX_CONTOUR_NOTES = 2000;
 
+export interface SegmentTimeWindow {
+  id: string;
+  startMs: number;
+  endMs: number;
+}
+
+export interface AbsolutePitchContourNote {
+  id: string;
+  startMs: number;
+  durationMs: number;
+  lane: number;
+}
+
+export interface SegmentedPitchContourNote {
+  segmentId: string;
+  note: PitchContourNote;
+}
+
 export interface PitchContourValidationResult {
   ok: boolean;
   error?: string;
@@ -57,4 +75,39 @@ export function validatePitchContourNotes(notes: unknown): PitchContourValidatio
   }
 
   return { ok: true };
+}
+
+export function splitAbsoluteContourNoteBySegments(
+  absoluteNote: AbsolutePitchContourNote,
+  segmentWindows: SegmentTimeWindow[]
+): SegmentedPitchContourNote[] {
+  const absoluteStartMs = Math.max(0, absoluteNote.startMs);
+  const absoluteEndMs = Math.max(absoluteStartMs, absoluteStartMs + absoluteNote.durationMs);
+  if (absoluteEndMs <= absoluteStartMs) {
+    return [];
+  }
+
+  const orderedWindows = [...segmentWindows].sort((a, b) => a.startMs - b.startMs);
+
+  const segmentedNotes: SegmentedPitchContourNote[] = [];
+
+  for (const window of orderedWindows) {
+    const overlapStartMs = Math.max(absoluteStartMs, window.startMs);
+    const overlapEndMs = Math.min(absoluteEndMs, window.endMs);
+    if (overlapEndMs <= overlapStartMs) {
+      continue;
+    }
+
+    segmentedNotes.push({
+      segmentId: window.id,
+      note: {
+        id: `${absoluteNote.id}:${window.id}:${segmentedNotes.length}`,
+        timeOffsetMs: overlapStartMs - window.startMs,
+        durationMs: overlapEndMs - overlapStartMs,
+        lane: Math.min(1, Math.max(0, absoluteNote.lane)),
+      },
+    });
+  }
+
+  return segmentedNotes;
 }

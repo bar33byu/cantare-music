@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useReducer } from "react";
-import { Song, MemoryRating } from "../types/index";
+import { Song, MemoryRating, PitchContourNote } from "../types/index";
 import { sessionReducer, SessionState } from "../lib/sessionReducer";
 import { computeKnowledgeScore } from "../lib/knowledgeUtils";
 import SegmentCard from "./SegmentCard";
@@ -10,6 +10,7 @@ import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
+import { compareContourAttempt } from "../lib/contourPractice";
 
 interface TransportDebugState {
   playToggleClicks: number;
@@ -45,6 +46,14 @@ const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
 const PRACTICED_PLAYBACK_THRESHOLD_MS = 10_000;
 const PREV_SEGMENT_GO_BACK_THRESHOLD_MS = 3_000;
 const OFFLINE_RATING_QUEUE_PREFIX = "cantare:offline-ratings:";
+const MIN_TAP_DURATION_MS = 80;
+
+interface ActiveTapCapture {
+  id: string;
+  startOffsetMs: number;
+  lane: number;
+  pointerId: number;
+}
 
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
   if (mode === "full") {
@@ -83,6 +92,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(false);
+  const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
+  const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
   const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
   const practicedRecordedRef = React.useRef(false);
@@ -112,11 +123,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   });
   const hasSegments = song.segments.length > 0;
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
+  const tapBarRef = React.useRef<HTMLDivElement | null>(null);
+  const activeTapCaptureRef = React.useRef<ActiveTapCapture | null>(null);
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
+  const currentAttemptNotes = currentSegment ? (tapAttemptsBySegment[currentSegment.id] ?? []) : [];
+  const currentSegmentMatch = useMemo(() => {
+    if (!currentSegment) {
+      return null;
+    }
+
+    return compareContourAttempt(
+      currentSegment.pitchContourNotes ?? [],
+      currentAttemptNotes,
+      { timeToleranceMs: 400, sameDeadZone: 0.08 }
+    );
+  }, [currentAttemptNotes, currentSegment]);
   const hasAutoplayedSongRef = React.useRef<string | null>(null);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
 
@@ -610,6 +635,63 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
   };
 
+  const getTapLane = React.useCallback((clientY: number) => {
+    const rect = tapBarRef.current?.getBoundingClientRect();
+    if (!rect || rect.height <= 0) {
+      return 0.5;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    return 1 - ratio;
+  }, []);
+
+  const finalizeTapCapture = React.useCallback((endLane?: number) => {
+    const capture = activeTapCaptureRef.current;
+    if (!capture || !currentSegment) {
+      activeTapCaptureRef.current = null;
+      return;
+    }
+
+    const segmentDurationMs = Math.max(1, currentSegment.endMs - currentSegment.startMs);
+    const endOffsetMs = Math.min(
+      segmentDurationMs,
+      Math.max(capture.startOffsetMs + MIN_TAP_DURATION_MS, currentMs - currentSegment.startMs)
+    );
+    if (endOffsetMs <= capture.startOffsetMs) {
+      activeTapCaptureRef.current = null;
+      return;
+    }
+
+    const note: PitchContourNote = {
+      id: capture.id,
+      timeOffsetMs: capture.startOffsetMs,
+      durationMs: endOffsetMs - capture.startOffsetMs,
+      lane: Math.min(1, Math.max(0, typeof endLane === "number" ? endLane : capture.lane)),
+    };
+
+    setTapAttemptsBySegment((previous) => {
+      const segmentId = currentSegment.id;
+      const nextSegmentNotes = [...(previous[segmentId] ?? []), note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+      return {
+        ...previous,
+        [segmentId]: nextSegmentNotes,
+      };
+    });
+
+    activeTapCaptureRef.current = null;
+  }, [currentMs, currentSegment]);
+
+  const clearCurrentSegmentTaps = React.useCallback(() => {
+    if (!currentSegment) {
+      return;
+    }
+    setTapAttemptsBySegment((previous) => ({
+      ...previous,
+      [currentSegment.id]: [],
+    }));
+    activeTapCaptureRef.current = null;
+  }, [currentSegment]);
+
   const handleRateCurrentSegment = React.useCallback((rating: MemoryRating) => {
     if (!currentSegment) {
       return;
@@ -770,6 +852,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [session.currentSegmentIndex]);
 
   useEffect(() => {
+    activeTapCaptureRef.current = null;
+  }, [currentSegment?.id]);
+
+  useEffect(() => {
+    setTapAttemptsBySegment({});
+    setIsTapPracticeMode(false);
+    activeTapCaptureRef.current = null;
+  }, [song.id]);
+
+  useEffect(() => {
     if (ratingsLoading || lastSavedRatingsRef.current === "unloaded") {
       return;
     }
@@ -910,6 +1002,33 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         ) : (
           <KnowledgeBar percent={knowledgeScore.overall} />
         )}
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="practice-tap-mode-toggle"
+            onClick={() => {
+              setIsTapPracticeMode((previous) => !previous);
+              activeTapCaptureRef.current = null;
+            }}
+            className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+              isTapPracticeMode
+                ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
+                : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+            }`}
+          >
+            Tap practice: {isTapPracticeMode ? "On" : "Off"}
+          </button>
+          {isTapPracticeMode && hasSegments && currentSegment ? (
+            <button
+              type="button"
+              data-testid="practice-clear-taps"
+              onClick={clearCurrentSegmentTaps}
+              className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            >
+              Clear segment taps
+            </button>
+          ) : null}
+        </div>
         {ratingsError ? (
           <p data-testid="ratings-load-error" className="mt-2 text-sm text-amber-700">
             {ratingsError}
@@ -919,19 +1038,21 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       <main data-testid="practice-main" className="flex flex-1 justify-center overflow-hidden px-4 pb-44 pt-2 md:px-8 md:pb-48">
         <section data-testid="practice-focus" className="flex h-full min-h-0 w-full max-w-3xl items-center justify-center gap-2 md:gap-3">
-          <button
-            type="button"
-            aria-label="Previous segment"
-            data-testid="practice-prev-segment"
-            onClick={handlePrevSegment}
-            disabled={!hasSegments || isFirst}
-            className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 12H6" />
-              <path d="M10 8l-4 4 4 4" />
-            </svg>
-          </button>
+          {!isTapPracticeMode ? (
+            <button
+              type="button"
+              aria-label="Previous segment"
+              data-testid="practice-prev-segment"
+              onClick={handlePrevSegment}
+              disabled={!hasSegments || isFirst}
+              className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 12H6" />
+                <path d="M10 8l-4 4 4 4" />
+              </svg>
+            </button>
+          ) : null}
           <div className="h-full min-h-0 w-full max-w-md">
             {hasSegments && currentSegment ? (
               <div className="segment-stack-shell relative h-full min-h-0 overflow-visible">
@@ -962,20 +1083,79 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 </p>
               </div>
             )}
+
+            {isTapPracticeMode && hasSegments && currentSegment ? (
+              <div className="mt-3 rounded-xl border border-indigo-200 bg-white/95 p-2 text-xs text-indigo-900 shadow-sm" data-testid="practice-tap-feedback">
+                <p className="font-semibold">Contour match</p>
+                <p>
+                  {Math.round((currentSegmentMatch?.score ?? 0) * 100)}% ({currentSegmentMatch?.matchedEvents ?? 0}/
+                  {currentSegmentMatch?.totalEvents ?? 0} transitions)
+                </p>
+              </div>
+            ) : null}
           </div>
-          <button
-            type="button"
-            aria-label="Next segment"
-            data-testid="practice-next-segment"
-            onClick={handleNextSegment}
-            disabled={!hasSegments || isLast}
-            className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 12h12" />
-              <path d="M14 8l4 4-4 4" />
-            </svg>
-          </button>
+          {isTapPracticeMode && hasSegments && currentSegment ? (
+            <div
+              ref={tapBarRef}
+              data-testid="practice-tap-bar"
+              aria-label="Tap contour bar"
+              className="relative h-full min-h-0 w-16 shrink-0 rounded-2xl border-2 border-indigo-400 bg-gradient-to-b from-indigo-100 via-white to-indigo-100"
+              onPointerDown={(event) => {
+                if (!currentSegment) {
+                  return;
+                }
+                event.preventDefault();
+                if (typeof event.currentTarget.setPointerCapture === "function") {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }
+                activeTapCaptureRef.current = {
+                  id: crypto.randomUUID(),
+                  startOffsetMs: Math.max(0, currentMs - currentSegment.startMs),
+                  lane: getTapLane(event.clientY),
+                  pointerId: event.pointerId,
+                };
+              }}
+              onPointerMove={(event) => {
+                const activeCapture = activeTapCaptureRef.current;
+                if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                  return;
+                }
+                activeCapture.lane = getTapLane(event.clientY);
+              }}
+              onPointerUp={(event) => {
+                const activeCapture = activeTapCaptureRef.current;
+                if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                  return;
+                }
+                finalizeTapCapture(getTapLane(event.clientY));
+              }}
+              onPointerCancel={(event) => {
+                const activeCapture = activeTapCaptureRef.current;
+                if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                  return;
+                }
+                finalizeTapCapture(getTapLane(event.clientY));
+              }}
+            >
+              <div className="pointer-events-none absolute inset-x-2 top-2 rounded bg-indigo-200/80 px-1 py-0.5 text-center text-[10px] font-semibold text-indigo-800">
+                Tap
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              aria-label="Next segment"
+              data-testid="practice-next-segment"
+              onClick={handleNextSegment}
+              disabled={!hasSegments || isLast}
+              className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 12h12" />
+                <path d="M14 8l4 4-4 4" />
+              </svg>
+            </button>
+          )}
         </section>
       </main>
 
