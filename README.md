@@ -1,4 +1,4 @@
-# Cantare
+# Cantare v1.1.0
 
 A practice application for singers to learn and master songs through deliberate, segment-based repetition.
 
