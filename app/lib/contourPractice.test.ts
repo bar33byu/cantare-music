@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildContourDirectionEvents, compareContourAttempt } from './contourPractice';
+import { buildContourDirectionEvents, compareContourAttempt, compareContourAttemptDetailed } from './contourPractice';
 
 describe('contourPractice', () => {
   it('builds up/down/same direction events', () => {
@@ -48,5 +48,21 @@ describe('contourPractice', () => {
     expect(result.totalEvents).toBe(1);
     expect(result.matchedEvents).toBe(0);
     expect(result.score).toBe(0);
+  });
+
+  it('marks attempt notes as mismatched when duration is too far off', () => {
+    const detailed = compareContourAttemptDetailed(
+      [
+        { id: 'a1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
+        { id: 'a2', timeOffsetMs: 500, durationMs: 500, lane: 0.8 },
+      ],
+      [
+        { id: 'u1', timeOffsetMs: 20, durationMs: 100, lane: 0.2 },
+        { id: 'u2', timeOffsetMs: 520, durationMs: 40, lane: 0.8 },
+      ]
+    );
+
+    expect(detailed.matchedEvents).toBe(0);
+    expect(detailed.attemptNoteStatuses.u2).toBe('mismatched');
   });
 });

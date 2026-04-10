@@ -331,6 +331,62 @@ describe("PracticeView", () => {
     });
   });
 
+  it("triggers haptic feedback when a tap is classified as a miss", async () => {
+    const vibrate = vi.fn();
+    Object.defineProperty(window.navigator, "vibrate", {
+      configurable: true,
+      value: vibrate,
+    });
+
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      pitchContourNotes: [
+        { id: "k1", timeOffsetMs: 0, durationMs: 120, lane: 0.2 },
+        { id: "k2", timeOffsetMs: 100, durationMs: 120, lane: 0.8 },
+      ],
+    };
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    // First tap high, second tap low => down contour against an up answer key.
+    fireEvent.pointerDown(tapBar, { pointerId: 11, clientY: 20 });
+    fireEvent.pointerUp(tapBar, { pointerId: 11, clientY: 20 });
+    fireEvent.pointerDown(tapBar, { pointerId: 12, clientY: 180 });
+    fireEvent.pointerUp(tapBar, { pointerId: 12, clientY: 180 });
+
+    await waitFor(() => {
+      expect(vibrate).toHaveBeenCalled();
+    });
+  });
+
   it("fetches historical ratings on mount", async () => {
     const song = makeSong(2);
     render(<PracticeView song={song} initialSession={makeSession(song)} />);

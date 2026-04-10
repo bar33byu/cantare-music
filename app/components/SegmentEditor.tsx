@@ -1098,12 +1098,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
               </div>
             </div>
 
-            <div className="w-14 shrink-0">
+            <div className="w-16 shrink-0">
               <div
                 ref={contourTapBarRef}
                 data-testid="segment-editor-contour-tapbar"
                 aria-label="Contour tap bar"
-                className={`relative h-full min-h-[140px] rounded-xl border-2 ${
+                className={`relative h-full min-h-[280px] rounded-xl border-2 ${
                   isContourRecording
                     ? 'border-indigo-500 bg-gradient-to-b from-indigo-100 via-white to-indigo-100'
                     : 'border-slate-300 bg-slate-100'

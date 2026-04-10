@@ -10,6 +10,7 @@ export interface ContourEvent {
 export interface ContourMatchOptions {
   timeToleranceMs: number;
   sameDeadZone: number;
+  durationToleranceRatio: number;
 }
 
 export interface ContourMatchResult {
@@ -18,9 +19,16 @@ export interface ContourMatchResult {
   score: number;
 }
 
+export type AttemptNoteStatus = 'pending' | 'matched' | 'mismatched';
+
+export interface ContourMatchDetailedResult extends ContourMatchResult {
+  attemptNoteStatuses: Record<string, AttemptNoteStatus>;
+}
+
 const DEFAULT_MATCH_OPTIONS: ContourMatchOptions = {
   timeToleranceMs: 400,
   sameDeadZone: 0.08,
+  durationToleranceRatio: 0.6,
 };
 
 function toDirection(deltaLane: number, deadZone: number): ContourDirection {
@@ -61,22 +69,48 @@ export function compareContourAttempt(
   attempt: PitchContourNote[],
   options: Partial<ContourMatchOptions> = {}
 ): ContourMatchResult {
+  const detailed = compareContourAttemptDetailed(answerKey, attempt, options);
+  return {
+    matchedEvents: detailed.matchedEvents,
+    totalEvents: detailed.totalEvents,
+    score: detailed.score,
+  };
+}
+
+export function compareContourAttemptDetailed(
+  answerKey: PitchContourNote[],
+  attempt: PitchContourNote[],
+  options: Partial<ContourMatchOptions> = {}
+): ContourMatchDetailedResult {
   const effective = { ...DEFAULT_MATCH_OPTIONS, ...options };
-  const answerEvents = buildContourDirectionEvents(answerKey, effective);
-  const attemptEvents = buildContourDirectionEvents(attempt, effective);
+  const sortedAnswer = [...answerKey].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+  const sortedAttempt = [...attempt].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+  const answerEvents = buildContourDirectionEvents(sortedAnswer, effective);
+  const attemptEvents = buildContourDirectionEvents(sortedAttempt, effective);
+
+  const attemptNoteStatuses: Record<string, AttemptNoteStatus> = {};
+  for (const note of sortedAttempt) {
+    attemptNoteStatuses[note.id] = 'pending';
+  }
+
+  for (let i = 1; i < sortedAttempt.length; i += 1) {
+    attemptNoteStatuses[sortedAttempt[i].id] = 'mismatched';
+  }
 
   if (answerEvents.length === 0) {
     return {
       matchedEvents: 0,
       totalEvents: 0,
       score: 1,
+      attemptNoteStatuses,
     };
   }
 
   const usedAttemptIndices = new Set<number>();
   let matchedEvents = 0;
 
-  for (const answerEvent of answerEvents) {
+  for (let answerIndex = 0; answerIndex < answerEvents.length; answerIndex += 1) {
+    const answerEvent = answerEvents[answerIndex];
     let bestAttemptIndex = -1;
     let bestDelta = Number.POSITIVE_INFINITY;
 
@@ -87,6 +121,13 @@ export function compareContourAttempt(
 
       const attemptEvent = attemptEvents[i];
       if (attemptEvent.direction !== answerEvent.direction) {
+        continue;
+      }
+
+      const answerDurationMs = Math.max(1, sortedAnswer[Math.min(sortedAnswer.length - 1, answerIndex + 1)]?.durationMs ?? 1);
+      const attemptDurationMs = Math.max(1, sortedAttempt[Math.min(sortedAttempt.length - 1, i + 1)]?.durationMs ?? 1);
+      const durationDeltaRatio = Math.abs(attemptDurationMs - answerDurationMs) / answerDurationMs;
+      if (durationDeltaRatio > effective.durationToleranceRatio) {
         continue;
       }
 
@@ -104,6 +145,10 @@ export function compareContourAttempt(
     if (bestAttemptIndex !== -1) {
       usedAttemptIndices.add(bestAttemptIndex);
       matchedEvents += 1;
+      const matchedNote = sortedAttempt[Math.min(sortedAttempt.length - 1, bestAttemptIndex + 1)];
+      if (matchedNote) {
+        attemptNoteStatuses[matchedNote.id] = 'matched';
+      }
     }
   }
 
@@ -113,5 +158,6 @@ export function compareContourAttempt(
     matchedEvents,
     totalEvents,
     score: totalEvents === 0 ? 1 : matchedEvents / totalEvents,
+    attemptNoteStatuses,
   };
 }

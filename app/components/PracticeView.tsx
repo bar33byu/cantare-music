@@ -10,7 +10,8 @@ import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
-import { compareContourAttempt } from "../lib/contourPractice";
+import { compareContourAttemptDetailed } from "../lib/contourPractice";
+import type { AttemptNoteStatus } from "../lib/contourPractice";
 
 interface TransportDebugState {
   playToggleClicks: number;
@@ -47,6 +48,7 @@ const PRACTICED_PLAYBACK_THRESHOLD_MS = 10_000;
 const PREV_SEGMENT_GO_BACK_THRESHOLD_MS = 3_000;
 const OFFLINE_RATING_QUEUE_PREFIX = "cantare:offline-ratings:";
 const MIN_TAP_DURATION_MS = 80;
+const ROLL_WINDOW_MS = 6000;
 
 interface ActiveTapCapture {
   id: string;
@@ -136,12 +138,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return null;
     }
 
-    return compareContourAttempt(
+    return compareContourAttemptDetailed(
       currentSegment.pitchContourNotes ?? [],
       currentAttemptNotes,
-      { timeToleranceMs: 400, sameDeadZone: 0.08 }
+      { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
     );
   }, [currentAttemptNotes, currentSegment]);
+  const currentSegmentOffsetMs = currentSegment
+    ? Math.max(0, Math.min(currentSegment.endMs - currentSegment.startMs, currentMs - currentSegment.startMs))
+    : 0;
   const hasAutoplayedSongRef = React.useRef<string | null>(null);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
 
@@ -669,9 +674,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lane: Math.min(1, Math.max(0, typeof endLane === "number" ? endLane : capture.lane)),
     };
 
+    const nextSegmentNotes = [...currentAttemptNotes, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+    const immediateMatch = compareContourAttemptDetailed(
+      currentSegment.pitchContourNotes ?? [],
+      nextSegmentNotes,
+      { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
+    );
+    if (immediateMatch.attemptNoteStatuses[note.id] === "mismatched" && typeof navigator !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(35);
+    }
+
     setTapAttemptsBySegment((previous) => {
       const segmentId = currentSegment.id;
-      const nextSegmentNotes = [...(previous[segmentId] ?? []), note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
       return {
         ...previous,
         [segmentId]: nextSegmentNotes,
@@ -679,7 +693,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     });
 
     activeTapCaptureRef.current = null;
-  }, [currentMs, currentSegment]);
+  }, [currentAttemptNotes, currentMs, currentSegment]);
 
   const clearCurrentSegmentTaps = React.useCallback(() => {
     if (!currentSegment) {
@@ -691,6 +705,20 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }));
     activeTapCaptureRef.current = null;
   }, [currentSegment]);
+
+  const getRollX = React.useCallback((noteOffsetMs: number) => {
+    return 100 - ((currentSegmentOffsetMs - noteOffsetMs) / ROLL_WINDOW_MS) * 100;
+  }, [currentSegmentOffsetMs]);
+
+  const getAttemptStatusColor = React.useCallback((status: AttemptNoteStatus) => {
+    if (status === "matched") {
+      return "rgb(22 163 74)";
+    }
+    if (status === "mismatched") {
+      return "rgb(220 38 38)";
+    }
+    return "rgb(245 158 11)";
+  }, []);
 
   const handleRateCurrentSegment = React.useCallback((rating: MemoryRating) => {
     if (!currentSegment) {
@@ -1087,10 +1115,57 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             {isTapPracticeMode && hasSegments && currentSegment ? (
               <div className="mt-3 rounded-xl border border-indigo-200 bg-white/95 p-2 text-xs text-indigo-900 shadow-sm" data-testid="practice-tap-feedback">
                 <p className="font-semibold">Contour match</p>
-                <p>
+                <p className="mb-2">
                   {Math.round((currentSegmentMatch?.score ?? 0) * 100)}% ({currentSegmentMatch?.matchedEvents ?? 0}/
                   {currentSegmentMatch?.totalEvents ?? 0} transitions)
                 </p>
+                <div className="relative h-28 overflow-hidden rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white" data-testid="practice-piano-roll">
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
+                    <line x1="0" y1="50" x2="100" y2="50" stroke="rgb(199 210 254)" strokeWidth="0.6" />
+                    {(currentSegment.pitchContourNotes ?? []).map((note) => {
+                      const x = getRollX(note.timeOffsetMs);
+                      if (x < -5 || x > 105) {
+                        return null;
+                      }
+                      const y = (1 - note.lane) * 100;
+                      return (
+                        <circle
+                          key={`answer-${note.id}`}
+                          cx={x}
+                          cy={y}
+                          r={2.2}
+                          fill="rgb(99 102 241)"
+                          opacity="0.65"
+                        />
+                      );
+                    })}
+
+                    {currentAttemptNotes.map((note) => {
+                      const x = getRollX(note.timeOffsetMs);
+                      if (x < -5 || x > 105) {
+                        return null;
+                      }
+                      const y = (1 - note.lane) * 100;
+                      const status = currentSegmentMatch?.attemptNoteStatuses[note.id] ?? "pending";
+                      return (
+                        <circle
+                          key={`attempt-${note.id}`}
+                          data-testid="practice-attempt-dot"
+                          cx={x}
+                          cy={y}
+                          r={3.1}
+                          fill={getAttemptStatusColor(status)}
+                          stroke="white"
+                          strokeWidth="0.8"
+                        />
+                      );
+                    })}
+                    <line x1="100" y1="0" x2="100" y2="100" stroke="rgb(79 70 229)" strokeWidth="1" />
+                  </svg>
+                  <div className="pointer-events-none absolute right-2 top-1 rounded bg-indigo-200/80 px-1 py-0.5 text-[10px] font-semibold text-indigo-800">
+                    Tap now
+                  </div>
+                </div>
               </div>
             ) : null}
           </div>
