@@ -95,6 +95,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(false);
   const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
+  const [showTapOverlay, setShowTapOverlay] = React.useState(true);
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
   const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
@@ -886,6 +887,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   useEffect(() => {
     setTapAttemptsBySegment({});
     setIsTapPracticeMode(false);
+    setShowTapOverlay(true);
     activeTapCaptureRef.current = null;
   }, [song.id]);
 
@@ -1049,6 +1051,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           {isTapPracticeMode && hasSegments && currentSegment ? (
             <button
               type="button"
+              data-testid="practice-overlay-toggle"
+              onClick={() => setShowTapOverlay((previous) => !previous)}
+              className="rounded-full border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+            >
+              Overlay: {showTapOverlay ? "On" : "Off"}
+            </button>
+          ) : null}
+          {isTapPracticeMode && hasSegments && currentSegment ? (
+            <button
+              type="button"
               data-testid="practice-clear-taps"
               onClick={clearCurrentSegmentTaps}
               className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
@@ -1064,8 +1076,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         ) : null}
       </div>
 
-      <main data-testid="practice-main" className="flex flex-1 justify-center overflow-hidden px-4 pb-44 pt-2 md:px-8 md:pb-48">
-        <section data-testid="practice-focus" className="flex h-full min-h-0 w-full max-w-3xl items-center justify-center gap-2 md:gap-3">
+      <main data-testid="practice-main" className="flex flex-1 justify-center overflow-y-auto px-4 pb-44 pt-2 md:px-8 md:pb-48">
+        <section data-testid="practice-focus" className="flex h-full min-h-full w-full max-w-3xl items-start justify-center gap-2 md:gap-3">
           {!isTapPracticeMode ? (
             <button
               type="button"
@@ -1084,6 +1096,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           <div className="h-full min-h-0 w-full max-w-md">
             {hasSegments && currentSegment ? (
               <div className="segment-stack-shell relative h-full min-h-0 overflow-visible">
+                {isTapPracticeMode ? (
+                  <div
+                    data-testid="practice-tap-feedback"
+                    className="pointer-events-none absolute left-3 top-3 z-20 rounded-full bg-white/85 px-2 py-1 text-[11px] font-semibold text-indigo-900 shadow-sm"
+                  >
+                    {Math.round((currentSegmentMatch?.score ?? 0) * 100)}% ({currentSegmentMatch?.matchedEvents ?? 0}/
+                    {currentSegmentMatch?.totalEvents ?? 0})
+                  </div>
+                ) : null}
                 <div
                   key={`${currentSegment.id}-${transitionToken}`}
                   className={`relative z-10 h-full min-h-0 ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}
@@ -1099,6 +1120,50 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
                   />
                 </div>
+                {isTapPracticeMode && hasSegments && currentSegment && showTapOverlay ? (
+                  <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden rounded-2xl border border-indigo-200/30 bg-indigo-50/10" data-testid="practice-piano-roll-overlay">
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
+                      <line x1="0" y1="50" x2="100" y2="50" stroke="rgb(199 210 254)" strokeWidth="0.5" opacity="0.45" />
+                      {(currentSegment.pitchContourNotes ?? []).map((note) => {
+                        const x = getRollX(note.timeOffsetMs);
+                        if (x < -5 || x > 105) {
+                          return null;
+                        }
+                        const y = (1 - note.lane) * 100;
+                        return (
+                          <circle
+                            key={`answer-${note.id}`}
+                            cx={x}
+                            cy={y}
+                            r={2.2}
+                            fill="rgb(99 102 241)"
+                            opacity="0.35"
+                          />
+                        );
+                      })}
+                      {currentAttemptNotes.map((note) => {
+                        const x = getRollX(note.timeOffsetMs);
+                        if (x < -5 || x > 105) {
+                          return null;
+                        }
+                        const y = (1 - note.lane) * 100;
+                        const status = currentSegmentMatch?.attemptNoteStatuses[note.id] ?? "pending";
+                        return (
+                          <circle
+                            key={`attempt-${note.id}`}
+                            data-testid="practice-attempt-dot"
+                            cx={x}
+                            cy={y}
+                            r={3.3}
+                            fill={getAttemptStatusColor(status)}
+                            opacity="0.72"
+                          />
+                        );
+                      })}
+                      <line x1="100" y1="0" x2="100" y2="100" stroke="rgb(79 70 229)" strokeWidth="1" opacity="0.7" />
+                    </svg>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div
@@ -1111,63 +1176,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 </p>
               </div>
             )}
-
-            {isTapPracticeMode && hasSegments && currentSegment ? (
-              <div className="mt-3 rounded-xl border border-indigo-200 bg-white/95 p-2 text-xs text-indigo-900 shadow-sm" data-testid="practice-tap-feedback">
-                <p className="font-semibold">Contour match</p>
-                <p className="mb-2">
-                  {Math.round((currentSegmentMatch?.score ?? 0) * 100)}% ({currentSegmentMatch?.matchedEvents ?? 0}/
-                  {currentSegmentMatch?.totalEvents ?? 0} transitions)
-                </p>
-                <div className="relative h-28 overflow-hidden rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white" data-testid="practice-piano-roll">
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
-                    <line x1="0" y1="50" x2="100" y2="50" stroke="rgb(199 210 254)" strokeWidth="0.6" />
-                    {(currentSegment.pitchContourNotes ?? []).map((note) => {
-                      const x = getRollX(note.timeOffsetMs);
-                      if (x < -5 || x > 105) {
-                        return null;
-                      }
-                      const y = (1 - note.lane) * 100;
-                      return (
-                        <circle
-                          key={`answer-${note.id}`}
-                          cx={x}
-                          cy={y}
-                          r={2.2}
-                          fill="rgb(99 102 241)"
-                          opacity="0.65"
-                        />
-                      );
-                    })}
-
-                    {currentAttemptNotes.map((note) => {
-                      const x = getRollX(note.timeOffsetMs);
-                      if (x < -5 || x > 105) {
-                        return null;
-                      }
-                      const y = (1 - note.lane) * 100;
-                      const status = currentSegmentMatch?.attemptNoteStatuses[note.id] ?? "pending";
-                      return (
-                        <circle
-                          key={`attempt-${note.id}`}
-                          data-testid="practice-attempt-dot"
-                          cx={x}
-                          cy={y}
-                          r={3.1}
-                          fill={getAttemptStatusColor(status)}
-                          stroke="white"
-                          strokeWidth="0.8"
-                        />
-                      );
-                    })}
-                    <line x1="100" y1="0" x2="100" y2="100" stroke="rgb(79 70 229)" strokeWidth="1" />
-                  </svg>
-                  <div className="pointer-events-none absolute right-2 top-1 rounded bg-indigo-200/80 px-1 py-0.5 text-[10px] font-semibold text-indigo-800">
-                    Tap now
-                  </div>
-                </div>
-              </div>
-            ) : null}
           </div>
           {isTapPracticeMode && hasSegments && currentSegment ? (
             <div

@@ -280,6 +280,7 @@ describe("PracticeView", () => {
     expect(screen.queryByTestId("practice-prev-segment")).not.toBeInTheDocument();
     expect(screen.queryByTestId("practice-next-segment")).not.toBeInTheDocument();
     expect(screen.getByTestId("practice-tap-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-overlay-toggle")).toBeInTheDocument();
   });
 
   it("updates contour feedback as user taps in tap practice mode", async () => {
@@ -328,7 +329,19 @@ describe("PracticeView", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("practice-tap-feedback")).toHaveTextContent("100%");
+      expect(screen.getByTestId("practice-piano-roll-overlay")).toBeInTheDocument();
     });
+  });
+
+  it("can hide translucent contour overlay in tap mode", async () => {
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    expect(screen.getByTestId("practice-piano-roll-overlay")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("practice-overlay-toggle"));
+    expect(screen.queryByTestId("practice-piano-roll-overlay")).not.toBeInTheDocument();
   });
 
   it("triggers haptic feedback when a tap is classified as a miss", async () => {
