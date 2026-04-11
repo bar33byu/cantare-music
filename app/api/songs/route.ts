@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllSongs, createSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds } from '../../../db/queries';
+import { getAllSongs, createSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getSegmentsBySongId } from '../../../db/queries';
 import { resolveRequestUserId } from '../_user';
 
 function toIsoString(value: unknown): string | null {
@@ -36,16 +36,29 @@ export async function GET(request: NextRequest) {
     const userId = resolveRequestUserId(request);
     const songs = await getAllSongs(userId);
     const songIds = songs.map((song) => song.id);
-    const [ratingFallbackBySongId, knowledgeBySongId] = await Promise.all([
+    const [ratingFallbackBySongId, knowledgeBySongId, readinessBySongId] = await Promise.all([
       getLatestRatingTimeBySongIds(songIds, userId),
       getSongKnowledgeBySongIds(songIds, userId),
+      Promise.all(
+        songIds.map(async (songId) => {
+          const segments = await getSegmentsBySongId(songId);
+          const hasSegments = segments.length > 0;
+          const hasTapKeys = segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0);
+
+          return [songId, { hasSegments, hasTapKeys }] as const;
+        })
+      ).then((entries) => Object.fromEntries(entries)),
     ]);
+
     return NextResponse.json(
       songs.map((song) => ({
         ...song,
         createdAt: toIsoString(song.createdAt) ?? new Date(0).toISOString(),
         lastPracticedAt: toIsoString(song.lastPracticedAt ?? ratingFallbackBySongId[song.id] ?? null),
         masteryPercent: knowledgeBySongId[song.id] ?? 0,
+        hasAudio: Boolean(song.audioKey),
+        hasSegments: readinessBySongId[song.id]?.hasSegments ?? false,
+        hasTapKeys: readinessBySongId[song.id]?.hasTapKeys ?? false,
       }))
     );
   } catch (error) {

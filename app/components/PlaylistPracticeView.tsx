@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
 import { buildProxyAudioUrl, parseAudioKey } from '../lib/audioUrls';
+import { SongReadinessIcons } from './SongReadinessIcons';
 
 type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
 interface SortState { key: SortKey; asc: boolean }
@@ -313,13 +314,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
           const shouldRenderLabelInsideBar = mastery >= 10;
           const hasAudio = Boolean(song.audioUrl?.trim());
           const hasSegments = song.segments.length > 0;
-          const readinessNotes: string[] = [];
-          if (!hasAudio) {
-            readinessNotes.push('Missing audio');
-          }
-          if (!hasSegments) {
-            readinessNotes.push('Missing segments');
-          }
+          const hasTapKeys = song.segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0);
           return (
             <div
               key={song.id}
@@ -354,18 +349,14 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
 
               <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
               {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
-              {readinessNotes.length > 0 ? (
-                <div data-testid={`playlist-practice-song-status-${song.id}`} className="mb-2 flex flex-wrap gap-1">
-                  {readinessNotes.map((note) => (
-                    <span
-                      key={`${song.id}-${note}`}
-                      className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"
-                    >
-                      {note}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
+              <div className="absolute bottom-3 right-3">
+                <SongReadinessIcons
+                  hasAudio={hasAudio}
+                  hasSegments={hasSegments}
+                  hasTapKeys={hasTapKeys}
+                  testIdPrefix={`playlist-practice-song-${song.id}`}
+                />
+              </div>
               <p className="text-xs text-gray-500 mt-2">{getLastPracticedLabel(song.lastPracticedAt)}</p>
             </div>
           );

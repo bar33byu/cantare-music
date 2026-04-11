@@ -125,8 +125,9 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-2')).toBeInTheDocument();
     expect(screen.getByTestId('playlist-practice-song-song-3')).toBeInTheDocument();
 
-    expect(screen.getByTestId('playlist-practice-song-status-song-2')).toHaveTextContent('Missing audio');
-    expect(screen.getByTestId('playlist-practice-song-status-song-3')).toHaveTextContent('Missing segments');
+    expect(screen.getByTestId('playlist-practice-song-song-2-readiness-audio')).toHaveAttribute('aria-label', 'Audio file missing');
+    expect(screen.getByTestId('playlist-practice-song-song-2-readiness-segments')).toHaveAttribute('aria-label', 'Sections present');
+    expect(screen.getByTestId('playlist-practice-song-song-3-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
   it('shows both readiness tags when both audio and segments are missing', async () => {
@@ -144,8 +145,8 @@ describe('PlaylistPracticeView', () => {
       expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId('playlist-practice-song-status-song-1')).toHaveTextContent('Missing audio');
-    expect(screen.getByTestId('playlist-practice-song-status-song-1')).toHaveTextContent('Missing segments');
+    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file missing');
+    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
   it('places mastery label inside the bar at 10% or higher and outside when below 10%', async () => {

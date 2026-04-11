@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { getMasteryColor } from '../lib/masteryColors';
+import { SongReadinessIcons } from './SongReadinessIcons';
 
 interface SongListItem {
   id: string;
@@ -11,6 +12,9 @@ interface SongListItem {
   createdAt: string;
   lastPracticedAt?: string | null;
   masteryPercent?: number;
+  hasAudio?: boolean;
+  hasSegments?: boolean;
+  hasTapKeys?: boolean;
 }
 
 interface SongBrowserProps {
@@ -360,6 +364,9 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
         {displayedSongs.map((song) => {
           const masteryPercent = clampPercent(song.masteryPercent);
           const masteryColor = getMasteryColor(masteryPercent);
+          const hasAudio = song.hasAudio ?? Boolean(song.audioKey?.trim());
+          const hasSegments = song.hasSegments ?? false;
+          const hasTapKeys = song.hasTapKeys ?? false;
 
           return (
           <div
@@ -388,6 +395,14 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
                 {song.artist}
               </p>
             )}
+            <div className="absolute bottom-3 right-3">
+              <SongReadinessIcons
+                hasAudio={hasAudio}
+                hasSegments={hasSegments}
+                hasTapKeys={hasTapKeys}
+                testIdPrefix={`song-item-${song.id}`}
+              />
+            </div>
             <p className="text-xs text-gray-500 mt-2" data-testid={`song-last-practiced-${song.id}`}>
               {getLastPracticedLabel(song.lastPracticedAt)}
             </p>

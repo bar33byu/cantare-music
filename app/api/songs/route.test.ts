@@ -13,11 +13,12 @@ vi.mock('../../../db/queries', () => ({
   getAllSongs: vi.fn(),
   getLatestRatingTimeBySongIds: vi.fn(),
   getSongKnowledgeBySongIds: vi.fn(),
+  getSegmentsBySongId: vi.fn(),
   createSong: vi.fn(),
 }));
 
 import { GET, POST } from './route';
-import { getAllSongs, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, createSong } from '../../../db/queries';
+import { getAllSongs, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getSegmentsBySongId, createSong } from '../../../db/queries';
 
 describe('GET /api/songs', () => {
   it('returns array of songs', async () => {
@@ -32,6 +33,18 @@ describe('GET /api/songs', () => {
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({ '1': 65 });
+    vi.mocked(getSegmentsBySongId).mockResolvedValue([
+      {
+        id: 'seg-1',
+        songId: '1',
+        label: '1',
+        order: 0,
+        startMs: 0,
+        endMs: 1000,
+        lyricText: '',
+        pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
+      } as any,
+    ]);
 
     const request = new Request('http://localhost/api/songs');
     const response = await GET(request as any);
@@ -44,6 +57,9 @@ describe('GET /api/songs', () => {
         createdAt: '2024-01-01T00:00:00.000Z',
         lastPracticedAt: '2024-01-02T00:00:00.000Z',
         masteryPercent: 65,
+        hasAudio: false,
+        hasSegments: true,
+        hasTapKeys: true,
       },
     ]);
     expect(getAllSongs).toHaveBeenCalledWith('default');
@@ -63,6 +79,7 @@ describe('GET /api/songs', () => {
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs as any);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
+    vi.mocked(getSegmentsBySongId).mockResolvedValue([] as any);
 
     const request = new Request('http://localhost/api/songs');
     const response = await GET(request as any);
@@ -75,6 +92,9 @@ describe('GET /api/songs', () => {
         createdAt: '2024-03-10T00:00:00.000Z',
         lastPracticedAt: '2024-03-11T00:00:00.000Z',
         masteryPercent: 0,
+        hasAudio: false,
+        hasSegments: false,
+        hasTapKeys: false,
       },
     ]);
   });
@@ -104,6 +124,7 @@ describe('GET /api/songs', () => {
       'song-9': new Date('2024-03-20T00:00:00.000Z'),
     });
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({ 'song-9': 40 });
+    vi.mocked(getSegmentsBySongId).mockResolvedValue([] as any);
 
     const request = new Request('http://localhost/api/songs');
     const response = await GET(request as any);
@@ -112,6 +133,8 @@ describe('GET /api/songs', () => {
     expect(response.status).toBe(200);
     expect(data[0].lastPracticedAt).toBe('2024-03-20T00:00:00.000Z');
     expect(data[0].masteryPercent).toBe(40);
+    expect(data[0].hasSegments).toBe(false);
+    expect(data[0].hasTapKeys).toBe(false);
   });
 });
 
