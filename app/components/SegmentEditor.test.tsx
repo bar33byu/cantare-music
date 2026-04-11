@@ -517,6 +517,56 @@ describe('SegmentEditor', () => {
     expect(play).toHaveBeenCalledWith(2000, 60000);
   });
 
+  it('replays automatically after switching to fallback audio on playback error', async () => {
+    let playbackError: string | null = null;
+    const play = vi.fn(() => {
+      playbackError = 'Unable to load audio for this song';
+    });
+
+    vi.mocked(useAudioPlayer).mockImplementation(() => ({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 2000,
+      durationMs: 60000,
+      playbackError,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause: vi.fn(),
+      seek: vi.fn(),
+    }));
+
+    const { rerender } = render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-play-toggle')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-play-toggle'));
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenNthCalledWith(1, 2000, 60000);
+
+    rerender(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(play).toHaveBeenCalledTimes(2);
+    });
+    expect(play).toHaveBeenNthCalledWith(2, 2000, 60000);
+  });
+
   it('renders practice-style skip controls and seeks by 5 seconds', async () => {
     const seek = vi.fn();
     vi.mocked(useAudioPlayer).mockReturnValue({
@@ -561,7 +611,7 @@ describe('SegmentEditor', () => {
     expect(seek).toHaveBeenNthCalledWith(2, 15000);
   });
 
-  it('renders full-song timeline strip and seeks from slider', async () => {
+  it('renders full-song timeline strip and seeks when timeline track is clicked', async () => {
     const seek = vi.fn();
     vi.mocked(useAudioPlayer).mockReturnValue({
       isPlaying: false,
@@ -596,8 +646,68 @@ describe('SegmentEditor', () => {
       expect(screen.getByTestId('song-timeline-segment-seg-1')).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByTestId('segment-editor-song-seek'), { target: { value: '15000' } });
+    const timelineTrack = screen.getByTestId('segment-editor-song-timeline-track');
+    vi.spyOn(timelineTrack, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 20,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 20,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.click(timelineTrack, { clientX: 250 });
     expect(seek).toHaveBeenCalledWith(15000);
+  });
+
+  it('seeks when clicking empty canvas space on the segment board', async () => {
+    const seek = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek,
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    const board = await screen.findByTestId('segment-editor-board');
+    vi.spyOn(board, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 560,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 560,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.click(board, { clientX: 500 });
+    expect(seek).toHaveBeenCalledWith(30000);
   });
 
   it('saves selected label changes via patch on blur', async () => {
