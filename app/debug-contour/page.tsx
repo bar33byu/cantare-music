@@ -12,6 +12,7 @@ import {
 const DEFAULT_TIMELINE_MS = 4000;
 const DEFAULT_NOTE_DURATION_MS = 120;
 const DEFAULT_SAME_DEAD_ZONE = 0.08;
+const PAUSED_CAPTURE_ADVANCE_MS = 350;
 
 type EditorMode = "answer" | "attempt";
 
@@ -321,6 +322,7 @@ export default function DebugContourPage() {
   const [playheadMs, setPlayheadMs] = React.useState(0);
   const [isAudioPlaying, setIsAudioPlaying] = React.useState(false);
   const [syncTimelineToAudio, setSyncTimelineToAudio] = React.useState(true);
+  const [captureMode, setCaptureMode] = React.useState<EditorMode>("answer");
   const [answerNotes, setAnswerNotes] = React.useState<PitchContourNote[]>([
     makeNote("answer-1", 0, 0.22),
     makeNote("answer-2", 900, 0.78),
@@ -508,21 +510,33 @@ export default function DebugContourPage() {
     setAnswerText(serializeNotes(next));
   }, [attemptNotes]);
 
-  const captureAttemptTap = React.useCallback((clientY: number, rect: DOMRect) => {
+  const captureModeTap = React.useCallback((mode: EditorMode, clientY: number, rect: DOMRect) => {
     const yRatio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
     const lane = Number((1 - yRatio).toFixed(3));
     const note = makeNote(
-      `attempt-live-${Date.now()}-${Math.round(clientY)}`,
+      `${mode}-live-${Date.now()}-${Math.round(clientY)}`,
       Math.round(Math.min(Math.max(0, playheadMs), timelineMs)),
       lane
     );
 
-    setAttemptNotes((previous) => {
-      const next = [...previous, note].sort((first, second) => first.timeOffsetMs - second.timeOffsetMs);
-      setAttemptText(serializeNotes(next));
-      return next;
-    });
-  }, [playheadMs, timelineMs]);
+    if (mode === "answer") {
+      setAnswerNotes((previous) => {
+        const next = [...previous, note].sort((first, second) => first.timeOffsetMs - second.timeOffsetMs);
+        setAnswerText(serializeNotes(next));
+        return next;
+      });
+    } else {
+      setAttemptNotes((previous) => {
+        const next = [...previous, note].sort((first, second) => first.timeOffsetMs - second.timeOffsetMs);
+        setAttemptText(serializeNotes(next));
+        return next;
+      });
+    }
+
+    if (!isAudioPlaying) {
+      setPlayheadMs((previous) => Math.min(timelineMs, previous + PAUSED_CAPTURE_ADVANCE_MS));
+    }
+  }, [isAudioPlaying, playheadMs, timelineMs]);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,#fef3c7,transparent_28%),radial-gradient(circle_at_top_right,#dbeafe,transparent_34%),linear-gradient(180deg,#f8fafc,#eef2ff)] px-4 py-8 md:px-8">
@@ -566,6 +580,45 @@ export default function DebugContourPage() {
 
           <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Live Playback + Tap Capture</h2>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCaptureMode("answer")}
+                className={`rounded-full border px-3 py-1.5 text-sm font-medium ${
+                  captureMode === "answer"
+                    ? "border-sky-500 bg-sky-500 text-white"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                Answer key mode
+              </button>
+              <button
+                type="button"
+                onClick={() => setCaptureMode("attempt")}
+                className={`rounded-full border px-3 py-1.5 text-sm font-medium ${
+                  captureMode === "attempt"
+                    ? "border-indigo-600 bg-indigo-600 text-white"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                Attempt mode
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAttemptNotes([]);
+                  setAttemptText("");
+                  setCaptureMode("attempt");
+                  setPlayheadMs(0);
+                }}
+                className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Start fresh attempt
+              </button>
+              <p className="text-xs text-slate-600">
+                Current capture target: <span className="font-semibold text-slate-900">{captureMode === "answer" ? "Answer key" : "Attempt"}</span>
+              </p>
+            </div>
             <div className="mt-3 flex flex-wrap items-end gap-3">
               <input
                 ref={uploadInputRef}
@@ -646,23 +699,29 @@ export default function DebugContourPage() {
             <div className="mt-4 grid gap-3 md:grid-cols-[120px_minmax(0,1fr)]">
               <button
                 type="button"
-                onPointerDown={(event) => captureAttemptTap(event.clientY, event.currentTarget.getBoundingClientRect())}
-                className="relative h-48 w-full overflow-hidden rounded-2xl border border-dashed border-indigo-300 bg-[linear-gradient(180deg,rgba(238,242,255,0.75),rgba(224,231,255,0.55))]"
-                title="Tap vertically while audio is playing. Tap time comes from the moving playhead."
+                onPointerDown={(event) => captureModeTap(captureMode, event.clientY, event.currentTarget.getBoundingClientRect())}
+                className={`relative h-48 w-full overflow-hidden rounded-2xl border border-dashed ${
+                  captureMode === "answer"
+                    ? "border-sky-300 bg-[linear-gradient(180deg,rgba(224,242,254,0.75),rgba(186,230,253,0.55))]"
+                    : "border-indigo-300 bg-[linear-gradient(180deg,rgba(238,242,255,0.75),rgba(224,231,255,0.55))]"
+                }`}
+                title="Tap vertically. Tap time uses the current playhead; when paused, each tap advances the playhead automatically."
               >
-                <div className="absolute inset-x-0 top-1/2 border-t border-indigo-200/90" />
-                <div className="absolute left-1/2 top-2 -translate-x-1/2 text-[10px] font-semibold uppercase tracking-[0.2em] text-indigo-700">
-                  Tap Lane
+                <div className={`absolute inset-x-0 top-1/2 border-t ${captureMode === "answer" ? "border-sky-200/90" : "border-indigo-200/90"}`} />
+                <div className={`absolute left-1/2 top-2 -translate-x-1/2 text-[10px] font-semibold uppercase tracking-[0.2em] ${captureMode === "answer" ? "text-sky-700" : "text-indigo-700"}`}>
+                  {captureMode === "answer" ? "Answer lane" : "Attempt lane"}
                 </div>
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-indigo-700">Higher pitch up top</div>
+                <div className={`absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] ${captureMode === "answer" ? "text-sky-700" : "text-indigo-700"}`}>Higher pitch up top</div>
               </button>
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <p className="text-sm font-semibold text-slate-900">Live capture state</p>
                 <p className="mt-1 text-sm text-slate-700">Playhead: {formatTime(playheadMs)} / {formatTime(timelineMs)}</p>
+                <p className="mt-1 text-sm text-slate-700">Capture mode: {captureMode === "answer" ? "Answer key" : "Attempt"}</p>
+                <p className="mt-1 text-sm text-slate-700">Answer points: {answerNotes.length}</p>
                 <p className="mt-1 text-sm text-slate-700">Attempt taps: {attemptNotes.length}</p>
                 <p className="mt-2 text-xs leading-5 text-slate-600">
-                  Use this to test the exact interaction you described: listen while the playhead moves, tap the lane by feel,
-                  and then compare your expected up/down/same transitions against the system interpretation shown in the panels.
+                  Suggested workflow: build the answer key in Answer key mode, then switch to Attempt mode and tap against playback.
+                  If playback is paused, each tap advances the playhead by {PAUSED_CAPTURE_ADVANCE_MS} ms so notes spread across the piano roll instead of stacking vertically.
                 </p>
               </div>
             </div>
