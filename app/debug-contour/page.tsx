@@ -309,10 +309,14 @@ function DotPlot({
 
 export default function DebugContourPage() {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const uploadInputRef = React.useRef<HTMLInputElement | null>(null);
+  const uploadedAudioObjectUrlRef = React.useRef<string | null>(null);
   const [timelineMs, setTimelineMs] = React.useState(DEFAULT_TIMELINE_MS);
   const [sameDeadZone, setSameDeadZone] = React.useState(DEFAULT_SAME_DEAD_ZONE);
   const [audioKey, setAudioKey] = React.useState("audio/sample.mp3");
   const [audioSrc, setAudioSrc] = React.useState<string | null>(null);
+  const [audioSource, setAudioSource] = React.useState<"key" | "upload" | null>(null);
+  const [uploadedAudioName, setUploadedAudioName] = React.useState<string | null>(null);
   const [audioError, setAudioError] = React.useState<string | null>(null);
   const [playheadMs, setPlayheadMs] = React.useState(0);
   const [isAudioPlaying, setIsAudioPlaying] = React.useState(false);
@@ -330,6 +334,15 @@ export default function DebugContourPage() {
   ]);
   const [answerText, setAnswerText] = React.useState(serializeNotes(answerNotes));
   const [attemptText, setAttemptText] = React.useState(serializeNotes(attemptNotes));
+
+  React.useEffect(() => {
+    return () => {
+      if (uploadedAudioObjectUrlRef.current) {
+        URL.revokeObjectURL(uploadedAudioObjectUrlRef.current);
+        uploadedAudioObjectUrlRef.current = null;
+      }
+    };
+  }, []);
 
   React.useEffect(() => {
     const audio = audioRef.current;
@@ -372,11 +385,42 @@ export default function DebugContourPage() {
     const trimmed = audioKey.trim();
     if (!trimmed) {
       setAudioSrc(null);
+      setAudioSource(null);
+      setUploadedAudioName(null);
       return;
     }
+    if (uploadedAudioObjectUrlRef.current) {
+      URL.revokeObjectURL(uploadedAudioObjectUrlRef.current);
+      uploadedAudioObjectUrlRef.current = null;
+    }
     setAudioSrc(buildAudioProxyPath(trimmed));
+    setAudioSource("key");
+    setUploadedAudioName(null);
     setPlayheadMs(0);
   }, [audioKey]);
+
+  const handleUploadClick = React.useCallback(() => {
+    uploadInputRef.current?.click();
+  }, []);
+
+  const handleUploadAudio = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    if (uploadedAudioObjectUrlRef.current) {
+      URL.revokeObjectURL(uploadedAudioObjectUrlRef.current);
+      uploadedAudioObjectUrlRef.current = null;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    uploadedAudioObjectUrlRef.current = objectUrl;
+    setAudioError(null);
+    setAudioSrc(objectUrl);
+    setAudioSource("upload");
+    setUploadedAudioName(file.name);
+    setPlayheadMs(0);
+    event.target.value = "";
+  }, []);
 
   const togglePlayback = React.useCallback(async () => {
     const audio = audioRef.current;
@@ -523,6 +567,13 @@ export default function DebugContourPage() {
           <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Live Playback + Tap Capture</h2>
             <div className="mt-3 flex flex-wrap items-end gap-3">
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="audio/*"
+                className="hidden"
+                onChange={handleUploadAudio}
+              />
               <label className="min-w-[260px] flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                 <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Audio key</span>
                 <input
@@ -538,6 +589,13 @@ export default function DebugContourPage() {
                 className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Load audio
+              </button>
+              <button
+                type="button"
+                onClick={handleUploadClick}
+                className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Upload file
               </button>
               <button
                 type="button"
@@ -565,6 +623,12 @@ export default function DebugContourPage() {
               </label>
             </div>
 
+            {audioSource === "upload" && uploadedAudioName ? (
+              <p className="mt-2 text-sm text-slate-700">Loaded local file: {uploadedAudioName}</p>
+            ) : audioSource === "key" ? (
+              <p className="mt-2 text-sm text-slate-700">Loaded from key: {audioKey.trim() || "(none)"}</p>
+            ) : null}
+
             {audioError ? <p className="mt-2 text-sm text-rose-700">Audio error: {audioError}</p> : null}
             {audioSrc ? (
               <audio
@@ -573,10 +637,10 @@ export default function DebugContourPage() {
                 controls
                 preload="metadata"
                 className="mt-3 w-full"
-                onError={() => setAudioError("Could not load audio from the provided key.")}
+                onError={() => setAudioError(audioSource === "upload" ? "Could not play the uploaded file." : "Could not load audio from the provided key.")}
               />
             ) : (
-              <p className="mt-3 text-sm text-slate-500">Load an audio key to enable a moving playhead and live tap capture.</p>
+              <p className="mt-3 text-sm text-slate-500">Load an audio key or upload a local file to enable a moving playhead and live tap capture.</p>
             )}
 
             <div className="mt-4 grid gap-3 md:grid-cols-[120px_minmax(0,1fr)]">
