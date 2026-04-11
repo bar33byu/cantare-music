@@ -108,6 +108,15 @@ function scorePillClasses(status: "matched" | "mismatched" | "extra") {
   return "border-rose-300 bg-rose-50 text-rose-800";
 }
 
+function buildAudioProxyPath(key: string): string {
+  const segments = key
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment));
+  return `/api/audio/${segments.join("/")}`;
+}
+
 interface PlotProps {
   title: string;
   subtitle: string;
@@ -120,6 +129,7 @@ interface PlotProps {
   onClear: () => void;
   textValue: string;
   onTextChange: (value: string) => void;
+  playheadMs?: number;
 }
 
 function DotPlot({
@@ -134,6 +144,7 @@ function DotPlot({
   onClear,
   textValue,
   onTextChange,
+  playheadMs,
 }: PlotProps) {
   const arrowLookup = React.useMemo(() => buildArrowLookup(notes, sameDeadZone), [notes, sameDeadZone]);
   const sortedNotes = React.useMemo(
@@ -224,6 +235,21 @@ function DotPlot({
           );
         })}
 
+        {typeof playheadMs === "number" ? (
+          <>
+            <div
+              className="absolute inset-y-0 w-0.5 bg-indigo-600/80"
+              style={{ left: `${Math.min(100, Math.max(0, (playheadMs / timelineMs) * 100))}%` }}
+            />
+            <div
+              className="absolute top-2 -translate-x-1/2 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+              style={{ left: `${Math.min(100, Math.max(0, (playheadMs / timelineMs) * 100))}%` }}
+            >
+              {formatTime(playheadMs)}
+            </div>
+          </>
+        ) : null}
+
         <div className="absolute bottom-3 left-3 rounded-full bg-white/90 px-3 py-1 text-xs text-slate-600 shadow-sm">
           Click anywhere to add a point. Horizontal = time, vertical = lane.
         </div>
@@ -282,8 +308,15 @@ function DotPlot({
 }
 
 export default function DebugContourPage() {
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [timelineMs, setTimelineMs] = React.useState(DEFAULT_TIMELINE_MS);
   const [sameDeadZone, setSameDeadZone] = React.useState(DEFAULT_SAME_DEAD_ZONE);
+  const [audioKey, setAudioKey] = React.useState("audio/sample.mp3");
+  const [audioSrc, setAudioSrc] = React.useState<string | null>(null);
+  const [audioError, setAudioError] = React.useState<string | null>(null);
+  const [playheadMs, setPlayheadMs] = React.useState(0);
+  const [isAudioPlaying, setIsAudioPlaying] = React.useState(false);
+  const [syncTimelineToAudio, setSyncTimelineToAudio] = React.useState(true);
   const [answerNotes, setAnswerNotes] = React.useState<PitchContourNote[]>([
     makeNote("answer-1", 0, 0.22),
     makeNote("answer-2", 900, 0.78),
@@ -297,6 +330,82 @@ export default function DebugContourPage() {
   ]);
   const [answerText, setAnswerText] = React.useState(serializeNotes(answerNotes));
   const [attemptText, setAttemptText] = React.useState(serializeNotes(attemptNotes));
+
+  React.useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    const handleTimeUpdate = () => {
+      setPlayheadMs(audio.currentTime * 1000);
+    };
+    const handlePlay = () => setIsAudioPlaying(true);
+    const handlePause = () => setIsAudioPlaying(false);
+    const handleEnded = () => {
+      setIsAudioPlaying(false);
+      setPlayheadMs(audio.duration > 0 ? audio.duration * 1000 : 0);
+    };
+    const handleLoadedMetadata = () => {
+      if (syncTimelineToAudio && Number.isFinite(audio.duration) && audio.duration > 0) {
+        setTimelineMs(Math.max(500, Math.round(audio.duration * 1000)));
+      }
+    };
+
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+
+    return () => {
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+    };
+  }, [syncTimelineToAudio]);
+
+  const loadAudio = React.useCallback(() => {
+    setAudioError(null);
+    const trimmed = audioKey.trim();
+    if (!trimmed) {
+      setAudioSrc(null);
+      return;
+    }
+    setAudioSrc(buildAudioProxyPath(trimmed));
+    setPlayheadMs(0);
+  }, [audioKey]);
+
+  const togglePlayback = React.useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    if (audio.paused) {
+      try {
+        await audio.play();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setAudioError(message);
+      }
+      return;
+    }
+
+    audio.pause();
+  }, []);
+
+  const stopPlayback = React.useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    audio.pause();
+    audio.currentTime = 0;
+    setPlayheadMs(0);
+  }, []);
 
   const appendPoint = React.useCallback((mode: EditorMode, clientX: number, clientY: number, rect: DOMRect) => {
     const xRatio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
@@ -355,6 +464,22 @@ export default function DebugContourPage() {
     setAnswerText(serializeNotes(next));
   }, [attemptNotes]);
 
+  const captureAttemptTap = React.useCallback((clientY: number, rect: DOMRect) => {
+    const yRatio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    const lane = Number((1 - yRatio).toFixed(3));
+    const note = makeNote(
+      `attempt-live-${Date.now()}-${Math.round(clientY)}`,
+      Math.round(Math.min(Math.max(0, playheadMs), timelineMs)),
+      lane
+    );
+
+    setAttemptNotes((previous) => {
+      const next = [...previous, note].sort((first, second) => first.timeOffsetMs - second.timeOffsetMs);
+      setAttemptText(serializeNotes(next));
+      return next;
+    });
+  }, [playheadMs, timelineMs]);
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,#fef3c7,transparent_28%),radial-gradient(circle_at_top_right,#dbeafe,transparent_34%),linear-gradient(180deg,#f8fafc,#eef2ff)] px-4 py-8 md:px-8">
       <div className="mx-auto max-w-7xl">
@@ -394,6 +519,90 @@ export default function DebugContourPage() {
               </label>
             </div>
           </div>
+
+          <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Live Playback + Tap Capture</h2>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <label className="min-w-[260px] flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Audio key</span>
+                <input
+                  value={audioKey}
+                  onChange={(event) => setAudioKey(event.target.value)}
+                  className="mt-1 w-full bg-transparent text-sm font-medium outline-none"
+                  placeholder="audio/sample.mp3"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={loadAudio}
+                className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Load audio
+              </button>
+              <button
+                type="button"
+                onClick={togglePlayback}
+                disabled={!audioSrc}
+                className="rounded-full border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isAudioPlaying ? "Pause" : "Play"}
+              </button>
+              <button
+                type="button"
+                onClick={stopPlayback}
+                disabled={!audioSrc}
+                className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Stop
+              </button>
+              <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={syncTimelineToAudio}
+                  onChange={(event) => setSyncTimelineToAudio(event.target.checked)}
+                />
+                Sync timeline to audio duration
+              </label>
+            </div>
+
+            {audioError ? <p className="mt-2 text-sm text-rose-700">Audio error: {audioError}</p> : null}
+            {audioSrc ? (
+              <audio
+                ref={audioRef}
+                src={audioSrc}
+                controls
+                preload="metadata"
+                className="mt-3 w-full"
+                onError={() => setAudioError("Could not load audio from the provided key.")}
+              />
+            ) : (
+              <p className="mt-3 text-sm text-slate-500">Load an audio key to enable a moving playhead and live tap capture.</p>
+            )}
+
+            <div className="mt-4 grid gap-3 md:grid-cols-[120px_minmax(0,1fr)]">
+              <button
+                type="button"
+                onPointerDown={(event) => captureAttemptTap(event.clientY, event.currentTarget.getBoundingClientRect())}
+                className="relative h-48 w-full overflow-hidden rounded-2xl border border-dashed border-indigo-300 bg-[linear-gradient(180deg,rgba(238,242,255,0.75),rgba(224,231,255,0.55))]"
+                title="Tap vertically while audio is playing. Tap time comes from the moving playhead."
+              >
+                <div className="absolute inset-x-0 top-1/2 border-t border-indigo-200/90" />
+                <div className="absolute left-1/2 top-2 -translate-x-1/2 text-[10px] font-semibold uppercase tracking-[0.2em] text-indigo-700">
+                  Tap Lane
+                </div>
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-indigo-700">Higher pitch up top</div>
+              </button>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-sm font-semibold text-slate-900">Live capture state</p>
+                <p className="mt-1 text-sm text-slate-700">Playhead: {formatTime(playheadMs)} / {formatTime(timelineMs)}</p>
+                <p className="mt-1 text-sm text-slate-700">Attempt taps: {attemptNotes.length}</p>
+                <p className="mt-2 text-xs leading-5 text-slate-600">
+                  Use this to test the exact interaction you described: listen while the playhead moves, tap the lane by feel,
+                  and then compare your expected up/down/same transitions against the system interpretation shown in the panels.
+                </p>
+              </div>
+            </div>
+          </section>
         </header>
 
         <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -418,6 +627,7 @@ export default function DebugContourPage() {
                 setAnswerText("");
               }}
               textValue={answerText}
+              playheadMs={playheadMs}
               onTextChange={(value) => {
                 setAnswerText(value);
                 setAnswerNotes(parseNotes(value));
@@ -444,6 +654,7 @@ export default function DebugContourPage() {
                 setAttemptText("");
               }}
               textValue={attemptText}
+              playheadMs={playheadMs}
               onTextChange={(value) => {
                 setAttemptText(value);
                 setAttemptNotes(parseNotes(value));
