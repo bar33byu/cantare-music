@@ -13,7 +13,7 @@ describe('contourPractice', () => {
     expect(events.map((event) => event.direction)).toEqual(['up', 'same', 'down']);
   });
 
-  it('matches nearby events with tolerant timing', () => {
+  it('matches direction sequence even when timing is far apart', () => {
     const result = compareContourAttempt(
       [
         { id: 'a1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
@@ -25,7 +25,7 @@ describe('contourPractice', () => {
         { id: 'u2', timeOffsetMs: 760, durationMs: 100, lane: 0.7 },
         { id: 'u3', timeOffsetMs: 1100, durationMs: 100, lane: 0.35 },
       ],
-      { timeToleranceMs: 250 }
+      { timeToleranceMs: 10 }
     );
 
     expect(result.totalEvents).toBe(2);
@@ -50,7 +50,7 @@ describe('contourPractice', () => {
     expect(result.score).toBe(0);
   });
 
-  it('marks attempt notes as mismatched when duration is too far off', () => {
+  it('does not penalize duration mismatch when direction is correct', () => {
     const detailed = compareContourAttemptDetailed(
       [
         { id: 'a1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
@@ -62,7 +62,7 @@ describe('contourPractice', () => {
       ]
     );
 
-    expect(detailed.matchedEvents).toBe(0);
-    expect(detailed.attemptNoteStatuses.u2).toBe('mismatched');
+    expect(detailed.matchedEvents).toBe(1);
+    expect(detailed.attemptNoteStatuses.u2).toBe('matched');
   });
 });

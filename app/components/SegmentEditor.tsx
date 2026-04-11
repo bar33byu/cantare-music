@@ -1175,7 +1175,15 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                   isContourRecording
                     ? 'border-indigo-500 bg-gradient-to-b from-indigo-100 via-white to-indigo-100'
                     : 'border-slate-300 bg-slate-100'
-                }`}
+                } select-none touch-none`}
+                style={{
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  WebkitTouchCallout: 'none',
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                }}
                 onPointerDown={(event) => {
                   if (!isContourRecording) {
                     return;

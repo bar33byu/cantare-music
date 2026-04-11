@@ -108,13 +108,13 @@ export function compareContourAttemptDetailed(
 
   const usedAttemptIndices = new Set<number>();
   let matchedEvents = 0;
+  let searchStartIndex = 0;
 
   for (let answerIndex = 0; answerIndex < answerEvents.length; answerIndex += 1) {
     const answerEvent = answerEvents[answerIndex];
-    let bestAttemptIndex = -1;
-    let bestDelta = Number.POSITIVE_INFINITY;
+    let matchedAttemptIndex = -1;
 
-    for (let i = 0; i < attemptEvents.length; i += 1) {
+    for (let i = searchStartIndex; i < attemptEvents.length; i += 1) {
       if (usedAttemptIndices.has(i)) {
         continue;
       }
@@ -124,28 +124,15 @@ export function compareContourAttemptDetailed(
         continue;
       }
 
-      const answerDurationMs = Math.max(1, sortedAnswer[Math.min(sortedAnswer.length - 1, answerIndex + 1)]?.durationMs ?? 1);
-      const attemptDurationMs = Math.max(1, sortedAttempt[Math.min(sortedAttempt.length - 1, i + 1)]?.durationMs ?? 1);
-      const durationDeltaRatio = Math.abs(attemptDurationMs - answerDurationMs) / answerDurationMs;
-      if (durationDeltaRatio > effective.durationToleranceRatio) {
-        continue;
-      }
-
-      const delta = Math.abs(attemptEvent.timeOffsetMs - answerEvent.timeOffsetMs);
-      if (delta > effective.timeToleranceMs) {
-        continue;
-      }
-
-      if (delta < bestDelta) {
-        bestDelta = delta;
-        bestAttemptIndex = i;
-      }
+      matchedAttemptIndex = i;
+      break;
     }
 
-    if (bestAttemptIndex !== -1) {
-      usedAttemptIndices.add(bestAttemptIndex);
+    if (matchedAttemptIndex !== -1) {
+      usedAttemptIndices.add(matchedAttemptIndex);
       matchedEvents += 1;
-      const matchedNote = sortedAttempt[Math.min(sortedAttempt.length - 1, bestAttemptIndex + 1)];
+      searchStartIndex = matchedAttemptIndex + 1;
+      const matchedNote = sortedAttempt[Math.min(sortedAttempt.length - 1, matchedAttemptIndex + 1)];
       if (matchedNote) {
         attemptNoteStatuses[matchedNote.id] = 'matched';
       }

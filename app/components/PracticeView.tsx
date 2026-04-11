@@ -132,6 +132,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const activeTapCaptureRef = React.useRef<ActiveTapCapture | null>(null);
   const toastTimerRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
+  const segmentScoreToastHandledRef = React.useRef<Record<string, boolean>>({});
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
@@ -667,6 +668,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }, 1600);
   }, []);
 
+  const showSegmentTapScoreToast = React.useCallback((segment: Song["segments"][number]) => {
+    const tapMatch = compareContourAttemptDetailed(
+      segment.pitchContourNotes ?? [],
+      tapAttemptsRef.current[segment.id] ?? [],
+      { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
+    );
+    const scoreOutOfFive = Math.max(0, Math.min(5, Math.round(tapMatch.score * 5)));
+    showAccuracyToast(`Tap score ${scoreOutOfFive}/5`);
+  }, [showAccuracyToast]);
+
   const finalizeTapCapture = React.useCallback((endLane?: number) => {
     const capture = activeTapCaptureRef.current;
     if (!capture || !currentSegment) {
@@ -879,7 +890,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // Restart the segment when playback reaches its natural end while looping.
   // Uses pausedByUserRef to avoid restarting after an explicit user pause.
   useEffect(() => {
-    if (!isLooping || !currentSegment) return;
+    if (!isTapPracticeMode || !isLooping || !currentSegment) return;
     if (isPlaying) {
       // Reset the user-pause flag whenever playback is active.
       pausedByUserRef.current = false;
@@ -893,16 +904,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
       loopHandledRef.current = loopKey;
-      const loopMatch = compareContourAttemptDetailed(
-        currentSegment.pitchContourNotes ?? [],
-        tapAttemptsBySegment[currentSegment.id] ?? [],
-        { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
-      );
-      showAccuracyToast(`Loop accuracy ${Math.round(loopMatch.score * 100)}%`);
+      showSegmentTapScoreToast(currentSegment);
       setTapAttemptsBySegment((previous) => ({
         ...previous,
         [currentSegment.id]: [],
       }));
+      segmentScoreToastHandledRef.current[currentSegment.id] = false;
       activeTapCaptureRef.current = null;
       play(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
@@ -910,12 +917,34 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     currentMs,
     currentSegment,
     getSegmentStartWithPreroll,
+    isTapPracticeMode,
     isLooping,
     isPlaying,
     play,
-    showAccuracyToast,
-    tapAttemptsBySegment,
+    showSegmentTapScoreToast,
   ]);
+
+  useEffect(() => {
+    if (!isTapPracticeMode || !isPlaying || !currentSegment) {
+      return;
+    }
+
+    const segmentId = currentSegment.id;
+    const previousHandled = segmentScoreToastHandledRef.current[segmentId] ?? false;
+    if (currentMs <= currentSegment.startMs + 120) {
+      segmentScoreToastHandledRef.current[segmentId] = false;
+      return;
+    }
+
+    if (previousHandled) {
+      return;
+    }
+
+    if (currentMs >= currentSegment.endMs - 50) {
+      segmentScoreToastHandledRef.current[segmentId] = true;
+      showSegmentTapScoreToast(currentSegment);
+    }
+  }, [currentMs, currentSegment, isPlaying, isTapPracticeMode, showSegmentTapScoreToast]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;
@@ -942,6 +971,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setAccuracyToast(null);
     activeTapCaptureRef.current = null;
     loopHandledRef.current = null;
+    segmentScoreToastHandledRef.current = {};
     if (toastTimerRef.current !== null) {
       window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = null;

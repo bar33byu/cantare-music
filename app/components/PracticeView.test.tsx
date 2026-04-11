@@ -413,7 +413,7 @@ describe("PracticeView", () => {
     expect(screen.getAllByTestId("practice-attempt-dot")).toHaveLength(1);
   });
 
-  it("shows loop accuracy toast and clears taps when loop restarts", async () => {
+  it("shows 0-5 tap score toast and clears taps when loop restarts", async () => {
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
       isReady: true,
@@ -455,11 +455,74 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("mock-loop-toggle"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("practice-accuracy-toast")).toHaveTextContent("Loop accuracy");
+      expect(screen.getByTestId("practice-accuracy-toast")).toHaveTextContent("Tap score");
       expect(mockPlay).toHaveBeenCalledWith(0, 4000);
     });
 
     expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
+  });
+
+  it("does not show tap score toast when looping outside tap mode", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 3995,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      startMs: 0,
+      endMs: 4000,
+    };
+
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("practice-accuracy-toast")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows a temporary 0-5 tap score toast at segment end in tap mode", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 3995,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      startMs: 0,
+      endMs: 4000,
+      pitchContourNotes: [
+        { id: "k1", timeOffsetMs: 0, durationMs: 120, lane: 0.2 },
+        { id: "k2", timeOffsetMs: 100, durationMs: 120, lane: 0.8 },
+      ],
+    };
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-accuracy-toast")).toHaveTextContent(/Tap score [0-5]\/5/);
+    });
   });
 
   it("shows immediate miss feedback when a tap is classified as a miss", async () => {
