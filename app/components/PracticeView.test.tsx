@@ -352,9 +352,72 @@ describe("PracticeView", () => {
     fireEvent.pointerUp(tapBar, { pointerId: 2, clientY: 20 });
 
     await waitFor(() => {
-      expect(screen.getByTestId("practice-tap-feedback")).toHaveTextContent("100%");
+      expect(screen.getByTestId("practice-tap-feedback")).toHaveTextContent("100% contour recall (1/1)");
       expect(screen.getByTestId("practice-piano-roll-overlay")).toBeInTheDocument();
     });
+
+    const transitionSteps = screen.getAllByTestId("practice-transition-step");
+    expect(transitionSteps).toHaveLength(2);
+    expect(transitionSteps[0]).toHaveAttribute("data-status", "pending");
+    expect(transitionSteps[1]).toHaveAttribute("data-status", "matched");
+  });
+
+  it("keeps earlier matched contour steps stable after a later wrong tap", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      pitchContourNotes: [
+        { id: "k1", timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
+        { id: "k2", timeOffsetMs: 10, durationMs: 100, lane: 0.8 },
+        { id: "k3", timeOffsetMs: 20, durationMs: 100, lane: 0.3 },
+      ],
+    };
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 41, clientY: 180 });
+    fireEvent.pointerUp(tapBar, { pointerId: 41, clientY: 180 });
+    fireEvent.pointerDown(tapBar, { pointerId: 42, clientY: 20 });
+    fireEvent.pointerUp(tapBar, { pointerId: 42, clientY: 20 });
+    fireEvent.pointerDown(tapBar, { pointerId: 43, clientY: 10 });
+    fireEvent.pointerUp(tapBar, { pointerId: 43, clientY: 10 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-tap-feedback")).toHaveTextContent("50% contour recall (1/2)");
+    });
+
+    const transitionSteps = screen.getAllByTestId("practice-transition-step");
+    expect(transitionSteps).toHaveLength(3);
+    expect(transitionSteps[0]).toHaveAttribute("data-status", "pending");
+    expect(transitionSteps[1]).toHaveAttribute("data-status", "matched");
+    expect(transitionSteps[2]).toHaveAttribute("data-status", "mismatched");
   });
 
   it("can hide translucent contour overlay in tap mode", async () => {
