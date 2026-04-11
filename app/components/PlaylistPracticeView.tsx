@@ -310,6 +310,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
         {displayedSongs.map((song) => {
           const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
           const masteryColor = getMasteryColor(mastery);
+          const shouldRenderLabelInsideBar = mastery >= 10;
           const hasAudio = Boolean(song.audioUrl?.trim());
           const hasSegments = song.segments.length > 0;
           const readinessNotes: string[] = [];
@@ -328,11 +329,29 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
             >
               <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
                 <div
-                  className="h-full rounded-tl-lg"
+                  className="relative h-full rounded-tl-lg"
                   style={{ width: `${mastery}%`, backgroundColor: masteryColor }}
-                />
+                >
+                  {shouldRenderLabelInsideBar ? (
+                    <span
+                      data-testid={`playlist-practice-mastery-label-${song.id}`}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-white"
+                    >
+                      {mastery}%
+                    </span>
+                  ) : null}
+                </div>
+                {!shouldRenderLabelInsideBar ? (
+                  <span
+                    data-testid={`playlist-practice-mastery-label-${song.id}`}
+                    className="absolute top-1/2 -translate-y-1/2 text-[11px] font-semibold text-gray-700"
+                    style={{ left: `calc(${mastery}% + 4px)` }}
+                  >
+                    {mastery}%
+                  </span>
+                ) : null}
               </div>
-              <p className="absolute right-2 top-1 text-[11px] font-semibold text-gray-700">{mastery}%</p>
+
               <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
               {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
               {readinessNotes.length > 0 ? (

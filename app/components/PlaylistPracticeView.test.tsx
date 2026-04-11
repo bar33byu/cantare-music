@@ -27,6 +27,7 @@ const playlist: Playlist = {
       ],
       createdAt: '2025-01-01T00:00:00.000Z',
       position: 0,
+      masteryPercent: 91,
     },
     {
       id: 'song-2',
@@ -46,6 +47,7 @@ const playlist: Playlist = {
       ],
       createdAt: '2025-01-01T00:00:00.000Z',
       position: 1,
+      masteryPercent: 7,
     },
   ],
 };
@@ -144,5 +146,23 @@ describe('PlaylistPracticeView', () => {
 
     expect(screen.getByTestId('playlist-practice-song-status-song-1')).toHaveTextContent('Missing audio');
     expect(screen.getByTestId('playlist-practice-song-status-song-1')).toHaveTextContent('Missing segments');
+  });
+
+  it('places mastery label inside the bar at 10% or higher and outside when below 10%', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument();
+    });
+
+    const insideLabel = screen.getByTestId('playlist-practice-mastery-label-song-1');
+    expect(insideLabel).toHaveTextContent('91%');
+    expect(insideLabel.className).toContain('text-white');
+
+    const outsideLabel = screen.getByTestId('playlist-practice-mastery-label-song-2');
+    expect(outsideLabel).toHaveTextContent('7%');
+    expect(outsideLabel.className).toContain('text-gray-700');
   });
 });
