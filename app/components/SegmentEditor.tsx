@@ -20,6 +20,8 @@ const BULK_REQUEST_RETRY_DELAY_MS = 250;
 const CONTOUR_PLAYBACK_RATES = [0.5, 0.75, 1] as const;
 const MIN_CONTOUR_TAP_DURATION_MS = 80;
 
+const getBulkLyricsDraftStorageKey = (songId: string) => `segment-editor:bulk-lyrics:${songId}`;
+
 interface ActiveContourCapture {
   id: string;
   startMs: number;
@@ -71,6 +73,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const [stableDurationMs, setStableDurationMs] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
+  const [bulkDraftLoaded, setBulkDraftLoaded] = useState(false);
   const [bulkSeparator, setBulkSeparator] = useState('*');
   const [replaceExistingOnBulk, setReplaceExistingOnBulk] = useState(true);
   const [bulkImportPending, setBulkImportPending] = useState(false);
@@ -84,6 +87,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const activeContourCaptureRef = useRef<ActiveContourCapture | null>(null);
 
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(audioUrl)), [audioUrl]);
+  const bulkLyricsDraftStorageKey = useMemo(() => getBulkLyricsDraftStorageKey(songId), [songId]);
   const playbackAudioUrl = useMemo(() => {
     if (useProxyFallback && proxyAudioUrl) {
       return proxyAudioUrl;
@@ -487,7 +491,6 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       }
 
       setShowBulkImport(false);
-      setBulkText('');
       setRefreshKey((previous) => previous + 1);
       setSelectedSegmentId(null);
 
@@ -684,6 +687,36 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     setContourDraftBySegment({});
     activeContourCaptureRef.current = null;
   }, [songId]);
+
+  useEffect(() => {
+    setBulkDraftLoaded(false);
+
+    try {
+      const savedDraft = window.localStorage.getItem(bulkLyricsDraftStorageKey);
+      setBulkText(savedDraft ?? '');
+    } catch {
+      setBulkText('');
+    } finally {
+      setBulkDraftLoaded(true);
+    }
+  }, [bulkLyricsDraftStorageKey]);
+
+  useEffect(() => {
+    if (!bulkDraftLoaded) {
+      return;
+    }
+
+    try {
+      if (bulkText.trim().length === 0) {
+        window.localStorage.removeItem(bulkLyricsDraftStorageKey);
+        return;
+      }
+
+      window.localStorage.setItem(bulkLyricsDraftStorageKey, bulkText);
+    } catch {
+      // Ignore storage failures in private browsing or restricted environments.
+    }
+  }, [bulkDraftLoaded, bulkLyricsDraftStorageKey, bulkText]);
 
   useEffect(() => {
     if (!playbackError || useProxyFallback || !proxyAudioUrl) {

@@ -38,6 +38,7 @@ describe('SegmentEditor', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     vi.mocked(useAudioPlayer).mockReturnValue({
       isPlaying: false,
       isReady: true,
@@ -196,6 +197,42 @@ describe('SegmentEditor', () => {
       // No new sections are needed when there are already 2 existing sections.
       expect(createCalls.length).toBe(0);
     });
+  });
+
+  it('keeps bulk lyrics text after import and restores it after reload', async () => {
+    const { unmount } = render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+
+    const draftLyrics = ['Verse one line 1', 'Verse one line 2', '*', 'Verse two line 1'].join('\n');
+    fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
+      target: { value: draftLyrics },
+    });
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
+
+    await waitFor(() => {
+      const patchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/') && init?.method === 'PATCH'
+      );
+      expect(patchCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    expect(screen.getByTestId('segment-editor-bulk-text')).toHaveValue(draftLyrics);
+
+    unmount();
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    expect(screen.getByTestId('segment-editor-bulk-text')).toHaveValue(draftLyrics);
   });
 
   it('bulk-import spreads sections across probed song duration when player duration is not ready', async () => {
