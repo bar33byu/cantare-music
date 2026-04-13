@@ -5,7 +5,6 @@ import type { PitchContourNote } from "../types";
 import {
   buildContourDirectionEvents,
   compareContourAttemptDetailed,
-  compareContourAttemptStable,
   type ContourDirection,
 } from "../lib/contourPractice";
 
@@ -53,12 +52,12 @@ function directionLabel(direction: ContourDirection): string {
   return "Same";
 }
 
-function statusLabel(status: "matched" | "mismatched" | "extra"): string {
+function statusLabel(status: "matched" | "mismatched" | "pending"): string {
   if (status === "matched") {
     return "Correct";
   }
-  if (status === "extra") {
-    return "Extra";
+  if (status === "pending") {
+    return "Pending";
   }
   return "Wrong";
 }
@@ -99,11 +98,11 @@ function buildArrowLookup(notes: PitchContourNote[], sameDeadZone: number): Reco
   return lookup;
 }
 
-function scorePillClasses(status: "matched" | "mismatched" | "extra") {
+function scorePillClasses(status: "matched" | "mismatched" | "pending") {
   if (status === "matched") {
     return "border-emerald-300 bg-emerald-50 text-emerald-800";
   }
-  if (status === "extra") {
+  if (status === "pending") {
     return "border-amber-300 bg-amber-50 text-amber-900";
   }
   return "border-rose-300 bg-rose-50 text-rose-800";
@@ -478,11 +477,6 @@ export default function DebugContourPage() {
     });
   }, [timelineMs]);
 
-  const stableScore = React.useMemo(
-    () => compareContourAttemptStable(answerNotes, attemptNotes, { sameDeadZone }),
-    [answerNotes, attemptNotes, sameDeadZone]
-  );
-
   const detailedScore = React.useMemo(
     () => compareContourAttemptDetailed(answerNotes, attemptNotes, { sameDeadZone }),
     [answerNotes, attemptNotes, sameDeadZone]
@@ -808,12 +802,7 @@ export default function DebugContourPage() {
                 <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Score comparison</h2>
                 <div className="mt-3 grid gap-3">
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-sm font-semibold text-slate-900">Stable step score</p>
-                    <p className="mt-1 text-2xl font-semibold text-slate-950">{Math.round(stableScore.score * 100)}%</p>
-                    <p className="mt-1 text-sm text-slate-600">{stableScore.matchedEvents} matched out of {stableScore.totalEvents}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-sm font-semibold text-slate-900">Greedy sequence score</p>
+                    <p className="text-sm font-semibold text-slate-900">Detailed score</p>
                     <p className="mt-1 text-2xl font-semibold text-slate-950">{Math.round(detailedScore.score * 100)}%</p>
                     <p className="mt-1 text-sm text-slate-600">{detailedScore.matchedEvents} matched out of {detailedScore.totalEvents}</p>
                   </div>
@@ -851,19 +840,20 @@ export default function DebugContourPage() {
               </section>
 
               <section>
-                <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Stable step outcomes</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Attempt note outcomes</h2>
                 <div className="mt-3 flex flex-col gap-2">
-                  {stableScore.transitionResults.length === 0 ? (
-                    <p className="text-sm text-slate-500">Add two attempt points to produce a scored step.</p>
+                  {attemptNotes.length === 0 ? (
+                    <p className="text-sm text-slate-500">Add attempt points to produce note-level outcomes.</p>
                   ) : (
-                    stableScore.transitionResults.map((result, index) => (
-                      <div key={`${result.attemptNoteId}-${index}`} className={`rounded-2xl border px-3 py-2 text-sm ${scorePillClasses(result.status)}`}>
-                        <p className="font-semibold">{`Step ${index + 1}: ${directionGlyph(result.direction)} ${directionLabel(result.direction)} - ${statusLabel(result.status)}`}</p>
-                        <p className="mt-1 text-xs opacity-80">
-                          {result.expectedDirection ? `Expected ${directionLabel(result.expectedDirection)}` : "No matching answer step remains."}
-                        </p>
-                      </div>
-                    ))
+                    attemptNotes.map((note, index) => {
+                      const status = detailedScore.attemptNoteStatuses[note.id] ?? "pending";
+                      return (
+                        <div key={note.id} className={`rounded-2xl border px-3 py-2 text-sm ${scorePillClasses(status)}`}>
+                          <p className="font-semibold">{`Note ${index + 1}: ${statusLabel(status)}`}</p>
+                          <p className="mt-1 text-xs opacity-80">{`${formatTime(note.timeOffsetMs)}, lane ${formatLane(note.lane)}`}</p>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </section>
