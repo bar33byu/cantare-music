@@ -100,6 +100,7 @@ export default function DebugTapPracticePage() {
   const [songsLoading, setSongsLoading] = React.useState(true);
   const [selectedSongId, setSelectedSongId] = React.useState<string>("");
   const [querySongId, setQuerySongId] = React.useState<string | null>(null);
+  const [querySessionId, setQuerySessionId] = React.useState<string | null>(null);
 
   const [songDetail, setSongDetail] = React.useState<Song | null>(null);
   const [sessions, setSessions] = React.useState<TapSessionSummary[]>([]);
@@ -122,7 +123,9 @@ export default function DebugTapPracticePage() {
     }
     const params = new URLSearchParams(window.location.search);
     const songId = params.get("songId");
+    const sessionId = params.get("sessionId");
     setQuerySongId(songId);
+    setQuerySessionId(sessionId);
   }, []);
 
   const loadSongs = React.useCallback(async () => {
@@ -176,6 +179,9 @@ export default function DebugTapPracticePage() {
 
       if (sessionsPayload.sessions.length > 0) {
         setSelectedSessionId((previous) => {
+          if (querySessionId && sessionsPayload.sessions.some((session) => session.id === querySessionId)) {
+            return querySessionId;
+          }
           const stillExists = sessionsPayload.sessions.some((session) => session.id === previous);
           return stillExists ? previous : sessionsPayload.sessions[0].id;
         });
@@ -192,7 +198,7 @@ export default function DebugTapPracticePage() {
     } finally {
       setSessionsLoading(false);
     }
-  }, []);
+  }, [querySessionId]);
 
   React.useEffect(() => {
     void loadSongContext(selectedSongId);

@@ -13,6 +13,13 @@ const mockSetPlaybackEndMs = vi.fn();
 const mockUseAudioPlayer = vi.fn();
 const mockFetch = vi.fn();
 
+function makeFetchResponse(payload: unknown, ok = true) {
+  return {
+    ok,
+    json: async () => payload,
+  };
+}
+
 global.fetch = mockFetch;
 
 vi.mock("./SegmentCard", () => ({
@@ -123,7 +130,25 @@ describe("PracticeView", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ratings: [] }) });
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
+        return makeFetchResponse({ ratings: [] });
+      }
+      if (url.endsWith("/tap-sessions") && init?.method === "POST") {
+        return makeFetchResponse({ session: { id: "tap-session-1" } });
+      }
+      if (url.includes("/tap-sessions/") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/practice") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/ratings") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      return makeFetchResponse({});
+    });
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
       isReady: true,
@@ -290,6 +315,24 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-overlay-toggle")).toBeInTheDocument();
   });
 
+  it("creates a tap session when tap practice is enabled and updates the debug link", async () => {
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-open-tap-debug")).toHaveAttribute(
+        "href",
+        expect.stringContaining(`songId=${encodeURIComponent(song.id)}&sessionId=tap-session-1`)
+      );
+    });
+  });
+
   it("toggles static contour map on section card independently", async () => {
     const song = makeSong(2);
     await renderAndWaitForRatings(song);
@@ -354,6 +397,64 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("practice-tap-feedback")).toHaveTextContent("100%");
       expect(screen.getByTestId("practice-piano-roll-overlay")).toBeInTheDocument();
+    });
+  });
+
+  it("persists captured taps to the active tap session", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-open-tap-debug")).toHaveAttribute(
+        "href",
+        expect.stringContaining("sessionId=tap-session-1")
+      );
+    });
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 91, clientY: 60 });
+    fireEvent.pointerUp(tapBar, { pointerId: 91, clientY: 60 });
+
+    await waitFor(() => {
+      const persistCall = mockFetch.mock.calls.find(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions/tap-session-1` && init?.method === "POST"
+      );
+      expect(persistCall).toBeTruthy();
+
+      const payload = JSON.parse(String((persistCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+      expect(payload).toEqual(expect.objectContaining({
+        segmentId: "seg-0",
+        timeOffsetMs: 100,
+        durationMs: 80,
+      }));
+      expect(payload.noteId).toEqual(expect.any(String));
+      expect(typeof payload.lane).toBe("number");
     });
   });
 

@@ -57,6 +57,14 @@ interface ActiveTapCapture {
   pointerId: number;
 }
 
+interface PersistedTapPayload {
+  segmentId: string;
+  noteId: string;
+  timeOffsetMs: number;
+  durationMs: number;
+  lane: number;
+}
+
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
   if (mode === "full") {
     return "hint";
@@ -133,9 +141,20 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const toastTimerRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
+  const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
+  const tapSessionIdRef = React.useRef<string | null>(null);
+  const tapSessionGenerationRef = React.useRef(0);
+  const pendingPersistedTapsRef = React.useRef<PersistedTapPayload[]>([]);
+  const persistTapChainRef = React.useRef<Promise<void>>(Promise.resolve());
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
-  const tapDebugHref = `/debug-tap-practice?songId=${encodeURIComponent(song.id)}`;
+  const tapDebugHref = React.useMemo(() => {
+    const params = new URLSearchParams({ songId: song.id });
+    if (tapSessionId) {
+      params.set("sessionId", tapSessionId);
+    }
+    return `/debug-tap-practice?${params.toString()}`;
+  }, [song.id, tapSessionId]);
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
@@ -227,6 +246,44 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       // Keep queued ratings for a future retry.
     }
   }, [clearOfflineRatingsQueue, dequeueOfflineRatings, postRatingsSnapshot]);
+
+  const flushPersistedTaps = React.useCallback((sessionIdOverride?: string) => {
+    const activeSessionId = sessionIdOverride ?? tapSessionIdRef.current;
+    if (!activeSessionId || pendingPersistedTapsRef.current.length === 0) {
+      return;
+    }
+
+    const payloads = pendingPersistedTapsRef.current.splice(0, pendingPersistedTapsRef.current.length);
+    persistTapChainRef.current = persistTapChainRef.current.then(async () => {
+      const failedPayloads: PersistedTapPayload[] = [];
+
+      for (const payload of payloads) {
+        try {
+          const response = await fetch(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to persist tap (${response.status})`);
+          }
+        } catch (error) {
+          console.error("Failed to persist tap practice tap:", error);
+          failedPayloads.push(payload);
+        }
+      }
+
+      if (failedPayloads.length > 0) {
+        pendingPersistedTapsRef.current.unshift(...failedPayloads);
+      }
+    });
+  }, [song.id]);
+
+  const queuePersistedTap = React.useCallback((payload: PersistedTapPayload) => {
+    pendingPersistedTapsRef.current.push(payload);
+    flushPersistedTaps();
+  }, [flushPersistedTaps]);
 
   const getSegmentIndexAtMs = React.useCallback((ms: number) => {
     // During overlaps, prefer the later segment so rapid next-clicks keep advancing.
@@ -714,8 +771,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       showAccuracyToast("Missed tap");
     }
 
+    queuePersistedTap({
+      segmentId,
+      noteId: note.id,
+      timeOffsetMs: note.timeOffsetMs,
+      durationMs: note.durationMs,
+      lane: note.lane,
+    });
+
     activeTapCaptureRef.current = null;
-  }, [currentMs, currentSegment, showAccuracyToast]);
+  }, [currentMs, currentSegment, queuePersistedTap, showAccuracyToast]);
 
   const clearCurrentSegmentTaps = React.useCallback(() => {
     if (!currentSegment) {
@@ -932,6 +997,47 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [tapAttemptsBySegment]);
 
   useEffect(() => {
+    tapSessionIdRef.current = tapSessionId;
+  }, [tapSessionId]);
+
+  useEffect(() => {
+    tapSessionGenerationRef.current += 1;
+    pendingPersistedTapsRef.current = [];
+    setTapSessionId(null);
+    tapSessionIdRef.current = null;
+
+    if (!isTapPracticeMode) {
+      return;
+    }
+
+    const generation = tapSessionGenerationRef.current;
+
+    void fetch(`/api/songs/${song.id}/tap-sessions`, { method: "POST" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to create tap session (${response.status})`);
+        }
+
+        const payload = await response.json() as { session?: { id?: string } };
+        const nextSessionId = payload.session?.id;
+        if (typeof nextSessionId !== "string" || nextSessionId.length === 0) {
+          throw new Error("Tap session response did not include an id");
+        }
+
+        if (tapSessionGenerationRef.current !== generation) {
+          return;
+        }
+
+        setTapSessionId(nextSessionId);
+        tapSessionIdRef.current = nextSessionId;
+        flushPersistedTaps(nextSessionId);
+      })
+      .catch((error) => {
+        console.error("Failed to create tap practice session:", error);
+      });
+  }, [flushPersistedTaps, isTapPracticeMode, song.id]);
+
+  useEffect(() => {
     activeTapCaptureRef.current = null;
   }, [currentSegment?.id]);
 
@@ -943,6 +1049,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setAccuracyToast(null);
     activeTapCaptureRef.current = null;
     loopHandledRef.current = null;
+    setTapSessionId(null);
+    tapSessionIdRef.current = null;
+    pendingPersistedTapsRef.current = [];
     if (toastTimerRef.current !== null) {
       window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = null;
