@@ -13,12 +13,6 @@ type PlaylistListItem = {
   songs?: Playlist['songs'];
 };
 
-type PlaylistHealthStats = {
-  songsWithAudio: number;
-  songsWithSegments: number;
-  songsWithTapKeys: number;
-};
-
 interface PlaylistBrowserProps {
   onSelectPlaylist: (playlist: Playlist) => void;
   onManagePlaylist: (playlist: Playlist) => void;
@@ -29,7 +23,6 @@ interface PlaylistBrowserProps {
 export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, refreshTrigger }: PlaylistBrowserProps) {
   const [playlists, setPlaylists] = useState<PlaylistListItem[]>([]);
   const [knowledgeByPlaylist, setKnowledgeByPlaylist] = useState<Record<string, number>>({});
-  const [statsByPlaylist, setStatsByPlaylist] = useState<Record<string, PlaylistHealthStats>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -70,8 +63,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
       const list = Array.isArray(data.playlists) ? data.playlists : [];
       setPlaylists(list);
 
-      const [knowledgeEntries, statsEntries] = await Promise.all([
-        Promise.all(
+      const knowledgeEntries = await Promise.all(
         list.map(async (playlist) => {
           const knowledgeResponse = await request(`/api/playlists/${playlist.id}/knowledge`);
           if (!knowledgeResponse.ok) {
@@ -80,34 +72,12 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
           const payload = (await knowledgeResponse.json()) as { score?: number };
           return [playlist.id, Math.min(Math.round(payload.score ?? 0), 100)] as const;
         })
-        ),
-        Promise.all(
-          list.map(async (playlist) => {
-            const detailResponse = await request(`/api/playlists/${playlist.id}`);
-            if (!detailResponse.ok) {
-              return [playlist.id, { songsWithAudio: 0, songsWithSegments: 0, songsWithTapKeys: 0 }] as const;
-            }
-            const detail = (await detailResponse.json()) as Playlist;
-            const songs = Array.isArray(detail.songs) ? detail.songs : [];
-
-            const songsWithAudio = songs.filter((song) => !!song.audioUrl).length;
-            const songsWithSegments = songs.filter((song) => (song.segments?.length ?? 0) > 0).length;
-            const songsWithTapKeys = songs.filter((song) =>
-              (song.segments ?? []).some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0)
-            ).length;
-
-            return [playlist.id, { songsWithAudio, songsWithSegments, songsWithTapKeys }] as const;
-          })
-        ),
-      ]);
-
+      );
       setKnowledgeByPlaylist(Object.fromEntries(knowledgeEntries));
-      setStatsByPlaylist(Object.fromEntries(statsEntries));
     } catch {
       setError('Unable to load playlists right now.');
       setPlaylists([]);
       setKnowledgeByPlaylist({});
-      setStatsByPlaylist({});
     } finally {
       setLoading(false);
     }
@@ -233,21 +203,11 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
           {playlists.map((playlist) => {
             const retiredClass = playlist.isRetired ? 'text-gray-500 italic' : '';
             const playlistPayload = { ...playlist, songs: playlist.songs ?? [] } as Playlist;
-            const knowledgePercent = Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100);
-            const stats = statsByPlaylist[playlist.id] ?? {
-              songsWithAudio: 0,
-              songsWithSegments: 0,
-              songsWithTapKeys: 0,
-            };
-            const totalSongs = Math.max(playlist.songCount ?? 0, 0);
             return (
               <article
                 key={playlist.id}
                 data-testid={`playlist-row-${playlist.id}`}
-                className={`rounded border border-gray-200 p-4 transition hover:border-indigo-300 ${retiredClass}`}
-                style={{
-                  backgroundImage: `linear-gradient(90deg, rgba(79, 70, 229, 0.15) 0%, rgba(79, 70, 229, 0.15) ${knowledgePercent}%, rgba(255, 255, 255, 1) ${knowledgePercent}%, rgba(255, 255, 255, 1) 100%)`,
-                }}
+                className={`rounded border border-gray-200 bg-white p-4 transition hover:border-indigo-300 hover:bg-indigo-50/30 ${retiredClass}`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <button
@@ -258,27 +218,13 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                   >
                     <h3 className="font-semibold" data-testid={`playlist-name-${playlist.id}`}>{playlist.name}</h3>
                     {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
-                    <p className="text-xs text-gray-500">Songs: {totalSongs}</p>
-                    <p className="text-sm font-semibold text-indigo-800" data-testid={`playlist-knowledge-${playlist.id}`}>
-                      Knowledge: {knowledgePercent}%
+                    <p className="text-xs text-gray-500">Songs: {playlist.songCount ?? 0}</p>
+                    <p className="text-xs text-indigo-700" data-testid={`playlist-knowledge-${playlist.id}`}>
+                      Knowledge: {Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100)}%
                     </p>
-                    <div className="mt-2 hidden grid-cols-3 gap-2 text-[11px] text-indigo-900 lg:grid" data-testid={`playlist-health-${playlist.id}`}>
-                      <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
-                        Audio {stats.songsWithAudio}/{totalSongs}
-                      </span>
-                      <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
-                        Sections {stats.songsWithSegments}/{totalSongs}
-                      </span>
-                      <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
-                        Tap keys {stats.songsWithTapKeys}/{totalSongs}
-                      </span>
-                    </div>
                   </button>
 
                   <div className="relative">
-                    <div className="mb-1 text-right text-2xl font-bold leading-none text-indigo-800" aria-hidden="true">
-                      {knowledgePercent}%
-                    </div>
                     <button
                       type="button"
                       data-testid={`playlist-actions-${playlist.id}`}

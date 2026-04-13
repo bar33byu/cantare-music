@@ -104,6 +104,43 @@ export const orphanedAudioKeys = pgTable("orphaned_audio_keys", {
   failedAt: timestamp("failed_at").defaultNow(),
 });
 
+export const tapPracticeSessions = pgTable(
+  "tap_practice_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().default("default"),
+    songId: text("song_id")
+      .notNull()
+      .references(() => songs.id, { onDelete: "cascade" }),
+    startedAt: timestamp("started_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdStartedAtIdx: index("idx_tap_practice_sessions_user_started_at").on(table.userId, table.startedAt),
+    userSongStartedAtIdx: index("idx_tap_practice_sessions_user_song_started_at").on(table.userId, table.songId, table.startedAt),
+  })
+);
+
+export const tapPracticeTaps = pgTable(
+  "tap_practice_taps",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => tapPracticeSessions.id, { onDelete: "cascade" }),
+    segmentId: text("segment_id")
+      .notNull()
+      .references(() => segments.id, { onDelete: "cascade" }),
+    noteId: text("note_id").notNull(),
+    timeOffsetMs: integer("time_offset_ms").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    laneMilli: integer("lane_milli").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionCreatedAtIdx: index("idx_tap_practice_taps_session_created_at").on(table.sessionId, table.createdAt),
+  })
+);
+
 export type UserRow = InferSelectModel<typeof users>;
 export type SongRow = InferSelectModel<typeof songs>;
 export type SegmentRow = InferSelectModel<typeof segments>;
@@ -111,3 +148,5 @@ export type PracticeRatingRow = InferSelectModel<typeof practiceRatings>;
 export type PlaylistRow = InferSelectModel<typeof playlists>;
 export type PlaylistSongRow = InferSelectModel<typeof playlistSongs>;
 export type OrphanedAudioKeyRow = InferSelectModel<typeof orphanedAudioKeys>;
+export type TapPracticeSessionRow = InferSelectModel<typeof tapPracticeSessions>;
+export type TapPracticeTapRow = InferSelectModel<typeof tapPracticeTaps>;

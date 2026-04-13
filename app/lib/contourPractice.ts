@@ -21,22 +21,8 @@ export interface ContourMatchResult {
 
 export type AttemptNoteStatus = 'pending' | 'matched' | 'mismatched';
 
-export type AttemptTransitionStatus = 'matched' | 'mismatched' | 'extra';
-
-export interface AttemptTransitionResult {
-  attemptEventIndex: number;
-  attemptNoteId: string;
-  direction: ContourDirection;
-  status: AttemptTransitionStatus;
-  expectedDirection: ContourDirection | null;
-}
-
 export interface ContourMatchDetailedResult extends ContourMatchResult {
   attemptNoteStatuses: Record<string, AttemptNoteStatus>;
-}
-
-export interface StableContourMatchResult extends ContourMatchDetailedResult {
-  transitionResults: AttemptTransitionResult[];
 }
 
 const DEFAULT_MATCH_OPTIONS: ContourMatchOptions = {
@@ -122,13 +108,13 @@ export function compareContourAttemptDetailed(
 
   const usedAttemptIndices = new Set<number>();
   let matchedEvents = 0;
-  let searchStartIndex = 0;
 
   for (let answerIndex = 0; answerIndex < answerEvents.length; answerIndex += 1) {
     const answerEvent = answerEvents[answerIndex];
-    let matchedAttemptIndex = -1;
+    let bestAttemptIndex = -1;
+    let bestDelta = Number.POSITIVE_INFINITY;
 
-    for (let i = searchStartIndex; i < attemptEvents.length; i += 1) {
+    for (let i = 0; i < attemptEvents.length; i += 1) {
       if (usedAttemptIndices.has(i)) {
         continue;
       }
@@ -138,15 +124,28 @@ export function compareContourAttemptDetailed(
         continue;
       }
 
-      matchedAttemptIndex = i;
-      break;
+      const answerDurationMs = Math.max(1, sortedAnswer[Math.min(sortedAnswer.length - 1, answerIndex + 1)]?.durationMs ?? 1);
+      const attemptDurationMs = Math.max(1, sortedAttempt[Math.min(sortedAttempt.length - 1, i + 1)]?.durationMs ?? 1);
+      const durationDeltaRatio = Math.abs(attemptDurationMs - answerDurationMs) / answerDurationMs;
+      if (durationDeltaRatio > effective.durationToleranceRatio) {
+        continue;
+      }
+
+      const delta = Math.abs(attemptEvent.timeOffsetMs - answerEvent.timeOffsetMs);
+      if (delta > effective.timeToleranceMs) {
+        continue;
+      }
+
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestAttemptIndex = i;
+      }
     }
 
-    if (matchedAttemptIndex !== -1) {
-      usedAttemptIndices.add(matchedAttemptIndex);
+    if (bestAttemptIndex !== -1) {
+      usedAttemptIndices.add(bestAttemptIndex);
       matchedEvents += 1;
-      searchStartIndex = matchedAttemptIndex + 1;
-      const matchedNote = sortedAttempt[Math.min(sortedAttempt.length - 1, matchedAttemptIndex + 1)];
+      const matchedNote = sortedAttempt[Math.min(sortedAttempt.length - 1, bestAttemptIndex + 1)];
       if (matchedNote) {
         attemptNoteStatuses[matchedNote.id] = 'matched';
       }
@@ -160,67 +159,5 @@ export function compareContourAttemptDetailed(
     totalEvents,
     score: totalEvents === 0 ? 1 : matchedEvents / totalEvents,
     attemptNoteStatuses,
-  };
-}
-
-export function compareContourAttemptStable(
-  answerKey: PitchContourNote[],
-  attempt: PitchContourNote[],
-  options: Partial<ContourMatchOptions> = {}
-): StableContourMatchResult {
-  const effective = { ...DEFAULT_MATCH_OPTIONS, ...options };
-  const sortedAnswer = [...answerKey].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-  const sortedAttempt = [...attempt].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-  const answerEvents = buildContourDirectionEvents(sortedAnswer, effective);
-  const attemptEvents = buildContourDirectionEvents(sortedAttempt, effective);
-
-  const attemptNoteStatuses: Record<string, AttemptNoteStatus> = {};
-  for (const note of sortedAttempt) {
-    attemptNoteStatuses[note.id] = 'pending';
-  }
-
-  const transitionResults: AttemptTransitionResult[] = [];
-  let matchedEvents = 0;
-
-  for (let index = 0; index < attemptEvents.length; index += 1) {
-    const attemptEvent = attemptEvents[index];
-    const attemptNote = sortedAttempt[index + 1];
-    if (!attemptNote) {
-      continue;
-    }
-
-    const expectedEvent = answerEvents[index];
-    let status: AttemptTransitionStatus = 'extra';
-    let expectedDirection: ContourDirection | null = null;
-
-    if (expectedEvent) {
-      expectedDirection = expectedEvent.direction;
-      status = attemptEvent.direction === expectedEvent.direction ? 'matched' : 'mismatched';
-    }
-
-    if (status === 'matched') {
-      matchedEvents += 1;
-      attemptNoteStatuses[attemptNote.id] = 'matched';
-    } else {
-      attemptNoteStatuses[attemptNote.id] = 'mismatched';
-    }
-
-    transitionResults.push({
-      attemptEventIndex: index,
-      attemptNoteId: attemptNote.id,
-      direction: attemptEvent.direction,
-      status,
-      expectedDirection,
-    });
-  }
-
-  const totalEvents = answerEvents.length === 0 ? 0 : Math.max(answerEvents.length, attemptEvents.length);
-
-  return {
-    matchedEvents,
-    totalEvents,
-    score: totalEvents === 0 ? 1 : matchedEvents / totalEvents,
-    attemptNoteStatuses,
-    transitionResults,
   };
 }

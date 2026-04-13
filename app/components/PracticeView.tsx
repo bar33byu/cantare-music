@@ -10,8 +10,8 @@ import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
-import { compareContourAttemptStable } from "../lib/contourPractice";
-import type { AttemptTransitionResult, AttemptTransitionStatus } from "../lib/contourPractice";
+import { compareContourAttemptDetailed } from "../lib/contourPractice";
+import type { AttemptNoteStatus } from "../lib/contourPractice";
 
 interface TransportDebugState {
   playToggleClicks: number;
@@ -49,36 +49,6 @@ const PREV_SEGMENT_GO_BACK_THRESHOLD_MS = 3_000;
 const OFFLINE_RATING_QUEUE_PREFIX = "cantare:offline-ratings:";
 const MIN_TAP_DURATION_MS = 80;
 const ROLL_WINDOW_MS = 6000;
-
-function getTransitionLabel(direction: AttemptTransitionResult["direction"]): string {
-  if (direction === "up") {
-    return "Up";
-  }
-  if (direction === "down") {
-    return "Down";
-  }
-  return "Same";
-}
-
-function getTransitionStatusLabel(status: AttemptTransitionStatus): string {
-  if (status === "matched") {
-    return "Correct";
-  }
-  if (status === "extra") {
-    return "Extra";
-  }
-  return "Wrong";
-}
-
-function getTransitionStatusClasses(status: AttemptTransitionStatus | "pending"): string {
-  if (status === "matched") {
-    return "border-emerald-300 bg-emerald-50 text-emerald-800";
-  }
-  if (status === "pending") {
-    return "border-amber-300 bg-amber-50 text-amber-800";
-  }
-  return "border-rose-300 bg-rose-50 text-rose-800";
-}
 
 interface ActiveTapCapture {
   id: string;
@@ -162,7 +132,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const activeTapCaptureRef = React.useRef<ActiveTapCapture | null>(null);
   const toastTimerRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
-  const segmentScoreToastHandledRef = React.useRef<Record<string, boolean>>({});
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
@@ -175,7 +144,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return null;
     }
 
-    return compareContourAttemptStable(
+    return compareContourAttemptDetailed(
       currentSegment.pitchContourNotes ?? [],
       currentAttemptNotes,
       { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
@@ -698,16 +667,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }, 1600);
   }, []);
 
-  const showSegmentTapScoreToast = React.useCallback((segment: Song["segments"][number]) => {
-    const tapMatch = compareContourAttemptStable(
-      segment.pitchContourNotes ?? [],
-      tapAttemptsRef.current[segment.id] ?? [],
-      { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
-    );
-    const scoreOutOfFive = Math.max(0, Math.min(5, Math.round(tapMatch.score * 5)));
-    showAccuracyToast(`Tap score ${scoreOutOfFive}/5`);
-  }, [showAccuracyToast]);
-
   const finalizeTapCapture = React.useCallback((endLane?: number) => {
     const capture = activeTapCaptureRef.current;
     if (!capture || !currentSegment) {
@@ -735,13 +694,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const segmentId = currentSegment.id;
     const latestForSegment = tapAttemptsRef.current[segmentId] ?? [];
     const nextSegmentNotes = [...latestForSegment, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-    const immediateMatch = compareContourAttemptStable(
+    const immediateMatch = compareContourAttemptDetailed(
       currentSegment.pitchContourNotes ?? [],
       nextSegmentNotes,
       { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
     );
-    const latestTransition = immediateMatch.transitionResults.at(-1);
-    const missedTap = latestTransition != null && latestTransition.status !== "matched";
+    const missedTap = immediateMatch.attemptNoteStatuses[note.id] === "mismatched";
 
     setTapAttemptsBySegment((previous) => ({
       ...previous,
@@ -772,6 +730,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const getRollX = React.useCallback((noteOffsetMs: number) => {
     return 100 - ((currentSegmentOffsetMs - noteOffsetMs) / ROLL_WINDOW_MS) * 100;
   }, [currentSegmentOffsetMs]);
+
+  const getAttemptStatusColor = React.useCallback((status: AttemptNoteStatus) => {
+    if (status === "matched") {
+      return "rgb(22 163 74)";
+    }
+    if (status === "mismatched") {
+      return "rgb(220 38 38)";
+    }
+    return "rgb(245 158 11)";
+  }, []);
 
   const handleRateCurrentSegment = React.useCallback((rating: MemoryRating) => {
     if (!currentSegment) {
@@ -911,7 +879,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // Restart the segment when playback reaches its natural end while looping.
   // Uses pausedByUserRef to avoid restarting after an explicit user pause.
   useEffect(() => {
-    if (!isTapPracticeMode || !isLooping || !currentSegment) return;
+    if (!isLooping || !currentSegment) return;
     if (isPlaying) {
       // Reset the user-pause flag whenever playback is active.
       pausedByUserRef.current = false;
@@ -925,12 +893,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
       loopHandledRef.current = loopKey;
-      showSegmentTapScoreToast(currentSegment);
+      const loopMatch = compareContourAttemptDetailed(
+        currentSegment.pitchContourNotes ?? [],
+        tapAttemptsBySegment[currentSegment.id] ?? [],
+        { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
+      );
+      showAccuracyToast(`Loop accuracy ${Math.round(loopMatch.score * 100)}%`);
       setTapAttemptsBySegment((previous) => ({
         ...previous,
         [currentSegment.id]: [],
       }));
-      segmentScoreToastHandledRef.current[currentSegment.id] = false;
       activeTapCaptureRef.current = null;
       play(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
@@ -938,34 +910,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     currentMs,
     currentSegment,
     getSegmentStartWithPreroll,
-    isTapPracticeMode,
     isLooping,
     isPlaying,
     play,
-    showSegmentTapScoreToast,
+    showAccuracyToast,
+    tapAttemptsBySegment,
   ]);
-
-  useEffect(() => {
-    if (!isTapPracticeMode || !isPlaying || !currentSegment) {
-      return;
-    }
-
-    const segmentId = currentSegment.id;
-    const previousHandled = segmentScoreToastHandledRef.current[segmentId] ?? false;
-    if (currentMs <= currentSegment.startMs + 120) {
-      segmentScoreToastHandledRef.current[segmentId] = false;
-      return;
-    }
-
-    if (previousHandled) {
-      return;
-    }
-
-    if (currentMs >= currentSegment.endMs - 50) {
-      segmentScoreToastHandledRef.current[segmentId] = true;
-      showSegmentTapScoreToast(currentSegment);
-    }
-  }, [currentMs, currentSegment, isPlaying, isTapPracticeMode, showSegmentTapScoreToast]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;
@@ -992,7 +942,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setAccuracyToast(null);
     activeTapCaptureRef.current = null;
     loopHandledRef.current = null;
-    segmentScoreToastHandledRef.current = {};
     if (toastTimerRef.current !== null) {
       window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = null;
@@ -1233,39 +1182,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 {isTapPracticeMode ? (
                   <div
                     data-testid="practice-tap-feedback"
-                    className="pointer-events-none absolute left-3 top-3 z-20 max-w-[calc(100%-1.5rem)] rounded-2xl border border-indigo-200/70 bg-white/90 px-3 py-2 text-[11px] text-indigo-950 shadow-sm backdrop-blur"
+                    className="pointer-events-none absolute left-3 top-3 z-20 rounded-full bg-white/85 px-2 py-1 text-[11px] font-semibold text-indigo-900 shadow-sm"
                   >
-                    <p className="font-semibold">
-                      {Math.round((currentSegmentMatch?.score ?? 0) * 100)}% contour recall ({currentSegmentMatch?.matchedEvents ?? 0}/
-                      {currentSegmentMatch?.totalEvents ?? 0})
-                    </p>
-                    <div data-testid="practice-transition-strip" className="mt-2 flex flex-wrap gap-1">
-                      {currentAttemptNotes.length === 0 ? (
-                        <span className={`rounded-full border px-2 py-1 ${getTransitionStatusClasses("pending")}`}>
-                          Tap to begin
-                        </span>
-                      ) : (
-                        <>
-                          <span
-                            data-testid="practice-transition-step"
-                            data-status="pending"
-                            className={`rounded-full border px-2 py-1 font-medium ${getTransitionStatusClasses("pending")}`}
-                          >
-                            Start
-                          </span>
-                          {(currentSegmentMatch?.transitionResults ?? []).map((result, index) => (
-                            <span
-                              key={`${result.attemptNoteId}-${result.attemptEventIndex}`}
-                              data-testid="practice-transition-step"
-                              data-status={result.status}
-                              className={`rounded-full border px-2 py-1 font-medium ${getTransitionStatusClasses(result.status)}`}
-                            >
-                              {`Step ${index + 1}: ${getTransitionLabel(result.direction)} ${getTransitionStatusLabel(result.status)}`}
-                            </span>
-                          ))}
-                        </>
-                      )}
-                    </div>
+                    {Math.round((currentSegmentMatch?.score ?? 0) * 100)}% ({currentSegmentMatch?.matchedEvents ?? 0}/
+                    {currentSegmentMatch?.totalEvents ?? 0})
                   </div>
                 ) : null}
                 <div
@@ -1311,6 +1231,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                           return null;
                         }
                         const y = (1 - note.lane) * 100;
+                        const status = currentSegmentMatch?.attemptNoteStatuses[note.id] ?? "pending";
                         return (
                           <circle
                             key={`attempt-${note.id}`}
@@ -1318,7 +1239,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                             cx={x}
                             cy={y}
                             r={3.3}
-                            fill="rgb(79 70 229)"
+                            fill={getAttemptStatusColor(status)}
                             opacity="0.72"
                           />
                         );

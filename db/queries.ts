@@ -1,7 +1,7 @@
-import { eq, asc, desc, inArray, and, count } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, count, lte } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow } from "./schema";
 
 const DEFAULT_QUERY_USER_ID = "default";
 
@@ -12,6 +12,30 @@ export interface PersistedSegmentRating {
   segmentId: string;
   rating: PersistedMemoryRating;
   ratedAt: string;
+}
+
+export interface PersistedTapPracticeTap {
+  id: string;
+  noteId: string;
+  segmentId: string;
+  timeOffsetMs: number;
+  durationMs: number;
+  lane: number;
+  createdAt: string;
+}
+
+export interface PersistedTapPracticeSessionSummary {
+  id: string;
+  songId: string;
+  startedAt: string;
+  tapCount: number;
+}
+
+export interface PersistedTapPracticeSessionDetail {
+  id: string;
+  songId: string;
+  startedAt: string;
+  taps: PersistedTapPracticeTap[];
 }
 
 export interface PlaylistSongItem {
@@ -830,6 +854,156 @@ export async function deleteRatingsForSong(
   await db()
     .delete(practiceRatings)
     .where(inArray(practiceRatings.segmentId, songSegments.map((segment) => segment.id)));
+}
+
+// ── Tap Practice ─────────────────────────────────────────────────────────
+
+function mapTapPracticeSession(row: Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">): PersistedTapPracticeSessionSummary {
+  return {
+    id: row.id,
+    songId: row.songId,
+    startedAt: row.startedAt.toISOString(),
+    tapCount: 0,
+  };
+}
+
+function laneToMilli(lane: number): number {
+  return Math.max(0, Math.min(1000, Math.round(lane * 1000)));
+}
+
+function laneFromMilli(laneMilli: number): number {
+  return Math.max(0, Math.min(1, laneMilli / 1000));
+}
+
+export async function deleteExpiredTapPracticeData(
+  userId: string = DEFAULT_QUERY_USER_ID,
+  cutoff: Date = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+): Promise<void> {
+  await db()
+    .delete(tapPracticeSessions)
+    .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
+}
+
+export async function createTapPracticeSession(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  startedAt: Date = new Date()
+): Promise<PersistedTapPracticeSessionSummary> {
+  const rows = await db()
+    .insert(tapPracticeSessions)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      songId,
+      startedAt,
+    })
+    .returning();
+
+  return mapTapPracticeSession(rows[0]);
+}
+
+export async function addTapPracticeTap(
+  sessionId: string,
+  data: {
+    segmentId: string;
+    noteId: string;
+    timeOffsetMs: number;
+    durationMs: number;
+    lane: number;
+  }
+): Promise<void> {
+  await db()
+    .insert(tapPracticeTaps)
+    .values({
+      id: crypto.randomUUID(),
+      sessionId,
+      segmentId: data.segmentId,
+      noteId: data.noteId,
+      timeOffsetMs: data.timeOffsetMs,
+      durationMs: data.durationMs,
+      laneMilli: laneToMilli(data.lane),
+      createdAt: new Date(),
+    });
+}
+
+export async function listTapPracticeSessionsForSong(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  limit: number = 20
+): Promise<PersistedTapPracticeSessionSummary[]> {
+  const sessions = await db()
+    .select({
+      id: tapPracticeSessions.id,
+      songId: tapPracticeSessions.songId,
+      startedAt: tapPracticeSessions.startedAt,
+    })
+    .from(tapPracticeSessions)
+    .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+    .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
+    .orderBy(desc(tapPracticeSessions.startedAt));
+
+  const selectedSessions = sessions.slice(0, Math.max(1, limit));
+  if (selectedSessions.length === 0) {
+    return [];
+  }
+
+  const sessionIds = selectedSessions.map((row) => row.id);
+  const tapRows = await db()
+    .select({ sessionId: tapPracticeTaps.sessionId })
+    .from(tapPracticeTaps)
+    .where(inArray(tapPracticeTaps.sessionId, sessionIds));
+
+  const tapCountBySession = tapRows.reduce<Record<string, number>>((accumulator, row) => {
+    accumulator[row.sessionId] = (accumulator[row.sessionId] ?? 0) + 1;
+    return accumulator;
+  }, {});
+
+  return selectedSessions.map((row) => ({
+    ...mapTapPracticeSession(row),
+    tapCount: tapCountBySession[row.id] ?? 0,
+  }));
+}
+
+export async function getTapPracticeSessionDetail(
+  sessionId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedTapPracticeSessionDetail | null> {
+  const sessionRows = await db()
+    .select({
+      id: tapPracticeSessions.id,
+      songId: tapPracticeSessions.songId,
+      startedAt: tapPracticeSessions.startedAt,
+    })
+    .from(tapPracticeSessions)
+    .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+    .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
+    .limit(1);
+
+  const sessionRow = sessionRows[0];
+  if (!sessionRow) {
+    return null;
+  }
+
+  const taps = await db()
+    .select()
+    .from(tapPracticeTaps)
+    .where(eq(tapPracticeTaps.sessionId, sessionId))
+    .orderBy(asc(tapPracticeTaps.createdAt));
+
+  return {
+    id: sessionRow.id,
+    songId: sessionRow.songId,
+    startedAt: sessionRow.startedAt.toISOString(),
+    taps: taps.map((tap) => ({
+      id: tap.id,
+      noteId: tap.noteId,
+      segmentId: tap.segmentId,
+      timeOffsetMs: tap.timeOffsetMs,
+      durationMs: tap.durationMs,
+      lane: laneFromMilli(tap.laneMilli),
+      createdAt: tap.createdAt.toISOString(),
+    })),
+  };
 }
 
 // ── Playlists ─────────────────────────────────────────────────────────────

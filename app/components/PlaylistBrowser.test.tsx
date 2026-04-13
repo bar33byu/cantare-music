@@ -11,7 +11,6 @@ const basePlaylist = {
   eventDate: '2026-04-04',
   isRetired: false,
   createdAt: '2026-03-01T00:00:00.000Z',
-  songCount: 3,
   songs: [],
 };
 
@@ -135,37 +134,5 @@ describe('PlaylistBrowser', () => {
     fireEvent.click(screen.getByTestId('playlist-manage-pl-1'));
 
     expect(onManagePlaylist).toHaveBeenCalledWith(expect.objectContaining({ id: 'pl-1', songs: [] }));
-  });
-
-  it('renders playlist health metrics when detail data is available', async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ playlists: [basePlaylist] }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ score: 85 }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: 'pl-1',
-          songs: [
-            { id: 's1', audioUrl: '/a1.mp3', segments: [{ id: 'seg-1', pitchContourNotes: [{ id: 'n1' }] }] },
-            { id: 's2', audioUrl: '/a2.mp3', segments: [{ id: 'seg-2', pitchContourNotes: [] }] },
-            { id: 's3', audioUrl: '', segments: [] },
-          ],
-        }),
-      });
-
-    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
-
-    await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
-
-    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Audio 2/3');
-    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Sections 2/3');
-    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Tap keys 1/3');
-    expect(screen.getByTestId('playlist-knowledge-pl-1')).toHaveTextContent('Knowledge: 85%');
   });
 });

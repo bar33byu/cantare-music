@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { eq, desc } from "drizzle-orm";
-import { songs, segments, practiceRatings, playlists, playlistSongs } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, tapPracticeSessions, tapPracticeTaps } from "./schema";
 
 // ── chainable mock builder ─────────────────────────────────────────────────────
 // Creates a fluent mock object where every method returns itself and
@@ -713,6 +713,143 @@ describe("deleteRatingsForSong", () => {
     await deleteRatingsForSong("song-1");
 
     expect(deleteSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("tap practice persistence", () => {
+  it("createTapPracticeSession inserts a new session row", async () => {
+    const startedAt = new Date("2026-04-11T12:00:00.000Z");
+    const insertChain = makeChain([
+      {
+        id: "session-1",
+        userId: "default",
+        songId: "song-1",
+        startedAt,
+      },
+    ]);
+    insertSpy.mockReturnValue(insertChain);
+
+    const { createTapPracticeSession } = await getQueries();
+    const result = await createTapPracticeSession("song-1", "default", startedAt);
+
+    expect(insertSpy).toHaveBeenCalledWith(tapPracticeSessions);
+    expect(result).toEqual({
+      id: "session-1",
+      songId: "song-1",
+      startedAt: startedAt.toISOString(),
+      tapCount: 0,
+    });
+  });
+
+  it("deleteExpiredTapPracticeData deletes old sessions for user", async () => {
+    const deleteChain = makeChain();
+    deleteSpy.mockReturnValue(deleteChain);
+
+    const { deleteExpiredTapPracticeData } = await getQueries();
+    await deleteExpiredTapPracticeData("default", new Date("2026-03-28T00:00:00.000Z"));
+
+    expect(deleteSpy).toHaveBeenCalledWith(tapPracticeSessions);
+    const whereSpy = (deleteChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).toHaveBeenCalled();
+  });
+
+  it("addTapPracticeTap stores lane using integer millis", async () => {
+    const insertChain = makeChain([]);
+    insertSpy.mockReturnValue(insertChain);
+
+    const { addTapPracticeTap } = await getQueries();
+    await addTapPracticeTap("session-1", {
+      segmentId: "seg-1",
+      noteId: "note-1",
+      timeOffsetMs: 120,
+      durationMs: 90,
+      lane: 0.333,
+    });
+
+    expect(insertSpy).toHaveBeenCalledWith(tapPracticeTaps);
+    const valuesSpy = (insertChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
+    expect(valuesSpy).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "session-1",
+      segmentId: "seg-1",
+      noteId: "note-1",
+      timeOffsetMs: 120,
+      durationMs: 90,
+      laneMilli: 333,
+    }));
+  });
+
+  it("listTapPracticeSessionsForSong includes tap counts", async () => {
+    const sessionChain = makeChain([
+      {
+        id: "session-2",
+        songId: "song-1",
+        startedAt: new Date("2026-04-11T12:00:00.000Z"),
+      },
+    ]);
+    const tapCountChain = makeChain([
+      { sessionId: "session-2" },
+      { sessionId: "session-2" },
+    ]);
+    selectSpy
+      .mockReturnValueOnce(sessionChain)
+      .mockReturnValueOnce(tapCountChain);
+
+    const { listTapPracticeSessionsForSong } = await getQueries();
+    const result = await listTapPracticeSessionsForSong("song-1", "default");
+
+    expect(result).toEqual([
+      {
+        id: "session-2",
+        songId: "song-1",
+        startedAt: "2026-04-11T12:00:00.000Z",
+        tapCount: 2,
+      },
+    ]);
+  });
+
+  it("getTapPracticeSessionDetail maps lane millis back to decimal lane", async () => {
+    const sessionChain = makeChain([
+      {
+        id: "session-7",
+        songId: "song-1",
+        startedAt: new Date("2026-04-11T12:00:00.000Z"),
+      },
+    ]);
+    const tapsChain = makeChain([
+      {
+        id: "tap-1",
+        sessionId: "session-7",
+        segmentId: "seg-1",
+        noteId: "note-1",
+        timeOffsetMs: 50,
+        durationMs: 100,
+        laneMilli: 875,
+        createdAt: new Date("2026-04-11T12:00:02.000Z"),
+      },
+    ]);
+    selectSpy
+      .mockReturnValueOnce(sessionChain)
+      .mockReturnValueOnce(tapsChain);
+
+    const { getTapPracticeSessionDetail } = await getQueries();
+    const result = await getTapPracticeSessionDetail("session-7", "default");
+
+    expect(result).toEqual({
+      id: "session-7",
+      songId: "song-1",
+      startedAt: "2026-04-11T12:00:00.000Z",
+      taps: [
+        {
+          id: "tap-1",
+          noteId: "note-1",
+          segmentId: "seg-1",
+          timeOffsetMs: 50,
+          durationMs: 100,
+          lane: 0.875,
+          createdAt: "2026-04-11T12:00:02.000Z",
+        },
+      ],
+    });
   });
 });
 
