@@ -135,6 +135,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
+  const tapDebugHref = `/debug-tap-practice?songId=${encodeURIComponent(song.id)}`;
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
@@ -1150,6 +1151,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             >
               Clear segment taps
             </button>
+          ) : null}
+          {isTapPracticeMode ? (
+            <a
+              href={tapDebugHref}
+              data-testid="practice-open-tap-debug"
+              className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Open Tap Debug
+            </a>
           ) : null}
         </div>
         {ratingsError ? (

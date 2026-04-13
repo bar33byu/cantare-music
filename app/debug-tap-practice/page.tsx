@@ -99,6 +99,7 @@ export default function DebugTapPracticePage() {
   const [songs, setSongs] = React.useState<SongSummary[]>([]);
   const [songsLoading, setSongsLoading] = React.useState(true);
   const [selectedSongId, setSelectedSongId] = React.useState<string>("");
+  const [querySongId, setQuerySongId] = React.useState<string | null>(null);
 
   const [songDetail, setSongDetail] = React.useState<Song | null>(null);
   const [sessions, setSessions] = React.useState<TapSessionSummary[]>([]);
@@ -115,6 +116,15 @@ export default function DebugTapPracticePage() {
 
   const [error, setError] = React.useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const songId = params.get("songId");
+    setQuerySongId(songId);
+  }, []);
+
   const loadSongs = React.useCallback(async () => {
     setSongsLoading(true);
     setError(null);
@@ -122,14 +132,22 @@ export default function DebugTapPracticePage() {
       const data = await fetchJson<SongSummary[]>("/api/songs");
       setSongs(data);
       if (data.length > 0) {
-        setSelectedSongId((previous) => previous || data[0].id);
+        setSelectedSongId((previous) => {
+          if (previous) {
+            return previous;
+          }
+          if (querySongId && data.some((song) => song.id === querySongId)) {
+            return querySongId;
+          }
+          return data[0].id;
+        });
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load songs");
     } finally {
       setSongsLoading(false);
     }
-  }, []);
+  }, [querySongId]);
 
   React.useEffect(() => {
     void loadSongs();
