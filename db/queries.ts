@@ -1,9 +1,10 @@
-import { eq, asc, desc, inArray, and, count, lte } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, count, lte, sql } from "drizzle-orm";
 import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow } from "./schema";
 
 const DEFAULT_QUERY_USER_ID = "default";
+let ensureTapPracticeTablesPromise: Promise<void> | null = null;
 
 export type PersistedMemoryRating = 1 | 2 | 3 | 4 | 5;
 
@@ -209,6 +210,54 @@ function isMissingTapPracticeTableError(error: unknown): boolean {
   }
 
   return false;
+}
+
+async function ensureTapPracticeTables(): Promise<void> {
+  if (!ensureTapPracticeTablesPromise) {
+    ensureTapPracticeTablesPromise = (async () => {
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "tap_practice_sessions" (
+          "id" text PRIMARY KEY NOT NULL,
+          "user_id" text NOT NULL DEFAULT 'default',
+          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
+          "started_at" timestamp NOT NULL DEFAULT now()
+        )
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "tap_practice_taps" (
+          "id" text PRIMARY KEY NOT NULL,
+          "session_id" text NOT NULL REFERENCES "tap_practice_sessions"("id") ON DELETE cascade,
+          "segment_id" text NOT NULL REFERENCES "segments"("id") ON DELETE cascade,
+          "note_id" text NOT NULL,
+          "time_offset_ms" integer NOT NULL,
+          "duration_ms" integer NOT NULL,
+          "lane_milli" integer NOT NULL,
+          "created_at" timestamp NOT NULL DEFAULT now()
+        )
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_started_at"
+          ON "tap_practice_sessions" ("user_id", "started_at")
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_song_started_at"
+          ON "tap_practice_sessions" ("user_id", "song_id", "started_at")
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_taps_session_created_at"
+          ON "tap_practice_taps" ("session_id", "created_at")
+      `));
+    })().catch((error) => {
+      ensureTapPracticeTablesPromise = null;
+      throw error;
+    });
+  }
+
+  await ensureTapPracticeTablesPromise;
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────
@@ -922,6 +971,10 @@ export async function deleteExpiredTapPracticeData(
       .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .delete(tapPracticeSessions)
+        .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
       return;
     }
     throw error;
@@ -947,12 +1000,18 @@ export async function createTapPracticeSession(
     return mapTapPracticeSession(rows[0]);
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
-      return {
-        id: crypto.randomUUID(),
-        songId,
-        startedAt: startedAt.toISOString(),
-        tapCount: 0,
-      };
+      await ensureTapPracticeTables();
+      const rows = await db()
+        .insert(tapPracticeSessions)
+        .values({
+          id: crypto.randomUUID(),
+          userId,
+          songId,
+          startedAt,
+        })
+        .returning();
+
+      return mapTapPracticeSession(rows[0]);
     }
     throw error;
   }
@@ -983,6 +1042,19 @@ export async function addTapPracticeTap(
       });
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .insert(tapPracticeTaps)
+        .values({
+          id: crypto.randomUUID(),
+          sessionId,
+          segmentId: data.segmentId,
+          noteId: data.noteId,
+          timeOffsetMs: data.timeOffsetMs,
+          durationMs: data.durationMs,
+          laneMilli: laneToMilli(data.lane),
+          createdAt: new Date(),
+        });
       return;
     }
     throw error;
@@ -1008,9 +1080,20 @@ export async function listTapPracticeSessionsForSong(
       .orderBy(desc(tapPracticeSessions.startedAt));
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
-      return [];
+      await ensureTapPracticeTables();
+      sessions = await db()
+        .select({
+          id: tapPracticeSessions.id,
+          songId: tapPracticeSessions.songId,
+          startedAt: tapPracticeSessions.startedAt,
+        })
+        .from(tapPracticeSessions)
+        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+        .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
+        .orderBy(desc(tapPracticeSessions.startedAt));
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   const selectedSessions = sessions.slice(0, Math.max(1, limit));
@@ -1027,12 +1110,14 @@ export async function listTapPracticeSessionsForSong(
       .where(inArray(tapPracticeTaps.sessionId, sessionIds));
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
-      return selectedSessions.map((row) => ({
-        ...mapTapPracticeSession(row),
-        tapCount: 0,
-      }));
+      await ensureTapPracticeTables();
+      tapRows = await db()
+        .select({ sessionId: tapPracticeTaps.sessionId })
+        .from(tapPracticeTaps)
+        .where(inArray(tapPracticeTaps.sessionId, sessionIds));
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   const tapCountBySession = tapRows.reduce<Record<string, number>>((accumulator, row) => {
@@ -1064,9 +1149,20 @@ export async function getTapPracticeSessionDetail(
       .limit(1);
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
-      return null;
+      await ensureTapPracticeTables();
+      sessionRows = await db()
+        .select({
+          id: tapPracticeSessions.id,
+          songId: tapPracticeSessions.songId,
+          startedAt: tapPracticeSessions.startedAt,
+        })
+        .from(tapPracticeSessions)
+        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+        .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
+        .limit(1);
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   const sessionRow = sessionRows[0];
@@ -1091,14 +1187,15 @@ export async function getTapPracticeSessionDetail(
       .orderBy(asc(tapPracticeTaps.createdAt));
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
-      return {
-        id: sessionRow.id,
-        songId: sessionRow.songId,
-        startedAt: sessionRow.startedAt.toISOString(),
-        taps: [],
-      };
+      await ensureTapPracticeTables();
+      taps = await db()
+        .select()
+        .from(tapPracticeTaps)
+        .where(eq(tapPracticeTaps.sessionId, sessionId))
+        .orderBy(asc(tapPracticeTaps.createdAt));
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   return {
