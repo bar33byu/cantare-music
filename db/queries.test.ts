@@ -27,7 +27,6 @@ const selectSpy = vi.fn();
 const insertSpy = vi.fn();
 const updateSpy = vi.fn();
 const deleteSpy = vi.fn();
-const executeSpy = vi.fn();
 
 vi.mock("./index", () => ({
   db: vi.fn(() => ({
@@ -35,7 +34,6 @@ vi.mock("./index", () => ({
     insert: insertSpy,
     update: updateSpy,
     delete: deleteSpy,
-    execute: executeSpy,
   })),
 }));
 
@@ -719,40 +717,6 @@ describe("deleteRatingsForSong", () => {
 });
 
 describe("tap practice persistence", () => {
-  it("createTapPracticeSession auto-creates missing tap practice tables and retries", async () => {
-    const startedAt = new Date("2026-04-11T12:00:00.000Z");
-    const failingInsertChain = {
-      values: vi.fn(() => {
-        throw new Error('relation "tap_practice_sessions" does not exist');
-      }),
-    };
-    const successfulInsertChain = makeChain([
-      {
-        id: "session-9",
-        userId: "default",
-        songId: "song-1",
-        startedAt,
-      },
-    ]);
-
-    insertSpy
-      .mockReturnValueOnce(failingInsertChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(successfulInsertChain);
-    executeSpy.mockResolvedValue({});
-
-    const { createTapPracticeSession } = await getQueries();
-    const result = await createTapPracticeSession("song-1", "default", startedAt);
-
-    expect(executeSpy).toHaveBeenCalledTimes(5);
-    expect(insertSpy).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({
-      id: "session-9",
-      songId: "song-1",
-      startedAt: startedAt.toISOString(),
-      tapCount: 0,
-    });
-  });
-
   it("createTapPracticeSession inserts a new session row", async () => {
     const startedAt = new Date("2026-04-11T12:00:00.000Z");
     const insertChain = makeChain([

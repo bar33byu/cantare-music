@@ -94,7 +94,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   const sortDirLabel: Record<SortKey, [string, string]> = {
     alphabetical: ['Z–A', 'A–Z'],
     'date-added':   ['Newest', 'Oldest'],
-    'date-practiced': ['Recent', 'Oldest'],
+    'date-practiced': ['Recent', 'Longest ago'],
     'memory-score': ['Highest', 'Lowest'],
   };
 

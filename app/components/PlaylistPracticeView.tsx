@@ -123,7 +123,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
         await Promise.allSettled(
           playlist.songs.map(async (song) => {
             const songRequest = new Request(`/api/songs/${song.id}`);
-            const songResponse = await fetch(songRequest, { cache: 'reload' });
+            const songResponse = await fetch(songRequest, { cache: 'force-cache' });
             if (songResponse.ok) {
               await cache.put(songRequest, songResponse.clone());
             }
@@ -134,7 +134,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
             }
 
             const audioRequest = new Request(proxyAudioUrl);
-            const audioResponse = await fetch(audioRequest, { cache: 'reload' });
+            const audioResponse = await fetch(audioRequest, { cache: 'force-cache' });
             if (audioResponse.ok) {
               await cache.put(audioRequest, audioResponse.clone());
             }

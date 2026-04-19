@@ -20,6 +20,8 @@ const BULK_REQUEST_RETRY_DELAY_MS = 250;
 const CONTOUR_PLAYBACK_RATES = [0.5, 0.75, 1] as const;
 const MIN_CONTOUR_TAP_DURATION_MS = 80;
 
+const getBulkLyricsDraftStorageKey = (songId: string) => `segment-editor:bulk-lyrics:${songId}`;
+
 interface ActiveContourCapture {
   id: string;
   startMs: number;
@@ -71,6 +73,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const [stableDurationMs, setStableDurationMs] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
+  const [bulkDraftLoaded, setBulkDraftLoaded] = useState(false);
   const [bulkSeparator, setBulkSeparator] = useState('*');
   const [replaceExistingOnBulk, setReplaceExistingOnBulk] = useState(true);
   const [bulkImportPending, setBulkImportPending] = useState(false);
@@ -82,8 +85,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const contourTapBarRef = useRef<HTMLDivElement | null>(null);
   const activeContourCaptureRef = useRef<ActiveContourCapture | null>(null);
+  const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
 
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(audioUrl)), [audioUrl]);
+  const bulkLyricsDraftStorageKey = useMemo(() => getBulkLyricsDraftStorageKey(songId), [songId]);
   const playbackAudioUrl = useMemo(() => {
     if (useProxyFallback && proxyAudioUrl) {
       return proxyAudioUrl;
@@ -487,7 +492,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       }
 
       setShowBulkImport(false);
-      setBulkText('');
+      setBulkText(''); // Clear bulk lyrics after successful import
       setRefreshKey((previous) => previous + 1);
       setSelectedSegmentId(null);
 
@@ -575,6 +580,21 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     }
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     return Math.round(ratio * timelineDurationMs);
+  };
+
+  const seekFromClientX = (clientX: number, element: HTMLElement) => {
+    if (timelineDurationMs <= 0) {
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const nextMs = Math.round(ratio * timelineDurationMs);
+    seek(nextMs);
   };
 
   const handleInteractionMove = (clientX: number, pointerId: number) => {
@@ -683,14 +703,61 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     setIsContourRecording(false);
     setContourDraftBySegment({});
     activeContourCaptureRef.current = null;
+    pendingFallbackPlayRangeRef.current = null;
   }, [songId]);
+
+  useEffect(() => {
+    setBulkDraftLoaded(false);
+
+    try {
+      const savedDraft = window.localStorage.getItem(bulkLyricsDraftStorageKey);
+      setBulkText(savedDraft ?? '');
+    } catch {
+      setBulkText('');
+    } finally {
+      setBulkDraftLoaded(true);
+    }
+  }, [bulkLyricsDraftStorageKey]);
+
+  useEffect(() => {
+    if (!bulkDraftLoaded) {
+      return;
+    }
+
+    try {
+      if (bulkText.trim().length === 0) {
+        window.localStorage.removeItem(bulkLyricsDraftStorageKey);
+        return;
+      }
+
+      window.localStorage.setItem(bulkLyricsDraftStorageKey, bulkText);
+    } catch {
+      // Ignore storage failures in private browsing or restricted environments.
+    }
+  }, [bulkDraftLoaded, bulkLyricsDraftStorageKey, bulkText]);
 
   useEffect(() => {
     if (!playbackError || useProxyFallback || !proxyAudioUrl) {
       return;
     }
+    // Stop playback before switching URLs to avoid redownload
+    pause();
     setUseProxyFallback(true);
-  }, [playbackError, proxyAudioUrl, useProxyFallback]);
+  }, [playbackError, proxyAudioUrl, useProxyFallback, pause]);
+
+  useEffect(() => {
+    if (!useProxyFallback) {
+      return;
+    }
+
+    const pendingRange = pendingFallbackPlayRangeRef.current;
+    if (!pendingRange) {
+      return;
+    }
+
+    pendingFallbackPlayRangeRef.current = null;
+    play(pendingRange.startMs, pendingRange.endMs);
+  }, [play, useProxyFallback]);
 
   // Clean up undo timer on unmount to avoid memory leaks
   useEffect(() => {
@@ -706,6 +773,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     }
     const safeDuration = timelineDurationMs > 0 ? timelineDurationMs : Number.POSITIVE_INFINITY;
     const startMs = Math.max(0, Math.min(currentMs, safeDuration));
+    pendingFallbackPlayRangeRef.current = {
+      startMs,
+      endMs: safeDuration,
+    };
     play(startMs, safeDuration);
   };
 
@@ -1107,7 +1178,15 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                   isContourRecording
                     ? 'border-indigo-500 bg-gradient-to-b from-indigo-100 via-white to-indigo-100'
                     : 'border-slate-300 bg-slate-100'
-                }`}
+                } select-none touch-none`}
+                style={{
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  WebkitTouchCallout: 'none',
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                }}
                 onPointerDown={(event) => {
                   if (!isContourRecording) {
                     return;
@@ -1221,6 +1300,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
             data-testid="segment-editor-board"
             className="relative h-[560px] min-w-full overflow-hidden bg-gradient-to-b from-indigo-50/40 to-white touch-none"
             style={{ width: `${zoomPercent}%` }}
+            onClick={(event) => {
+              if (event.target !== event.currentTarget || activeInteraction) {
+                return;
+              }
+              seekFromClientX(event.clientX, event.currentTarget);
+            }}
           >
           {orderedSegments.map((segment, index) => {
             const left = (segment.startMs / timelineDurationMs) * 100;
@@ -1392,7 +1477,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
         <div data-testid="segment-editor-song-timeline" className="mt-4 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-3">
           <div className="overflow-x-auto">
-            <div className="relative h-5 min-w-full rounded bg-indigo-100" style={{ width: `${zoomPercent}%` }}>
+            <div
+              data-testid="segment-editor-song-timeline-track"
+              className="relative h-5 min-w-full cursor-pointer rounded bg-indigo-100"
+              style={{ width: `${zoomPercent}%` }}
+              onClick={(event) => {
+                seekFromClientX(event.clientX, event.currentTarget);
+              }}
+            >
             {orderedSegments.map((segment) => {
               const left = (segment.startMs / timelineDurationMs) * 100;
               const width = Math.max(0.8, ((segment.endMs - segment.startMs) / timelineDurationMs) * 100);
@@ -1400,29 +1492,18 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                 <div
                   key={`timeline-${segment.id}`}
                   data-testid={`song-timeline-segment-${segment.id}`}
-                  className="absolute inset-y-0 rounded bg-indigo-400/55"
+                  className="pointer-events-none absolute inset-y-0 rounded bg-indigo-400/55"
                   style={{ left: `${left}%`, width: `${width}%` }}
                 />
               );
             })}
             <div
               data-testid="song-timeline-playhead"
-              className="absolute inset-y-0 w-0.5 bg-indigo-800"
+              className="pointer-events-none absolute inset-y-0 w-0.5 bg-indigo-800"
               style={{ left: `${Math.max(0, Math.min(100, (currentMs / timelineDurationMs) * 100))}%` }}
             />
             </div>
           </div>
-
-          <input
-            type="range"
-            min={0}
-            max={timelineDurationMs}
-            step={100}
-            value={Math.max(0, Math.min(currentMs, timelineDurationMs))}
-            onChange={(event) => seek(Number(event.target.value))}
-            data-testid="segment-editor-song-seek"
-            className="mt-2 w-full accent-indigo-700"
-          />
 
           <div className="mt-1 flex items-center justify-between text-xs text-indigo-800">
             <span>0:00</span>

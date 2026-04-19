@@ -16,7 +16,11 @@ export async function GET(request: NextRequest) {
     const userId = resolveRequestUserId(request);
     const includeRetired = new URL(request.url).searchParams.get('includeRetired') === 'true';
     const playlists = await getAllPlaylists(userId, includeRetired);
-    return NextResponse.json({ playlists });
+    return NextResponse.json({ playlists }, {
+      headers: {
+        'Cache-Control': 'max-age=300', // Cache for 5 minutes
+      },
+    });
   } catch (error) {
     console.error('Error fetching playlists:', error);
     return NextResponse.json(formatError(error), { status: 500 });

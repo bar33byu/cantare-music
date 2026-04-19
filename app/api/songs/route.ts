@@ -59,7 +59,12 @@ export async function GET(request: NextRequest) {
         hasAudio: Boolean(song.audioKey),
         hasSegments: readinessBySongId[song.id]?.hasSegments ?? false,
         hasTapKeys: readinessBySongId[song.id]?.hasTapKeys ?? false,
-      }))
+      })),
+      {
+        headers: {
+          'Cache-Control': 'max-age=300', // Cache for 5 minutes
+        },
+      }
     );
   } catch (error) {
     if (isMissingDatabaseConfigError(error)) {

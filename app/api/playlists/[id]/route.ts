@@ -24,7 +24,11 @@ export async function GET(
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
 
-    return NextResponse.json(playlist);
+    return NextResponse.json(playlist, {
+      headers: {
+        'Cache-Control': 'max-age=300', // Cache for 5 minutes
+      },
+    });
   } catch (error) {
     console.error('Error fetching playlist:', error);
     return NextResponse.json(formatError(error), { status: 500 });
