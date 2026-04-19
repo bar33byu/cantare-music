@@ -6,24 +6,24 @@ import RatingBar from "./RatingBar";
 import { PitchContourThumbnail } from "./PitchContourThumbnail";
 
 const LYRIC_FONT_MAX_REM = 2.25; // 36px
-const LYRIC_FONT_MIN_REM = 0.95; // 15.2px
+const LYRIC_FONT_MIN_REM = 0.6; // 9.6px
 
 function getAdaptiveLyricFontSize(text: string): string {
   const length = text.trim().length;
 
   if (length <= 80) {
-    return `clamp(1.4rem, 4.4vw, ${LYRIC_FONT_MAX_REM}rem)`;
+    return `clamp(${LYRIC_FONT_MIN_REM}rem, 2.2vw, ${LYRIC_FONT_MAX_REM}rem)`;
   }
 
   if (length <= 180) {
-    return "clamp(1.2rem, 3.6vw, 2rem)";
+    return `clamp(${LYRIC_FONT_MIN_REM}rem, 1.8vw, 2rem)`;
   }
 
   if (length <= 320) {
-    return "clamp(1rem, 3vw, 1.75rem)";
+    return `clamp(${LYRIC_FONT_MIN_REM}rem, 1.5vw, 1.75rem)`;
   }
 
-  return `clamp(${LYRIC_FONT_MIN_REM}rem, 2.7vw, 1.5rem)`;
+  return `clamp(${LYRIC_FONT_MIN_REM}rem, 1.35vw, 1.5rem)`;
 }
 
 interface SegmentCardProps {

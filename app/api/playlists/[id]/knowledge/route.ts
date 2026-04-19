@@ -40,7 +40,11 @@ export async function GET(
     }));
     const score = computePlaylistKnowledge(normalizedSongs, ratings);
 
-    return NextResponse.json({ score });
+    return NextResponse.json({ score }, {
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
+    });
   } catch (error) {
     console.error('Error computing playlist knowledge:', error);
     return NextResponse.json(formatError(error), { status: 500 });

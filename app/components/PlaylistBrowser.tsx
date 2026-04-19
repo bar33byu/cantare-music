@@ -37,6 +37,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
   const [createName, setCreateName] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
 
   const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
     if (!userId) {
@@ -115,7 +116,17 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
 
   useEffect(() => {
     void fetchPlaylists(showArchived);
-  }, [showArchived, refreshTrigger, userId]);
+  }, [showArchived, refreshTrigger, userId, refetchTrigger]);
+
+  useEffect(() => {
+    const handleRatingsUpdated = () => {
+      setRefetchTrigger(prev => prev + 1);
+    };
+    window.addEventListener('ratingsUpdated', handleRatingsUpdated);
+    return () => {
+      window.removeEventListener('ratingsUpdated', handleRatingsUpdated);
+    };
+  }, []);
 
   const handleCreate = async () => {
     if (!createName.trim()) {

@@ -118,9 +118,8 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           const aTime = a.lastPracticedAt ?? '';
           const bTime = b.lastPracticedAt ?? '';
           if (!aTime && !bTime) return 0;
-          // Always push unpracticed songs to the bottom regardless of direction
-          if (!aTime) return 1;
-          if (!bTime) return -1;
+          if (!aTime) return dir;
+          if (!bTime) return -dir;
           return dir * aTime.localeCompare(bTime);
         }
         case 'memory-score': {

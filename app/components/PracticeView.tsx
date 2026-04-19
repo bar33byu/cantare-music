@@ -1117,7 +1117,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // Restart the segment when playback reaches its natural end while looping.
   // Uses pausedByUserRef to avoid restarting after an explicit user pause.
   useEffect(() => {
-    if (!isTapPracticeMode || !isLooping || !currentSegment) return;
+    if (!isLooping || !currentSegment) return;
     if (isPlaying) {
       // Reset the user-pause flag whenever playback is active.
       pausedByUserRef.current = false;
@@ -1131,15 +1131,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
       loopHandledRef.current = loopKey;
-      showSegmentTapScoreToast(currentSegment);
-      setTapAttemptsBySegment((previous) => ({
-        ...previous,
-        [currentSegment.id]: [],
-      }));
-      segmentScoreToastHandledRef.current[currentSegment.id] = false;
-      activeTapCaptureRef.current = null;
-      // Increment transition token on replay to force SegmentCard refresh
-      setTransitionToken((previous) => previous + 1);
+      if (isTapPracticeMode) {
+        showSegmentTapScoreToast(currentSegment);
+        setTapAttemptsBySegment((previous) => ({
+          ...previous,
+          [currentSegment.id]: [],
+        }));
+        segmentScoreToastHandledRef.current[currentSegment.id] = false;
+        activeTapCaptureRef.current = null;
+        // Increment transition token on replay to force SegmentCard refresh
+        setTransitionToken((previous) => previous + 1);
+      }
       play(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
   }, [
@@ -1252,6 +1254,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         .then(() => {
           lastSavedRatingsRef.current = snapshot;
           clearOfflineRatingsQueue();
+          window.dispatchEvent(new CustomEvent('ratingsUpdated'));
         })
         .catch(() => {
           enqueueOfflineRatings(snapshot);

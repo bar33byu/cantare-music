@@ -58,6 +58,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   const [playlistScore, setPlaylistScore] = useState(0);
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
 
   useEffect(() => {
     try {
@@ -93,7 +94,17 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
       } catch { /* ignore */ }
     };
     void load();
-  }, [playlist.id]);
+  }, [playlist.id, refetchTrigger]);
+
+  useEffect(() => {
+    const handleRatingsUpdated = () => {
+      setRefetchTrigger(prev => prev + 1);
+    };
+    window.addEventListener('ratingsUpdated', handleRatingsUpdated);
+    return () => {
+      window.removeEventListener('ratingsUpdated', handleRatingsUpdated);
+    };
+  }, []);
 
   useEffect(() => {
     const maybePrecachePlaylist = async () => {
@@ -160,8 +171,8 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
           const aTime = a.lastPracticedAt ?? '';
           const bTime = b.lastPracticedAt ?? '';
           if (!aTime && !bTime) return 0;
-          if (!aTime) return 1;
-          if (!bTime) return -1;
+          if (!aTime) return dir;
+          if (!bTime) return -dir;
           return dir * aTime.localeCompare(bTime);
         }
         case 'memory-score':

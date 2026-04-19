@@ -604,6 +604,36 @@ describe("PracticeView", () => {
     });
   });
 
+  it("restarts segment playback when looping in regular practice mode", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 3995,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      startMs: 0,
+      endMs: 4000,
+    };
+
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+
+    await waitFor(() => {
+      expect(mockPlay).toHaveBeenCalledWith(0, 4000);
+    });
+  });
+
   it("shows a temporary 0-5 tap score toast at segment end in tap mode", async () => {
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: true,
