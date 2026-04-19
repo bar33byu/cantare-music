@@ -189,8 +189,8 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       if (!response.ok) {
         throw new Error('Patch failed');
       }
-
-      setRefreshKey((previous) => previous + 1);
+      // Don't refresh on every patch to avoid losing in-progress edits
+      // Local state is already updated optimistically
     } finally {
       setSavingSegmentId(null);
     }
@@ -254,14 +254,33 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       .filter((section) => section.length > 0);
   };
 
-  const buildBulkTimings = (sectionCount: number, totalDurationMs: number) => {
-    const safeTotalDuration = Math.max(totalDurationMs, sectionCount * MIN_SEGMENT_MS);
+  const buildBulkTimings = (sectionCount: number, totalDurationMs: number, includeGaps = true) => {
+    if (!includeGaps) {
+      // Legacy equal distribution (used when replacing existing sections)
+      const safeTotalDuration = Math.max(totalDurationMs, sectionCount * MIN_SEGMENT_MS);
+      return Array.from({ length: sectionCount }, (_, index) => {
+        const startMs = Math.round((index * safeTotalDuration) / sectionCount);
+        const endMs = index === sectionCount - 1
+          ? safeTotalDuration
+          : Math.round(((index + 1) * safeTotalDuration) / sectionCount);
+
+        return {
+          startMs,
+          endMs: Math.max(endMs, startMs + MIN_SEGMENT_MS),
+        };
+      });
+    }
+
+    // New behavior with 5-second gaps (used when creating new sections)
+    const GAP_MS = 5_000; // 5 second gaps
+    // Total gaps: 5s before all + 5s between each (n-1) + 5s after all
+    const totalGapsMs = GAP_MS + (sectionCount - 1) * GAP_MS + GAP_MS;
+    const availableMs = Math.max(totalDurationMs - totalGapsMs, sectionCount * MIN_SEGMENT_MS);
+    const sectionDurationMs = Math.floor(availableMs / sectionCount);
 
     return Array.from({ length: sectionCount }, (_, index) => {
-      const startMs = Math.round((index * safeTotalDuration) / sectionCount);
-      const endMs = index === sectionCount - 1
-        ? safeTotalDuration
-        : Math.round(((index + 1) * safeTotalDuration) / sectionCount);
+      const startMs = Math.round(GAP_MS + index * (sectionDurationMs + GAP_MS));
+      const endMs = startMs + sectionDurationMs;
 
       return {
         startMs,
@@ -394,7 +413,9 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
     try {
       const bulkDurationMs = await resolveBulkDurationMs();
-      const timings = buildBulkTimings(sections.length, bulkDurationMs);
+      // Use gaps only when creating new sections, not when replacing existing ones
+      const includeGaps = !replaceExistingOnBulk || segments.length === 0;
+      const timings = buildBulkTimings(sections.length, bulkDurationMs, includeGaps);
 
       if (replaceExistingOnBulk) {
         const orderedExisting = [...segments].sort((a, b) => a.order - b.order);
@@ -492,7 +513,6 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       }
 
       setShowBulkImport(false);
-      setBulkText(''); // Clear bulk lyrics after successful import
       setRefreshKey((previous) => previous + 1);
       setSelectedSegmentId(null);
 

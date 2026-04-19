@@ -336,10 +336,11 @@ describe('SegmentEditor', () => {
       const firstCreateBody = JSON.parse(String(createCalls[0][1]?.body ?? '{}'));
       const secondCreateBody = JSON.parse(String(createCalls[1][1]?.body ?? '{}'));
 
-      expect(firstCreateBody.startMs).toBe(0);
-      expect(firstCreateBody.endMs).toBe(90000);
-      expect(secondCreateBody.startMs).toBe(90000);
-      expect(secondCreateBody.endMs).toBe(180000);
+      // With 5-second gaps: 5s before + (2 sections of ~82.5s each) + 5s between + 5s after = 180s
+      expect(firstCreateBody.startMs).toBe(5000);
+      expect(firstCreateBody.endMs).toBe(87500);
+      expect(secondCreateBody.startMs).toBe(92500);
+      expect(secondCreateBody.endMs).toBe(175000);
     });
 
     vi.stubGlobal('Audio', originalAudio);
