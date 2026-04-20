@@ -1541,7 +1541,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               aria-label="Previous segment"
               data-testid="practice-prev-segment"
               onClick={handlePrevSegment}
-              disabled={!hasSegments || isFirst}
+              disabled={!hasSegments}
               className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

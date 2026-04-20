@@ -5,6 +5,7 @@ import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
 import { buildProxyAudioUrl, parseAudioKey } from '../lib/audioUrls';
 import { SongReadinessIcons } from './SongReadinessIcons';
+import { useAudioPlayer } from '../hooks/useAudioPlayer';
 
 type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
 interface SortState { key: SortKey; asc: boolean }
@@ -47,6 +48,13 @@ function getLastPracticedLabel(value?: string | null): string {
   return 'Last practiced just now';
 }
 
+function formatMs(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 interface PlaylistPracticeViewProps {
   playlist: Playlist;
   onExit: () => void;
@@ -59,6 +67,59 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
+  const [mode, setMode] = useState<'practice' | 'listen'>('practice');
+  const [currentSongIndex, setCurrentSongIndex] = useState(0);
+
+  const displayedSongs = useMemo(() => {
+    const dir = sort.asc ? 1 : -1;
+    return [...playlist.songs].sort((a, b) => {
+      switch (sort.key) {
+        case 'alphabetical':
+          return dir * a.title.localeCompare(b.title);
+        case 'date-added':
+          return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
+        case 'date-practiced': {
+          const aTime = a.lastPracticedAt ?? '';
+          const bTime = b.lastPracticedAt ?? '';
+          if (!aTime && !bTime) return 0;
+          if (!aTime) return dir;
+          if (!bTime) return -dir;
+          return dir * aTime.localeCompare(bTime);
+        }
+        case 'memory-score':
+          return dir * ((a.masteryPercent ?? 0) - (b.masteryPercent ?? 0));
+        default:
+          return 0;
+      }
+    });
+  }, [playlist.songs, sort]);
+
+  const currentSong = displayedSongs[currentSongIndex];
+  const audioPlayer = useAudioPlayer(currentSong?.audioUrl ?? '');
+
+  useEffect(() => {
+    if (mode === 'listen' && currentSong) {
+      audioPlayer.play(0, audioPlayer.durationMs);
+    }
+  }, [mode, currentSong, audioPlayer]);
+
+  useEffect(() => {
+    if (mode === 'listen' && audioPlayer.currentMs >= audioPlayer.durationMs - 1000 && currentSongIndex < displayedSongs.length - 1) {
+      setCurrentSongIndex(prev => prev + 1);
+    }
+  }, [mode, audioPlayer.currentMs, audioPlayer.durationMs, currentSongIndex, displayedSongs.length]);
+
+  const handleNextSong = () => {
+    if (currentSongIndex < displayedSongs.length - 1) {
+      setCurrentSongIndex(prev => prev + 1);
+    }
+  };
+
+  const handlePrevSong = () => {
+    if (currentSongIndex > 0) {
+      setCurrentSongIndex(prev => prev - 1);
+    }
+  };
 
   useEffect(() => {
     try {
@@ -159,30 +220,6 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
     void maybePrecachePlaylist();
   }, [playlist.songs]);
 
-  const displayedSongs = useMemo(() => {
-    const dir = sort.asc ? 1 : -1;
-    return [...playlist.songs].sort((a, b) => {
-      switch (sort.key) {
-        case 'alphabetical':
-          return dir * a.title.localeCompare(b.title);
-        case 'date-added':
-          return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
-        case 'date-practiced': {
-          const aTime = a.lastPracticedAt ?? '';
-          const bTime = b.lastPracticedAt ?? '';
-          if (!aTime && !bTime) return 0;
-          if (!aTime) return dir;
-          if (!bTime) return -dir;
-          return dir * aTime.localeCompare(bTime);
-        }
-        case 'memory-score':
-          return dir * ((a.masteryPercent ?? 0) - (b.masteryPercent ?? 0));
-        default:
-          return 0;
-      }
-    });
-  }, [playlist.songs, sort]);
-
   if (playlist.songs.length === 0) {
     return (
       <section data-testid="playlist-practice-empty" className="space-y-4">
@@ -246,6 +283,13 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setMode(mode === 'practice' ? 'listen' : 'practice')}
+            className="flex h-10 items-center gap-2 rounded border border-indigo-300 px-3 text-indigo-700 hover:bg-indigo-50"
+          >
+            {mode === 'practice' ? '🎧 Listen' : '🎼 Practice'}
+          </button>
           {onManage ? (
             <button
               data-testid="playlist-practice-manage"
@@ -263,116 +307,180 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
         </div>
       </header>
 
-      {/* Sort toolbar */}
-      <div className="flex items-center gap-2">
-        <div className="relative ml-auto">
-          <button
-            type="button"
-            data-testid="playlist-sort-toggle"
-            onClick={() => setShowSortMenu((prev) => !prev)}
-            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm text-gray-500 hover:bg-gray-100"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <line x1="8" y1="6" x2="21" y2="6" />
-              <line x1="8" y1="12" x2="21" y2="12" />
-              <line x1="8" y1="18" x2="21" y2="18" />
-              <polyline points="3 6 4 7 6 5" />
-              <polyline points="3 12 4 13 6 11" />
-              <polyline points="3 18 4 19 6 17" />
-            </svg>
-            {sortDirLabel[sort.key][sort.asc ? 1 : 0]}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-          {showSortMenu && (
-            <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-gray-200 bg-white shadow-lg">
-              {(['alphabetical', 'date-added', 'date-practiced', 'memory-score'] as const).map((key) => {
-                const isActive = sort.key === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    data-testid={`playlist-sort-${key}`}
-                    onClick={() => {
-                      updateSort({ key, asc: isActive ? !sort.asc : defaultAscForKey(key) });
-                      setShowSortMenu(false);
-                    }}
-                    className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg hover:bg-gray-50 ${
-                      isActive ? 'font-semibold text-blue-600' : 'text-gray-700'
-                    }`}
-                  >
-                    {sortKeyLabel[key]}
-                    {isActive && (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                        {sort.asc
-                          ? <polyline points="18 15 12 9 6 15" />
-                          : <polyline points="6 9 12 15 18 9" />}
-                      </svg>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="playlist-song-grid">
-        {displayedSongs.map((song) => {
-          const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
-          const masteryColor = getMasteryColor(mastery);
-          const shouldRenderLabelInsideBar = mastery >= 10;
-          const hasAudio = Boolean(song.audioUrl?.trim());
-          const hasSegments = song.segments.length > 0;
-          const hasTapKeys = song.segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0);
-          return (
-            <div
-              key={song.id}
-              data-testid={`playlist-practice-song-${song.id}`}
-              className="relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent"
-              onClick={() => onSelectSong(song.id)}
-            >
-              <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
-                <div
-                  className="relative h-full rounded-tl-lg"
-                  style={{ width: `${mastery}%`, backgroundColor: masteryColor }}
-                >
-                  {shouldRenderLabelInsideBar ? (
-                    <span
-                      data-testid={`playlist-practice-mastery-label-${song.id}`}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-white"
-                    >
-                      {mastery}%
-                    </span>
-                  ) : null}
+      {mode === 'practice' && (
+        <>
+          {/* Sort toolbar */}
+          <div className="flex items-center gap-2">
+            <div className="relative ml-auto">
+              <button
+                type="button"
+                data-testid="playlist-sort-toggle"
+                onClick={() => setShowSortMenu((prev) => !prev)}
+                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm text-gray-500 hover:bg-gray-100"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                  <line x1="8" y1="6" x2="21" y2="6" />
+                  <line x1="8" y1="12" x2="21" y2="12" />
+                  <line x1="8" y1="18" x2="21" y2="18" />
+                  <polyline points="3 6 4 7 6 5" />
+                  <polyline points="3 12 4 13 6 11" />
+                  <polyline points="3 18 4 19 6 17" />
+                </svg>
+                {sortDirLabel[sort.key][sort.asc ? 1 : 0]}
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              {showSortMenu && (
+                <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {(['alphabetical', 'date-added', 'date-practiced', 'memory-score'] as const).map((key) => {
+                    const isActive = sort.key === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        data-testid={`playlist-sort-${key}`}
+                        onClick={() => {
+                          updateSort({ key, asc: isActive ? !sort.asc : defaultAscForKey(key) });
+                          setShowSortMenu(false);
+                        }}
+                        className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg hover:bg-gray-50 ${
+                          isActive ? 'font-semibold text-blue-600' : 'text-gray-700'
+                        }`}
+                      >
+                        {sortKeyLabel[key]}
+                        {isActive && (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                            {sort.asc
+                              ? <polyline points="18 15 12 9 6 15" />
+                              : <polyline points="6 9 12 15 18 9" />}
+                          </svg>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
-                {!shouldRenderLabelInsideBar ? (
-                  <span
-                    data-testid={`playlist-practice-mastery-label-${song.id}`}
-                    className="absolute top-1/2 -translate-y-1/2 text-[11px] font-semibold text-gray-700"
-                    style={{ left: `calc(${mastery}% + 4px)` }}
-                  >
-                    {mastery}%
-                  </span>
-                ) : null}
-              </div>
-
-              <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
-              {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
-              <div className="absolute bottom-3 right-3">
-                <SongReadinessIcons
-                  hasAudio={hasAudio}
-                  hasSegments={hasSegments}
-                  hasTapKeys={hasTapKeys}
-                  testIdPrefix={`playlist-practice-song-${song.id}`}
-                />
-              </div>
-              <p className="text-xs text-gray-500 mt-2">{getLastPracticedLabel(song.lastPracticedAt)}</p>
+              )}
             </div>
-          );
-        })}
-      </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="playlist-song-grid">
+            {displayedSongs.map((song) => {
+              const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
+              const masteryColor = getMasteryColor(mastery);
+              const shouldRenderLabelInsideBar = mastery >= 10;
+              const hasAudio = Boolean(song.audioUrl?.trim());
+              const hasSegments = song.segments.length > 0;
+              const hasTapKeys = song.segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0);
+              return (
+                <div
+                  key={song.id}
+                  data-testid={`playlist-practice-song-${song.id}`}
+                  className="relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent"
+                  onClick={() => onSelectSong(song.id)}
+                >
+                  <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
+                    <div
+                      className="relative h-full rounded-tl-lg"
+                      style={{ width: `${mastery}%`, backgroundColor: masteryColor }}
+                    >
+                      {shouldRenderLabelInsideBar ? (
+                        <span
+                          data-testid={`playlist-practice-mastery-label-${song.id}`}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-white"
+                        >
+                          {mastery}%
+                        </span>
+                      ) : null}
+                    </div>
+                    {!shouldRenderLabelInsideBar ? (
+                      <span
+                        data-testid={`playlist-practice-mastery-label-${song.id}`}
+                        className="absolute top-1/2 -translate-y-1/2 text-[11px] font-semibold text-gray-700"
+                        style={{ left: `calc(${mastery}% + 4px)` }}
+                      >
+                        {mastery}%
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
+                  {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
+                  <div className="absolute bottom-3 right-3">
+                    <SongReadinessIcons
+                      hasAudio={hasAudio}
+                      hasSegments={hasSegments}
+                      hasTapKeys={hasTapKeys}
+                      testIdPrefix={`playlist-practice-song-${song.id}`}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">{getLastPracticedLabel(song.lastPracticedAt)}</p>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {mode === 'listen' && currentSong && (
+        <div className="space-y-4">
+          <div className="text-center">
+            <h3 className="text-2xl font-semibold">{currentSong.title}</h3>
+            {currentSong.artist && <p className="text-gray-600">{currentSong.artist}</p>}
+            <p className="text-sm text-gray-500">{currentSongIndex + 1} of {displayedSongs.length}</p>
+          </div>
+          <div className="flex justify-center gap-4">
+            <button
+              onClick={handlePrevSong}
+              disabled={currentSongIndex === 0}
+              className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
+            >
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+            <button
+              onClick={() => audioPlayer.isPlaying ? audioPlayer.pause() : audioPlayer.play(0, audioPlayer.durationMs)}
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              {audioPlayer.isPlaying ? (
+                <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 3l14 9-14 9V3z" />
+                </svg>
+              )}
+            </button>
+            <button
+              onClick={handleNextSong}
+              disabled={currentSongIndex === displayedSongs.length - 1}
+              className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
+            >
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          </div>
+          <div className="mx-auto max-w-md">
+            <div className="relative">
+              <input
+                type="range"
+                min="0"
+                max={audioPlayer.durationMs}
+                value={audioPlayer.currentMs}
+                onChange={(e) => audioPlayer.seek(Number(e.target.value))}
+                className="w-full"
+              />
+              <div className="flex justify-between text-sm text-gray-500 mt-1">
+                <span>{formatMs(audioPlayer.currentMs)}</span>
+                <span>{formatMs(audioPlayer.durationMs)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
