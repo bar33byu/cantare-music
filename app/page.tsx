@@ -1,5 +1,4 @@
-import HomeClient from "./HomeClient";
+"use client";
 
-export default function Page() {
-  return <HomeClient />;
-}
+export { default } from "./HomeClient";
+

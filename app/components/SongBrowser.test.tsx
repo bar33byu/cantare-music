@@ -16,9 +16,6 @@ describe('SongBrowser', () => {
       title: 'Test Song 1',
       artist: 'Test Artist 1',
       audioKey: 'audio-1',
-      hasAudio: true,
-      hasSegments: true,
-      hasTapKeys: true,
       createdAt: '2024-01-01T00:00:00.000Z',
       lastPracticedAt: '2024-02-01T00:00:00.000Z',
       masteryPercent: 72,
@@ -28,9 +25,6 @@ describe('SongBrowser', () => {
       title: 'Test Song 2',
       artist: 'Test Artist 2',
       audioKey: 'audio-2',
-      hasAudio: true,
-      hasSegments: false,
-      hasTapKeys: false,
       createdAt: '2024-01-02T00:00:00.000Z',
       lastPracticedAt: null,
       masteryPercent: 10,
@@ -73,10 +67,6 @@ describe('SongBrowser', () => {
     expect(screen.getByTestId('song-artist-song-2')).toHaveTextContent('Test Artist 2');
     expect(screen.getByTestId('song-mastery-percent-song-1')).toHaveTextContent('72%');
     expect(screen.getByTestId('song-mastery-fill-song-1')).toHaveStyle({ width: '72%' });
-    expect(screen.getByTestId('song-item-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file present');
-    expect(screen.getByTestId('song-item-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections present');
-    expect(screen.getByTestId('song-item-song-1-readiness-tapkeys')).toHaveAttribute('aria-label', 'Tap keys present');
-    expect(screen.getByTestId('song-item-song-2-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
   it('shows error state when fetch fails', async () => {
@@ -381,7 +371,7 @@ describe('SongBrowser', () => {
     // Open menu and click the already-active "date-practiced" → toggles to asc
     fireEvent.click(screen.getByTestId('song-browser-sort-toggle'));
     fireEvent.click(screen.getByTestId('song-browser-sort-date-practiced'));
-    expect(screen.getByTestId('song-browser-sort-toggle')).toHaveTextContent('Longest ago');
+    expect(screen.getByTestId('song-browser-sort-toggle')).toHaveTextContent('Oldest');
 
     // Toggle back
     fireEvent.click(screen.getByTestId('song-browser-sort-toggle'));

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRatingsForSong, getSongById, getSegmentsBySongId, saveRatings, markSongPracticed } from '../../../../../db/queries';
-import { resolveRequestUserId } from '../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -20,15 +19,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const song = await getSongById(id, userId);
+    const song = await getSongById(id);
 
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
-    const ratings = await getRatingsForSong(id, userId);
+    const ratings = await getRatingsForSong(id);
     return NextResponse.json({ ratings });
   } catch (error) {
     console.error('Error fetching ratings:', error);
@@ -41,9 +39,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const song = await getSongById(id, userId);
+    const song = await getSongById(id);
 
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
@@ -81,8 +78,6 @@ export async function POST(
     }
 
     await saveRatings(
-      id,
-      userId,
       ratings.map((item) => ({
         segmentId: item.segmentId,
         rating: item.rating,
@@ -91,7 +86,7 @@ export async function POST(
     );
 
     if (ratings.length > 0) {
-      await markSongPracticed(id, userId, new Date());
+      await markSongPracticed(id, new Date());
     }
 
     return new NextResponse(null, { status: 204 });

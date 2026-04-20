@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { BUCKET, generateUploadKey, r2Client } from '../../../../lib/r2';
-import { resolveRequestUserId } from '../../_user';
-import { getSongById } from '../../../../db/queries';
 
 const MAX_FILE_SIZE = 15_000_000;
 const ALLOWED_CONTENT_TYPES = new Set(['audio/mpeg', 'audio/mp3']);
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
     const formData = await request.formData();
     const file = formData.get('file');
     const songId = formData.get('songId');
@@ -27,19 +24,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
-    const song = await getSongById(songId, userId);
-    if (!song) {
-      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
-    }
-
     const key =
       typeof requestedKey === 'string' && requestedKey.length > 0
         ? requestedKey
-        : generateUploadKey(userId, songId, file.name);
-
-    if (!key.startsWith(`users/${userId}/`)) {
-      return NextResponse.json({ error: 'Invalid upload key namespace' }, { status: 400 });
-    }
+        : generateUploadKey(songId, file.name);
 
     const buffer = Buffer.from(await file.arrayBuffer());
 

@@ -42,7 +42,7 @@ describe('PATCH /api/playlists/[id]', () => {
 
     const response = await PATCH(request as any, { params: Promise.resolve({ id: 'pl-1' }) });
     expect(response.status).toBe(204);
-    expect(updatePlaylist).toHaveBeenCalledWith('pl-1', { name: undefined, eventDate: undefined, isRetired: true }, 'default');
+    expect(updatePlaylist).toHaveBeenCalledWith('pl-1', { name: undefined, eventDate: undefined, isRetired: true });
   });
 
   it('returns 404 when missing', async () => {
@@ -66,6 +66,6 @@ describe('DELETE /api/playlists/[id]', () => {
     const request = new Request('http://localhost/api/playlists/pl-1', { method: 'DELETE' });
     const response = await DELETE(request as any, { params: Promise.resolve({ id: 'pl-1' }) });
     expect(response.status).toBe(204);
-    expect(deletePlaylist).toHaveBeenCalledWith('pl-1', 'default');
+    expect(deletePlaylist).toHaveBeenCalledWith('pl-1');
   });
 });

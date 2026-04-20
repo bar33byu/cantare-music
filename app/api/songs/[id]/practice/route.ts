@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSongById, markSongPracticed } from '../../../../../db/queries';
-import { resolveRequestUserId } from '../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -16,15 +15,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
     const { id } = await params;
-    const song = await getSongById(id, userId);
+    const song = await getSongById(id);
 
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
-    await markSongPracticed(id, userId, new Date());
+    await markSongPracticed(id, new Date());
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error updating song practice timestamp:', error);

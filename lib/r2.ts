@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, PutBucketCorsCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 function normalizeEnv(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -71,8 +71,8 @@ export function getPublicUrl(key: string): string {
   return `${configuredPublicUrl.replace(/\/$/, '')}/${encodedKey}`;
 }
 
-export function generateUploadKey(userId: string, songId: string, filename: string): string {
-  return `users/${userId}/audio/${songId}/${Date.now()}-${filename}`;
+export function generateUploadKey(songId: string, filename: string): string {
+  return `audio/${songId}/${Date.now()}-${filename}`;
 }
 
 export async function deleteObject(key: string): Promise<void> {
@@ -82,44 +82,4 @@ export async function deleteObject(key: string): Promise<void> {
       Key: key,
     }),
   );
-}
-
-// Lazily ensure the R2 bucket has CORS configured to allow direct browser uploads.
-// This must succeed before issuing signed upload URLs, otherwise browser PUTs fail.
-let corsConfigured = false;
-let corsConfigPromise: Promise<void> | null = null;
-
-export function ensureBucketCors(): Promise<void> {
-  if (corsConfigured) {
-    return Promise.resolve();
-  }
-  if (corsConfigPromise) {
-    return corsConfigPromise;
-  }
-
-  corsConfigPromise = r2Client
-    .send(
-      new PutBucketCorsCommand({
-        Bucket: BUCKET,
-        CORSConfiguration: {
-          CORSRules: [
-            {
-              AllowedOrigins: ['*'],
-              AllowedMethods: ['PUT', 'GET', 'HEAD'],
-              AllowedHeaders: ['*'],
-              MaxAgeSeconds: 3600,
-            },
-          ],
-        },
-      }),
-    )
-    .then(() => {
-      corsConfigured = true;
-    })
-    .catch((err: unknown) => {
-      corsConfigPromise = null; // allow retry on next request
-      throw err;
-    });
-
-  return corsConfigPromise;
 }

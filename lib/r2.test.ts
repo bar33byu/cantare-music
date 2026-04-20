@@ -69,9 +69,9 @@ describe('r2 helpers', () => {
     expect(getPublicUrl('audio/song-1/file.mp3')).toBe('/api/audio/audio/song-1/file.mp3');
   });
 
-  it('generateUploadKey returns string scoped by user namespace', async () => {
+  it('generateUploadKey returns string starting with audio/', async () => {
     const { generateUploadKey } = await import('./r2');
-    expect(generateUploadKey('user-1', 'song-1', 'clip.mp3')).toMatch(/^users\/user-1\/audio\//);
+    expect(generateUploadKey('song-1', 'clip.mp3')).toMatch(/^audio\//);
   });
 
   it('deleteObject calls S3Client.send with DeleteObjectCommand', async () => {
