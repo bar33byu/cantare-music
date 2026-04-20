@@ -15,6 +15,7 @@ Cantare lets you upload songs, divide them into labeled segments (verses, chorus
 - **Practice view** — plays each segment in sequence (with a configurable pre-roll), shows or hides lyrics, and lets you rate your memory after each repetition
 - **Knowledge bar** — color-coded mastery visualization across all segments of a song
 - **Playlists** — group songs together for a rehearsal or event, with aggregate knowledge scores across the whole playlist
+- **Listen mode** — play entire playlists sequentially without the practice interface, perfect for listening while driving to rehearsal
 - **Multi-user support** — multiple user profiles share the same instance, each with fully isolated songs, playlists, and ratings
 
 ## Tech stack
