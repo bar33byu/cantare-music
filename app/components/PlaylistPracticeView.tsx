@@ -104,8 +104,16 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   }, [mode, currentSong, audioPlayer]);
 
   useEffect(() => {
-    if (mode === 'listen' && audioPlayer.currentMs >= audioPlayer.durationMs - 1000 && currentSongIndex < displayedSongs.length - 1) {
-      setCurrentSongIndex(prev => prev + 1);
+    if (
+      mode !== 'listen' ||
+      audioPlayer.durationMs <= 0 ||
+      currentSongIndex >= displayedSongs.length - 1
+    ) {
+      return;
+    }
+
+    if (audioPlayer.currentMs >= audioPlayer.durationMs - 1000) {
+      setCurrentSongIndex((prev) => Math.min(prev + 1, displayedSongs.length - 1));
     }
   }, [mode, audioPlayer.currentMs, audioPlayer.durationMs, currentSongIndex, displayedSongs.length]);
 
