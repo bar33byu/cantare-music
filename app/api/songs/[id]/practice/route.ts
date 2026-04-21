@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSongById, markSongPracticed } from '../../../../../db/queries';
-import { resolveRequestUserId } from '../../_user';
+import { resolveRequestUserId } from '../../../_user';
 
 const userScopedHeaders = {
   'Cache-Control': 'private, no-store',
