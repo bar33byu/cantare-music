@@ -4,6 +4,11 @@ import { computePlaylistKnowledge } from '../../../../lib/knowledgeUtils';
 import type { Song } from '../../../../types';
 import { resolveRequestUserId } from '../../../_user';
 
+const userScopedHeaders = {
+  'Cache-Control': 'private, no-store',
+  Vary: 'X-User-ID',
+};
+
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
   const shouldExpose =
@@ -41,9 +46,7 @@ export async function GET(
     const score = computePlaylistKnowledge(normalizedSongs, ratings);
 
     return NextResponse.json({ score }, {
-      headers: {
-        'Cache-Control': 'no-cache',
-      },
+      headers: userScopedHeaders,
     });
   } catch (error) {
     console.error('Error computing playlist knowledge:', error);

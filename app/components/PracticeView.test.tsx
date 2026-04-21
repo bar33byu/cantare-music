@@ -1160,6 +1160,53 @@ describe("PracticeView", () => {
     );
   });
 
+  it("resets to the first segment when replay starts before an initial gap", async () => {
+    const playbackState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 10000,
+      durationMs: 10000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const gappedSong: Song = {
+      id: "gapped-song",
+      title: "Gapped",
+      audioUrl: "https://cdn.example.com/audio.mp3",
+      segments: [
+        { id: "g0", songId: "gapped-song", order: 0, label: "A", lyricText: "", startMs: 1000, endMs: 4000 },
+        { id: "g1", songId: "gapped-song", order: 1, label: "B", lyricText: "", startMs: 6000, endMs: 9000 },
+      ],
+      createdAt: new Date().toISOString(),
+    };
+    const endedSession = { ...makeSession(gappedSong), currentSegmentIndex: 1 };
+
+    const view = render(<PracticeView song={gappedSong} initialSession={endedSession} />);
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${gappedSong.id}/ratings`);
+    });
+
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 2");
+
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+    expect(mockPlay).toHaveBeenCalledWith(0, 10000);
+
+    playbackState.isPlaying = true;
+    playbackState.currentMs = 0;
+    view.rerender(<PracticeView song={gappedSong} initialSession={endedSession} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 2");
+    });
+  });
+
   it("clicking rating 1 twice toggles back to unrated", async () => {
     const song = makeSong(1);
     await renderAndWaitForRatings(song);

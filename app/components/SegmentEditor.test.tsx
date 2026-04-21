@@ -343,7 +343,7 @@ describe('SegmentEditor', () => {
         return {
           ok: true,
           json: async () => ({
-            audioUrl: 'https://pub-example.r2.dev/users/default/audio/song-1/test.mp3',
+            audioUrl: '/audio/song-1/test.mp3',
             title: 'My Song',
           }),
         } as Response;

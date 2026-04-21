@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
 import { buildProxyAudioUrl, parseAudioKey } from '../lib/audioUrls';
@@ -59,7 +59,7 @@ interface PlaylistPracticeViewProps {
   playlist: Playlist;
   onExit: () => void;
   onManage?: () => void;
-  onSelectSong: (songId: string) => void;
+  onSelectSong: (song: Playlist["songs"][number]) => void;
 }
 
 export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
@@ -69,6 +69,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const [mode, setMode] = useState<'practice' | 'listen'>('practice');
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
+  const autoPlaySongIdRef = useRef<string | null>(null);
 
   const displayedSongs = useMemo(() => {
     const dir = sort.asc ? 1 : -1;
@@ -98,10 +99,18 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   const audioPlayer = useAudioPlayer(currentSong?.audioUrl ?? '');
 
   useEffect(() => {
-    if (mode === 'listen' && currentSong) {
-      audioPlayer.play(0, audioPlayer.durationMs);
+    if (mode !== 'listen' || !currentSong) {
+      autoPlaySongIdRef.current = null;
+      return;
     }
-  }, [mode, currentSong, audioPlayer]);
+
+    if (autoPlaySongIdRef.current === currentSong.id) {
+      return;
+    }
+
+    autoPlaySongIdRef.current = currentSong.id;
+    audioPlayer.play(0, 0);
+  }, [mode, currentSong?.id, audioPlayer.play]);
 
   useEffect(() => {
     if (
@@ -385,7 +394,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
                   key={song.id}
                   data-testid={`playlist-practice-song-${song.id}`}
                   className="relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent"
-                  onClick={() => onSelectSong(song.id)}
+                  onClick={() => onSelectSong(song)}
                 >
                   <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
                     <div

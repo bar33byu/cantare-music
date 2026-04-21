@@ -10,6 +10,7 @@ vi.mock('../../../../../db/index', () => ({
 }));
 
 vi.mock('../../../../../db/queries', () => ({
+  getSongById: vi.fn(),
   getSegmentsBySongId: vi.fn(),
   upsertSegments: vi.fn(),
   createSegment: vi.fn(),
@@ -17,11 +18,12 @@ vi.mock('../../../../../db/queries', () => ({
 }));
 
 import { GET, PUT, POST, PATCH } from './route';
-import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments } from '../../../../../db/queries';
+import { getSongById, getSegmentsBySongId, upsertSegments, createSegment, reorderSegments } from '../../../../../db/queries';
 
 describe('GET /api/songs/[id]/segments', () => {
   it('returns segments array', async () => {
     const mockSegments = [{ id: '1', label: 'Verse', order: 1 }];
+    vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
     vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/123/segments');
@@ -61,6 +63,7 @@ describe('POST /api/songs/[id]/segments', () => {
     ];
     const createdSegment = { ...newSegment, songId: 'song-1', order: 1 };
 
+    vi.mocked(getSongById).mockResolvedValue({ id: 'song-1', title: 'Song 1' } as any);
     vi.mocked(getSegmentsBySongId).mockResolvedValue(existingSegments as any);
     vi.mocked(createSegment).mockResolvedValue(createdSegment as any);
     vi.mocked(reorderSegments).mockResolvedValue(undefined);
@@ -123,6 +126,7 @@ describe('POST /api/songs/[id]/segments', () => {
         lyricText: '',
       },
     ];
+    vi.mocked(getSongById).mockResolvedValue({ id: 'song-1', title: 'Song 1' } as any);
     vi.mocked(getSegmentsBySongId).mockResolvedValue(existingSegments as any);
     vi.mocked(createSegment).mockResolvedValue({ ...requestBody, songId: 'song-1', order: 1 } as any);
     vi.mocked(reorderSegments).mockResolvedValue(undefined);
@@ -226,6 +230,7 @@ describe('PUT /api/songs/[id]/segments', () => {
       },
     ];
 
+    vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
     const request = new Request('http://localhost/api/songs/123/segments', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -239,6 +244,7 @@ describe('PUT /api/songs/[id]/segments', () => {
   });
 
   it('returns 400 for invalid pitch contour notes in PUT payload', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
     const request = new Request('http://localhost/api/songs/123/segments', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -265,6 +271,7 @@ describe('PUT /api/songs/[id]/segments', () => {
   });
 
   it('returns 400 for invalid segments', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
     const request = new Request('http://localhost/api/songs/123/segments', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -284,6 +291,7 @@ describe('PUT /api/songs/[id]/segments', () => {
     });
 
     it('calls reorderSegments and returns 200 for valid body', async () => {
+      vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
       vi.mocked(reorderSegments).mockResolvedValue(undefined);
 
       const body = [
@@ -308,6 +316,7 @@ describe('PUT /api/songs/[id]/segments', () => {
     });
 
     it('returns 400 when body is not an array', async () => {
+      vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
       const request = new Request('http://localhost/api/songs/123/segments', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -322,6 +331,7 @@ describe('PUT /api/songs/[id]/segments', () => {
     });
 
     it('returns 400 when an item is missing id', async () => {
+      vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
       const request = new Request('http://localhost/api/songs/123/segments', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -336,6 +346,7 @@ describe('PUT /api/songs/[id]/segments', () => {
     });
 
     it('returns 400 when order is negative', async () => {
+      vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
       const request = new Request('http://localhost/api/songs/123/segments', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -350,6 +361,7 @@ describe('PUT /api/songs/[id]/segments', () => {
     });
 
     it('returns 400 when order is not an integer', async () => {
+      vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
       const request = new Request('http://localhost/api/songs/123/segments', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -364,6 +376,7 @@ describe('PUT /api/songs/[id]/segments', () => {
     });
 
     it('returns 500 when reorderSegments throws', async () => {
+      vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
       vi.mocked(reorderSegments).mockRejectedValue(new Error('DB error'));
 
       const request = new Request('http://localhost/api/songs/123/segments', {
