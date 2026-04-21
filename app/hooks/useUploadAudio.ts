@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+const MAX_SERVER_FALLBACK_SIZE = 4_000_000;
+
 interface UseUploadAudioReturn {
   upload: (songId: string, file: File) => Promise<string>;
   uploading: boolean;
@@ -11,6 +13,40 @@ export function useUploadAudio(): UseUploadAudioReturn {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const uploadViaServer = async (songId: string, file: File, key?: string): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('songId', songId);
+
+    if (key) {
+      formData.append('key', key);
+    }
+
+    const response = await fetch('/api/songs/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMsg = 'Failed to upload audio via server fallback';
+      try {
+        const errorData = JSON.parse(errorText);
+        errorMsg = errorData.error || errorMsg;
+      } catch {
+        errorMsg = errorText || errorMsg;
+      }
+      throw new Error(errorMsg);
+    }
+
+    const data = await response.json();
+    if (!data?.key || typeof data.key !== 'string') {
+      throw new Error('Server fallback upload returned an invalid storage key');
+    }
+
+    return data.key;
+  };
 
   const upload = async (songId: string, file: File): Promise<string> => {
     setError(null);
@@ -65,9 +101,8 @@ export function useUploadAudio(): UseUploadAudioReturn {
 
       const { uploadUrl, key } = await response.json();
 
-      // Attempt 1: Upload file directly to R2 using the presigned URL.
-      // Files are sent straight to R2, bypassing Vercel's function payload limit.
-      let directUploadFailed = false;
+      // Upload file directly to R2 using the presigned URL.
+      // Files are sent straight to R2, bypassing Vercel's 4.5 MB function payload limit.
       try {
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -89,7 +124,7 @@ export function useUploadAudio(): UseUploadAudioReturn {
           });
 
           xhr.addEventListener('error', () => {
-            reject(new Error('direct_upload_cors_failure'));
+            reject(new Error('Direct upload to storage failed. This is usually a CORS or network issue.'));
           });
 
           xhr.addEventListener('abort', () => {
@@ -100,40 +135,17 @@ export function useUploadAudio(): UseUploadAudioReturn {
           xhr.setRequestHeader('Content-Type', file.type);
           xhr.send(file);
         });
-      } catch (xhrErr) {
-        if (xhrErr instanceof Error && xhrErr.message === 'direct_upload_cors_failure') {
-          directUploadFailed = true;
-        } else {
-          throw xhrErr;
-        }
-      }
+      } catch (directUploadError) {
+        const message = directUploadError instanceof Error ? directUploadError.message : 'Direct upload failed';
 
-      if (directUploadFailed) {
-        // Attempt 2: Fall back to server-side proxy upload.
-        // This avoids browser CORS entirely because the request goes server→R2.
-        setProgress(0);
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('songId', songId);
-        formData.append('key', key);
-
-        const fallback = await fetch('/api/songs/upload', {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (!fallback.ok) {
-          const fallbackData = await fallback.json().catch(() => ({})) as { error?: string };
-          throw new Error(
-            fallbackData.error ??
-              'Upload failed. Storage CORS is not configured and server fallback also failed.',
-          );
+        if (file.size > MAX_SERVER_FALLBACK_SIZE) {
+          throw new Error(`${message} Server fallback is limited to files up to 4 MB on this deployment.`);
         }
 
-        const fallbackData = await fallback.json() as { key: string };
+        const fallbackKey = await uploadViaServer(songId, file, key);
         setProgress(100);
         setUploading(false);
-        return fallbackData.key;
+        return fallbackKey;
       }
 
       setProgress(100);

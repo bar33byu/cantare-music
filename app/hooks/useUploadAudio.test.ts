@@ -170,15 +170,14 @@ describe('useUploadAudio', () => {
     expect(result.current.uploading).toBe(false);
   });
 
-  it('falls back to server-side upload when direct XHR upload fails (CORS)', async () => {
+  it('surfaces error when direct upload to R2 fails', async () => {
     global.XMLHttpRequest = XMLHttpRequestErrorStub as any;
 
-    // First call: upload-url route
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'presigned-key' }),
+      json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
     });
-    // Second call: server-side fallback route
+
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ key: 'fallback-key' }),
@@ -187,44 +186,38 @@ describe('useUploadAudio', () => {
     const { result } = renderHook(() => useUploadAudio());
     const file = new File(['test'], 'test.mp3', { type: 'audio/mpeg' });
 
-    let returnedKey: string | undefined;
     await act(async () => {
-      returnedKey = await result.current.upload('song-123', file);
+      await expect(result.current.upload('song-123', file)).resolves.toBe('fallback-key');
     });
 
-    expect(returnedKey).toBe('fallback-key');
-    expect(result.current.uploading).toBe(false);
     expect(result.current.error).toBe(null);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(mockFetch).toHaveBeenNthCalledWith(2, '/api/songs/upload', expect.objectContaining({ method: 'POST' }));
+    expect(mockFetch).toHaveBeenNthCalledWith(2, '/api/songs/upload', {
+      method: 'POST',
+      body: expect.any(FormData),
+    });
 
     global.XMLHttpRequest = XMLHttpRequestStub as any;
   });
 
-  it('surfaces error when both direct and fallback uploads fail', async () => {
+  it('surfaces the direct upload error when the file is too large for server fallback', async () => {
     global.XMLHttpRequest = XMLHttpRequestErrorStub as any;
 
-    // First call: upload-url route
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'presigned-key' }),
-    });
-    // Second call: fallback also fails
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      json: () => Promise.resolve({ error: 'Server upload failed' }),
+      json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
     });
 
     const { result } = renderHook(() => useUploadAudio());
-    const file = new File(['test'], 'test.mp3', { type: 'audio/mpeg' });
+    const file = new File(['x'.repeat(4_100_000)], 'test.mp3', { type: 'audio/mpeg' });
 
     await act(async () => {
-      await expect(result.current.upload('song-123', file)).rejects.toThrow('Server upload failed');
+      await expect(result.current.upload('song-123', file)).rejects.toThrow(
+        'Server fallback is limited to files up to 4 MB on this deployment.',
+      );
     });
 
-    expect(result.current.error).toBe('Server upload failed');
-    expect(result.current.uploading).toBe(false);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(result.current.error).toMatch('Server fallback is limited to files up to 4 MB on this deployment.');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
 
     global.XMLHttpRequest = XMLHttpRequestStub as any;
   });

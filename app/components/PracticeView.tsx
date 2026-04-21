@@ -10,8 +10,8 @@ import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
-import { compareContourAttemptStable } from "../lib/contourPractice";
-import type { AttemptTransitionResult, AttemptTransitionStatus } from "../lib/contourPractice";
+import { compareContourAttemptDetailed } from "../lib/contourPractice";
+import type { AttemptNoteStatus } from "../lib/contourPractice";
 
 interface TransportDebugState {
   playToggleClicks: number;
@@ -49,36 +49,7 @@ const PREV_SEGMENT_GO_BACK_THRESHOLD_MS = 3_000;
 const OFFLINE_RATING_QUEUE_PREFIX = "cantare:offline-ratings:";
 const MIN_TAP_DURATION_MS = 80;
 const ROLL_WINDOW_MS = 6000;
-
-function getTransitionLabel(direction: AttemptTransitionResult["direction"]): string {
-  if (direction === "up") {
-    return "Up";
-  }
-  if (direction === "down") {
-    return "Down";
-  }
-  return "Same";
-}
-
-function getTransitionStatusLabel(status: AttemptTransitionStatus): string {
-  if (status === "matched") {
-    return "Correct";
-  }
-  if (status === "extra") {
-    return "Extra";
-  }
-  return "Wrong";
-}
-
-function getTransitionStatusClasses(status: AttemptTransitionStatus | "pending"): string {
-  if (status === "matched") {
-    return "border-emerald-300 bg-emerald-50 text-emerald-800";
-  }
-  if (status === "pending") {
-    return "border-amber-300 bg-amber-50 text-amber-800";
-  }
-  return "border-rose-300 bg-rose-50 text-rose-800";
-}
+const TAP_PERSISTENCE_WARNING_MS = 3500;
 
 interface ActiveTapCapture {
   id: string;
@@ -87,28 +58,12 @@ interface ActiveTapCapture {
   pointerId: number;
 }
 
-interface PersistedTapPracticeSessionSummary {
-  id: string;
-  songId: string;
-  startedAt: string;
-  tapCount: number;
-}
-
-interface PersistedTapPracticeTap {
-  id: string;
-  noteId: string;
+interface PersistedTapPayload {
   segmentId: string;
+  noteId: string;
   timeOffsetMs: number;
   durationMs: number;
   lane: number;
-  createdAt: string;
-}
-
-interface PersistedTapPracticeSessionDetail {
-  id: string;
-  songId: string;
-  startedAt: string;
-  taps: PersistedTapPracticeTap[];
 }
 
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
@@ -151,17 +106,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
   const [showCardContourMap, setShowCardContourMap] = React.useState(false);
   const [showTapOverlay, setShowTapOverlay] = React.useState(true);
-  const [tapBarCollapsed, setTapBarCollapsed] = React.useState(false);
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
-  const [activeTapSessionId, setActiveTapSessionId] = React.useState<string | null>(null);
-  const [tapSessions, setTapSessions] = React.useState<PersistedTapPracticeSessionSummary[]>([]);
-  const [isTapSessionsLoading, setIsTapSessionsLoading] = React.useState(false);
-  const [tapDebugMode, setTapDebugMode] = React.useState(false);
-  const [selectedTapDebugSessionId, setSelectedTapDebugSessionId] = React.useState<string | null>(null);
-  const [tapDebugSession, setTapDebugSession] = React.useState<PersistedTapPracticeSessionDetail | null>(null);
-  const [isTapDebugSessionLoading, setIsTapDebugSessionLoading] = React.useState(false);
-  const [tapPersistenceError, setTapPersistenceError] = React.useState<string | null>(null);
   const [accuracyToast, setAccuracyToast] = React.useState<{ text: string; visible: boolean } | null>(null);
+  const [tapPersistenceWarning, setTapPersistenceWarning] = React.useState<string | null>(null);
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
   const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
   const practicedRecordedRef = React.useRef(false);
@@ -194,11 +141,23 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const tapBarRef = React.useRef<HTMLDivElement | null>(null);
   const activeTapCaptureRef = React.useRef<ActiveTapCapture | null>(null);
   const toastTimerRef = React.useRef<number | null>(null);
+  const tapWarningTimerRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
-  const segmentScoreToastHandledRef = React.useRef<Record<string, boolean>>({});
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
+  const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
+  const tapSessionIdRef = React.useRef<string | null>(null);
+  const tapSessionGenerationRef = React.useRef(0);
+  const pendingPersistedTapsRef = React.useRef<PersistedTapPayload[]>([]);
+  const persistTapChainRef = React.useRef<Promise<void>>(Promise.resolve());
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
+  const tapDebugHref = React.useMemo(() => {
+    const params = new URLSearchParams({ songId: song.id });
+    if (tapSessionId) {
+      params.set("sessionId", tapSessionId);
+    }
+    return `/debug-tap-practice?${params.toString()}`;
+  }, [song.id, tapSessionId]);
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
@@ -208,45 +167,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return null;
     }
 
-    return compareContourAttemptStable(
+    return compareContourAttemptDetailed(
       currentSegment.pitchContourNotes ?? [],
       currentAttemptNotes,
       { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
     );
   }, [currentAttemptNotes, currentSegment]);
-  const tapDebugSegmentComparisons = useMemo(() => {
-    if (!tapDebugSession) {
-      return [] as Array<{
-        segment: Song["segments"][number];
-        attemptNotes: PitchContourNote[];
-        match: ReturnType<typeof compareContourAttemptStable>;
-      }>;
-    }
-
-    return song.segments.map((segment) => {
-      const attemptNotes = tapDebugSession.taps
-        .filter((tap) => tap.segmentId === segment.id)
-        .map((tap) => ({
-          id: tap.noteId,
-          timeOffsetMs: tap.timeOffsetMs,
-          durationMs: tap.durationMs,
-          lane: tap.lane,
-        }))
-        .sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-
-      const match = compareContourAttemptStable(
-        segment.pitchContourNotes ?? [],
-        attemptNotes,
-        { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
-      );
-
-      return {
-        segment,
-        attemptNotes,
-        match,
-      };
-    });
-  }, [song.segments, tapDebugSession]);
   const currentSegmentOffsetMs = currentSegment
     ? Math.max(0, Math.min(currentSegment.endMs - currentSegment.startMs, currentMs - currentSegment.startMs))
     : 0;
@@ -283,111 +209,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       window.localStorage.removeItem(buildOfflineRatingsQueueKey(song.id));
     } catch {
       // Ignore queue cleanup failures.
-    }
-  }, [song.id]);
-
-  const loadTapSessions = React.useCallback(async () => {
-    setIsTapSessionsLoading(true);
-    try {
-      const response = await fetch(`/api/songs/${song.id}/tap-sessions`);
-      if (!response.ok) {
-        throw new Error(`Failed to load tap sessions (${response.status})`);
-      }
-
-      const payload = await response.json() as { sessions?: PersistedTapPracticeSessionSummary[] };
-      const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
-      setTapSessions(sessions);
-      if (!selectedTapDebugSessionId && sessions.length > 0) {
-        const preferredSession = activeTapSessionId ?? sessions[0].id;
-        setSelectedTapDebugSessionId(preferredSession);
-      }
-    } catch {
-      setTapPersistenceError("Could not load tap-debug sessions.");
-    } finally {
-      setIsTapSessionsLoading(false);
-    }
-  }, [activeTapSessionId, selectedTapDebugSessionId, song.id]);
-
-  const startTapSession = React.useCallback(async () => {
-    try {
-      const response = await fetch(`/api/songs/${song.id}/tap-sessions`, {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to start tap session (${response.status})`);
-      }
-
-      const payload = await response.json() as { session?: PersistedTapPracticeSessionSummary };
-      if (!payload.session) {
-        throw new Error("Tap session response missing session");
-      }
-
-      setActiveTapSessionId(payload.session.id);
-      setTapSessions((previous) => {
-        const deduped = previous.filter((session) => session.id !== payload.session?.id);
-        return [payload.session as PersistedTapPracticeSessionSummary, ...deduped];
-      });
-      setSelectedTapDebugSessionId(payload.session.id);
-      setTapPersistenceError(null);
-    } catch {
-      setActiveTapSessionId(null);
-      setTapPersistenceError("Could not start tap-debug capture.");
-    }
-  }, [song.id]);
-
-  const persistTapNote = React.useCallback(async (segmentId: string, note: PitchContourNote) => {
-    if (!activeTapSessionId) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/songs/${song.id}/tap-sessions/${activeTapSessionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          segmentId,
-          noteId: note.id,
-          timeOffsetMs: note.timeOffsetMs,
-          durationMs: note.durationMs,
-          lane: note.lane,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to persist tap note (${response.status})`);
-      }
-
-      setTapSessions((previous) => previous.map((session) => {
-        if (session.id !== activeTapSessionId) {
-          return session;
-        }
-        return {
-          ...session,
-          tapCount: session.tapCount + 1,
-        };
-      }));
-      setTapPersistenceError(null);
-    } catch {
-      setTapPersistenceError("Some tap events were not saved.");
-    }
-  }, [activeTapSessionId, song.id]);
-
-  const loadTapDebugSession = React.useCallback(async (sessionId: string) => {
-    setIsTapDebugSessionLoading(true);
-    try {
-      const response = await fetch(`/api/songs/${song.id}/tap-sessions/${sessionId}`);
-      if (!response.ok) {
-        throw new Error(`Failed to load tap session detail (${response.status})`);
-      }
-
-      const payload = await response.json() as { session?: PersistedTapPracticeSessionDetail };
-      setTapDebugSession(payload.session ?? null);
-      setTapPersistenceError(null);
-    } catch {
-      setTapDebugSession(null);
-      setTapPersistenceError("Could not load tap-debug details.");
-    } finally {
-      setIsTapDebugSessionLoading(false);
     }
   }, [song.id]);
 
@@ -428,6 +249,79 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       // Keep queued ratings for a future retry.
     }
   }, [clearOfflineRatingsQueue, dequeueOfflineRatings, postRatingsSnapshot]);
+
+  const clearTapPersistenceWarning = React.useCallback(() => {
+    if (tapWarningTimerRef.current !== null) {
+      window.clearTimeout(tapWarningTimerRef.current);
+      tapWarningTimerRef.current = null;
+    }
+    setTapPersistenceWarning(null);
+  }, []);
+
+  const showTapPersistenceWarning = React.useCallback((message: string) => {
+    if (tapWarningTimerRef.current !== null) {
+      window.clearTimeout(tapWarningTimerRef.current);
+      tapWarningTimerRef.current = null;
+    }
+
+    setTapPersistenceWarning(message);
+    tapWarningTimerRef.current = window.setTimeout(() => {
+      setTapPersistenceWarning(null);
+      tapWarningTimerRef.current = null;
+    }, TAP_PERSISTENCE_WARNING_MS);
+  }, []);
+
+  const flushPersistedTaps = React.useCallback((sessionIdOverride?: string) => {
+    const activeSessionId = sessionIdOverride ?? tapSessionIdRef.current;
+    if (!activeSessionId || pendingPersistedTapsRef.current.length === 0) {
+      return;
+    }
+
+    const payloads = pendingPersistedTapsRef.current.splice(0, pendingPersistedTapsRef.current.length);
+    persistTapChainRef.current = persistTapChainRef.current.then(async () => {
+      const failedPayloads: PersistedTapPayload[] = [];
+      let hadClientFailure = false;
+
+      for (const payload of payloads) {
+        try {
+          const response = await fetch(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            if (response.status >= 400 && response.status < 500) {
+              console.error(`Tap persistence rejected with ${response.status}; dropping payload.`, payload);
+              hadClientFailure = true;
+              continue;
+            }
+            throw new Error(`Failed to persist tap (${response.status})`);
+          }
+        } catch (error) {
+          console.error("Failed to persist tap practice tap:", error);
+          failedPayloads.push(payload);
+        }
+      }
+
+      if (failedPayloads.length > 0) {
+        pendingPersistedTapsRef.current.unshift(...failedPayloads);
+      }
+
+      if (hadClientFailure) {
+        showTapPersistenceWarning("Some taps could not be saved. Toggle Tap practice off and on to start a fresh session.");
+      } else if (failedPayloads.length > 0) {
+        showTapPersistenceWarning("Tap saving is temporarily unavailable. We will keep retrying in the background.");
+      } else {
+        clearTapPersistenceWarning();
+      }
+    });
+  }, [clearTapPersistenceWarning, showTapPersistenceWarning, song.id]);
+
+  const queuePersistedTap = React.useCallback((payload: PersistedTapPayload) => {
+    pendingPersistedTapsRef.current.push(payload);
+    flushPersistedTaps();
+  }, [flushPersistedTaps]);
 
   const getSegmentIndexAtMs = React.useCallback((ms: number) => {
     // During overlaps, prefer the later segment so rapid next-clicks keep advancing.
@@ -869,16 +763,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }, 1600);
   }, []);
 
-  const showSegmentTapScoreToast = React.useCallback((segment: Song["segments"][number]) => {
-    const tapMatch = compareContourAttemptStable(
-      segment.pitchContourNotes ?? [],
-      tapAttemptsRef.current[segment.id] ?? [],
-      { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
-    );
-    const scoreOutOfFive = Math.max(0, Math.min(5, Math.round(tapMatch.score * 5)));
-    showAccuracyToast(`Tap score ${scoreOutOfFive}/5`);
-  }, [showAccuracyToast]);
-
   const finalizeTapCapture = React.useCallback((endLane?: number) => {
     const capture = activeTapCaptureRef.current;
     if (!capture || !currentSegment) {
@@ -887,10 +771,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     const segmentDurationMs = Math.max(1, currentSegment.endMs - currentSegment.startMs);
-    const endOffsetMs = Math.min(
-      segmentDurationMs,
-      Math.max(capture.startOffsetMs + MIN_TAP_DURATION_MS, currentMs - currentSegment.startMs)
-    );
+    const latestOffsetMs = Math.min(segmentDurationMs, Math.max(0, Math.round(currentMs - currentSegment.startMs)));
+    const minEndOffsetMs = Math.min(segmentDurationMs, capture.startOffsetMs + MIN_TAP_DURATION_MS);
+    const endOffsetMs = Math.max(minEndOffsetMs, latestOffsetMs);
     if (endOffsetMs <= capture.startOffsetMs) {
       activeTapCaptureRef.current = null;
       return;
@@ -906,19 +789,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const segmentId = currentSegment.id;
     const latestForSegment = tapAttemptsRef.current[segmentId] ?? [];
     const nextSegmentNotes = [...latestForSegment, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-    const immediateMatch = compareContourAttemptStable(
+    const immediateMatch = compareContourAttemptDetailed(
       currentSegment.pitchContourNotes ?? [],
       nextSegmentNotes,
       { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
     );
-    const latestTransition = immediateMatch.transitionResults.at(-1);
-    const missedTap = latestTransition != null && latestTransition.status !== "matched";
+    const missedTap = immediateMatch.attemptNoteStatuses[note.id] === "mismatched";
 
     setTapAttemptsBySegment((previous) => ({
       ...previous,
       [segmentId]: nextSegmentNotes,
     }));
-    void persistTapNote(segmentId, note);
 
     if (missedTap) {
       if (typeof navigator !== "undefined" && "vibrate" in navigator) {
@@ -927,8 +808,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       showAccuracyToast("Missed tap");
     }
 
+    queuePersistedTap({
+      segmentId,
+      noteId: note.id,
+      timeOffsetMs: note.timeOffsetMs,
+      durationMs: note.durationMs,
+      lane: note.lane,
+    });
+
     activeTapCaptureRef.current = null;
-  }, [currentMs, currentSegment, persistTapNote, showAccuracyToast]);
+  }, [currentMs, currentSegment, queuePersistedTap, showAccuracyToast]);
 
   const clearCurrentSegmentTaps = React.useCallback(() => {
     if (!currentSegment) {
@@ -941,25 +830,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     activeTapCaptureRef.current = null;
   }, [currentSegment]);
 
-  const handleToggleTapPracticeMode = React.useCallback(() => {
-    const nextMode = !isTapPracticeMode;
-    setIsTapPracticeMode(nextMode);
-    activeTapCaptureRef.current = null;
-
-    if (nextMode) {
-      setTapAttemptsBySegment({});
-      setTapDebugMode(false);
-      setTapDebugSession(null);
-      void startTapSession();
-      return;
-    }
-
-    setActiveTapSessionId(null);
-  }, [isTapPracticeMode, startTapSession]);
-
   const getRollX = React.useCallback((noteOffsetMs: number) => {
     return 100 - ((currentSegmentOffsetMs - noteOffsetMs) / ROLL_WINDOW_MS) * 100;
   }, [currentSegmentOffsetMs]);
+
+  const getAttemptStatusColor = React.useCallback((status: AttemptNoteStatus) => {
+    if (status === "matched") {
+      return "rgb(22 163 74)";
+    }
+    if (status === "mismatched") {
+      return "rgb(220 38 38)";
+    }
+    return "rgb(245 158 11)";
+  }, []);
 
   const handleRateCurrentSegment = React.useCallback((rating: MemoryRating) => {
     if (!currentSegment) {
@@ -981,24 +864,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }));
     play(0, 10000);
   };
-
-  const handleToggleTapDebugMode = React.useCallback(() => {
-    const nextMode = !tapDebugMode;
-    setTapDebugMode(nextMode);
-
-    if (!nextMode) {
-      return;
-    }
-
-    if (activeTapSessionId) {
-      setSelectedTapDebugSessionId(activeTapSessionId);
-      return;
-    }
-
-    if (tapSessions.length > 0) {
-      setSelectedTapDebugSessionId(tapSessions[0].id);
-    }
-  }, [activeTapSessionId, tapDebugMode, tapSessions]);
 
   useEffect(() => {
     const isTextInputLike = (target: EventTarget | null): boolean => {
@@ -1131,51 +996,29 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
       loopHandledRef.current = loopKey;
-      if (isTapPracticeMode) {
-        showSegmentTapScoreToast(currentSegment);
-        setTapAttemptsBySegment((previous) => ({
-          ...previous,
-          [currentSegment.id]: [],
-        }));
-        segmentScoreToastHandledRef.current[currentSegment.id] = false;
-        activeTapCaptureRef.current = null;
-        // Increment transition token on replay to force SegmentCard refresh
-        setTransitionToken((previous) => previous + 1);
-      }
+      const loopMatch = compareContourAttemptDetailed(
+        currentSegment.pitchContourNotes ?? [],
+        tapAttemptsBySegment[currentSegment.id] ?? [],
+        { timeToleranceMs: 400, sameDeadZone: 0.08, durationToleranceRatio: 0.6 }
+      );
+      showAccuracyToast(`Loop accuracy ${Math.round(loopMatch.score * 100)}%`);
+      setTapAttemptsBySegment((previous) => ({
+        ...previous,
+        [currentSegment.id]: [],
+      }));
+      activeTapCaptureRef.current = null;
       play(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
   }, [
     currentMs,
     currentSegment,
     getSegmentStartWithPreroll,
-    isTapPracticeMode,
     isLooping,
     isPlaying,
     play,
-    showSegmentTapScoreToast,
+    showAccuracyToast,
+    tapAttemptsBySegment,
   ]);
-
-  useEffect(() => {
-    if (!isTapPracticeMode || !isPlaying || !currentSegment) {
-      return;
-    }
-
-    const segmentId = currentSegment.id;
-    const previousHandled = segmentScoreToastHandledRef.current[segmentId] ?? false;
-    if (currentMs <= currentSegment.startMs + 120) {
-      segmentScoreToastHandledRef.current[segmentId] = false;
-      return;
-    }
-
-    if (previousHandled) {
-      return;
-    }
-
-    if (currentMs >= currentSegment.endMs - 50) {
-      segmentScoreToastHandledRef.current[segmentId] = true;
-      showSegmentTapScoreToast(currentSegment);
-    }
-  }, [currentMs, currentSegment, isPlaying, isTapPracticeMode, showSegmentTapScoreToast]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;
@@ -1191,48 +1034,77 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [tapAttemptsBySegment]);
 
   useEffect(() => {
+    tapSessionIdRef.current = tapSessionId;
+  }, [tapSessionId]);
+
+  useEffect(() => {
+    tapSessionGenerationRef.current += 1;
+    pendingPersistedTapsRef.current = [];
+    setTapSessionId(null);
+    tapSessionIdRef.current = null;
+    clearTapPersistenceWarning();
+
+    if (!isTapPracticeMode) {
+      return;
+    }
+
+    const generation = tapSessionGenerationRef.current;
+
+    void fetch(`/api/songs/${song.id}/tap-sessions`, { method: "POST" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to create tap session (${response.status})`);
+        }
+
+        const payload = await response.json() as { session?: { id?: string } };
+        const nextSessionId = payload.session?.id;
+        if (typeof nextSessionId !== "string" || nextSessionId.length === 0) {
+          throw new Error("Tap session response did not include an id");
+        }
+
+        if (tapSessionGenerationRef.current !== generation) {
+          return;
+        }
+
+        setTapSessionId(nextSessionId);
+        tapSessionIdRef.current = nextSessionId;
+        flushPersistedTaps(nextSessionId);
+      })
+      .catch((error) => {
+        console.error("Failed to create tap practice session:", error);
+        showTapPersistenceWarning("Could not start tap persistence session. Check your connection and try again.");
+      });
+  }, [clearTapPersistenceWarning, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id]);
+
+  useEffect(() => {
     activeTapCaptureRef.current = null;
   }, [currentSegment?.id]);
 
   useEffect(() => {
     setTapAttemptsBySegment({});
     setIsTapPracticeMode(false);
-    setActiveTapSessionId(null);
-    setTapSessions([]);
-    setTapDebugMode(false);
-    setSelectedTapDebugSessionId(null);
-    setTapDebugSession(null);
-    setTapPersistenceError(null);
     setShowCardContourMap(false);
     setShowTapOverlay(true);
     setAccuracyToast(null);
     activeTapCaptureRef.current = null;
     loopHandledRef.current = null;
-    segmentScoreToastHandledRef.current = {};
+    setTapSessionId(null);
+    tapSessionIdRef.current = null;
+    clearTapPersistenceWarning();
+    pendingPersistedTapsRef.current = [];
     if (toastTimerRef.current !== null) {
       window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = null;
     }
-  }, [song.id]);
-
-  useEffect(() => {
-    if (!tapDebugMode) {
-      return;
-    }
-    void loadTapSessions();
-  }, [loadTapSessions, tapDebugMode]);
-
-  useEffect(() => {
-    if (!tapDebugMode || !selectedTapDebugSessionId) {
-      return;
-    }
-    void loadTapDebugSession(selectedTapDebugSessionId);
-  }, [loadTapDebugSession, selectedTapDebugSessionId, tapDebugMode]);
+  }, [clearTapPersistenceWarning, song.id]);
 
   useEffect(() => {
     return () => {
       if (toastTimerRef.current !== null) {
         window.clearTimeout(toastTimerRef.current);
+      }
+      if (tapWarningTimerRef.current !== null) {
+        window.clearTimeout(tapWarningTimerRef.current);
       }
     };
   }, []);
@@ -1254,7 +1126,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         .then(() => {
           lastSavedRatingsRef.current = snapshot;
           clearOfflineRatingsQueue();
-          window.dispatchEvent(new CustomEvent('ratingsUpdated'));
         })
         .catch(() => {
           enqueueOfflineRatings(snapshot);
@@ -1401,7 +1272,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           <button
             type="button"
             data-testid="practice-tap-mode-toggle"
-            onClick={handleToggleTapPracticeMode}
+            onClick={() => {
+              setIsTapPracticeMode((previous) => !previous);
+              activeTapCaptureRef.current = null;
+            }}
             className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
               isTapPracticeMode
                 ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
@@ -1430,108 +1304,37 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               Clear segment taps
             </button>
           ) : null}
-          <button
-            type="button"
-            data-testid="practice-tap-debug-toggle"
-            onClick={handleToggleTapDebugMode}
-            className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
-              tapDebugMode
-                ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700"
-                : "border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50"
-            }`}
-          >
-            Tap debug: {tapDebugMode ? "On" : "Off"}
-          </button>
+          {isTapPracticeMode ? (
+            <a
+              href={tapDebugHref}
+              data-testid="practice-open-tap-debug"
+              className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Open Tap Debug
+            </a>
+          ) : null}
         </div>
         {ratingsError ? (
           <p data-testid="ratings-load-error" className="mt-2 text-sm text-amber-700">
             {ratingsError}
           </p>
         ) : null}
-        {tapPersistenceError ? (
-          <p data-testid="tap-persistence-error" className="mt-2 text-sm text-amber-700">
-            {tapPersistenceError}
-          </p>
-        ) : null}
-      </div>
-
-      {tapDebugMode ? (
-        <section data-testid="practice-tap-debug-panel" className="mx-4 mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-3 md:mx-8">
-          <div className="flex flex-wrap items-center gap-2">
-            <label htmlFor="tap-debug-session" className="text-sm font-semibold text-emerald-900">
-              Debug session
-            </label>
-            <select
-              id="tap-debug-session"
-              data-testid="practice-tap-debug-session-select"
-              value={selectedTapDebugSessionId ?? ""}
-              onChange={(event) => setSelectedTapDebugSessionId(event.target.value || null)}
-              className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-sm text-emerald-900"
-            >
-              <option value="">Select a session</option>
-              {tapSessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {new Date(session.startedAt).toLocaleString()} - {session.tapCount} taps
-                </option>
-              ))}
-            </select>
+        {tapPersistenceWarning ? (
+          <div className="mt-2 flex items-start gap-2">
+            <p data-testid="practice-tap-persist-warning" className="text-sm text-amber-700">
+              {tapPersistenceWarning}
+            </p>
             <button
               type="button"
-              data-testid="practice-tap-debug-refresh"
-              onClick={() => {
-                void loadTapSessions();
-                if (selectedTapDebugSessionId) {
-                  void loadTapDebugSession(selectedTapDebugSessionId);
-                }
-              }}
-              className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+              data-testid="practice-tap-persist-warning-dismiss"
+              onClick={clearTapPersistenceWarning}
+              className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
             >
-              Refresh
+              Dismiss
             </button>
-            {isTapSessionsLoading ? (
-              <span className="text-xs text-emerald-700">Loading sessions...</span>
-            ) : null}
           </div>
-
-          {isTapDebugSessionLoading ? (
-            <p className="mt-2 text-sm text-emerald-800">Loading tap debug details...</p>
-          ) : null}
-
-          {!isTapDebugSessionLoading && tapDebugSession ? (
-            <div className="mt-3 grid gap-2">
-              {tapDebugSegmentComparisons.map(({ segment, attemptNotes, match }) => (
-                <article key={segment.id} className="rounded-xl border border-emerald-200 bg-white p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-emerald-950">{segment.label}</h3>
-                    <p className="text-xs font-medium text-emerald-900">
-                      Score {Math.round(match.score * 100)}% ({match.matchedEvents}/{match.totalEvents})
-                    </p>
-                  </div>
-                  <p className="mt-1 text-xs text-emerald-900">
-                    Answer notes: {(segment.pitchContourNotes ?? []).length} | Tap notes: {attemptNotes.length}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-1" data-testid={`practice-debug-transitions-${segment.id}`}>
-                    {match.transitionResults.length === 0 ? (
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700">
-                        No transition data
-                      </span>
-                    ) : (
-                      match.transitionResults.map((result, index) => (
-                        <span
-                          key={`${segment.id}-${result.attemptNoteId}-${index}`}
-                          className={`rounded-full border px-2 py-1 text-[11px] font-medium ${getTransitionStatusClasses(result.status)}`}
-                        >
-                          {`Step ${index + 1}: key ${getTransitionLabel(result.expectedDirection ?? "same")}, tap ${getTransitionLabel(result.direction)}`}
-                        </span>
-                      ))
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+        ) : null}
+      </div>
 
       <main data-testid="practice-main" className="flex flex-1 justify-center overflow-y-auto px-4 pb-44 pt-2 md:px-8 md:pb-48">
         <section data-testid="practice-focus" className="flex h-full min-h-full w-full max-w-3xl items-start justify-center gap-2 md:gap-3">
@@ -1541,7 +1344,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               aria-label="Previous segment"
               data-testid="practice-prev-segment"
               onClick={handlePrevSegment}
-              disabled={!hasSegments}
+              disabled={!hasSegments || isFirst}
               className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1556,39 +1359,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 {isTapPracticeMode ? (
                   <div
                     data-testid="practice-tap-feedback"
-                    className="pointer-events-none absolute left-3 top-3 z-20 max-w-[calc(100%-1.5rem)] rounded-2xl border border-indigo-200/70 bg-white/90 px-3 py-2 text-[11px] text-indigo-950 shadow-sm backdrop-blur"
+                    className="pointer-events-none absolute left-3 top-3 z-20 rounded-full bg-white/85 px-2 py-1 text-[11px] font-semibold text-indigo-900 shadow-sm"
                   >
-                    <p className="font-semibold">
-                      {Math.round((currentSegmentMatch?.score ?? 0) * 100)}% contour recall ({currentSegmentMatch?.matchedEvents ?? 0}/
-                      {currentSegmentMatch?.totalEvents ?? 0})
-                    </p>
-                    <div data-testid="practice-transition-strip" className="mt-2 flex flex-wrap gap-1">
-                      {currentAttemptNotes.length === 0 ? (
-                        <span className={`rounded-full border px-2 py-1 ${getTransitionStatusClasses("pending")}`}>
-                          Tap to begin
-                        </span>
-                      ) : (
-                        <>
-                          <span
-                            data-testid="practice-transition-step"
-                            data-status="pending"
-                            className={`rounded-full border px-2 py-1 font-medium ${getTransitionStatusClasses("pending")}`}
-                          >
-                            Start
-                          </span>
-                          {(currentSegmentMatch?.transitionResults ?? []).map((result, index) => (
-                            <span
-                              key={`${result.attemptNoteId}-${result.attemptEventIndex}`}
-                              data-testid="practice-transition-step"
-                              data-status={result.status}
-                              className={`rounded-full border px-2 py-1 font-medium ${getTransitionStatusClasses(result.status)}`}
-                            >
-                              {`Step ${index + 1}: ${getTransitionLabel(result.direction)} ${getTransitionStatusLabel(result.status)}`}
-                            </span>
-                          ))}
-                        </>
-                      )}
-                    </div>
+                    {Math.round((currentSegmentMatch?.score ?? 0) * 100)}% ({currentSegmentMatch?.matchedEvents ?? 0}/
+                    {currentSegmentMatch?.totalEvents ?? 0})
                   </div>
                 ) : null}
                 <div
@@ -1634,6 +1408,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                           return null;
                         }
                         const y = (1 - note.lane) * 100;
+                        const status = currentSegmentMatch?.attemptNoteStatuses[note.id] ?? "pending";
                         return (
                           <circle
                             key={`attempt-${note.id}`}
@@ -1641,7 +1416,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                             cx={x}
                             cy={y}
                             r={3.3}
-                            fill="rgb(79 70 229)"
+                            fill={getAttemptStatusColor(status)}
                             opacity="0.72"
                           />
                         );
@@ -1668,9 +1443,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               ref={tapBarRef}
               data-testid="practice-tap-bar"
               aria-label="Tap contour bar"
-              className={`relative h-full min-h-0 shrink-0 rounded-2xl border-2 border-indigo-400 bg-gradient-to-b from-indigo-100 via-white to-indigo-100 transition-all ${
-                tapBarCollapsed ? 'w-10' : 'w-16'
-              }`}
+              className="relative h-full min-h-0 w-16 shrink-0 rounded-2xl border-2 border-indigo-400 bg-gradient-to-b from-indigo-100 via-white to-indigo-100"
               onPointerDown={(event) => {
                 if (!currentSegment) {
                   return;
@@ -1679,9 +1452,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 if (typeof event.currentTarget.setPointerCapture === "function") {
                   event.currentTarget.setPointerCapture(event.pointerId);
                 }
+                const segmentDurationMs = Math.max(1, currentSegment.endMs - currentSegment.startMs);
+                const startOffsetMs = Math.min(
+                  segmentDurationMs,
+                  Math.max(0, Math.round(currentMs - currentSegment.startMs))
+                );
                 activeTapCaptureRef.current = {
                   id: crypto.randomUUID(),
-                  startOffsetMs: Math.max(0, currentMs - currentSegment.startMs),
+                  startOffsetMs,
                   lane: getTapLane(event.clientY),
                   pointerId: event.pointerId,
                 };
@@ -1708,19 +1486,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 finalizeTapCapture(getTapLane(event.clientY));
               }}
             >
-              <button
-                type="button"
-                className="absolute inset-x-0 top-0 z-10 rounded-t-lg bg-indigo-200/80 px-1 py-0.5 text-[10px] font-semibold text-indigo-800 hover:bg-indigo-300/80 transition"
-                onClick={() => setTapBarCollapsed(!tapBarCollapsed)}
-                aria-label={tapBarCollapsed ? "Expand tap bar" : "Collapse tap bar"}
-              >
-                {tapBarCollapsed ? '▶' : '◀'}
-              </button>
-              {!tapBarCollapsed && (
-                <div className="pointer-events-none absolute inset-x-2 top-8 rounded bg-indigo-200/60 px-1 py-0.5 text-center text-[9px] font-semibold text-indigo-700">
-                  Tap
-                </div>
-              )}
+              <div className="pointer-events-none absolute inset-x-2 top-2 rounded bg-indigo-200/80 px-1 py-0.5 text-center text-[10px] font-semibold text-indigo-800">
+                Tap
+              </div>
             </div>
           ) : (
             <button

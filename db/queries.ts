@@ -1,9 +1,10 @@
-import { eq, asc, desc, inArray, and, count, lte } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, count, lte, sql } from "drizzle-orm";
 import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow } from "./schema";
 
 const DEFAULT_QUERY_USER_ID = "default";
+let ensureTapPracticeTablesPromise: Promise<void> | null = null;
 
 export type PersistedMemoryRating = 1 | 2 | 3 | 4 | 5;
 
@@ -172,6 +173,91 @@ function isMissingUsersTableError(error: unknown): boolean {
   }
 
   return false;
+}
+
+function isMissingTapPracticeTableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const mentionsTapTables =
+    message.includes("tap_practice_sessions") ||
+    message.includes("tap_practice_taps") ||
+    (message.includes("tap_practice") && message.includes("does not exist"));
+
+  if (mentionsTapTables && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    const causeMentionsTapTables =
+      causeMessage.includes("tap_practice_sessions") ||
+      causeMessage.includes("tap_practice_taps") ||
+      causeMessage.includes("tap_practice");
+
+    if (causeCode === "42P01" && causeMentionsTapTables) {
+      return true;
+    }
+
+    if (causeMentionsTapTables && causeMessage.includes("does not exist")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function ensureTapPracticeTables(): Promise<void> {
+  if (!ensureTapPracticeTablesPromise) {
+    ensureTapPracticeTablesPromise = (async () => {
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "tap_practice_sessions" (
+          "id" text PRIMARY KEY NOT NULL,
+          "user_id" text NOT NULL DEFAULT 'default',
+          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
+          "started_at" timestamp NOT NULL DEFAULT now()
+        )
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "tap_practice_taps" (
+          "id" text PRIMARY KEY NOT NULL,
+          "session_id" text NOT NULL REFERENCES "tap_practice_sessions"("id") ON DELETE cascade,
+          "segment_id" text NOT NULL REFERENCES "segments"("id") ON DELETE cascade,
+          "note_id" text NOT NULL,
+          "time_offset_ms" integer NOT NULL,
+          "duration_ms" integer NOT NULL,
+          "lane_milli" integer NOT NULL,
+          "created_at" timestamp NOT NULL DEFAULT now()
+        )
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_started_at"
+          ON "tap_practice_sessions" ("user_id", "started_at")
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_song_started_at"
+          ON "tap_practice_sessions" ("user_id", "song_id", "started_at")
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_taps_session_created_at"
+          ON "tap_practice_taps" ("session_id", "created_at")
+      `));
+    })().catch((error) => {
+      ensureTapPracticeTablesPromise = null;
+      throw error;
+    });
+  }
+
+  await ensureTapPracticeTablesPromise;
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────
@@ -879,9 +965,20 @@ export async function deleteExpiredTapPracticeData(
   userId: string = DEFAULT_QUERY_USER_ID,
   cutoff: Date = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
 ): Promise<void> {
-  await db()
-    .delete(tapPracticeSessions)
-    .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
+  try {
+    await db()
+      .delete(tapPracticeSessions)
+      .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .delete(tapPracticeSessions)
+        .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function createTapPracticeSession(
@@ -889,17 +986,35 @@ export async function createTapPracticeSession(
   userId: string = DEFAULT_QUERY_USER_ID,
   startedAt: Date = new Date()
 ): Promise<PersistedTapPracticeSessionSummary> {
-  const rows = await db()
-    .insert(tapPracticeSessions)
-    .values({
-      id: crypto.randomUUID(),
-      userId,
-      songId,
-      startedAt,
-    })
-    .returning();
+  try {
+    const rows = await db()
+      .insert(tapPracticeSessions)
+      .values({
+        id: crypto.randomUUID(),
+        userId,
+        songId,
+        startedAt,
+      })
+      .returning();
 
-  return mapTapPracticeSession(rows[0]);
+    return mapTapPracticeSession(rows[0]);
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      const rows = await db()
+        .insert(tapPracticeSessions)
+        .values({
+          id: crypto.randomUUID(),
+          userId,
+          songId,
+          startedAt,
+        })
+        .returning();
+
+      return mapTapPracticeSession(rows[0]);
+    }
+    throw error;
+  }
 }
 
 export async function addTapPracticeTap(
@@ -912,18 +1027,38 @@ export async function addTapPracticeTap(
     lane: number;
   }
 ): Promise<void> {
-  await db()
-    .insert(tapPracticeTaps)
-    .values({
-      id: crypto.randomUUID(),
-      sessionId,
-      segmentId: data.segmentId,
-      noteId: data.noteId,
-      timeOffsetMs: data.timeOffsetMs,
-      durationMs: data.durationMs,
-      laneMilli: laneToMilli(data.lane),
-      createdAt: new Date(),
-    });
+  try {
+    await db()
+      .insert(tapPracticeTaps)
+      .values({
+        id: crypto.randomUUID(),
+        sessionId,
+        segmentId: data.segmentId,
+        noteId: data.noteId,
+        timeOffsetMs: data.timeOffsetMs,
+        durationMs: data.durationMs,
+        laneMilli: laneToMilli(data.lane),
+        createdAt: new Date(),
+      });
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .insert(tapPracticeTaps)
+        .values({
+          id: crypto.randomUUID(),
+          sessionId,
+          segmentId: data.segmentId,
+          noteId: data.noteId,
+          timeOffsetMs: data.timeOffsetMs,
+          durationMs: data.durationMs,
+          laneMilli: laneToMilli(data.lane),
+          createdAt: new Date(),
+        });
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function listTapPracticeSessionsForSong(
@@ -931,16 +1066,35 @@ export async function listTapPracticeSessionsForSong(
   userId: string = DEFAULT_QUERY_USER_ID,
   limit: number = 20
 ): Promise<PersistedTapPracticeSessionSummary[]> {
-  const sessions = await db()
-    .select({
-      id: tapPracticeSessions.id,
-      songId: tapPracticeSessions.songId,
-      startedAt: tapPracticeSessions.startedAt,
-    })
-    .from(tapPracticeSessions)
-    .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
-    .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
-    .orderBy(desc(tapPracticeSessions.startedAt));
+  let sessions: Array<Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">> = [];
+  try {
+    sessions = await db()
+      .select({
+        id: tapPracticeSessions.id,
+        songId: tapPracticeSessions.songId,
+        startedAt: tapPracticeSessions.startedAt,
+      })
+      .from(tapPracticeSessions)
+      .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+      .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
+      .orderBy(desc(tapPracticeSessions.startedAt));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      sessions = await db()
+        .select({
+          id: tapPracticeSessions.id,
+          songId: tapPracticeSessions.songId,
+          startedAt: tapPracticeSessions.startedAt,
+        })
+        .from(tapPracticeSessions)
+        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+        .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
+        .orderBy(desc(tapPracticeSessions.startedAt));
+    } else {
+      throw error;
+    }
+  }
 
   const selectedSessions = sessions.slice(0, Math.max(1, limit));
   if (selectedSessions.length === 0) {
@@ -948,10 +1102,23 @@ export async function listTapPracticeSessionsForSong(
   }
 
   const sessionIds = selectedSessions.map((row) => row.id);
-  const tapRows = await db()
-    .select({ sessionId: tapPracticeTaps.sessionId })
-    .from(tapPracticeTaps)
-    .where(inArray(tapPracticeTaps.sessionId, sessionIds));
+  let tapRows: Array<{ sessionId: string }> = [];
+  try {
+    tapRows = await db()
+      .select({ sessionId: tapPracticeTaps.sessionId })
+      .from(tapPracticeTaps)
+      .where(inArray(tapPracticeTaps.sessionId, sessionIds));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      tapRows = await db()
+        .select({ sessionId: tapPracticeTaps.sessionId })
+        .from(tapPracticeTaps)
+        .where(inArray(tapPracticeTaps.sessionId, sessionIds));
+    } else {
+      throw error;
+    }
+  }
 
   const tapCountBySession = tapRows.reduce<Record<string, number>>((accumulator, row) => {
     accumulator[row.sessionId] = (accumulator[row.sessionId] ?? 0) + 1;
@@ -968,27 +1135,68 @@ export async function getTapPracticeSessionDetail(
   sessionId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedTapPracticeSessionDetail | null> {
-  const sessionRows = await db()
-    .select({
-      id: tapPracticeSessions.id,
-      songId: tapPracticeSessions.songId,
-      startedAt: tapPracticeSessions.startedAt,
-    })
-    .from(tapPracticeSessions)
-    .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
-    .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
-    .limit(1);
+  let sessionRows: Array<Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">> = [];
+  try {
+    sessionRows = await db()
+      .select({
+        id: tapPracticeSessions.id,
+        songId: tapPracticeSessions.songId,
+        startedAt: tapPracticeSessions.startedAt,
+      })
+      .from(tapPracticeSessions)
+      .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+      .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
+      .limit(1);
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      sessionRows = await db()
+        .select({
+          id: tapPracticeSessions.id,
+          songId: tapPracticeSessions.songId,
+          startedAt: tapPracticeSessions.startedAt,
+        })
+        .from(tapPracticeSessions)
+        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+        .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
+        .limit(1);
+    } else {
+      throw error;
+    }
+  }
 
   const sessionRow = sessionRows[0];
   if (!sessionRow) {
     return null;
   }
 
-  const taps = await db()
-    .select()
-    .from(tapPracticeTaps)
-    .where(eq(tapPracticeTaps.sessionId, sessionId))
-    .orderBy(asc(tapPracticeTaps.createdAt));
+  let taps: Array<{
+    id: string;
+    noteId: string;
+    segmentId: string;
+    timeOffsetMs: number;
+    durationMs: number;
+    laneMilli: number;
+    createdAt: Date;
+  }> = [];
+  try {
+    taps = await db()
+      .select()
+      .from(tapPracticeTaps)
+      .where(eq(tapPracticeTaps.sessionId, sessionId))
+      .orderBy(asc(tapPracticeTaps.createdAt));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      taps = await db()
+        .select()
+        .from(tapPracticeTaps)
+        .where(eq(tapPracticeTaps.sessionId, sessionId))
+        .orderBy(asc(tapPracticeTaps.createdAt));
+    } else {
+      throw error;
+    }
+  }
 
   return {
     id: sessionRow.id,
