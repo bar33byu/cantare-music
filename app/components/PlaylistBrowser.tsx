@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 
 type PlaylistListItem = {
@@ -38,19 +38,25 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
+  const latestFetchIdRef = useRef(0);
+  const fetchControllerRef = useRef<AbortController | null>(null);
 
   const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
-    if (!userId) {
-      return init;
-    }
-
-    return {
+    const scopedInit: RequestInit = {
       ...init,
+      cache: 'no-store',
       headers: {
         ...(init?.headers ?? {}),
-        'X-User-ID': userId,
       },
     };
+
+    if (userId) {
+      const headers = new Headers(scopedInit.headers);
+      headers.set('X-User-ID', userId);
+      scopedInit.headers = headers;
+    }
+
+    return scopedInit;
   };
 
   const request = (url: string, init?: RequestInit) => {
@@ -59,22 +65,30 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
   };
 
   const fetchPlaylists = async (includeRetired: boolean) => {
+    const fetchId = latestFetchIdRef.current + 1;
+    latestFetchIdRef.current = fetchId;
+    fetchControllerRef.current?.abort();
+    const controller = new AbortController();
+    fetchControllerRef.current = controller;
     setLoading(true);
     setError(null);
     try {
       const query = includeRetired ? '?includeRetired=true' : '';
-      const response = await request(`/api/playlists${query}`);
+      const response = await request(`/api/playlists${query}`, { signal: controller.signal });
       if (!response.ok) {
         throw new Error('Failed to load playlists');
       }
       const data = (await response.json()) as { playlists?: PlaylistListItem[] };
       const list = Array.isArray(data.playlists) ? data.playlists : [];
+      if (latestFetchIdRef.current !== fetchId) {
+        return;
+      }
       setPlaylists(list);
 
       const [knowledgeEntries, statsEntries] = await Promise.all([
         Promise.all(
         list.map(async (playlist) => {
-          const knowledgeResponse = await request(`/api/playlists/${playlist.id}/knowledge`);
+          const knowledgeResponse = await request(`/api/playlists/${playlist.id}/knowledge`, { signal: controller.signal });
           if (!knowledgeResponse.ok) {
             return [playlist.id, 0] as const;
           }
@@ -84,7 +98,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
         ),
         Promise.all(
           list.map(async (playlist) => {
-            const detailResponse = await request(`/api/playlists/${playlist.id}`);
+            const detailResponse = await request(`/api/playlists/${playlist.id}`, { signal: controller.signal });
             if (!detailResponse.ok) {
               return [playlist.id, { songsWithAudio: 0, songsWithSegments: 0, songsWithTapKeys: 0 }] as const;
             }
@@ -102,21 +116,38 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
         ),
       ]);
 
+      if (latestFetchIdRef.current !== fetchId) {
+        return;
+      }
       setKnowledgeByPlaylist(Object.fromEntries(knowledgeEntries));
       setStatsByPlaylist(Object.fromEntries(statsEntries));
-    } catch {
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      if (latestFetchIdRef.current !== fetchId) {
+        return;
+      }
       setError('Unable to load playlists right now.');
       setPlaylists([]);
       setKnowledgeByPlaylist({});
       setStatsByPlaylist({});
     } finally {
-      setLoading(false);
+      if (latestFetchIdRef.current === fetchId) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     void fetchPlaylists(showArchived);
   }, [showArchived, refreshTrigger, userId, refetchTrigger]);
+
+  useEffect(() => {
+    return () => {
+      fetchControllerRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     const handleRatingsUpdated = () => {

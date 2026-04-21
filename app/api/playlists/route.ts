@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createPlaylist, getAllPlaylists } from '../../../db/queries';
 import { resolveRequestUserId } from '../_user';
 
+const userScopedHeaders = {
+  'Cache-Control': 'private, no-store',
+  Vary: 'X-User-ID',
+};
+
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
   const shouldExpose =
@@ -17,9 +22,7 @@ export async function GET(request: NextRequest) {
     const includeRetired = new URL(request.url).searchParams.get('includeRetired') === 'true';
     const playlists = await getAllPlaylists(userId, includeRetired);
     return NextResponse.json({ playlists }, {
-      headers: {
-        'Cache-Control': 'max-age=300', // Cache for 5 minutes
-      },
+      headers: userScopedHeaders,
     });
   } catch (error) {
     console.error('Error fetching playlists:', error);

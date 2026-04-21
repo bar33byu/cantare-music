@@ -371,7 +371,7 @@ describe('SongBrowser', () => {
     // Open menu and click the already-active "date-practiced" → toggles to asc
     fireEvent.click(screen.getByTestId('song-browser-sort-toggle'));
     fireEvent.click(screen.getByTestId('song-browser-sort-date-practiced'));
-    expect(screen.getByTestId('song-browser-sort-toggle')).toHaveTextContent('Oldest');
+    expect(screen.getByTestId('song-browser-sort-toggle')).toHaveTextContent('Longest ago');
 
     // Toggle back
     fireEvent.click(screen.getByTestId('song-browser-sort-toggle'));

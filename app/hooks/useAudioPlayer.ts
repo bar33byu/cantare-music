@@ -49,6 +49,31 @@ type AudioFactory = (url: string) => HTMLAudioElement;
 
 const defaultFactory: AudioFactory = (url) => new Audio(url);
 
+function getPlaybackErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Playback failed';
+}
+
+function isBenignPlayAbort(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    error.name === 'AbortError' ||
+    message.includes('interrupted by a call to pause') ||
+    message.includes('play() request was interrupted')
+  );
+}
+
+function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as PromiseLike<T>).then === 'function'
+  );
+}
+
 function makeDefaultDebugInfo(audioUrl: string): AudioDebugInfo {
   return {
     src: audioUrl,
@@ -176,39 +201,47 @@ export function useAudioPlayer(
 
     try {
       const result = audio.play();
-      if (result instanceof Promise) {
-        result.then(() => {
-          setDebugInfo((previous) => ({
-            ...previous,
-            playResolved: (previous.playResolved ?? 0) + 1,
-            lastPlayOutcome: 'resolved',
-          }));
-          updateDebugInfo(audio, 'play-resolved');
-        });
-        result.catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : 'Playback failed';
-          setPlaybackError(message);
-          setIsPlaying(false);
-          setDebugInfo((previous) => ({
-            ...previous,
-            playRejected: (previous.playRejected ?? 0) + 1,
-            lastPlayOutcome: 'rejected',
-            lastPlayError: message,
-          }));
-          updateDebugInfo(audio, 'play-rejected');
-        });
+      if (isPromiseLike<void>(result)) {
+        result.then(
+          () => {
+            setDebugInfo((previous) => ({
+              ...previous,
+              playResolved: (previous.playResolved ?? 0) + 1,
+              lastPlayOutcome: 'resolved',
+            }));
+            updateDebugInfo(audio, 'play-resolved');
+          },
+          (error: unknown) => {
+            const message = getPlaybackErrorMessage(error);
+            const isBenignAbort = isBenignPlayAbort(error);
+            if (!isBenignAbort) {
+              setPlaybackError(message);
+            }
+            setIsPlaying(false);
+            setDebugInfo((previous) => ({
+              ...previous,
+              playRejected: (previous.playRejected ?? 0) + 1,
+              lastPlayOutcome: isBenignAbort ? 'aborted' : 'rejected',
+              lastPlayError: message,
+            }));
+            updateDebugInfo(audio, isBenignAbort ? 'play-aborted' : 'play-rejected');
+          }
+        );
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Playback failed';
-      setPlaybackError(message);
+      const message = getPlaybackErrorMessage(error);
+      const isBenignAbort = isBenignPlayAbort(error);
+      if (!isBenignAbort) {
+        setPlaybackError(message);
+      }
       setIsPlaying(false);
       setDebugInfo((previous) => ({
         ...previous,
         playRejected: (previous.playRejected ?? 0) + 1,
-        lastPlayOutcome: 'throw',
+        lastPlayOutcome: isBenignAbort ? 'aborted' : 'throw',
         lastPlayError: message,
       }));
-      updateDebugInfo(audio, 'play-throw');
+      updateDebugInfo(audio, isBenignAbort ? 'play-aborted' : 'play-throw');
     }
   }, [applyCurrentTime, updateDebugInfo]);
 

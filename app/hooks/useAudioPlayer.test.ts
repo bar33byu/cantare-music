@@ -136,6 +136,31 @@ describe('useAudioPlayer', () => {
     expect(result.current.isReady).toBe(false);
   });
 
+  it('ignores interrupted play() AbortErrors caused by pause races', async () => {
+    const abortError = new Error('The play() request was interrupted by a call to pause().');
+    abortError.name = 'AbortError';
+    stub.play = vi.fn().mockReturnValue({
+      then: (_resolve: () => void, reject: (reason: unknown) => void) => {
+        reject(abortError);
+      },
+    });
+    factory = vi.fn().mockReturnValue(stub) as unknown as (url: string) => HTMLAudioElement;
+
+    const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
+
+    await act(async () => {
+      result.current.play(0, 4000);
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.playbackError).toBeNull();
+    expect(result.current.isPlaying).toBe(false);
+    expect(result.current.debugInfo.playRejected).toBe(1);
+  });
+
   it('does not surface decoder errors before user presses play', () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
 

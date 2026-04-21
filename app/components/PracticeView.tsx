@@ -611,6 +611,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     // In a gap between two segments: first half → show prior, second half → show next
     if (targetIndex === -1) {
+      const firstSegmentStartMs = song.segments[0]?.startMs ?? 0;
+      if (currentMs < firstSegmentStartMs) {
+        if (session.currentSegmentIndex !== 0) {
+          segmentIndexRef.current = 0;
+          dispatch({ type: "SET_SEGMENT_INDEX", index: 0 });
+        }
+        return;
+      }
+
       const gapBeforeIndex = song.segments.findIndex((seg, i) => {
         const next = song.segments[i + 1];
         return next !== undefined && currentMs >= seg.endMs && currentMs < next.startMs;

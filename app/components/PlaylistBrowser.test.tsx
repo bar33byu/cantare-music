@@ -55,7 +55,10 @@ describe('PlaylistBrowser', () => {
     fireEvent.click(screen.getByTestId('toggle-archived-button'));
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('/api/playlists?includeRetired=true');
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/playlists?includeRetired=true'),
+        expect.objectContaining({ cache: 'no-store' })
+      );
     });
   });
 
@@ -93,7 +96,7 @@ describe('PlaylistBrowser', () => {
     fireEvent.click(screen.getByTestId('create-playlist-submit'));
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('/api/playlists', expect.objectContaining({ method: 'POST' }));
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists', expect.objectContaining({ method: 'POST', cache: 'no-store' }));
       expect(onManagePlaylist).toHaveBeenCalledWith(expect.objectContaining({ id: 'pl-2', name: 'Conference Set', songs: [] }));
     });
   });
@@ -167,5 +170,134 @@ describe('PlaylistBrowser', () => {
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Sections 2/3');
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Tap keys 1/3');
     expect(screen.getByTestId('playlist-knowledge-pl-1')).toHaveTextContent('Knowledge: 85%');
+  });
+
+  it('refetches playlists when userId changes', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      const userHeader = headers.get('X-User-ID');
+
+      if (url.startsWith('/api/playlists?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            playlists: [
+              {
+                ...basePlaylist,
+                id: userHeader === 'test-user' ? 'pl-2' : 'pl-1',
+                name: userHeader === 'test-user' ? 'Test User Set' : 'April Set',
+              },
+            ],
+          }),
+        } as Response;
+      }
+
+      if (url.includes('/knowledge')) {
+        return { ok: true, json: async () => ({ score: 0 }) } as Response;
+      }
+
+      return { ok: true, json: async () => ({ id: 'pl-1', songs: [] }) } as Response;
+    });
+
+    const { rerender } = render(
+      <PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-name-pl-1')).toHaveTextContent('April Set');
+    });
+
+    rerender(
+      <PlaylistBrowser
+        onSelectPlaylist={onSelectPlaylist}
+        onManagePlaylist={onManagePlaylist}
+        userId="test-user"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-name-pl-2')).toHaveTextContent('Test User Set');
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/playlists?'),
+      expect.objectContaining({
+        cache: 'no-store',
+        headers: expect.any(Headers),
+      })
+    );
+    const matchingCall = mockFetch.mock.calls.find(
+      ([calledUrl, calledInit]) =>
+        String(calledUrl).startsWith('/api/playlists?') &&
+        calledInit &&
+        new Headers((calledInit as RequestInit).headers).get('X-User-ID') === 'test-user'
+    );
+    expect(matchingCall).toBeTruthy();
+  });
+
+  it('keeps the newest user switch result when earlier requests finish later', async () => {
+    let resolveDefaultList: ((value: Response) => void) | null = null;
+    let resolveTestUserList: ((value: Response) => void) | null = null;
+
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      const userHeader = headers.get('X-User-ID');
+
+      if (url.startsWith('/api/playlists?') && !userHeader) {
+        return new Promise<Response>((resolve) => {
+          resolveDefaultList = resolve;
+        });
+      }
+
+      if (url.startsWith('/api/playlists?') && userHeader === 'test-user') {
+        return new Promise<Response>((resolve) => {
+          resolveTestUserList = resolve;
+        });
+      }
+
+      if (url.includes('/knowledge')) {
+        return Promise.resolve({ ok: true, json: async () => ({ score: 0 }) } as Response);
+      }
+
+      return Promise.resolve({ ok: true, json: async () => ({ id: 'pl-x', songs: [] }) } as Response);
+    });
+
+    const { rerender } = render(
+      <PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />
+    );
+
+    rerender(
+      <PlaylistBrowser
+        onSelectPlaylist={onSelectPlaylist}
+        onManagePlaylist={onManagePlaylist}
+        userId="test-user"
+      />
+    );
+
+    resolveTestUserList?.({
+      ok: true,
+      json: async () => ({
+        playlists: [{ ...basePlaylist, id: 'pl-2', name: 'Test User Set' }],
+      }),
+    } as Response);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-name-pl-2')).toHaveTextContent('Test User Set');
+    });
+
+    resolveDefaultList?.({
+      ok: true,
+      json: async () => ({
+        playlists: [{ ...basePlaylist, id: 'pl-1', name: 'April Set' }],
+      }),
+    } as Response);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-name-pl-2')).toHaveTextContent('Test User Set');
+    });
+
+    expect(screen.queryByTestId('playlist-name-pl-1')).not.toBeInTheDocument();
   });
 });

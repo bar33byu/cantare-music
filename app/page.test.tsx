@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Home from './page';
 
 const practiceViewMock = vi.fn();
+const playlistBrowserMock = vi.fn();
 
 const samplePlaylist = {
   id: 'playlist-1',
@@ -83,16 +84,27 @@ vi.mock('./components/SongBrowser', () => ({
 }));
 
 vi.mock('./components/PlaylistBrowser', () => ({
-  PlaylistBrowser: ({ onSelectPlaylist, onManagePlaylist }: { onSelectPlaylist: (playlist: any) => void; onManagePlaylist: (playlist: any) => void }) => (
-    <div data-testid="mock-playlist-browser">
-      <button data-testid="mock-playlist-practice" onClick={() => onSelectPlaylist(samplePlaylist)}>
-        Practice Playlist
-      </button>
-      <button data-testid="mock-playlist-manage" onClick={() => onManagePlaylist(samplePlaylist)}>
-        Manage Playlist
-      </button>
-    </div>
-  ),
+  PlaylistBrowser: ({
+    onSelectPlaylist,
+    onManagePlaylist,
+    userId,
+  }: {
+    onSelectPlaylist: (playlist: any) => void;
+    onManagePlaylist: (playlist: any) => void;
+    userId?: string;
+  }) => {
+    playlistBrowserMock({ userId });
+    return (
+      <div data-testid="mock-playlist-browser">
+        <button data-testid="mock-playlist-practice" onClick={() => onSelectPlaylist(samplePlaylist)}>
+          Practice Playlist
+        </button>
+        <button data-testid="mock-playlist-manage" onClick={() => onManagePlaylist(samplePlaylist)}>
+          Manage Playlist
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('./components/PlaylistDetail', () => ({
@@ -109,9 +121,21 @@ vi.mock('./components/PlaylistDetail', () => ({
 }));
 
 vi.mock('./components/PlaylistPracticeView', () => ({
-  PlaylistPracticeView: ({ onExit, onSelectSong }: { onExit: () => void; onSelectSong?: (songId: string) => void }) => (
+  PlaylistPracticeView: ({ onExit, onSelectSong }: { onExit: () => void; onSelectSong?: (song: { id: string; title: string; artist?: string; audioUrl: string; segments: unknown[]; createdAt: string }) => void }) => (
     <div data-testid="mock-playlist-practice-view">
-      <button data-testid="mock-playlist-select-song" onClick={() => onSelectSong?.('song-1')}>
+      <button
+        data-testid="mock-playlist-select-song"
+        onClick={() =>
+          onSelectSong?.({
+            id: 'song-1',
+            title: 'Song One',
+            artist: 'Artist One',
+            audioUrl: 'https://example.com/one.mp3',
+            segments: [],
+            createdAt: '2025-01-01T00:00:00.000Z',
+          })
+        }
+      >
         Select Playlist Song
       </button>
       <button data-testid="mock-playlist-exit" onClick={onExit}>
@@ -125,7 +149,9 @@ describe('Home page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     practiceViewMock.mockReset();
+    playlistBrowserMock.mockReset();
     window.history.replaceState(null, '', '/');
+    window.localStorage.clear();
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -283,8 +309,12 @@ describe('Home page', () => {
       expect(screen.getByTestId('mock-practice-view')).toHaveTextContent('Segments: 2');
     });
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/songs/song-1');
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/songs/song-1');
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/songs/song-1', expect.objectContaining({
+      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/songs/song-1', expect.objectContaining({
+      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+    }));
   });
 
   it('shows breadcrumb root as Songs in song practice and returns to library when clicked', async () => {
@@ -311,7 +341,9 @@ describe('Home page', () => {
       expect(screen.getByTestId('mock-segment-editor')).toBeInTheDocument();
     });
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/songs/song-1');
+    expect(global.fetch).toHaveBeenCalledWith('/api/songs/song-1', expect.objectContaining({
+      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+    }));
   });
 
   it('writes hash route on navigation and supports browser back', async () => {
@@ -406,6 +438,95 @@ describe('Home page', () => {
       expect(screen.getByTestId('mock-playlist-practice-view')).toBeInTheDocument();
     });
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/playlists/playlist-1');
+    expect(fetchMock).toHaveBeenCalledWith('/api/playlists/playlist-1', expect.objectContaining({
+      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+    }));
+  });
+
+  it('opens song practice immediately from playlist data before song refresh resolves', async () => {
+    let resolveSongFetch: ((value: {
+      ok: true;
+      json: () => Promise<{
+        id: string;
+        title: string;
+        artist: string;
+        audioUrl: string;
+        segments: never[];
+        createdAt: string;
+      }>;
+    }) => void) | null = null;
+
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/songs/song-1') {
+        return new Promise((resolve) => {
+          resolveSongFetch = resolve;
+        });
+      }
+
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({}),
+      });
+    });
+
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('playlists-tab'));
+    fireEvent.click(await screen.findByTestId('mock-playlist-practice'));
+    expect(await screen.findByTestId('mock-playlist-practice-view')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-playlist-select-song'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
+    });
+
+    expect(resolveSongFetch).not.toBeNull();
+
+    await act(async () => {
+      resolveSongFetch?.({
+        ok: true,
+        json: async () => ({
+          id: 'song-1',
+          title: 'Song One',
+          artist: 'Artist One',
+          audioUrl: 'https://example.com/one.mp3',
+          segments: [],
+          createdAt: '2025-01-01T00:00:00.000Z',
+        }),
+      });
+      await Promise.resolve();
+    });
+  });
+
+  it('passes the current user id to playlist browser for both test and default users', async () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      collapseLyricLineBreaks: false,
+      currentUserId: 'default',
+      users: [
+        { id: 'default', name: 'Default User' },
+        { id: 'test-user', name: 'Test User' },
+      ],
+    }));
+
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    fireEvent.change(screen.getByTestId('active-user-select'), { target: { value: 'test-user' } });
+
+    await waitFor(() => {
+      const lastCall = playlistBrowserMock.mock.calls.at(-1)?.[0] as { userId?: string } | undefined;
+      expect(lastCall?.userId).toBe('test-user');
+    });
+
+    fireEvent.change(screen.getByTestId('active-user-select'), { target: { value: 'default' } });
+
+    await waitFor(() => {
+      const lastCall = playlistBrowserMock.mock.calls.at(-1)?.[0] as { userId?: string } | undefined;
+      expect(lastCall?.userId).toBe('default');
+    });
   });
 });

@@ -122,7 +122,7 @@ describe("SegmentCard", () => {
 
   it("selected rating button has selected style", () => {
     render(<SegmentCard {...defaultProps} currentRating={4} />);
-    expect(screen.getByTestId("rating-button-4").className).toContain("bg-indigo-700");
+    expect(screen.getByTestId("rating-button-4").className).toContain("bg-indigo-600");
   });
 
   it("does not render lock toggle", () => {

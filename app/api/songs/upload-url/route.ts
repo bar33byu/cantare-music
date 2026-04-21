@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
-    const key = generateUploadKey(userId, body.songId, body.filename);
+    const key = generateUploadKey(body.songId, body.filename);
 
     const command = new PutObjectCommand({
       Bucket: BUCKET,

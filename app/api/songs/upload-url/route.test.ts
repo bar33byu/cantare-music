@@ -48,7 +48,7 @@ describe('POST /api/songs/upload-url', () => {
       uploadUrl: 'https://example.r2.dev/presigned-url',
       key: 'audio/song-123/1234567-test.mp3',
     });
-    expect(generateUploadKey).toHaveBeenCalledWith('default', 'song-123', 'test.mp3');
+    expect(generateUploadKey).toHaveBeenCalledWith('song-123', 'test.mp3');
     expect(getSignedUrl).toHaveBeenCalled();
   });
 

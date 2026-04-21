@@ -20,14 +20,16 @@ describe('GET /api/playlists', () => {
 
     expect(response.status).toBe(200);
     expect(data.playlists).toHaveLength(1);
-    expect(getAllPlaylists).toHaveBeenCalledWith(false);
+    expect(getAllPlaylists).toHaveBeenCalledWith('default', false);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(response.headers.get('Vary')).toBe('X-User-ID');
   });
 
   it('supports includeRetired query param', async () => {
     vi.mocked(getAllPlaylists).mockResolvedValue([] as any);
     const request = new Request('http://localhost/api/playlists?includeRetired=true');
     await GET(request as any);
-    expect(getAllPlaylists).toHaveBeenCalledWith(true);
+    expect(getAllPlaylists).toHaveBeenCalledWith('default', true);
   });
 });
 
@@ -45,7 +47,7 @@ describe('POST /api/playlists', () => {
 
     const response = await POST(request as any);
     expect(response.status).toBe(201);
-    expect(createPlaylist).toHaveBeenCalledWith({ name: 'Set', eventDate: '2026-04-04' });
+    expect(createPlaylist).toHaveBeenCalledWith({ userId: 'default', name: 'Set', eventDate: '2026-04-04' });
   });
 
   it('returns 400 when name is missing', async () => {
