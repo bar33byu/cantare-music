@@ -639,6 +639,34 @@ describe("PracticeView", () => {
     expect(screen.queryByTestId("practice-piano-roll-overlay")).not.toBeInTheDocument();
   });
 
+  it("can show same-lane dead-zone guides on the tap overlay", async () => {
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      pitchContourNotes: [
+        { id: "k1", timeOffsetMs: 0, durationMs: 100, lane: 0.25 },
+        { id: "k2", timeOffsetMs: 200, durationMs: 100, lane: 0.25 },
+      ],
+    };
+
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    expect(screen.queryByTestId("practice-same-lane-legend")).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId("practice-same-lane-guide")).toHaveLength(0);
+
+    fireEvent.click(screen.getByTestId("practice-same-lane-guides-toggle"));
+
+    expect(screen.getByTestId("practice-same-lane-legend")).toHaveTextContent("answer lane +/- 0.08");
+    expect(screen.getAllByTestId("practice-same-lane-guide")).toHaveLength(2);
+    expect(screen.getAllByTestId("practice-answer-direction-label")).toHaveLength(1);
+    expect(screen.getByText("S")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("practice-overlay-toggle"));
+    expect(screen.queryByTestId("practice-same-lane-legend")).not.toBeInTheDocument();
+  });
+
   it("keeps segment taps cleared for new retries", async () => {
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: true,
