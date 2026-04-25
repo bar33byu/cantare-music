@@ -185,8 +185,6 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       if (!response.ok) {
         throw new Error('Patch failed');
       }
-
-      setRefreshKey((previous) => previous + 1);
     } finally {
       setSavingSegmentId(null);
     }
@@ -576,6 +574,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     }
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     return Math.round(ratio * timelineDurationMs);
+  };
+
+  const handleBoardSeek = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    seek(msFromClientX(event.clientX));
   };
 
   const handleInteractionMove = (clientX: number, pointerId: number) => {
@@ -1245,13 +1251,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           </div>
         ) : null}
 
-        <div className="overflow-x-auto rounded-lg border border-indigo-300">
-          <div
-            ref={boardRef}
-            data-testid="segment-editor-board"
-            className="relative h-[560px] min-w-full overflow-hidden bg-gradient-to-b from-indigo-50/40 to-white touch-none"
-            style={{ width: `${zoomPercent}%` }}
-          >
+          <div className="overflow-x-auto rounded-lg border border-indigo-300">
+            <div
+              ref={boardRef}
+              data-testid="segment-editor-board"
+              className="relative h-[560px] min-w-full overflow-hidden bg-gradient-to-b from-indigo-50/40 to-white touch-none"
+              style={{ width: `${zoomPercent}%` }}
+              onClick={handleBoardSeek}
+            >
           {orderedSegments.map((segment, index) => {
             const left = (segment.startMs / timelineDurationMs) * 100;
             const width = Math.max(1.5, ((segment.endMs - segment.startMs) / timelineDurationMs) * 100);
@@ -1346,13 +1353,17 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                       type="text"
                       value={segment.label}
                       onChange={(event) => updateLocalSegment(segment.id, { label: event.target.value })}
-                      onBlur={() => {
-                        void saveSegmentPatch(segment.id, { label: segment.label });
+                      onBlur={(event) => {
+                        const nextLabel = event.currentTarget.value;
+                        updateLocalSegment(segment.id, { label: nextLabel });
+                        void saveSegmentPatch(segment.id, { label: nextLabel });
                         setEditingLabelId(null);
                       }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
-                          void saveSegmentPatch(segment.id, { label: segment.label });
+                          const nextLabel = event.currentTarget.value;
+                          updateLocalSegment(segment.id, { label: nextLabel });
+                          void saveSegmentPatch(segment.id, { label: nextLabel });
                           setEditingLabelId(null);
                         }
                         if (event.key === 'Escape') {
@@ -1372,8 +1383,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                   <textarea
                     value={segment.lyricText}
                     onChange={(event) => updateLocalSegment(segment.id, { lyricText: event.target.value })}
-                    onBlur={() => {
-                      void saveSegmentPatch(segment.id, { lyricText: segment.lyricText });
+                    onBlur={(event) => {
+                      const nextLyricText = event.currentTarget.value;
+                      updateLocalSegment(segment.id, { lyricText: nextLyricText });
+                      void saveSegmentPatch(segment.id, { lyricText: nextLyricText });
                     }}
                     className="min-h-[180px] flex-1 rounded border border-indigo-200 px-2 py-2 text-sm leading-5 resize-none overflow-y-auto"
                     placeholder="lyrics"

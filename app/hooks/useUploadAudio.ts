@@ -1,12 +1,14 @@
 import { useState } from 'react';
 
-const MAX_SERVER_FALLBACK_SIZE = 4_000_000;
-
 interface UseUploadAudioReturn {
   upload: (songId: string, file: File) => Promise<string>;
   uploading: boolean;
   progress: number;
   error: string | null;
+}
+
+function isLikelyDeploymentBodyLimit(message: string): boolean {
+  return /413|payload too large|entity too large|body exceeded|request body|function payload|size limit/i.test(message);
 }
 
 export function useUploadAudio(): UseUploadAudioReturn {
@@ -136,16 +138,24 @@ export function useUploadAudio(): UseUploadAudioReturn {
           xhr.send(file);
         });
       } catch (directUploadError) {
-        const message = directUploadError instanceof Error ? directUploadError.message : 'Direct upload failed';
+        const directUploadMessage = directUploadError instanceof Error ? directUploadError.message : 'Direct upload failed';
 
-        if (file.size > MAX_SERVER_FALLBACK_SIZE) {
-          throw new Error(`${message} Server fallback is limited to files up to 4 MB on this deployment.`);
+        try {
+          const fallbackKey = await uploadViaServer(songId, file, key);
+          setProgress(100);
+          setUploading(false);
+          return fallbackKey;
+        } catch (fallbackError) {
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : 'Server fallback upload failed';
+
+          if (isLikelyDeploymentBodyLimit(fallbackMessage)) {
+            throw new Error(
+              `${directUploadMessage} Server fallback could not accept this file on the current deployment. This usually means a platform upload size limit.`
+            );
+          }
+
+          throw new Error(`${directUploadMessage} Server fallback also failed: ${fallbackMessage}`);
         }
-
-        const fallbackKey = await uploadViaServer(songId, file, key);
-        setProgress(100);
-        setUploading(false);
-        return fallbackKey;
       }
 
       setProgress(100);

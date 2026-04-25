@@ -308,6 +308,39 @@ describe('SegmentEditor', () => {
     vi.stubGlobal('Audio', originalAudio);
   });
 
+  it('keeps a second lyric draft intact when the first lyric field is blurred and saved', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByPlaceholderText('lyrics')).toHaveLength(2);
+    });
+
+    const lyricAreas = screen.getAllByPlaceholderText('lyrics') as HTMLTextAreaElement[];
+    fireEvent.change(lyricAreas[0], { target: { value: 'Updated line 1' } });
+    fireEvent.change(lyricAreas[1], { target: { value: 'Updated line 2 draft' } });
+    fireEvent.blur(lyricAreas[0], { target: { value: 'Updated line 1' } });
+
+    await waitFor(() => {
+      const patchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/') && init?.method === 'PATCH'
+      );
+      expect(patchCalls.length).toBeGreaterThan(0);
+    });
+
+    const patchCalls = mockFetch.mock.calls.filter(
+      ([url, init]) => String(url).includes('/api/songs/song-1/segments/') && init?.method === 'PATCH'
+    );
+    const firstPatchBody = JSON.parse(String(patchCalls.at(-1)?.[1]?.body ?? '{}'));
+
+    expect(firstPatchBody.lyricText).toBe('Updated line 1');
+    expect((screen.getAllByPlaceholderText('lyrics')[1] as HTMLTextAreaElement).value).toBe('Updated line 2 draft');
+
+    const segmentGetCalls = mockFetch.mock.calls.filter(
+      ([url, init]) => String(url).includes('/api/songs/song-1/segments') && (init?.method ?? 'GET') === 'GET'
+    );
+    expect(segmentGetCalls).toHaveLength(1);
+  });
+
   it('probes proxy audio URL for duration before first play when direct probe fails', async () => {
     vi.mocked(useAudioPlayer).mockReturnValue({
       isPlaying: false,
@@ -561,6 +594,90 @@ describe('SegmentEditor', () => {
 
     fireEvent.change(screen.getByTestId('segment-editor-song-seek'), { target: { value: '15000' } });
     expect(seek).toHaveBeenCalledWith(15000);
+  });
+
+  it('seeks when clicking an empty area of the section board', async () => {
+    const seek = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek,
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    const board = await screen.findByTestId('segment-editor-board');
+    vi.spyOn(board, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 560,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 560,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.click(board, { clientX: 500 });
+
+    expect(seek).toHaveBeenCalledWith(30000);
+  });
+
+  it('does not seek when clicking on a section block', async () => {
+    const seek = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek,
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    const segment = await screen.findByTestId('segment-block-seg-1');
+    fireEvent.click(segment);
+
+    expect(seek).not.toHaveBeenCalled();
   });
 
   it('saves selected label changes via patch on blur', async () => {

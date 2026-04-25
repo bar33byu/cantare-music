@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
-import { buildProxyAudioUrl, parseAudioKey } from '../lib/audioUrls';
+import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
 import { SongReadinessIcons } from './SongReadinessIcons';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 
@@ -96,7 +96,11 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   }, [playlist.songs, sort]);
 
   const currentSong = displayedSongs[currentSongIndex];
-  const audioPlayer = useAudioPlayer(currentSong?.audioUrl ?? '');
+  const playbackAudioUrl = useMemo(
+    () => toPlayableAudioUrl(currentSong?.audioUrl ?? ''),
+    [currentSong?.audioUrl]
+  );
+  const audioPlayer = useAudioPlayer(playbackAudioUrl);
 
   useEffect(() => {
     if (mode !== 'listen' || !currentSong) {

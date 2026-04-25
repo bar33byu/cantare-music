@@ -27,6 +27,7 @@ const playlist: Playlist = {
         },
       ],
       createdAt: '2025-01-01T00:00:00.000Z',
+      masteryPercent: 91,
       position: 0,
     },
     {
@@ -46,6 +47,7 @@ const playlist: Playlist = {
         },
       ],
       createdAt: '2025-01-01T00:00:00.000Z',
+      masteryPercent: 7,
       position: 1,
     },
   ],
@@ -202,6 +204,34 @@ describe('PlaylistPracticeView', () => {
     rerender(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
     expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a normalized playable audio URL for listen mode playback', async () => {
+    const useAudioPlayerSpy = vi.spyOn(audioPlayerHook, 'useAudioPlayer');
+
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://example.com/alpha.mp3');
+    });
+
+    const proxiedPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          audioUrl: '/audio/song-1/test.mp3',
+        },
+      ],
+    };
+
+    render(<PlaylistPracticeView playlist={proxiedPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(useAudioPlayerSpy).toHaveBeenCalledWith('/api/audio/audio/song-1/test.mp3');
+    });
   });
 
   it('places mastery label inside the bar at 10% or higher and outside when below 10%', async () => {

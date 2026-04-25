@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Segment, MemoryRating } from "../types/index";
+import { ContourNoteHeatStat, Segment, MemoryRating } from "../types/index";
 import RatingBar from "./RatingBar";
 import { PitchContourThumbnail } from "./PitchContourThumbnail";
 
@@ -36,6 +36,7 @@ interface SegmentCardProps {
   lyricVisibilityMode?: "full" | "hint" | "hidden";
   collapseLyricLineBreaks?: boolean;
   showContourMap?: boolean;
+  contourHeatMap?: Record<string, ContourNoteHeatStat>;
 }
 
 function isMaskableLyricChar(char: string): boolean {
@@ -97,6 +98,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   lyricVisibilityMode = "full",
   collapseLyricLineBreaks = false,
   showContourMap = false,
+  contourHeatMap,
 }) => {
   const lyricText = React.useMemo(() => {
     const base = segment.lyricText ?? "";
@@ -189,6 +191,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
           <PitchContourThumbnail
             notes={segment.pitchContourNotes ?? []}
             segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
+            noteHeatMap={contourHeatMap}
           />
         </div>
       ) : null}

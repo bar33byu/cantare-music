@@ -5,6 +5,12 @@ export interface PitchContourNote {
   durationMs: number;
 }
 
+export interface ContourNoteHeatStat {
+  sessionCount: number;
+  missCount: number;
+  missRate: number;
+}
+
 export interface Segment {
   id: string;
   songId: string;

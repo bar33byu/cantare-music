@@ -111,7 +111,7 @@ export default function DebugTapPracticePage() {
   const [sessionLoading, setSessionLoading] = React.useState(false);
 
   const [timeToleranceMs, setTimeToleranceMs] = React.useState(400);
-  const [sameDeadZone, setSameDeadZone] = React.useState(0.08);
+  const [sameDeadZone, setSameDeadZone] = React.useState(0.05);
   const [durationToleranceRatio, setDurationToleranceRatio] = React.useState(0.6);
   const [selectedSegmentId, setSelectedSegmentId] = React.useState("all");
 

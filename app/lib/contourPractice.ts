@@ -11,7 +11,6 @@ export interface ContourMatchOptions {
   timeToleranceMs: number;
   sameDeadZone: number;
   durationToleranceRatio: number;
-  answerLookaheadSlots: number;
 }
 
 export interface ContourMatchResult {
@@ -29,6 +28,7 @@ export interface AttemptTransitionResult {
   direction: ContourDirection;
   status: AttemptTransitionStatus;
   expectedDirection: ContourDirection | null;
+  answerEventIndex: number | null;
 }
 
 export interface ContourMatchDetailedResult extends ContourMatchResult {
@@ -37,13 +37,19 @@ export interface ContourMatchDetailedResult extends ContourMatchResult {
 
 export interface StableContourMatchResult extends ContourMatchDetailedResult {
   transitionResults: AttemptTransitionResult[];
+  answerEventStatuses: Array<'matched' | 'mismatched' | 'unattempted'>;
+}
+
+export interface ContourNoteHeatStat {
+  sessionCount: number;
+  missCount: number;
+  missRate: number;
 }
 
 const DEFAULT_MATCH_OPTIONS: ContourMatchOptions = {
   timeToleranceMs: 400,
-  sameDeadZone: 0.08,
+  sameDeadZone: 0.05,
   durationToleranceRatio: 0.6,
-  answerLookaheadSlots: 2,
 };
 
 function toDirection(deltaLane: number, deadZone: number): ContourDirection {
@@ -56,7 +62,33 @@ function toDirection(deltaLane: number, deadZone: number): ContourDirection {
   return 'same';
 }
 
-function scoreContourAttemptSlots(
+function findClosestAnswerEventIndex(
+  answerEvents: ContourEvent[],
+  startIndex: number,
+  targetTimeOffsetMs: number,
+  timeToleranceMs: number
+): number {
+  let closestIndex = -1;
+  let closestDistance = Number.POSITIVE_INFINITY;
+
+  for (let answerIndex = startIndex; answerIndex < answerEvents.length; answerIndex += 1) {
+    const distance = Math.abs(answerEvents[answerIndex].timeOffsetMs - targetTimeOffsetMs);
+    if (distance > timeToleranceMs) {
+      if (answerEvents[answerIndex].timeOffsetMs > targetTimeOffsetMs && closestIndex !== -1) {
+        break;
+      }
+      continue;
+    }
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = answerIndex;
+    }
+  }
+
+  return closestIndex;
+}
+
+function scoreContourAttemptByTime(
   answerEvents: ContourEvent[],
   attemptEvents: ContourEvent[],
   sortedAttempt: PitchContourNote[],
@@ -68,6 +100,7 @@ function scoreContourAttemptSlots(
   }
 
   const transitionResults: AttemptTransitionResult[] = [];
+  const answerEventStatuses = answerEvents.map(() => 'unattempted' as const);
   let nextAnswerIndex = 0;
   let matchedEvents = 0;
 
@@ -81,29 +114,32 @@ function scoreContourAttemptSlots(
     const expectedEvent = answerEvents[nextAnswerIndex];
     let status: AttemptTransitionStatus = 'extra';
     let expectedDirection: ContourDirection | null = null;
+    let answerEventIndex: number | null = null;
 
     if (expectedEvent) {
-      expectedDirection = expectedEvent.direction;
-      const maxAnswerIndex = Math.min(
-        answerEvents.length - 1,
-        nextAnswerIndex + Math.max(0, options.answerLookaheadSlots - 1)
+      const matchedAnswerIndex = findClosestAnswerEventIndex(
+        answerEvents,
+        nextAnswerIndex,
+        attemptEvent.timeOffsetMs,
+        options.timeToleranceMs
       );
 
-      let matchedAnswerIndex = -1;
-      for (let answerIndex = nextAnswerIndex; answerIndex <= maxAnswerIndex; answerIndex += 1) {
-        if (answerEvents[answerIndex]?.direction === attemptEvent.direction) {
-          matchedAnswerIndex = answerIndex;
-          break;
-        }
-      }
-
       if (matchedAnswerIndex !== -1) {
-        status = 'matched';
-        attemptNoteStatuses[attemptNote.id] = 'matched';
-        matchedEvents += 1;
+        answerEventIndex = matchedAnswerIndex;
         expectedDirection = answerEvents[matchedAnswerIndex].direction;
+        if (attemptEvent.direction === expectedDirection) {
+          status = 'matched';
+          attemptNoteStatuses[attemptNote.id] = 'matched';
+          matchedEvents += 1;
+          answerEventStatuses[matchedAnswerIndex] = 'matched';
+        } else {
+          status = 'mismatched';
+          attemptNoteStatuses[attemptNote.id] = 'mismatched';
+          answerEventStatuses[matchedAnswerIndex] = 'mismatched';
+        }
         nextAnswerIndex = matchedAnswerIndex + 1;
       } else {
+        expectedDirection = expectedEvent.direction;
         status = 'mismatched';
         attemptNoteStatuses[attemptNote.id] = 'mismatched';
       }
@@ -117,10 +153,11 @@ function scoreContourAttemptSlots(
       direction: attemptEvent.direction,
       status,
       expectedDirection,
+      answerEventIndex,
     });
   }
 
-  const totalEvents = answerEvents.length === 0 ? 0 : Math.max(answerEvents.length, attemptEvents.length);
+  const totalEvents = answerEvents.length;
 
   return {
     matchedEvents,
@@ -128,6 +165,7 @@ function scoreContourAttemptSlots(
     score: totalEvents === 0 ? 1 : matchedEvents / totalEvents,
     attemptNoteStatuses,
     transitionResults,
+    answerEventStatuses,
   };
 }
 
@@ -191,7 +229,7 @@ export function compareContourAttemptDetailed(
     };
   }
 
-  const scored = scoreContourAttemptSlots(answerEvents, attemptEvents, sortedAttempt, effective);
+  const scored = scoreContourAttemptByTime(answerEvents, attemptEvents, sortedAttempt, effective);
   return {
     matchedEvents: scored.matchedEvents,
     totalEvents: scored.totalEvents,
@@ -211,5 +249,54 @@ export function compareContourAttemptStable(
   const answerEvents = buildContourDirectionEvents(sortedAnswer, effective);
   const attemptEvents = buildContourDirectionEvents(sortedAttempt, effective);
 
-  return scoreContourAttemptSlots(answerEvents, attemptEvents, sortedAttempt, effective);
+  return scoreContourAttemptByTime(answerEvents, attemptEvents, sortedAttempt, effective);
+}
+
+export function computeContourNoteHeatMap(
+  answerKey: PitchContourNote[],
+  attempts: PitchContourNote[][],
+  options: Partial<ContourMatchOptions> = {}
+): Record<string, ContourNoteHeatStat> {
+  const sortedAnswer = [...answerKey].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+  if (sortedAnswer.length < 2) {
+    return {};
+  }
+
+  const noteIds = sortedAnswer.slice(1).map((note) => note.id);
+  const totals = new Map<string, { sessionCount: number; missCount: number }>(
+    noteIds.map((noteId) => [noteId, { sessionCount: 0, missCount: 0 }])
+  );
+
+  for (const attempt of attempts) {
+    if (attempt.length < 2) {
+      continue;
+    }
+
+    const match = compareContourAttemptStable(sortedAnswer, attempt, options);
+    for (let answerEventIndex = 0; answerEventIndex < match.answerEventStatuses.length; answerEventIndex += 1) {
+      const noteId = sortedAnswer[answerEventIndex + 1]?.id;
+      if (!noteId) {
+        continue;
+      }
+      const aggregate = totals.get(noteId);
+      if (!aggregate) {
+        continue;
+      }
+      aggregate.sessionCount += 1;
+      if (match.answerEventStatuses[answerEventIndex] !== 'matched') {
+        aggregate.missCount += 1;
+      }
+    }
+  }
+
+  return Object.fromEntries(
+    [...totals.entries()].map(([noteId, aggregate]) => [
+      noteId,
+      {
+        sessionCount: aggregate.sessionCount,
+        missCount: aggregate.missCount,
+        missRate: aggregate.sessionCount === 0 ? 0 : aggregate.missCount / aggregate.sessionCount,
+      },
+    ])
+  );
 }

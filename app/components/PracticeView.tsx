@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useReducer } from "react";
-import { Song, MemoryRating, PitchContourNote } from "../types/index";
+import { Song, MemoryRating, PitchContourNote, ContourNoteHeatStat } from "../types/index";
 import { sessionReducer, SessionState } from "../lib/sessionReducer";
 import { computeKnowledgeScore } from "../lib/knowledgeUtils";
 import SegmentCard from "./SegmentCard";
@@ -50,11 +50,14 @@ const OFFLINE_RATING_QUEUE_PREFIX = "cantare:offline-ratings:";
 const MIN_TAP_DURATION_MS = 80;
 const ROLL_WINDOW_MS = 6000;
 const TAP_PERSISTENCE_WARNING_MS = 3500;
+const TAP_PRACTICE_COUNT_IN_MS = 2000;
+// TODO: If we do not restore these debugging controls, remove the supporting
+// code paths instead of keeping them hidden indefinitely.
+const SHOW_AUXILIARY_TAP_DEBUG_CONTROLS = false;
 const TAP_MATCH_OPTIONS = {
   timeToleranceMs: 400,
-  sameDeadZone: 0.08,
+  sameDeadZone: 0.05,
   durationToleranceRatio: 0.6,
-  answerLookaheadSlots: 2,
 } as const;
 
 function toDirectionLetter(direction: "up" | "down" | "same"): "U" | "D" | "S" {
@@ -124,6 +127,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [showTapOverlay, setShowTapOverlay] = React.useState(true);
   const [showSameLaneGuides, setShowSameLaneGuides] = React.useState(false);
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
+  const [tapHeatMapBySegment, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
+  const [tapSessionResetToken, setTapSessionResetToken] = React.useState(0);
+  const [tapPracticeCountIn, setTapPracticeCountIn] = React.useState<number | null>(null);
   const [accuracyToast, setAccuracyToast] = React.useState<{ text: string; visible: boolean } | null>(null);
   const [tapPersistenceWarning, setTapPersistenceWarning] = React.useState<string | null>(null);
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
@@ -159,6 +165,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const activeTapCaptureRef = React.useRef<ActiveTapCapture | null>(null);
   const toastTimerRef = React.useRef<number | null>(null);
   const tapWarningTimerRef = React.useRef<number | null>(null);
+  const tapCountInIntervalRef = React.useRef<number | null>(null);
+  const tapCountInTimeoutRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
@@ -677,8 +685,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastActionAt: new Date().toISOString(),
     }));
     if (isPlaying) {
+      cancelTapPracticeCountIn();
       pausedByUserRef.current = true;
       pause();
+      return;
+    }
+
+    if (tapPracticeCountIn !== null) {
+      cancelTapPracticeCountIn();
       return;
     }
 
@@ -689,12 +703,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       const resumeMs = currentMs >= currentSegment.endMs
         ? segmentStartWithPreroll
         : Math.max(currentMs, segmentStartWithPreroll);
-      play(resumeMs, currentSegment.endMs);
+      startTapPracticePlayback(resumeMs, currentSegment.endMs);
       return;
     }
     const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
     const fullPieceResumeMs = durationMs > 0 && currentMs >= durationMs ? 0 : currentMs;
-    play(fullPieceResumeMs, effectiveDurationMs);
+    startTapPracticePlayback(fullPieceResumeMs, effectiveDurationMs, {
+      resetTapRun: isTapPracticeMode && fullPieceResumeMs === 0,
+    });
   };
 
   const handleSkipBy = (deltaMs: number) => {
@@ -773,6 +789,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastActionAt: new Date().toISOString(),
     }));
     navigationGuardRef.current = null;
+    cancelTapPracticeCountIn();
+    const seeksToSegmentStart = currentSegment
+      ? ms <= currentSegment.startMs + 50 && currentMs > currentSegment.startMs + 250
+      : false;
+    if (isTapPracticeMode && ((ms === 0 && currentMs > 0) || seeksToSegmentStart)) {
+      resetTapPracticeRun();
+    }
     seek(ms);
     const targetIndex = getSegmentIndexAtMs(ms);
     if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex) {
@@ -868,6 +891,55 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }));
     activeTapCaptureRef.current = null;
   }, [currentSegment]);
+
+  const resetTapPracticeRun = React.useCallback(() => {
+    activeTapCaptureRef.current = null;
+    loopHandledRef.current = null;
+    pendingPersistedTapsRef.current = [];
+    setTapAttemptsBySegment({});
+    setTapSessionResetToken((previous) => previous + 1);
+  }, []);
+
+  const cancelTapPracticeCountIn = React.useCallback(() => {
+    if (tapCountInIntervalRef.current !== null) {
+      window.clearInterval(tapCountInIntervalRef.current);
+      tapCountInIntervalRef.current = null;
+    }
+    if (tapCountInTimeoutRef.current !== null) {
+      window.clearTimeout(tapCountInTimeoutRef.current);
+      tapCountInTimeoutRef.current = null;
+    }
+    setTapPracticeCountIn(null);
+  }, []);
+
+  const startTapPracticePlayback = React.useCallback((
+    startMs: number,
+    endMs: number,
+    options?: { resetTapRun?: boolean }
+  ) => {
+    if (!isTapPracticeMode) {
+      play(startMs, endMs);
+      return;
+    }
+
+    cancelTapPracticeCountIn();
+
+    if (options?.resetTapRun) {
+      resetTapPracticeRun();
+    }
+
+    const deadline = Date.now() + TAP_PRACTICE_COUNT_IN_MS;
+    setTapPracticeCountIn(2);
+    tapCountInIntervalRef.current = window.setInterval(() => {
+      const remainingMs = Math.max(0, deadline - Date.now());
+      const nextCount = remainingMs <= 0 ? null : Math.max(1, Math.ceil(remainingMs / 1000));
+      setTapPracticeCountIn(nextCount);
+    }, 100);
+    tapCountInTimeoutRef.current = window.setTimeout(() => {
+      cancelTapPracticeCountIn();
+      play(startMs, endMs);
+    }, TAP_PRACTICE_COUNT_IN_MS);
+  }, [cancelTapPracticeCountIn, isTapPracticeMode, play, resetTapPracticeRun]);
 
   const getRollX = React.useCallback((noteOffsetMs: number) => {
     return 100 - ((currentSegmentOffsetMs - noteOffsetMs) / ROLL_WINDOW_MS) * 100;
@@ -1113,13 +1185,21 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         console.error("Failed to create tap practice session:", error);
         showTapPersistenceWarning("Could not start tap persistence session. Check your connection and try again.");
       });
-  }, [clearTapPersistenceWarning, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id]);
+  }, [clearTapPersistenceWarning, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id, tapSessionResetToken]);
 
   useEffect(() => {
     activeTapCaptureRef.current = null;
   }, [currentSegment?.id]);
 
   useEffect(() => {
+    if (isTapPracticeMode) {
+      return;
+    }
+    cancelTapPracticeCountIn();
+  }, [cancelTapPracticeCountIn, isTapPracticeMode]);
+
+  useEffect(() => {
+    cancelTapPracticeCountIn();
     setTapAttemptsBySegment({});
     setIsTapPracticeMode(false);
     setShowCardContourMap(false);
@@ -1135,7 +1215,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = null;
     }
-  }, [clearTapPersistenceWarning, song.id]);
+  }, [cancelTapPracticeCountIn, clearTapPersistenceWarning, song.id]);
+
+  useEffect(() => {
+    return () => {
+      cancelTapPracticeCountIn();
+    };
+  }, [cancelTapPracticeCountIn]);
 
   useEffect(() => {
     return () => {
@@ -1190,6 +1276,37 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   useEffect(() => {
     onSessionChange?.(session);
   }, [session, onSessionChange]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadTapHeatMap = async () => {
+      try {
+        const response = await fetch(`/api/songs/${song.id}/tap-heatmap`);
+        if (!response.ok) {
+          throw new Error(`Failed to load tap heat map (${response.status})`);
+        }
+
+        const payload = await response.json() as {
+          heatMapBySegment?: Record<string, Record<string, ContourNoteHeatStat>>;
+        };
+
+        if (!cancelled) {
+          setTapHeatMapBySegment(payload.heatMapBySegment ?? {});
+        }
+      } catch {
+        if (!cancelled) {
+          setTapHeatMapBySegment({});
+        }
+      }
+    };
+
+    void loadTapHeatMap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [song.id]);
 
   return (
     <div
@@ -1333,7 +1450,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               Overlay: {showTapOverlay ? "On" : "Off"}
             </button>
           ) : null}
-          {isTapPracticeMode && hasSegments && currentSegment ? (
+          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
             <button
               type="button"
               data-testid="practice-same-lane-guides-toggle"
@@ -1343,7 +1460,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               Same lanes: {showSameLaneGuides ? "On" : "Off"}
             </button>
           ) : null}
-          {isTapPracticeMode && hasSegments && currentSegment ? (
+          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
             <button
               type="button"
               data-testid="practice-clear-taps"
@@ -1353,7 +1470,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               Clear segment taps
             </button>
           ) : null}
-          {isTapPracticeMode ? (
+          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode ? (
             <a
               href={tapDebugHref}
               data-testid="practice-open-tap-debug"
@@ -1414,6 +1531,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     {currentSegmentMatch?.totalEvents ?? 0})
                   </div>
                 ) : null}
+                {isTapPracticeMode && tapPracticeCountIn !== null ? (
+                  <div
+                    data-testid="practice-count-in"
+                    className="pointer-events-none absolute inset-x-0 top-20 z-20 mx-auto flex w-fit flex-col items-center rounded-[28px] border border-amber-200 bg-white/95 px-5 py-3 text-center text-amber-950 shadow-lg"
+                  >
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">
+                      Count-in
+                    </span>
+                    <span className="mt-1 text-3xl font-bold leading-none">{tapPracticeCountIn}</span>
+                    <span className="mt-1 text-xs font-medium text-amber-800">Get ready to tap</span>
+                  </div>
+                ) : null}
                 {isTapPracticeMode && showTapOverlay && showSameLaneGuides ? (
                   <div
                     data-testid="practice-same-lane-legend"
@@ -1436,6 +1565,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     lyricVisibilityMode={lyricVisibilityMode}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
                     showContourMap={showCardContourMap}
+                    contourHeatMap={tapHeatMapBySegment[currentSegment.id]}
                   />
                 </div>
                 {isTapPracticeMode && hasSegments && currentSegment && showTapOverlay ? (

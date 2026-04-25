@@ -10,7 +10,7 @@ import {
 
 const DEFAULT_TIMELINE_MS = 4000;
 const DEFAULT_NOTE_DURATION_MS = 120;
-const DEFAULT_SAME_DEAD_ZONE = 0.08;
+const DEFAULT_SAME_DEAD_ZONE = 0.05;
 const PAUSED_CAPTURE_ADVANCE_MS = 350;
 
 type EditorMode = "answer" | "attempt";

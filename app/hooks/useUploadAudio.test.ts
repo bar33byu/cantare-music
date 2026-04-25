@@ -199,7 +199,7 @@ describe('useUploadAudio', () => {
     global.XMLHttpRequest = XMLHttpRequestStub as any;
   });
 
-  it('surfaces the direct upload error when the file is too large for server fallback', async () => {
+  it('tries server fallback even when the file is larger than 4 MB', async () => {
     global.XMLHttpRequest = XMLHttpRequestErrorStub as any;
 
     mockFetch.mockResolvedValueOnce({
@@ -207,17 +207,51 @@ describe('useUploadAudio', () => {
       json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
     });
 
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ key: 'fallback-key' }),
+    });
+
+    const { result } = renderHook(() => useUploadAudio());
+    const file = new File(['x'.repeat(4_100_000)], 'test.mp3', { type: 'audio/mpeg' });
+
+    await act(async () => {
+      await expect(result.current.upload('song-123', file)).resolves.toBe('fallback-key');
+    });
+
+    expect(result.current.error).toBe(null);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenNthCalledWith(2, '/api/songs/upload', {
+      method: 'POST',
+      body: expect.any(FormData),
+    });
+ 
+    global.XMLHttpRequest = XMLHttpRequestStub as any;
+  });
+
+  it('surfaces a deployment limit message when both direct upload and fallback fail due to request size', async () => {
+    global.XMLHttpRequest = XMLHttpRequestErrorStub as any;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ uploadUrl: 'https://example.com/upload', key: 'test-key' }),
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      text: () => Promise.resolve('Payload Too Large'),
+    });
+
     const { result } = renderHook(() => useUploadAudio());
     const file = new File(['x'.repeat(4_100_000)], 'test.mp3', { type: 'audio/mpeg' });
 
     await act(async () => {
       await expect(result.current.upload('song-123', file)).rejects.toThrow(
-        'Server fallback is limited to files up to 4 MB on this deployment.',
+        'Server fallback could not accept this file on the current deployment. This usually means a platform upload size limit.',
       );
     });
 
-    expect(result.current.error).toMatch('Server fallback is limited to files up to 4 MB on this deployment.');
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(result.current.error).toMatch('Server fallback could not accept this file on the current deployment.');
 
     global.XMLHttpRequest = XMLHttpRequestStub as any;
   });

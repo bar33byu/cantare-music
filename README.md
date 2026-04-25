@@ -14,6 +14,7 @@ Cantare lets you upload songs, divide them into labeled segments (verses, chorus
 - **Segment editor** - a visual timeline interface for slicing a song into segments, setting start/end times by dragging, attaching lyrics, and recording contour answer keys
 - **Practice view** - plays each segment in sequence with configurable pre-roll, shows or hides lyrics, and lets you rate your memory after each repetition
 - **Tap practice** - tap melodic contour attempts during practice and compare them against saved answer keys
+- **Contour review heat map** - the card contour can color recent trouble spots so repeated misses stand out visually
 - **Tap debug tools** - inspect persisted tap sessions and review contour-matching diagnostics
 - **Knowledge bar** - color-coded mastery visualization across all segments of a song
 - **Playlists** - group songs together for a rehearsal or event, with aggregate knowledge scores across the whole playlist
@@ -86,4 +87,7 @@ npm test
 
 - Tap practice creates a per-song tap session and persists taps in the background while you practice.
 - If you tap immediately after enabling tap practice, early taps are buffered until the session exists instead of being dropped.
-- Contour scoring re-aligns after a skipped transition, which reduces false cascades where one missed tap causes many later taps to be scored as wrong.
+- Starting playback in tap practice adds a two-second visual count-in so you have time to move from the play button to the tap bar.
+- Replaying from the beginning or seeking back to the active segment start resets the current tap run so old dots do not pollute a new attempt.
+- Contour scoring is time-anchored to the whole segment first and then checked for `up` / `down` / `same`, which keeps later taps aligned to the part of the music you actually attempted.
+- The card contour can color each note by recent miss rate, using saved tap sessions as a lightweight practice heat map.
