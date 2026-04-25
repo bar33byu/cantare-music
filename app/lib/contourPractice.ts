@@ -100,7 +100,9 @@ function scoreContourAttemptByTime(
   }
 
   const transitionResults: AttemptTransitionResult[] = [];
-  const answerEventStatuses = answerEvents.map(() => 'unattempted' as const);
+  const answerEventStatuses: StableContourMatchResult['answerEventStatuses'] = answerEvents.map(
+    () => 'unattempted'
+  );
   let nextAnswerIndex = 0;
   let matchedEvents = 0;
 
