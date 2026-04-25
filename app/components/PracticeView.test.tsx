@@ -791,6 +791,107 @@ describe("PracticeView", () => {
     });
   });
 
+  it("buffers immediate taps until the tap session has been created", async () => {
+    let resolveSessionStart: ((value: any) => void) | null = null;
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/ratings") && method === "GET") {
+        return Promise.resolve({ ok: true, json: async () => ({ ratings: [] }) } as any);
+      }
+
+      if (url.endsWith("/tap-sessions") && method === "POST") {
+        return new Promise((resolve) => {
+          resolveSessionStart = resolve;
+        });
+      }
+
+      if (url.includes("/tap-sessions/tap-session-1") && method === "POST") {
+        return Promise.resolve({ ok: true } as any);
+      }
+
+      if (url.endsWith("/tap-sessions") && method === "GET") {
+        return Promise.resolve({ ok: true, json: async () => ({ sessions: [] }) } as any);
+      }
+
+      if (url.includes("/tap-sessions/") && method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            session: {
+              id: "tap-session-1",
+              songId: "song-1",
+              startedAt: "2026-04-11T12:00:00.000Z",
+              taps: [],
+            },
+          }),
+        } as any);
+      }
+
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 77, clientY: 120 });
+    fireEvent.pointerUp(tapBar, { pointerId: 77, clientY: 120 });
+
+    const persistedBeforeSession = mockFetch.mock.calls.find(([calledUrl, calledInit]) => (
+      String(calledUrl).includes(`/api/songs/${song.id}/tap-sessions/tap-session-1`) &&
+      (calledInit as RequestInit | undefined)?.method === "POST"
+    ));
+    expect(persistedBeforeSession).toBeFalsy();
+
+    resolveSessionStart?.({
+      ok: true,
+      json: async () => ({
+        session: {
+          id: "tap-session-1",
+          songId: "song-1",
+          startedAt: "2026-04-11T12:00:00.000Z",
+          tapCount: 0,
+        },
+      }),
+    });
+
+    await waitFor(() => {
+      const tapPersistCall = mockFetch.mock.calls.find(([calledUrl, calledInit]) => (
+        String(calledUrl).includes(`/api/songs/${song.id}/tap-sessions/tap-session-1`) &&
+        (calledInit as RequestInit | undefined)?.method === "POST"
+      ));
+      expect(tapPersistCall).toBeTruthy();
+    });
+  });
   it("fetches historical ratings on mount", async () => {
     const song = makeSong(2);
     render(<PracticeView song={song} initialSession={makeSession(song)} />);

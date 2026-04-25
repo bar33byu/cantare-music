@@ -82,6 +82,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const contourTapBarRef = useRef<HTMLDivElement | null>(null);
   const activeContourCaptureRef = useRef<ActiveContourCapture | null>(null);
+  const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
 
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(audioUrl)), [audioUrl]);
   const playbackAudioUrl = useMemo(() => {
@@ -652,6 +653,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   }, [activeInteraction, finishInteraction, handleInteractionMove]);
 
   useEffect(() => {
+    setStableDurationMs(0);
+  }, [audioUrl]);
+
+  useEffect(() => {
     if (durationMs > 0) {
       setStableDurationMs((previous) => Math.max(previous, durationMs));
     }
@@ -683,6 +688,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     setIsContourRecording(false);
     setContourDraftBySegment({});
     activeContourCaptureRef.current = null;
+    pendingFallbackPlayRangeRef.current = null;
   }, [songId]);
 
   useEffect(() => {
@@ -691,6 +697,20 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     }
     setUseProxyFallback(true);
   }, [playbackError, proxyAudioUrl, useProxyFallback]);
+
+  useEffect(() => {
+    if (!useProxyFallback) {
+      return;
+    }
+
+    const pendingRange = pendingFallbackPlayRangeRef.current;
+    if (!pendingRange) {
+      return;
+    }
+
+    pendingFallbackPlayRangeRef.current = null;
+    play(pendingRange.startMs, pendingRange.endMs);
+  }, [play, useProxyFallback]);
 
   // Clean up undo timer on unmount to avoid memory leaks
   useEffect(() => {
@@ -705,7 +725,17 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       return;
     }
     const safeDuration = timelineDurationMs > 0 ? timelineDurationMs : Number.POSITIVE_INFINITY;
-    const startMs = Math.max(0, Math.min(currentMs, safeDuration));
+    const atOrPastEnd =
+      Number.isFinite(safeDuration) &&
+      safeDuration > 0 &&
+      currentMs >= Math.max(0, safeDuration - 250);
+    const startMs = atOrPastEnd
+      ? 0
+      : Math.max(0, Math.min(currentMs, safeDuration));
+    pendingFallbackPlayRangeRef.current = {
+      startMs,
+      endMs: safeDuration,
+    };
     play(startMs, safeDuration);
   };
 
@@ -909,7 +939,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         </button>
         {showReplaceAudio && (
           <div className="mt-2">
-            <ReplaceAudioForm songId={songId} onReplaced={onSongUpdated} />
+            <ReplaceAudioForm songId={songId} onReplaced={handleAudioUploaded} />
           </div>
         )}
       </div>

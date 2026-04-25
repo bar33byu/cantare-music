@@ -25,8 +25,9 @@ function normalizeEndpoint(value: string | undefined): string | undefined {
 }
 
 const R2_ACCOUNT_ID = normalizeEnv(process.env.R2_ACCOUNT_ID);
+const configuredR2Endpoint = normalizeEnv(process.env.R2_ENDPOINT);
 const R2_ENDPOINT = normalizeEndpoint(
-  process.env.R2_ENDPOINT ??
+  configuredR2Endpoint ||
     (R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : undefined),
 );
 const R2_ACCESS_KEY_ID = normalizeEnv(process.env.R2_ACCESS_KEY_ID) ?? '';
@@ -36,13 +37,14 @@ export const r2Client = new S3Client({
   endpoint: R2_ENDPOINT,
   region: 'auto',
   forcePathStyle: true,
+  requestChecksumCalculation: 'WHEN_REQUIRED',
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID,
     secretAccessKey: R2_SECRET_ACCESS_KEY,
   },
 });
 
-export const BUCKET = process.env.R2_BUCKET_NAME ?? process.env.R2_BUCKET ?? 'cantare-audio';
+export const BUCKET = normalizeEnv(process.env.R2_BUCKET_NAME) ?? normalizeEnv(process.env.R2_BUCKET) ?? 'cantare-audio';
 
 function firstTruthy(...candidates: Array<string | undefined>): string | undefined {
   for (const c of candidates) {

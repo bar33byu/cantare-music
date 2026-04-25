@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildContourDirectionEvents, compareContourAttempt, compareContourAttemptDetailed } from './contourPractice';
+import {
+  buildContourDirectionEvents,
+  compareContourAttempt,
+  compareContourAttemptDetailed,
+  compareContourAttemptStable,
+} from './contourPractice';
 
 describe('contourPractice', () => {
   it('builds up/down/same direction events', () => {
@@ -64,5 +69,41 @@ describe('contourPractice', () => {
 
     expect(detailed.matchedEvents).toBe(0);
     expect(detailed.attemptNoteStatuses.u2).toBe('mismatched');
+  });
+
+  it('re-aligns later stable matches after a skipped transition', () => {
+    const result = compareContourAttemptStable(
+      [
+        { id: 'a1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
+        { id: 'a2', timeOffsetMs: 100, durationMs: 100, lane: 0.8 },
+        { id: 'a3', timeOffsetMs: 200, durationMs: 100, lane: 0.2 },
+        { id: 'a4', timeOffsetMs: 300, durationMs: 100, lane: 0.8 },
+      ],
+      [
+        { id: 'u1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
+        { id: 'u2', timeOffsetMs: 100, durationMs: 100, lane: 0.8 },
+        { id: 'u3', timeOffsetMs: 300, durationMs: 100, lane: 0.2 },
+      ]
+    );
+
+    expect(result.transitionResults).toEqual([
+      {
+        attemptEventIndex: 0,
+        attemptNoteId: 'u2',
+        direction: 'up',
+        status: 'matched',
+        expectedDirection: 'up',
+      },
+      {
+        attemptEventIndex: 1,
+        attemptNoteId: 'u3',
+        direction: 'down',
+        status: 'matched',
+        expectedDirection: 'down',
+      },
+    ]);
+    expect(result.matchedEvents).toBe(2);
+    expect(result.totalEvents).toBe(3);
+    expect(result.score).toBeCloseTo(2 / 3);
   });
 });

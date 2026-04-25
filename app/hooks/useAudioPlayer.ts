@@ -103,6 +103,7 @@ export function useAudioPlayer(
   audioUrl: string,
   audioFactory: AudioFactory = defaultFactory
 ): AudioPlayerControls {
+  const mountedRef = useRef(true);
   const audioFactoryRef = useRef(audioFactory);
   const previousAudioUrlRef = useRef<string | null>(null);
   const audioUrlChangeCountRef = useRef(0);
@@ -110,6 +111,7 @@ export function useAudioPlayer(
   const audioInstanceIdRef = useRef(0);
   const audioInstancesCreatedRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playRequestIdRef = useRef(0);
   const endMsRef = useRef<number>(0);
   const pendingSeekMsRef = useRef<number | null>(null);
   const pendingPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
@@ -162,6 +164,13 @@ export function useAudioPlayer(
     });
   }, [audioUrl]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const applyCurrentTime = useCallback(
     (audio: HTMLAudioElement, ms: number, eventName: string) => {
       try {
@@ -178,6 +187,11 @@ export function useAudioPlayer(
   );
 
   const startPlayback = useCallback((audio: HTMLAudioElement, startMs: number, endMs: number) => {
+    const playRequestId = playRequestIdRef.current + 1;
+    playRequestIdRef.current = playRequestId;
+
+    const isStalePlayRequest = () => !mountedRef.current || audioRef.current !== audio || playRequestIdRef.current !== playRequestId;
+
     hasUserPlayIntentRef.current = true;
     lastErrorRef.current = null;
     setPlaybackError(null);
@@ -204,6 +218,9 @@ export function useAudioPlayer(
       if (isPromiseLike<void>(result)) {
         result.then(
           () => {
+            if (isStalePlayRequest()) {
+              return;
+            }
             setDebugInfo((previous) => ({
               ...previous,
               playResolved: (previous.playResolved ?? 0) + 1,
@@ -212,6 +229,9 @@ export function useAudioPlayer(
             updateDebugInfo(audio, 'play-resolved');
           },
           (error: unknown) => {
+            if (isStalePlayRequest()) {
+              return;
+            }
             const message = getPlaybackErrorMessage(error);
             const isBenignAbort = isBenignPlayAbort(error);
             if (!isBenignAbort) {
@@ -229,6 +249,9 @@ export function useAudioPlayer(
         );
       }
     } catch (error) {
+      if (isStalePlayRequest()) {
+        return;
+      }
       const message = getPlaybackErrorMessage(error);
       const isBenignAbort = isBenignPlayAbort(error);
       if (!isBenignAbort) {
@@ -377,6 +400,7 @@ export function useAudioPlayer(
     }
 
     return () => {
+      playRequestIdRef.current += 1;
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
