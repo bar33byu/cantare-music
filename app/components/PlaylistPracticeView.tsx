@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
@@ -69,7 +69,9 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const [mode, setMode] = useState<'practice' | 'listen'>('practice');
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
+  const [useProxyFallback, setUseProxyFallback] = useState(false);
   const autoPlaySongIdRef = useRef<string | null>(null);
+  const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
 
   const displayedSongs = useMemo(() => {
     const dir = sort.asc ? 1 : -1;
@@ -96,11 +98,54 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   }, [playlist.songs, sort]);
 
   const currentSong = displayedSongs[currentSongIndex];
-  const playbackAudioUrl = useMemo(
+  const proxyAudioUrl = useMemo(
+    () => buildProxyAudioUrl(parseAudioKey(currentSong?.audioUrl ?? '')),
+    [currentSong?.audioUrl]
+  );
+  const directPlaybackAudioUrl = useMemo(
     () => toPlayableAudioUrl(currentSong?.audioUrl ?? ''),
     [currentSong?.audioUrl]
   );
+  const canFallbackToProxy = proxyAudioUrl !== null && proxyAudioUrl !== directPlaybackAudioUrl;
+  const playbackAudioUrl = useMemo(() => {
+    if (useProxyFallback && canFallbackToProxy && proxyAudioUrl) {
+      return proxyAudioUrl;
+    }
+    return directPlaybackAudioUrl;
+  }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
+  const requestPlay = useCallback((startMs: number, endMs: number) => {
+    pendingFallbackPlayRangeRef.current = !useProxyFallback && canFallbackToProxy
+      ? { startMs, endMs }
+      : null;
+    audioPlayer.play(startMs, endMs);
+  }, [audioPlayer.play, canFallbackToProxy, useProxyFallback]);
+
+  useEffect(() => {
+    setUseProxyFallback(false);
+    pendingFallbackPlayRangeRef.current = null;
+  }, [currentSong?.id]);
+
+  useEffect(() => {
+    if (!audioPlayer.playbackError || useProxyFallback || !canFallbackToProxy) {
+      return;
+    }
+    setUseProxyFallback(true);
+  }, [audioPlayer.playbackError, canFallbackToProxy, useProxyFallback]);
+
+  useEffect(() => {
+    if (!useProxyFallback) {
+      return;
+    }
+
+    const pendingRange = pendingFallbackPlayRangeRef.current;
+    if (!pendingRange) {
+      return;
+    }
+
+    pendingFallbackPlayRangeRef.current = null;
+    audioPlayer.play(pendingRange.startMs, pendingRange.endMs);
+  }, [audioPlayer.play, useProxyFallback]);
 
   useEffect(() => {
     if (mode !== 'listen' || !currentSong) {
@@ -113,8 +158,8 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
     }
 
     autoPlaySongIdRef.current = currentSong.id;
-    audioPlayer.play(0, 0);
-  }, [mode, currentSong?.id, audioPlayer.play]);
+    requestPlay(0, 0);
+  }, [mode, currentSong?.id, requestPlay]);
 
   useEffect(() => {
     if (
@@ -461,7 +506,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
               </svg>
             </button>
             <button
-              onClick={() => audioPlayer.isPlaying ? audioPlayer.pause() : audioPlayer.play(0, audioPlayer.durationMs)}
+              onClick={() => audioPlayer.isPlaying ? audioPlayer.pause() : requestPlay(0, audioPlayer.durationMs)}
               className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700"
             >
               {audioPlayer.isPlaying ? (

@@ -27,6 +27,13 @@ export function parseAudioKey(audioUrl: string): string | null {
         .join("/");
     }
 
+    if (trimmedPath.includes("/audio/")) {
+      return trimmedPath
+        .split("/")
+        .map((segment) => decodeURIComponent(segment))
+        .join("/");
+    }
+
     return null;
   } catch {
     return null;

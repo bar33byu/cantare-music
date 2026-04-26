@@ -62,7 +62,6 @@ export function getPublicUrl(key: string): string {
   const configuredPublicUrl = firstTruthy(
     process.env.R2_PUBLIC_URL,
     process.env.R2_PUBLIC_BASE_URL,
-    process.env.R2_PUBLIC_BASE_UR,
   );
 
   if (!configuredPublicUrl) {

@@ -234,6 +234,57 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
+  it('falls back to the proxy URL when direct listen playback reports an error', async () => {
+    const useAudioPlayerSpy = vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 12000,
+      playbackRate: 1,
+      playbackError: audioUrl.startsWith('https://') ? 'Unable to load audio' : null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+
+    const fallbackPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          audioUrl: 'https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3',
+        },
+      ],
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={fallbackPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      const args = useAudioPlayerSpy.mock.calls.map((call) => String(call[0]));
+      expect(args).toContain('https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3');
+      expect(args).toContain('/api/audio/users/default/audio/song-1/test%20file.mp3');
+    });
+  });
+
   it('places mastery label inside the bar at 10% or higher and outside when below 10%', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
 

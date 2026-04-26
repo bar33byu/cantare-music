@@ -17,7 +17,6 @@ export async function GET(request: NextRequest) {
       R2_BUCKET: process.env.R2_BUCKET,
       R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
       R2_PUBLIC_BASE_URL: process.env.R2_PUBLIC_BASE_URL,
-      R2_PUBLIC_BASE_UR: process.env.R2_PUBLIC_BASE_UR,
       R2_ENDPOINT: process.env.R2_ENDPOINT,
     };
 
@@ -36,7 +35,7 @@ export async function GET(request: NextRequest) {
     const computedEndpoint = rawEnv.R2_ENDPOINT ?? (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined);
     const bucket = rawEnv.R2_BUCKET_NAME ?? BUCKET;
 
-    const publicCandidates = [rawEnv.R2_PUBLIC_URL, rawEnv.R2_PUBLIC_BASE_URL, rawEnv.R2_PUBLIC_BASE_UR, rawEnv.R2_ENDPOINT]
+    const publicCandidates = [rawEnv.R2_PUBLIC_URL, rawEnv.R2_PUBLIC_BASE_URL, rawEnv.R2_ENDPOINT]
       .filter((v) => typeof v === 'string' && v && v !== 'undefined');
     const chosenPublic = publicCandidates.length > 0 ? publicCandidates[0] : undefined;
 

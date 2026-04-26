@@ -146,7 +146,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(song.audioUrl)), [song.audioUrl]);
-  const playbackAudioUrl = useMemo(() => proxyAudioUrl ?? toPlayableAudioUrl(song.audioUrl), [proxyAudioUrl, song.audioUrl]);
+  const directPlaybackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
+  const canFallbackToProxy = proxyAudioUrl !== null && proxyAudioUrl !== directPlaybackAudioUrl;
+  const [useProxyFallback, setUseProxyFallback] = React.useState(false);
+  const pendingFallbackPlayRangeRef = React.useRef<{ startMs: number; endMs: number } | null>(null);
+  const playbackAudioUrl = useMemo(() => {
+    if (useProxyFallback && canFallbackToProxy && proxyAudioUrl) {
+      return proxyAudioUrl;
+    }
+    return directPlaybackAudioUrl;
+  }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
   const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(playbackAudioUrl);
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
@@ -216,6 +225,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     : 0;
   const hasAutoplayedSongRef = React.useRef<string | null>(null);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
+  const requestPlay = React.useCallback((startMs: number, endMs: number) => {
+    pendingFallbackPlayRangeRef.current = !useProxyFallback && canFallbackToProxy
+      ? { startMs, endMs }
+      : null;
+    play(startMs, endMs);
+  }, [canFallbackToProxy, play, useProxyFallback]);
 
   const enqueueOfflineRatings = React.useCallback((snapshot: string) => {
     if (typeof window === "undefined") {
@@ -418,6 +433,32 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [song.id]);
 
   useEffect(() => {
+    setUseProxyFallback(false);
+    pendingFallbackPlayRangeRef.current = null;
+  }, [song.id]);
+
+  useEffect(() => {
+    if (!playbackError || useProxyFallback || !canFallbackToProxy) {
+      return;
+    }
+    setUseProxyFallback(true);
+  }, [canFallbackToProxy, playbackError, useProxyFallback]);
+
+  useEffect(() => {
+    if (!useProxyFallback) {
+      return;
+    }
+
+    const pendingRange = pendingFallbackPlayRangeRef.current;
+    if (!pendingRange) {
+      return;
+    }
+
+    pendingFallbackPlayRangeRef.current = null;
+    play(pendingRange.startMs, pendingRange.endMs);
+  }, [play, useProxyFallback]);
+
+  useEffect(() => {
     if (!isPlaying) {
       flushPlayedTime();
       playbackStartedAtRef.current = null;
@@ -504,8 +545,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     hasAutoplayedSongRef.current = song.id;
     seek(0);
     const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
-    play(0, effectiveDurationMs);
-  }, [durationMs, play, seek, song.audioUrl, song.id]);
+    requestPlay(0, effectiveDurationMs);
+  }, [durationMs, requestPlay, seek, song.audioUrl, song.id]);
 
   useEffect(() => {
     if (!hasSegments || !isPlaying) {
@@ -666,12 +707,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         };
       }
       if (isLooping) {
-        play(targetStartWithPreroll, targetSegment.endMs);
+        requestPlay(targetStartWithPreroll, targetSegment.endMs);
         return;
       }
 
       const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
-      play(targetStartWithPreroll, effectiveDurationMs);
+      requestPlay(targetStartWithPreroll, effectiveDurationMs);
       return;
     }
     seek(targetSegment.startMs);
@@ -918,7 +959,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     options?: { resetTapRun?: boolean }
   ) => {
     if (!isTapPracticeMode) {
-      play(startMs, endMs);
+      requestPlay(startMs, endMs);
       return;
     }
 
@@ -937,9 +978,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }, 100);
     tapCountInTimeoutRef.current = window.setTimeout(() => {
       cancelTapPracticeCountIn();
-      play(startMs, endMs);
+      requestPlay(startMs, endMs);
     }, TAP_PRACTICE_COUNT_IN_MS);
-  }, [cancelTapPracticeCountIn, isTapPracticeMode, play, resetTapPracticeRun]);
+  }, [cancelTapPracticeCountIn, isTapPracticeMode, requestPlay, resetTapPracticeRun]);
 
   const getRollX = React.useCallback((noteOffsetMs: number) => {
     return 100 - ((currentSegmentOffsetMs - noteOffsetMs) / ROLL_WINDOW_MS) * 100;
@@ -973,7 +1014,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastAction: "debug-play-test",
       lastActionAt: new Date().toISOString(),
     }));
-    play(0, 10000);
+    requestPlay(0, 10000);
   };
 
   useEffect(() => {
@@ -1118,7 +1159,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         [currentSegment.id]: [],
       }));
       activeTapCaptureRef.current = null;
-      play(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
+      requestPlay(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
   }, [
     currentMs,

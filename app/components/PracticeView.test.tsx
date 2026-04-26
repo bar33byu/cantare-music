@@ -1045,7 +1045,7 @@ describe("PracticeView", () => {
     });
   });
 
-  it("uses proxy audio URL immediately when audio key can be parsed", async () => {
+  it("prefers the direct audio URL before any proxy fallback", async () => {
     const song = makeSong(2);
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
@@ -1065,7 +1065,35 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(mockUseAudioPlayer).toHaveBeenCalled();
       const args = mockUseAudioPlayer.mock.calls.map((call) => String(call[0]));
-      expect(args).toContain("/api/audio/audio/song-1/audio.mp3");
+      expect(args).toContain("https://cdn.example.com/audio/song-1/audio.mp3");
+    });
+  });
+
+  it("falls back to proxy playback when a direct public URL reports an error", async () => {
+    const song = {
+      ...makeSong(2),
+      audioUrl: "https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3",
+    };
+
+    mockUseAudioPlayer.mockImplementation((audioUrl: string) => ({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 12000,
+      playbackError: audioUrl.startsWith("https://") ? "Unable to load audio" : null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    }));
+
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      const args = mockUseAudioPlayer.mock.calls.map((call) => String(call[0]));
+      expect(args).toContain("https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3");
+      expect(args).toContain("/api/audio/users/default/audio/song-1/test%20file.mp3");
     });
   });
 
