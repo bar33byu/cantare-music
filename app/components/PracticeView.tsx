@@ -185,6 +185,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const persistTapChainRef = React.useRef<Promise<void>>(Promise.resolve());
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
+  const canRestartCurrentSegment = currentSegment
+    ? currentMs > currentSegment.startMs + PREV_SEGMENT_GO_BACK_THRESHOLD_MS
+    : false;
+  const canUsePrevSegment = hasSegments && (!isFirst || canRestartCurrentSegment);
   const tapDebugHref = React.useMemo(() => {
     const params = new URLSearchParams({ songId: song.id });
     if (tapSessionId) {
@@ -535,18 +539,22 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     seek(currentSegment.startMs);
   }, [currentSegment, isPlaying, song.audioUrl, seek]);
 
-  useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!song.audioUrl) {
       return;
     }
     if (hasAutoplayedSongRef.current === song.id) {
-      return;
+      return undefined;
     }
     hasAutoplayedSongRef.current = song.id;
     seek(0);
-    const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
-    requestPlay(0, effectiveDurationMs);
-  }, [durationMs, requestPlay, seek, song.audioUrl, song.id]);
+    requestPlay(0, Number.POSITIVE_INFINITY);
+    return () => {
+      if (hasAutoplayedSongRef.current === song.id) {
+        hasAutoplayedSongRef.current = null;
+      }
+    };
+  }, [requestPlay, seek, song.audioUrl, song.id]);
 
   useEffect(() => {
     if (!hasSegments || !isPlaying) {
@@ -1551,7 +1559,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               aria-label="Previous segment"
               data-testid="practice-prev-segment"
               onClick={handlePrevSegment}
-              disabled={!hasSegments || isFirst}
+              disabled={!canUsePrevSegment}
               className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

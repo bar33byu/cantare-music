@@ -164,10 +164,12 @@ describe('SegmentEditor', () => {
       expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
     });
 
+    const pastedLyrics = ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n');
+
     fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
     fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
       target: {
-        value: ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n'),
+        value: pastedLyrics,
       },
     });
     fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
@@ -181,12 +183,12 @@ describe('SegmentEditor', () => {
       const firstPatchBody = JSON.parse(String(patchCalls[patchCalls.length - 2][1]?.body ?? '{}'));
       const secondPatchBody = JSON.parse(String(patchCalls[patchCalls.length - 1][1]?.body ?? '{}'));
 
-      expect(firstPatchBody.startMs).toBe(0);
-      expect(firstPatchBody.endMs).toBe(30000);
+      expect(firstPatchBody.startMs).toBe(13333);
+      expect(firstPatchBody.endMs).toBe(26667);
       expect(firstPatchBody.lyricText).toBe('Line A1\nLine A2');
 
-      expect(secondPatchBody.startMs).toBe(30000);
-      expect(secondPatchBody.endMs).toBe(60000);
+      expect(secondPatchBody.startMs).toBe(33333);
+      expect(secondPatchBody.endMs).toBe(46667);
       expect(secondPatchBody.lyricText).toBe('Line B1\nLine B2');
 
       const createCalls = mockFetch.mock.calls.filter(
@@ -195,6 +197,162 @@ describe('SegmentEditor', () => {
 
       // No new sections are needed when there are already 2 existing sections.
       expect(createCalls.length).toBe(0);
+      expect(screen.getByTestId('segment-editor-bulk-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-bulk-text')).toHaveValue(pastedLyrics);
+    });
+  });
+
+  it('keeps bulk lyrics editable when a partial import fails', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => sampleSegments,
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments/') && method === 'PATCH') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        if (body.label === '2') {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ error: 'Database write failed' }),
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
+    });
+
+    const pastedLyrics = ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n');
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
+      target: { value: pastedLyrics },
+    });
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('segment-editor-bulk-panel')).toBeInTheDocument();
+        expect(screen.getByTestId('segment-editor-bulk-text')).toHaveValue(pastedLyrics);
+        expect(screen.getByText(/Failed sections: 2/i)).toBeInTheDocument();
+        expect(screen.getByText(/First error: Database write failed \(500\)/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
+  });
+
+  it('rounds bulk import timings before sending create payloads', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 180244.89800000002,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => [],
+        } as Response;
+      }
+
+      if (url.endsWith('/api/songs/song-1/segments') && method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-replace'));
+    fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
+      target: { value: ['One', '*', 'Two', '*', 'Three'].join('\n') },
+    });
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
+
+    await waitFor(() => {
+      const createCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).endsWith('/api/songs/song-1/segments') && init?.method === 'POST'
+      );
+      expect(createCalls).toHaveLength(3);
+
+      for (const [, init] of createCalls) {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        expect(Number.isInteger(body.startMs)).toBe(true);
+        expect(Number.isInteger(body.endMs)).toBe(true);
+      }
+
+      const lastCreateBody = JSON.parse(String(createCalls[2][1]?.body ?? '{}'));
+      expect(lastCreateBody.endMs).toBe(150204);
     });
   });
 
@@ -299,10 +457,10 @@ describe('SegmentEditor', () => {
       const firstCreateBody = JSON.parse(String(createCalls[0][1]?.body ?? '{}'));
       const secondCreateBody = JSON.parse(String(createCalls[1][1]?.body ?? '{}'));
 
-      expect(firstCreateBody.startMs).toBe(0);
-      expect(firstCreateBody.endMs).toBe(90000);
-      expect(secondCreateBody.startMs).toBe(90000);
-      expect(secondCreateBody.endMs).toBe(180000);
+      expect(firstCreateBody.startMs).toBe(40000);
+      expect(firstCreateBody.endMs).toBe(80000);
+      expect(secondCreateBody.startMs).toBe(100000);
+      expect(secondCreateBody.endMs).toBe(140000);
     });
 
     vi.stubGlobal('Audio', originalAudio);

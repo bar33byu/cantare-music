@@ -225,11 +225,51 @@ describe("PracticeView", () => {
     expect(onBreadcrumbRootClick).toHaveBeenCalledTimes(1);
   });
 
-  it("disables previous segment transport action on first segment", async () => {
+  it("retries initial autoplay across React Strict Mode effect replay", async () => {
+    const song = makeSong();
+    render(
+      <React.StrictMode>
+        <PracticeView song={song} initialSession={makeSession(song)} />
+      </React.StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    });
+
+    expect(mockPlay.mock.calls.filter(([startMs]) => startMs === 0).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("disables previous segment transport action near the start of the first segment", async () => {
     const song = makeSong(3);
     await renderAndWaitForRatings(song);
+    expect(screen.getByTestId("practice-prev-segment")).toBeDisabled();
     fireEvent.click(screen.getByTestId("practice-prev-segment"));
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
+  });
+
+  it("enables previous segment transport to restart the first segment after the threshold", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 4200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("practice-prev-segment")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("practice-prev-segment"));
+
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
+    expect(mockSeek).toHaveBeenCalledWith(0);
   });
 
   it("does not advance past last segment via transport next", async () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 export interface AudioPlayerControls {
   isPlaying: boolean;
@@ -268,7 +268,7 @@ export function useAudioPlayer(
     }
   }, [applyCurrentTime, updateDebugInfo]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     audioInitRunsRef.current += 1;
     if (previousAudioUrlRef.current !== audioUrl) {
       audioUrlChangeCountRef.current += 1;

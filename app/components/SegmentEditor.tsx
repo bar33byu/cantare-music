@@ -249,13 +249,17 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   };
 
   const buildBulkTimings = (sectionCount: number, totalDurationMs: number) => {
-    const safeTotalDuration = Math.max(totalDurationMs, sectionCount * MIN_SEGMENT_MS);
+    const gapUnits = 2 + Math.max(0, sectionCount - 1) * 0.5;
+    const totalUnits = sectionCount + gapUnits;
+    const safeTotalDuration = Math.round(Math.max(totalDurationMs, totalUnits * MIN_SEGMENT_MS));
+    const segmentDuration = safeTotalDuration / totalUnits;
+    const betweenSegmentGap = segmentDuration / 2;
+    let cursorMs = segmentDuration;
 
-    return Array.from({ length: sectionCount }, (_, index) => {
-      const startMs = Math.round((index * safeTotalDuration) / sectionCount);
-      const endMs = index === sectionCount - 1
-        ? safeTotalDuration
-        : Math.round(((index + 1) * safeTotalDuration) / sectionCount);
+    return Array.from({ length: sectionCount }, () => {
+      const startMs = Math.round(cursorMs);
+      const endMs = Math.round(cursorMs + segmentDuration);
+      cursorMs += segmentDuration + betweenSegmentGap;
 
       return {
         startMs,
@@ -354,9 +358,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     const readErrorMessage = async (response: Response, fallback: string) => {
       try {
         const payload = (await response.json()) as { error?: string };
-        return payload.error || fallback;
+        const message = payload.error || fallback;
+        return `${message} (${response.status})`;
       } catch {
-        return fallback;
+        return `${fallback} (${response.status})`;
       }
     };
 
@@ -485,14 +490,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         }
       }
 
-      setShowBulkImport(false);
-      setBulkText('');
       setRefreshKey((previous) => previous + 1);
       setSelectedSegmentId(null);
 
       if (failures.length > 0) {
         const failedSections = failures.map((failure) => failure.section).join(', ');
-        setDeleteError(`Bulk import completed with issues. Failed sections: ${failedSections}.`);
+        const firstFailure = failures[0]?.message ? ` First error: ${failures[0].message}` : '';
+        setShowBulkImport(true);
+        setDeleteError(`Bulk import completed with issues. Failed sections: ${failedSections}.${firstFailure}`);
       } else if (hadExtraDeleteFailure) {
         setDeleteError('Bulk import completed, but one or more extra sections could not be deleted.');
       }
