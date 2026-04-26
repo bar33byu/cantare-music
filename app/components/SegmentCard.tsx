@@ -7,6 +7,7 @@ import { PitchContourThumbnail } from "./PitchContourThumbnail";
 
 const LYRIC_FONT_MAX_REM = 2.25; // 36px
 const LYRIC_FONT_MIN_REM = 0.95; // 15.2px
+const LYRIC_FIT_TOLERANCE_PX = 1;
 
 function getAdaptiveLyricFontSize(text: string): string {
   const length = text.trim().length;
@@ -37,6 +38,15 @@ interface SegmentCardProps {
   collapseLyricLineBreaks?: boolean;
   showContourMap?: boolean;
   contourHeatMap?: Record<string, ContourNoteHeatStat>;
+}
+
+function getRootFontSizePx(): number {
+  if (typeof window === "undefined") {
+    return 16;
+  }
+
+  const parsed = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 16;
 }
 
 function isMaskableLyricChar(char: string): boolean {
@@ -100,6 +110,9 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   showContourMap = false,
   contourHeatMap,
 }) => {
+  const cardRef = React.useRef<HTMLDivElement | null>(null);
+  const lyricScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const lyricTextRef = React.useRef<HTMLParagraphElement | null>(null);
   const lyricText = React.useMemo(() => {
     const base = segment.lyricText ?? "";
     if (!collapseLyricLineBreaks) {
@@ -114,12 +127,126 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
     () => getAdaptiveLyricFontSize(lyricText),
     [lyricText]
   );
+  const [fittedLyricFontSize, setFittedLyricFontSize] = React.useState(lyricFontSize);
   const displayLyricContent = React.useMemo(() => {
     if (!hasLyrics) {
       return "No lyrics for this segment yet.";
     }
     return renderLyricWithStableMask(lyricText, lyricVisibilityMode);
   }, [hasLyrics, lyricText, lyricVisibilityMode]);
+
+  React.useLayoutEffect(() => {
+    setFittedLyricFontSize(lyricFontSize);
+  }, [lyricFontSize]);
+
+  React.useLayoutEffect(() => {
+    if (!hasLyrics) {
+      return;
+    }
+
+    let timeoutIds: number[] = [];
+    let animationFrameId: number | null = null;
+    let cancelled = false;
+    const container = lyricScrollRef.current;
+    const paragraph = lyricTextRef.current;
+    if (!container || !paragraph) {
+      return;
+    }
+
+    const fitText = () => {
+      const availableHeight = container.clientHeight;
+      if (availableHeight <= 0) {
+        return;
+      }
+
+      paragraph.style.fontSize = lyricFontSize;
+      const startingSizePx = Number.parseFloat(window.getComputedStyle(paragraph).fontSize);
+      if (!Number.isFinite(startingSizePx) || startingSizePx <= 0) {
+        return;
+      }
+
+      const rootFontSizePx = getRootFontSizePx();
+      const minSizePx = LYRIC_FONT_MIN_REM * rootFontSizePx;
+      const fitsAtCurrentSize = paragraph.scrollHeight <= availableHeight + LYRIC_FIT_TOLERANCE_PX;
+
+      if (fitsAtCurrentSize || startingSizePx <= minSizePx) {
+        const nextSize = fitsAtCurrentSize ? lyricFontSize : `${minSizePx}px`;
+        setFittedLyricFontSize((current) => (current === nextSize ? current : nextSize));
+        return;
+      }
+
+      let low = minSizePx;
+      let high = startingSizePx;
+      let best = minSizePx;
+
+      for (let i = 0; i < 8; i += 1) {
+        const candidate = (low + high) / 2;
+        paragraph.style.fontSize = `${candidate}px`;
+
+        if (paragraph.scrollHeight <= availableHeight + LYRIC_FIT_TOLERANCE_PX) {
+          best = candidate;
+          low = candidate;
+        } else {
+          high = candidate;
+        }
+      }
+
+      const nextSize = `${Math.max(minSizePx, Math.floor(best * 10) / 10)}px`;
+      setFittedLyricFontSize((current) => (current === nextSize ? current : nextSize));
+    };
+
+    const scheduleFitText = () => {
+      if (cancelled) {
+        return;
+      }
+
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+
+      animationFrameId = window.requestAnimationFrame(() => {
+        animationFrameId = null;
+        fitText();
+      });
+    };
+
+    scheduleFitText();
+    timeoutIds = [0, 100, 350].map((delay) => window.setTimeout(scheduleFitText, delay));
+
+    window.addEventListener("resize", scheduleFitText);
+
+    const fontReady = document.fonts?.ready;
+    if (fontReady) {
+      void fontReady.then(scheduleFitText);
+    }
+
+    if (typeof window === "undefined" || typeof window.ResizeObserver === "undefined") {
+      return () => {
+        cancelled = true;
+        window.removeEventListener("resize", scheduleFitText);
+        timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+        if (animationFrameId !== null) {
+          window.cancelAnimationFrame(animationFrameId);
+        }
+      };
+    }
+
+    const observer = new window.ResizeObserver(scheduleFitText);
+    observer.observe(container);
+    if (cardRef.current) {
+      observer.observe(cardRef.current);
+    }
+
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      window.removeEventListener("resize", scheduleFitText);
+      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [hasLyrics, lyricFontSize, lyricText, lyricVisibilityMode, showContourMap]);
 
   const clampedPlaybackMs = Math.min(
     segment.endMs,
@@ -144,7 +271,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   };
 
   return (
-    <div className="relative mx-auto flex h-full min-h-0 w-full max-w-md flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
+    <div ref={cardRef} className="relative mx-auto flex h-full min-h-0 w-full max-w-md flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
       <div className="mb-3">
         <p className="text-center text-sm text-gray-500" data-testid="segment-label-text">
           {segment.label}
@@ -152,13 +279,15 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
       </div>
       <div className="mb-4 min-h-0 flex-1">
         <div
+          ref={lyricScrollRef}
           className="h-full overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
           data-testid="segment-lyric-scroll-container"
         >
           <p
+            ref={lyricTextRef}
             data-testid="segment-lyric-text"
             className={`whitespace-pre-wrap text-center ${hasLyrics ? "text-slate-700" : "text-gray-400"}`}
-            style={{ fontSize: lyricFontSize, lineHeight: 1.4 }}
+            style={{ fontSize: fittedLyricFontSize, lineHeight: 1.4 }}
           >
             {displayLyricContent}
           </p>
