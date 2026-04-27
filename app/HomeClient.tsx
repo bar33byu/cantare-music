@@ -704,6 +704,7 @@ export default function Home() {
         <div className="mx-auto max-w-4xl">
           <PlaylistPracticeView
             playlist={selectedPlaylist}
+            userId={activeUserId}
             onExit={() => setActiveView("playlists")}
             onManage={() => setActiveView("playlist_detail")}
             onSelectSong={(song) => {

@@ -56,6 +56,11 @@ const playlist: Playlist = {
 describe('PlaylistPracticeView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    Reflect.deleteProperty(window, 'caches');
+    Object.defineProperty(navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
   });
 
   it('shows playlist name, knowledge score, and song cards', async () => {
@@ -204,6 +209,66 @@ describe('PlaylistPracticeView', () => {
     rerender(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
     expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes stale playlist song readiness from playlist detail in the background', async () => {
+    const stalePlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          audioUrl: '',
+          segments: [],
+        },
+      ],
+    };
+    const freshPlaylist: Playlist = {
+      ...stalePlaylist,
+      songs: [
+        {
+          ...stalePlaylist.songs[0],
+          audioUrl: 'https://example.com/fresh-alpha.mp3',
+          segments: playlist.songs[0].segments,
+        },
+      ],
+    };
+
+    const cache = {
+      match: vi.fn().mockResolvedValue(undefined),
+      put: vi.fn().mockResolvedValue(undefined),
+    };
+    Object.defineProperty(window, 'caches', {
+      configurable: true,
+      value: {
+        open: vi.fn().mockResolvedValue(cache),
+      },
+    });
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 67 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(freshPlaylist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={stalePlaylist} userId="user-1" onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file missing');
+    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file present');
+      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections present');
+    });
+
+    expect(cache.put).toHaveBeenCalled();
   });
 
   it('uses a normalized playable audio URL for listen mode playback', async () => {

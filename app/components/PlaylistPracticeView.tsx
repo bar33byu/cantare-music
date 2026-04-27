@@ -57,12 +57,16 @@ function formatMs(ms: number): string {
 
 interface PlaylistPracticeViewProps {
   playlist: Playlist;
+  userId?: string;
   onExit: () => void;
   onManage?: () => void;
   onSelectSong: (song: Playlist["songs"][number]) => void;
 }
 
-export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
+const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
+
+export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
+  const [livePlaylist, setLivePlaylist] = useState(playlist);
   const [playlistScore, setPlaylistScore] = useState(0);
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -73,9 +77,76 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   const autoPlaySongIdRef = useRef<string | null>(null);
   const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
 
+  const userScopedHeaders = useMemo(() => {
+    return userId ? { 'X-User-ID': userId } : undefined;
+  }, [userId]);
+
+  const playlistDetailRequest = useMemo(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    return new Request(new URL(`/api/playlists/${playlist.id}`, origin), {
+      headers: userScopedHeaders,
+    });
+  }, [playlist.id, userScopedHeaders]);
+
+  useEffect(() => {
+    setLivePlaylist(playlist);
+  }, [playlist]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFromCacheThenRevalidate = async () => {
+      const canUseCacheStorage = typeof window !== 'undefined' && 'caches' in window;
+      let cache: Cache | null = null;
+
+      if (canUseCacheStorage) {
+        try {
+          cache = await window.caches.open(PLAYLIST_PRACTICE_CACHE_NAME);
+          const cachedResponse = await cache.match(playlistDetailRequest);
+          if (cachedResponse?.ok) {
+            const cachedPlaylist = (await cachedResponse.clone().json()) as Playlist;
+            if (!cancelled && cachedPlaylist.id === playlist.id) {
+              setLivePlaylist(cachedPlaylist);
+            }
+          }
+        } catch {
+          cache = null;
+        }
+      }
+
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return;
+      }
+
+      try {
+        const response = await fetch(playlistDetailRequest, { cache: 'no-store' });
+        if (!response.ok) {
+          return;
+        }
+
+        const freshPlaylist = (await response.clone().json()) as Playlist;
+        if (!cancelled && freshPlaylist.id === playlist.id) {
+          setLivePlaylist(freshPlaylist);
+        }
+
+        if (cache) {
+          await cache.put(playlistDetailRequest, response);
+        }
+      } catch {
+        // Cached playlist data is enough to keep practice usable offline.
+      }
+    };
+
+    void loadFromCacheThenRevalidate();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [playlist.id, playlistDetailRequest]);
+
   const displayedSongs = useMemo(() => {
     const dir = sort.asc ? 1 : -1;
-    return [...playlist.songs].sort((a, b) => {
+    return [...livePlaylist.songs].sort((a, b) => {
       switch (sort.key) {
         case 'alphabetical':
           return dir * a.title.localeCompare(b.title);
@@ -95,7 +166,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
           return 0;
       }
     });
-  }, [playlist.songs, sort]);
+  }, [livePlaylist.songs, sort]);
 
   const currentSong = displayedSongs[currentSongIndex];
   const proxyAudioUrl = useMemo(
@@ -213,7 +284,9 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`/api/playlists/${playlist.id}/knowledge`);
+        const res = await fetch(`/api/playlists/${playlist.id}/knowledge`, {
+          headers: userScopedHeaders,
+        });
         if (res.ok) {
           const data = (await res.json()) as { score?: number };
           setPlaylistScore(Math.min(Math.round(data.score ?? 0), 100));
@@ -221,7 +294,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
       } catch { /* ignore */ }
     };
     void load();
-  }, [playlist.id, refetchTrigger]);
+  }, [playlist.id, refetchTrigger, userScopedHeaders]);
 
   useEffect(() => {
     const handleRatingsUpdated = () => {
@@ -256,11 +329,14 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
       }
 
       try {
-        const cache = await window.caches.open('cantare-playlist-practice-v1');
+        const cache = await window.caches.open(PLAYLIST_PRACTICE_CACHE_NAME);
 
         await Promise.allSettled(
-          playlist.songs.map(async (song) => {
-            const songRequest = new Request(`/api/songs/${song.id}`);
+          livePlaylist.songs.map(async (song) => {
+            const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+            const songRequest = new Request(new URL(`/api/songs/${song.id}`, origin), {
+              headers: userScopedHeaders,
+            });
             const songResponse = await fetch(songRequest, { cache: 'force-cache' });
             if (songResponse.ok) {
               await cache.put(songRequest, songResponse.clone());
@@ -284,9 +360,9 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
     };
 
     void maybePrecachePlaylist();
-  }, [playlist.songs]);
+  }, [livePlaylist.songs, userScopedHeaders]);
 
-  if (playlist.songs.length === 0) {
+  if (livePlaylist.songs.length === 0) {
     return (
       <section data-testid="playlist-practice-empty" className="space-y-4">
         <header className="space-y-3">
@@ -300,7 +376,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
                 Playlists
               </button>
               <span>/</span>
-              <span className="text-gray-900">{playlist.name}</span>
+              <span className="text-gray-900">{livePlaylist.name}</span>
             </div>
             {onManage ? (
               <button
@@ -341,9 +417,9 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
               Playlists
             </button>
             <span>/</span>
-            <span className="text-gray-900">{playlist.name}</span>
+            <span className="text-gray-900">{livePlaylist.name}</span>
           </div>
-          <h2 className="text-2xl font-bold">{playlist.name}</h2>
+          <h2 className="text-2xl font-bold">{livePlaylist.name}</h2>
           <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
             Playlist Knowledge: {playlistScore}%
           </p>
