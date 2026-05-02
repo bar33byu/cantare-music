@@ -73,8 +73,9 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const [mode, setMode] = useState<'practice' | 'listen'>('practice');
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
+  const [isListenPlaying, setIsListenPlaying] = useState(false);
   const [useProxyFallback, setUseProxyFallback] = useState(false);
-  const autoPlaySongIdRef = useRef<string | null>(null);
+  const listenStartedSongIdRef = useRef<string | null>(null);
   const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
 
   const userScopedHeaders = useMemo(() => {
@@ -168,7 +169,10 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     });
   }, [livePlaylist.songs, sort]);
 
-  const currentSong = displayedSongs[currentSongIndex];
+  const listenQueue = displayedSongs;
+  const currentSong = listenQueue[currentSongIndex];
+  const currentSongId = currentSong?.id;
+  const hasCurrentSongAudio = Boolean(currentSong?.audioUrl.trim());
   const proxyAudioUrl = useMemo(
     () => buildProxyAudioUrl(parseAudioKey(currentSong?.audioUrl ?? '')),
     [currentSong?.audioUrl]
@@ -185,24 +189,31 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     return directPlaybackAudioUrl;
   }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
+  const {
+    currentMs: playbackCurrentMs,
+    durationMs: playbackDurationMs,
+    pause: pauseAudio,
+    play: playAudio,
+    playbackError,
+  } = audioPlayer;
   const requestPlay = useCallback((startMs: number, endMs: number) => {
     pendingFallbackPlayRangeRef.current = !useProxyFallback && canFallbackToProxy
       ? { startMs, endMs }
       : null;
-    audioPlayer.play(startMs, endMs);
-  }, [audioPlayer.play, canFallbackToProxy, useProxyFallback]);
+    playAudio(startMs, endMs);
+  }, [canFallbackToProxy, playAudio, useProxyFallback]);
 
   useEffect(() => {
     setUseProxyFallback(false);
     pendingFallbackPlayRangeRef.current = null;
-  }, [currentSong?.id]);
+  }, [currentSongId]);
 
   useEffect(() => {
-    if (!audioPlayer.playbackError || useProxyFallback || !canFallbackToProxy) {
+    if (!playbackError || useProxyFallback || !canFallbackToProxy) {
       return;
     }
     setUseProxyFallback(true);
-  }, [audioPlayer.playbackError, canFallbackToProxy, useProxyFallback]);
+  }, [canFallbackToProxy, playbackError, useProxyFallback]);
 
   useEffect(() => {
     if (!useProxyFallback) {
@@ -215,39 +226,87 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     }
 
     pendingFallbackPlayRangeRef.current = null;
-    audioPlayer.play(pendingRange.startMs, pendingRange.endMs);
-  }, [audioPlayer.play, useProxyFallback]);
+    playAudio(pendingRange.startMs, pendingRange.endMs);
+  }, [playAudio, useProxyFallback]);
 
   useEffect(() => {
-    if (mode !== 'listen' || !currentSong) {
-      autoPlaySongIdRef.current = null;
+    if (mode !== 'listen') {
+      setIsListenPlaying(false);
+      listenStartedSongIdRef.current = null;
       return;
     }
 
-    if (autoPlaySongIdRef.current === currentSong.id) {
+    setCurrentSongIndex((prev) => Math.min(prev, Math.max(listenQueue.length - 1, 0)));
+  }, [listenQueue.length, mode]);
+
+  useEffect(() => {
+    if (mode !== 'listen' || !isListenPlaying || !currentSongId) {
       return;
     }
 
-    autoPlaySongIdRef.current = currentSong.id;
+    if (!hasCurrentSongAudio) {
+      listenStartedSongIdRef.current = currentSongId;
+      if (currentSongIndex < listenQueue.length - 1) {
+        setCurrentSongIndex((prev) => prev + 1);
+      } else {
+        setIsListenPlaying(false);
+        listenStartedSongIdRef.current = null;
+      }
+      return;
+    }
+
+    if (listenStartedSongIdRef.current === currentSongId) {
+      return;
+    }
+
+    listenStartedSongIdRef.current = currentSongId;
     requestPlay(0, 0);
-  }, [mode, currentSong?.id, requestPlay]);
+  }, [
+    currentSongId,
+    currentSongIndex,
+    hasCurrentSongAudio,
+    isListenPlaying,
+    listenQueue.length,
+    mode,
+    requestPlay,
+  ]);
 
   useEffect(() => {
     if (
       mode !== 'listen' ||
-      audioPlayer.durationMs <= 0 ||
-      currentSongIndex >= displayedSongs.length - 1
+      playbackDurationMs <= 0 ||
+      currentSongIndex >= listenQueue.length - 1
     ) {
       return;
     }
 
-    if (audioPlayer.currentMs >= audioPlayer.durationMs - 1000) {
-      setCurrentSongIndex((prev) => Math.min(prev + 1, displayedSongs.length - 1));
+    if (playbackCurrentMs >= playbackDurationMs - 1000) {
+      if (currentSongIndex < listenQueue.length - 1) {
+        setCurrentSongIndex((prev) => prev + 1);
+      } else {
+        setIsListenPlaying(false);
+        listenStartedSongIdRef.current = null;
+      }
     }
-  }, [mode, audioPlayer.currentMs, audioPlayer.durationMs, currentSongIndex, displayedSongs.length]);
+  }, [mode, playbackCurrentMs, playbackDurationMs, currentSongIndex, listenQueue.length]);
+
+  const handleListenPlayPause = () => {
+    if (audioPlayer.isPlaying || isListenPlaying) {
+      setIsListenPlaying(false);
+      listenStartedSongIdRef.current = null;
+      pauseAudio();
+      return;
+    }
+
+    setIsListenPlaying(true);
+    if (currentSongId && hasCurrentSongAudio) {
+      listenStartedSongIdRef.current = currentSongId;
+      requestPlay(0, 0);
+    }
+  };
 
   const handleNextSong = () => {
-    if (currentSongIndex < displayedSongs.length - 1) {
+    if (currentSongIndex < listenQueue.length - 1) {
       setCurrentSongIndex(prev => prev + 1);
     }
   };
@@ -569,10 +628,12 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
           <div className="text-center">
             <h3 className="text-2xl font-semibold">{currentSong.title}</h3>
             {currentSong.artist && <p className="text-gray-600">{currentSong.artist}</p>}
-            <p className="text-sm text-gray-500">{currentSongIndex + 1} of {displayedSongs.length}</p>
+            <p className="text-sm text-gray-500">{currentSongIndex + 1} of {listenQueue.length}</p>
           </div>
           <div className="flex justify-center gap-4">
             <button
+              type="button"
+              aria-label="Previous song"
               onClick={handlePrevSong}
               disabled={currentSongIndex === 0}
               className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
@@ -582,10 +643,12 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
               </svg>
             </button>
             <button
-              onClick={() => audioPlayer.isPlaying ? audioPlayer.pause() : requestPlay(0, audioPlayer.durationMs)}
+              type="button"
+              aria-label={audioPlayer.isPlaying || isListenPlaying ? "Pause playlist" : "Play playlist"}
+              onClick={handleListenPlayPause}
               className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700"
             >
-              {audioPlayer.isPlaying ? (
+              {audioPlayer.isPlaying || isListenPlaying ? (
                 <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
                 </svg>
@@ -596,8 +659,10 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
               )}
             </button>
             <button
+              type="button"
+              aria-label="Next song"
               onClick={handleNextSong}
-              disabled={currentSongIndex === displayedSongs.length - 1}
+              disabled={currentSongIndex === listenQueue.length - 1}
               className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
             >
               <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
@@ -621,6 +686,12 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {mode === 'listen' && !currentSong && (
+        <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This playlist does not have any songs yet.
         </div>
       )}
     </section>

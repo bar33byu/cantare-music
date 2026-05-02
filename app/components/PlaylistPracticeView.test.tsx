@@ -160,7 +160,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
-  it('does not auto-restart playback on unrelated rerenders in listen mode', async () => {
+  it('plays from the listen transport without auto-starting on mode entry', async () => {
     const play = vi.fn();
     const pause = vi.fn();
     const seek = vi.fn();
@@ -202,13 +202,73 @@ describe('PlaylistPracticeView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /listen/i }));
 
-    await waitFor(() => {
-      expect(play).toHaveBeenCalledTimes(1);
-    });
+    expect(play).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play playlist' }));
+
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledWith(0, 0);
 
     rerender(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
     expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats songs without audio as zero-length in listen mode and continues', async () => {
+    const play = vi.fn();
+
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 12000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+
+    const mixedPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        { ...playlist.songs[0], audioUrl: '' },
+        { ...playlist.songs[1], audioUrl: '/audio/song-2/beta.mp3' },
+      ],
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={mixedPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /listen/i }));
+
+    expect(screen.getByRole('heading', { name: 'Alpha' })).toBeInTheDocument();
+    expect(screen.getByText('1 of 2')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play playlist' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Beta' })).toBeInTheDocument();
+      expect(play).toHaveBeenCalledWith(0, 0);
+    });
   });
 
   it('refreshes stale playlist song readiness from playlist detail in the background', async () => {
