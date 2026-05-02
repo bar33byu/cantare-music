@@ -227,6 +227,38 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const currentSegmentOffsetMs = currentSegment
     ? Math.max(0, Math.min(currentSegment.endMs - currentSegment.startMs, currentMs - currentSegment.startMs))
     : 0;
+  const previousTapLane = useMemo(() => {
+    if (currentAttemptNotes.length === 0) {
+      return null;
+    }
+
+    return [...currentAttemptNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs).at(-1)?.lane ?? null;
+  }, [currentAttemptNotes]);
+  const previousTapGuide = useMemo(() => {
+    if (previousTapLane === null) {
+      return null;
+    }
+
+    const zoneTopLane = Math.min(1, previousTapLane + TAP_MATCH_OPTIONS.sameDeadZone);
+    const zoneBottomLane = Math.max(0, previousTapLane - TAP_MATCH_OPTIONS.sameDeadZone);
+    const topPercent = (1 - zoneTopLane) * 100;
+    const bottomPercent = (1 - zoneBottomLane) * 100;
+    const centerPercent = (1 - previousTapLane) * 100;
+
+    return {
+      topPercent,
+      bottomPercent,
+      centerPercent,
+      heightPercent: Math.max(4, bottomPercent - topPercent),
+    };
+  }, [previousTapLane]);
+  const hasTapHeatMapData = useMemo(
+    () =>
+      Object.values(tapHeatMapBySegment).some((segmentHeatMap) =>
+        Object.values(segmentHeatMap).some((stat) => stat.sessionCount > 0)
+      ),
+    [tapHeatMapBySegment]
+  );
   const hasAutoplayedSongRef = React.useRef<string | null>(null);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
   const requestPlay = React.useCallback((startMs: number, endMs: number) => {
@@ -853,6 +885,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
   };
 
+  const handleToggleLoop = React.useCallback(() => {
+    if (!isLooping) {
+      const targetIndex = getSegmentIndexAtMs(currentMs);
+      if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex) {
+        segmentIndexRef.current = targetIndex;
+        dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
+      }
+    }
+
+    setIsLooping((previous) => !previous);
+  }, [currentMs, getSegmentIndexAtMs, isLooping, session.currentSegmentIndex]);
+
   const getTapLane = React.useCallback((clientY: number) => {
     const rect = tapBarRef.current?.getBoundingClientRect();
     if (!rect || rect.height <= 0) {
@@ -1109,7 +1153,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       if (event.key === "r") {
         event.preventDefault();
-        setIsLooping((previous) => !previous);
+        handleToggleLoop();
         return;
       }
 
@@ -1121,7 +1165,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleTogglePlay, setIsLooping]);
+}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
@@ -1464,7 +1508,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           <KnowledgeBar percent={knowledgeScore.overall} />
         )}
         <div className="mt-2 flex items-center gap-2">
-          {hasSegments && currentSegment ? (
+          {hasSegments && currentSegment && hasTapHeatMapData ? (
             <button
               type="button"
               data-testid="practice-card-contour-toggle"
@@ -1552,7 +1596,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       </div>
 
       <main data-testid="practice-main" className="flex flex-1 justify-center overflow-y-auto px-4 pb-44 pt-2 md:px-8 md:pb-48">
-        <section data-testid="practice-focus" className="flex h-full min-h-full w-full max-w-3xl items-start justify-center gap-2 md:gap-3">
+        <section data-testid="practice-focus" className={`flex h-full min-h-full w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
           {!isTapPracticeMode ? (
             <button
               type="button"
@@ -1613,7 +1657,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     masteryPercent={masteryPercentForSegment(currentSegment.id)}
                     lyricVisibilityMode={lyricVisibilityMode}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
-                    showContourMap={showCardContourMap}
+                    showContourMap={showCardContourMap && hasTapHeatMapData}
                     contourHeatMap={tapHeatMapBySegment[currentSegment.id]}
                   />
                 </div>
@@ -1738,7 +1782,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               ref={tapBarRef}
               data-testid="practice-tap-bar"
               aria-label="Tap contour bar"
-              className="relative h-full min-h-0 w-16 shrink-0 rounded-2xl border-2 border-indigo-400 bg-gradient-to-b from-indigo-100 via-white to-indigo-100"
+              className="relative h-full min-h-[28rem] w-28 shrink-0 overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm sm:w-32"
               onPointerDown={(event) => {
                 if (!currentSegment) {
                   return;
@@ -1781,8 +1825,66 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 finalizeTapCapture(getTapLane(event.clientY));
               }}
             >
-              <div className="pointer-events-none absolute inset-x-2 top-2 rounded bg-indigo-200/80 px-1 py-0.5 text-center text-[10px] font-semibold text-indigo-800">
-                Tap
+              <div className="pointer-events-none absolute inset-0">
+                {Array.from({ length: 9 }, (_, index) => {
+                  const yPercent = (index + 1) * 10;
+                  const isMajor = (index + 1) % 5 === 0;
+                  return (
+                    <div
+                      key={`tap-guide-${yPercent}`}
+                      data-testid="practice-tap-graduation"
+                      className={`absolute left-0 right-0 border-t ${isMajor ? "border-indigo-300/80" : "border-slate-300/45"}`}
+                      style={{ top: `${yPercent}%` }}
+                    >
+                      <span className={`absolute -top-px right-2 h-px ${isMajor ? "w-8 bg-indigo-300" : "w-4 bg-slate-300"}`} />
+                      <span className={`absolute -top-px left-2 h-px ${isMajor ? "w-8 bg-indigo-300" : "w-4 bg-slate-300"}`} />
+                    </div>
+                  );
+                })}
+                <div className="absolute inset-x-0 top-0 flex h-16 items-start justify-center bg-gradient-to-b from-emerald-200/45 to-transparent pt-4 text-emerald-700">
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 19V5" />
+                    <path d="M6 11l6-6 6 6" />
+                  </svg>
+                </div>
+                <div className="absolute inset-x-0 bottom-0 flex h-16 items-end justify-center bg-gradient-to-t from-amber-200/55 to-transparent pb-4 text-amber-700">
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 5v14" />
+                    <path d="M18 13l-6 6-6-6" />
+                  </svg>
+                </div>
+                {previousTapGuide ? (
+                  <>
+                    <div
+                      data-testid="practice-tap-same-zone"
+                      className="absolute inset-x-1 rounded-xl border border-sky-400/75 bg-sky-200/35 shadow-[0_0_0_1px_rgba(14,165,233,0.12)]"
+                      style={{
+                        top: `${previousTapGuide.topPercent}%`,
+                        height: `${previousTapGuide.heightPercent}%`,
+                      }}
+                    />
+                    <div
+                      data-testid="practice-tap-previous-lane"
+                      className="absolute inset-x-0 border-t-2 border-sky-500"
+                      style={{ top: `${previousTapGuide.centerPercent}%` }}
+                    >
+                      <span className="absolute -top-2 left-1/2 flex h-4 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-sky-500 text-white shadow-sm">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <path d="M5 9h14" />
+                          <path d="M5 15h14" />
+                        </svg>
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="absolute inset-x-3 top-1/2 -translate-y-1/2 rounded-xl border border-indigo-200 bg-white/70 py-2 text-center text-indigo-500 shadow-sm">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="mx-auto h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 5v14" />
+                      <path d="M6 11l6-6 6 6" />
+                      <path d="M18 13l-6 6-6-6" />
+                    </svg>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -1827,7 +1929,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           masteryBySegment={knowledgeScore.bySegment}
           currentSegmentIndex={session.currentSegmentIndex}
           isLooping={isLooping}
-          onToggleLoop={() => setIsLooping((prev) => !prev)}
+          onToggleLoop={handleToggleLoop}
           lyricModeLabel={LYRIC_MODE_LABELS[lyricVisibilityMode]}
           onToggleLyricMode={() => setLyricVisibilityMode((previous) => getNextLyricMode(previous))}
         />

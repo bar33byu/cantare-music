@@ -352,7 +352,8 @@ describe("PracticeView", () => {
 
     expect(screen.queryByTestId("practice-prev-segment")).not.toBeInTheDocument();
     expect(screen.queryByTestId("practice-next-segment")).not.toBeInTheDocument();
-    expect(screen.getByTestId("practice-tap-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-tap-bar")).toHaveClass("w-28");
+    expect(screen.getAllByTestId("practice-tap-graduation")).toHaveLength(9);
     expect(screen.getByTestId("practice-overlay-toggle")).toBeInTheDocument();
   });
 
@@ -370,8 +371,40 @@ describe("PracticeView", () => {
   });
 
   it("toggles static contour map on section card independently", async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
+        return makeFetchResponse({ ratings: [] });
+      }
+      if (url.endsWith("/tap-heatmap") && (!init || init.method === undefined)) {
+        return makeFetchResponse({
+          heatMapBySegment: {
+            "seg-0": {
+              "note-1": { sessionCount: 1, missCount: 0, missRate: 0 },
+            },
+          },
+        });
+      }
+      if (url.endsWith("/tap-sessions") && init?.method === "POST") {
+        return makeFetchResponse({ session: { id: "tap-session-1" } });
+      }
+      if (url.includes("/tap-sessions/") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/practice") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/ratings") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      return makeFetchResponse({});
+    });
+
     const song = makeSong(2);
     await renderAndWaitForRatings(song);
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+    });
 
     const segmentCard = screen.getByTestId("mock-segment-card");
     expect(segmentCard).toHaveAttribute("data-show-contour-map", "false");
@@ -384,6 +417,18 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByTestId("practice-overlay-toggle"));
     expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
+  });
+
+  it("hides the card contour toggle when the song has no tap data", async () => {
+    const song = makeSong(2);
+    await renderAndWaitForRatings(song);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-heatmap`);
+    });
+
+    expect(screen.queryByTestId("practice-card-contour-toggle")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
   });
 
   it("updates contour feedback as user taps in tap practice mode", async () => {
@@ -427,6 +472,12 @@ describe("PracticeView", () => {
 
     fireEvent.pointerDown(tapBar, { pointerId: 1, clientY: 180 });
     fireEvent.pointerUp(tapBar, { pointerId: 1, clientY: 180 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-tap-same-zone")).toBeInTheDocument();
+      expect(screen.getByTestId("practice-tap-previous-lane")).toBeInTheDocument();
+    });
+
     fireEvent.pointerDown(tapBar, { pointerId: 2, clientY: 20 });
     fireEvent.pointerUp(tapBar, { pointerId: 2, clientY: 20 });
 
@@ -1645,6 +1696,37 @@ describe("PracticeView", () => {
     expect(mockPlay).not.toHaveBeenCalled();
     expect(mockSeek).not.toHaveBeenCalled();
     expect(mockSetPlaybackEndMs).toHaveBeenCalledWith(8000);
+  });
+
+  it("syncs the card to the playhead segment before enabling loop mode", async () => {
+    const playbackState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 4500,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("mock-segment-card")).toHaveTextContent("Verse 1");
+
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-segment-card")).toHaveTextContent("Verse 2");
+    });
+
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+
+    expect(mockPlay).toHaveBeenCalledWith(4500, 8000);
   });
 
   it("auto-saves ratings to the server after a rating change but not during initial load", async () => {
