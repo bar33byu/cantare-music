@@ -1,10 +1,33 @@
+function decodeAudioPath(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => decodeURIComponent(segment))
+    .join("/");
+}
+
 export function parseAudioKey(audioUrl: string): string | null {
-  if (!audioUrl || audioUrl.trim().length === 0) {
+  const trimmed = audioUrl.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!/^https?:\/\//i.test(trimmed)) {
+    const proxyPrefix = "/api/audio/";
+    if (trimmed.startsWith(proxyPrefix)) {
+      const rawKey = trimmed.slice(proxyPrefix.length);
+      return rawKey ? decodeAudioPath(rawKey) : null;
+    }
+
+    const trimmedPath = trimmed.replace(/^\/+/, "");
+    if (trimmedPath.startsWith("audio/") || trimmedPath.includes("/audio/")) {
+      return decodeAudioPath(trimmedPath);
+    }
+
     return null;
   }
 
   try {
-    const normalized = new URL(audioUrl, "http://localhost");
+    const normalized = new URL(trimmed);
     const path = normalized.pathname;
     const proxyPrefix = "/api/audio/";
 
@@ -13,25 +36,16 @@ export function parseAudioKey(audioUrl: string): string | null {
       if (!rawKey) {
         return null;
       }
-      return rawKey
-        .split("/")
-        .map((segment) => decodeURIComponent(segment))
-        .join("/");
+      return decodeAudioPath(rawKey);
     }
 
     const trimmedPath = path.replace(/^\/+/, "");
     if (trimmedPath.startsWith("audio/")) {
-      return trimmedPath
-        .split("/")
-        .map((segment) => decodeURIComponent(segment))
-        .join("/");
+      return decodeAudioPath(trimmedPath);
     }
 
     if (trimmedPath.includes("/audio/")) {
-      return trimmedPath
-        .split("/")
-        .map((segment) => decodeURIComponent(segment))
-        .join("/");
+      return decodeAudioPath(trimmedPath);
     }
 
     return null;

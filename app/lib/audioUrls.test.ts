@@ -12,6 +12,13 @@ describe('toPlayableAudioUrl', () => {
     expect(toPlayableAudioUrl(source)).toBe('/api/audio/audio/song-1/test%20file.mp3');
   });
 
+  it('preserves hash characters in stored relative audio keys', () => {
+    const source = 'audio/song-1/The Morning Breaks Brdcst #4844 17Jun22.mp3';
+    expect(toPlayableAudioUrl(source)).toBe(
+      '/api/audio/audio/song-1/The%20Morning%20Breaks%20Brdcst%20%234844%2017Jun22.mp3'
+    );
+  });
+
   it('keeps already-proxied URLs stable', () => {
     const source = '/api/audio/audio/song-1/test%20file.mp3';
     expect(toPlayableAudioUrl(source)).toBe(source);
@@ -32,5 +39,10 @@ describe('parseAudioKey', () => {
   it('extracts user-prefixed audio keys from relative paths', () => {
     const source = '/users/default/audio/song-1/test%20file.mp3';
     expect(parseAudioKey(source)).toBe('users/default/audio/song-1/test file.mp3');
+  });
+
+  it('does not treat hashes in relative paths as URL fragments', () => {
+    const source = 'audio/song-1/test #123.mp3';
+    expect(parseAudioKey(source)).toBe('audio/song-1/test #123.mp3');
   });
 });
