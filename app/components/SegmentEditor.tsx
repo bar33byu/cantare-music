@@ -99,6 +99,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const [isContourRecording, setIsContourRecording] = useState(false);
   const [contourDraftNotes, setContourDraftNotes] = useState<SongPitchContourNote[]>([]);
   const [isSavingContourDraft, setIsSavingContourDraft] = useState(false);
+  const [contourSaveMessage, setContourSaveMessage] = useState<string | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const focusedContourCardRef = useRef<HTMLDivElement | null>(null);
   const contourTapBarRef = useRef<HTMLDivElement | null>(null);
@@ -142,6 +143,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const isContourEditorOpen = isContourRecording || hasContourDraft;
 
   const updateContourDraftLane = (noteId: string, lane: number) => {
+    setContourSaveMessage(null);
     setContourDraftNotes((previous) => previous.map((note) => (note.id === noteId ? { ...note, lane } : note)));
   };
 
@@ -183,6 +185,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
     const endMs = Math.max(capture.startMs + MIN_CONTOUR_TAP_DURATION_MS, currentMs);
     const lane = typeof endLane === 'number' ? endLane : capture.lane;
+    setContourSaveMessage(null);
     setContourDraftNotes((previous) => [
       ...previous,
       {
@@ -194,6 +197,23 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     ].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id)));
 
     activeContourCaptureRef.current = null;
+  };
+
+  const getContourDraftNotesForSave = () => {
+    const activeCapture = activeContourCaptureRef.current;
+    const activeNote = activeCapture
+      ? {
+          id: activeCapture.id,
+          absoluteMs: activeCapture.startMs,
+          durationMs: Math.max(activeCapture.startMs + MIN_CONTOUR_TAP_DURATION_MS, currentMs) - activeCapture.startMs,
+          lane: activeCapture.lane,
+        }
+      : null;
+
+    return [
+      ...contourDraftNotes,
+      ...(activeNote ? [activeNote] : []),
+    ].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id));
   };
 
   const updateLocalSegment = (segmentId: string, updates: Partial<Segment>) => {
@@ -845,6 +865,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
   const clearContourDraft = () => {
     activeContourCaptureRef.current = null;
+    setContourSaveMessage(null);
     setContourDraftNotes([]);
   };
 
@@ -856,6 +877,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     }
 
     setDeleteError(null);
+    setContourSaveMessage(null);
     if (!hasContourDraft) {
       clearContourDraft();
     }
@@ -877,15 +899,19 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   };
 
   const saveContourDraft = async () => {
-    if (!hasContourDraft) {
+    const normalizedNotes = getContourDraftNotesForSave();
+    activeContourCaptureRef.current = null;
+    setContourDraftNotes(normalizedNotes);
+
+    if (normalizedNotes.length === 0) {
       return;
     }
 
     setDeleteError(null);
+    setContourSaveMessage(null);
     setIsSavingContourDraft(true);
 
     try {
-      const normalizedNotes = [...contourDraftNotes].sort((a, b) => a.absoluteMs - b.absoluteMs);
       const response = await fetch(`/api/songs/${songId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -893,11 +919,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       });
 
       if (!response.ok) {
-        throw new Error('Contour save failed');
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? `Contour save failed (${response.status})`);
       }
       setIsContourRecording(false);
-    } catch {
-      setDeleteError('Failed to save contour answer key. Please try again.');
+      setContourSaveMessage(`Saved ${normalizedNotes.length} answer key point${normalizedNotes.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Please try again.';
+      setDeleteError(`Failed to save contour answer key. ${message}`);
     } finally {
       setIsSavingContourDraft(false);
     }
@@ -1222,6 +1251,11 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                 <span>{formatMs(timelineDurationMs)}</span>
                 {savingSegmentId ? <span className="text-indigo-600">Saving...</span> : null}
                 {isSavingContourDraft ? <span className="text-indigo-600">Saving contour...</span> : null}
+                {contourSaveMessage ? (
+                  <span data-testid="segment-editor-contour-save-message" className="text-emerald-700">
+                    {contourSaveMessage}
+                  </span>
+                ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -1660,12 +1694,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           </div>
 
           {isContourRecording ? (
-            <div className="min-h-[50dvh] lg:min-h-0">
+            <div className="flex min-h-[calc(100svh-8rem)] justify-start lg:block lg:min-h-0">
               <div
                 ref={contourTapBarRef}
                 data-testid="segment-editor-contour-tapbar"
                 aria-label="Contour tap bar"
-                className="tap-input-surface sticky top-[7rem] h-[50dvh] min-h-[360px] touch-none select-none overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm lg:h-[calc(100dvh-12rem)]"
+                className="tap-input-surface sticky top-[7rem] h-[calc(100svh-8rem)] min-h-[70svh] w-[calc(100%-3rem)] touch-none select-none overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm lg:h-[calc(100dvh-12rem)] lg:min-h-0 lg:w-full"
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();

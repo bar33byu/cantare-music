@@ -10,6 +10,28 @@ interface RatingBarProps {
 }
 
 const RATINGS: MemoryRating[] = [1, 2, 3, 4, 5];
+const RATING_STYLES: Record<MemoryRating, { filled: string; empty: string }> = {
+  1: {
+    filled: "bg-indigo-200 text-indigo-950",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
+  2: {
+    filled: "bg-indigo-300 text-indigo-950",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
+  3: {
+    filled: "bg-indigo-500 text-white",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
+  4: {
+    filled: "bg-indigo-700 text-white",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
+  5: {
+    filled: "bg-slate-950 text-white",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
+};
 
 const RatingBar: React.FC<RatingBarProps> = ({
   currentRating,
@@ -21,6 +43,7 @@ const RatingBar: React.FC<RatingBarProps> = ({
       {RATINGS.map((rating) => {
         const isExactSelection = currentRating === rating;
         const isFilled = currentRating !== undefined && rating <= currentRating;
+        const ratingStyle = RATING_STYLES[rating];
 
         return (
         <button
@@ -31,10 +54,11 @@ const RatingBar: React.FC<RatingBarProps> = ({
           aria-label={`Rate ${rating}`}
           aria-pressed={isExactSelection ? "true" : "false"}
           className={[
-            "w-10 h-10 rounded-full text-sm font-semibold transition-colors",
+            "w-10 h-10 rounded-full text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2",
             isFilled
-              ? "bg-indigo-600 text-white"
-              : "bg-gray-100 text-gray-700 hover:bg-indigo-100",
+              ? ratingStyle.filled
+              : ratingStyle.empty,
+            isExactSelection ? "shadow-sm ring-2 ring-indigo-300 ring-offset-2" : "",
             disabled ? "opacity-40 cursor-not-allowed" : "",
           ]
             .filter(Boolean)

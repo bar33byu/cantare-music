@@ -1174,6 +1174,8 @@ describe('SegmentEditor', () => {
 
     const tapBar = screen.getByTestId('segment-editor-contour-tapbar');
     expect(tapBar).toHaveClass('tap-input-surface');
+    expect(tapBar).toHaveClass('h-[calc(100svh-8rem)]');
+    expect(tapBar).toHaveClass('w-[calc(100%-3rem)]');
     expect(tapBar).toHaveClass('lg:h-[calc(100dvh-12rem)]');
     expect(fireEvent.contextMenu(tapBar)).toBe(false);
     expect(fireEvent.doubleClick(tapBar)).toBe(false);
@@ -1235,5 +1237,81 @@ describe('SegmentEditor', () => {
       expect(body.pitchContourNotes[0].absoluteMs).toBe(5000);
       expect(body.pitchContourNotes[0].durationMs).toBe(80);
     });
+    expect(await screen.findByTestId('segment-editor-contour-save-message')).toHaveTextContent('Saved 1 answer key point.');
+  });
+
+  it('shows the server error when contour pass saving is rejected', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackRate: 1,
+      setPlaybackRate: vi.fn(),
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'PATCH') {
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({ error: 'Pitch contour notes cannot exceed 2000 points' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => sampleSegments,
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({ error: 'Unexpected request' }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+    const tapBar = screen.getByTestId('segment-editor-contour-tapbar');
+    fireEvent.pointerDown(tapBar, { pointerId: 31, clientY: 40 });
+    fireEvent.pointerUp(tapBar, { pointerId: 31, clientY: 44 });
+    fireEvent.click(screen.getByTestId('segment-editor-contour-save'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Pitch contour notes cannot exceed 2000 points');
   });
 });

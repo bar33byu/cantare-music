@@ -114,6 +114,13 @@ const makeSession = (song: Song): SessionState => ({
   currentSongId: song.id,
 });
 
+function setNavigatorUserActivation(isActive: boolean) {
+  Object.defineProperty(navigator, "userActivation", {
+    configurable: true,
+    value: { isActive },
+  });
+}
+
 describe("PracticeView", () => {
   const renderAndWaitForRatings = async (
     song: Song,
@@ -135,6 +142,7 @@ describe("PracticeView", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    setNavigatorUserActivation(true);
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
@@ -242,6 +250,19 @@ describe("PracticeView", () => {
     });
 
     expect(mockPlay.mock.calls.filter(([startMs]) => startMs === 0).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not attempt initial autoplay without active user activation", async () => {
+    setNavigatorUserActivation(false);
+    const song = makeSong();
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    });
+
+    expect(mockSeek).toHaveBeenCalledWith(0);
+    expect(mockPlay).not.toHaveBeenCalled();
   });
 
   it("disables previous segment transport action near the start of the first segment", async () => {

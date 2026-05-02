@@ -65,6 +65,18 @@ const TAP_MATCH_OPTIONS = {
   durationToleranceRatio: 0.6,
 } as const;
 
+function hasActiveUserActivation(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  const userActivation = (navigator as Navigator & {
+    userActivation?: { isActive?: boolean };
+  }).userActivation;
+
+  return userActivation?.isActive === true;
+}
+
 function toDirectionLetter(direction: "up" | "down" | "same"): "U" | "D" | "S" {
   if (direction === "up") {
     return "U";
@@ -597,6 +609,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     hasAutoplayedSongRef.current = song.id;
     seek(0);
+    if (!hasActiveUserActivation()) {
+      return undefined;
+    }
     requestPlay(0, Number.POSITIVE_INFINITY);
     return () => {
       if (hasAutoplayedSongRef.current === song.id) {
