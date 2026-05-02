@@ -513,7 +513,7 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
               const shouldRenderLabelInsideBar = mastery >= 10;
               const hasAudio = Boolean(song.audioUrl?.trim());
               const hasSegments = song.segments.length > 0;
-              const hasTapKeys = song.segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0);
+              const hasTapKeys = (song.pitchContourNotes?.length ?? 0) > 0;
               return (
                 <div
                   key={song.id}

@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { PitchContourNote, Segment } from '../types/index';
+import { Segment, SongPitchContourNote } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { PitchContourThumbnail } from './PitchContourThumbnail';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
 import { getDefaultNewSegmentPlacement, getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
-import { splitAbsoluteContourNoteBySegments } from '../lib/pitchContour';
+import { getSegmentPitchContourNotes } from '../lib/pitchContour';
 
 const MIN_SEGMENT_MS = 1000;
 const MIN_ZOOM = 1;
@@ -27,11 +27,30 @@ interface ActiveContourCapture {
   pointerId: number;
 }
 
+interface ContourDraftPoint {
+  id: string;
+  absoluteMs: number;
+  durationMs: number;
+  lane: number;
+  direction: 'U' | 'D' | 'S' | null;
+}
+
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getContourDirectionLabel(previousLane: number, nextLane: number): 'U' | 'D' | 'S' {
+  const delta = nextLane - previousLane;
+  if (delta > 0.05) {
+    return 'U';
+  }
+  if (delta < -0.05) {
+    return 'D';
+  }
+  return 'S';
 }
 
 type ResizeEdge = 'start' | 'end';
@@ -77,9 +96,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const [songLoaded, setSongLoaded] = useState(false);
   const [songLoadKey, setSongLoadKey] = useState(0);
   const [isContourRecording, setIsContourRecording] = useState(false);
-  const [contourDraftBySegment, setContourDraftBySegment] = useState<Record<string, PitchContourNote[]>>({});
+  const [contourDraftNotes, setContourDraftNotes] = useState<SongPitchContourNote[]>([]);
   const [isSavingContourDraft, setIsSavingContourDraft] = useState(false);
   const boardRef = useRef<HTMLDivElement | null>(null);
+  const focusedContourCardRef = useRef<HTMLDivElement | null>(null);
   const contourTapBarRef = useRef<HTMLDivElement | null>(null);
   const activeContourCaptureRef = useRef<ActiveContourCapture | null>(null);
   const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
@@ -111,23 +131,41 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     [segments, selectedSegmentId]
   );
 
-  const segmentWindows = useMemo(
-    () => segments.map((segment) => ({ id: segment.id, startMs: segment.startMs, endMs: segment.endMs })),
-    [segments]
-  );
-
-  const hasContourDraft = useMemo(
-    () => Object.values(contourDraftBySegment).some((notes) => notes.length > 0),
-    [contourDraftBySegment]
-  );
+  const hasContourDraft = contourDraftNotes.length > 0;
 
   const contourDraftPointCount = useMemo(
-    () => Object.values(contourDraftBySegment).reduce((total, notes) => total + notes.length, 0),
-    [contourDraftBySegment]
+    () => contourDraftNotes.length,
+    [contourDraftNotes]
   );
+
+  const isContourEditorOpen = isContourRecording || hasContourDraft;
+
+  const updateContourDraftLane = (noteId: string, lane: number) => {
+    setContourDraftNotes((previous) => previous.map((note) => (note.id === noteId ? { ...note, lane } : note)));
+  };
 
   const getLaneFromClientY = (clientY: number): number => {
     const rect = contourTapBarRef.current?.getBoundingClientRect();
+    if (!rect || rect.height <= 0) {
+      return 0.5;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    return 1 - ratio;
+  };
+
+  const getBoardLaneFromClientY = (clientY: number): number => {
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect || rect.height <= 0) {
+      return 0.5;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    return 1 - ratio;
+  };
+
+  const getFocusedContourLaneFromClientY = (clientY: number): number => {
+    const rect = focusedContourCardRef.current?.getBoundingClientRect();
     if (!rect || rect.height <= 0) {
       return 0.5;
     }
@@ -144,25 +182,15 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
     const endMs = Math.max(capture.startMs + MIN_CONTOUR_TAP_DURATION_MS, currentMs);
     const lane = typeof endLane === 'number' ? endLane : capture.lane;
-    const splitNotes = splitAbsoluteContourNoteBySegments(
+    setContourDraftNotes((previous) => [
+      ...previous,
       {
         id: capture.id,
-        startMs: capture.startMs,
+        absoluteMs: capture.startMs,
         durationMs: endMs - capture.startMs,
         lane,
       },
-      segmentWindows
-    );
-
-    if (splitNotes.length > 0) {
-      setContourDraftBySegment((previous) => {
-        const next = { ...previous };
-        for (const splitNote of splitNotes) {
-          next[splitNote.segmentId] = [...(next[splitNote.segmentId] ?? []), splitNote.note];
-        }
-        return next;
-      });
-    }
+    ].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id)));
 
     activeContourCaptureRef.current = null;
   };
@@ -572,6 +600,64 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     [segments]
   );
 
+  const playbackSegment = useMemo(
+    () => orderedSegments.find((segment) => currentMs >= segment.startMs && currentMs < segment.endMs) ?? null,
+    [currentMs, orderedSegments]
+  );
+
+  const focusedRecordingSegment = isContourRecording
+    ? playbackSegment ?? selectedSegment ?? orderedSegments[0] ?? null
+    : selectedSegment ?? playbackSegment ?? orderedSegments[0] ?? null;
+  const focusedRecordingSegmentIndex = focusedRecordingSegment
+    ? orderedSegments.findIndex((segment) => segment.id === focusedRecordingSegment.id)
+    : -1;
+  const focusedSegmentDurationMs = focusedRecordingSegment
+    ? Math.max(1, focusedRecordingSegment.endMs - focusedRecordingSegment.startMs)
+    : 1;
+
+  const contourDraftPoints = useMemo<ContourDraftPoint[]>(() => {
+    const points = [...contourDraftNotes]
+      .sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id))
+      .map((note) => ({
+        id: note.id,
+        absoluteMs: note.absoluteMs,
+        durationMs: note.durationMs,
+        lane: note.lane,
+        direction: null,
+      }));
+
+    return points.map((point, index) => ({
+      ...point,
+      direction: index === 0 ? null : getContourDirectionLabel(points[index - 1].lane, point.lane),
+    }));
+  }, [contourDraftNotes]);
+
+  const focusedContourDraftPoints = useMemo<ContourDraftPoint[]>(() => {
+    if (!focusedRecordingSegment) {
+      return [];
+    }
+
+    const points = contourDraftNotes
+      .filter((note) => {
+        const noteStartMs = note.absoluteMs;
+        const noteEndMs = noteStartMs + note.durationMs;
+        return noteEndMs > focusedRecordingSegment.startMs && noteStartMs < focusedRecordingSegment.endMs;
+      })
+      .sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id))
+      .map((note) => ({
+        id: note.id,
+        absoluteMs: note.absoluteMs,
+        durationMs: note.durationMs,
+        lane: note.lane,
+        direction: null,
+      }));
+
+    return points.map((point, index) => ({
+      ...point,
+      direction: index === 0 ? null : getContourDirectionLabel(points[index - 1].lane, point.lane),
+    }));
+  }, [contourDraftNotes, focusedRecordingSegment]);
+
   const msFromClientX = (clientX: number): number => {
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || timelineDurationMs <= 0) {
@@ -697,7 +783,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   useEffect(() => {
     setUseProxyFallback(false);
     setIsContourRecording(false);
-    setContourDraftBySegment({});
+    setContourDraftNotes([]);
     activeContourCaptureRef.current = null;
     pendingFallbackPlayRangeRef.current = null;
   }, [songId]);
@@ -758,7 +844,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
   const clearContourDraft = () => {
     activeContourCaptureRef.current = null;
-    setContourDraftBySegment({});
+    setContourDraftNotes([]);
   };
 
   const handleToggleContourRecording = () => {
@@ -769,8 +855,24 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     }
 
     setDeleteError(null);
-    clearContourDraft();
+    if (!hasContourDraft) {
+      clearContourDraft();
+    }
+    const startingSegment = playbackSegment ?? selectedSegment ?? orderedSegments[0] ?? null;
+    if (startingSegment) {
+      setSelectedSegmentId(startingSegment.id);
+    }
     setIsContourRecording(true);
+  };
+
+  const selectRecordingSegment = (index: number) => {
+    const nextSegment = orderedSegments[index];
+    if (!nextSegment) {
+      return;
+    }
+
+    setSelectedSegmentId(nextSegment.id);
+    seek(nextSegment.startMs);
   };
 
   const saveContourDraft = async () => {
@@ -782,14 +884,16 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     setIsSavingContourDraft(true);
 
     try {
-      const updates = Object.entries(contourDraftBySegment).filter(([, notes]) => notes.length > 0);
-      for (const [segmentId, notes] of updates) {
-        const normalizedNotes = [...notes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-        updateLocalSegment(segmentId, { pitchContourNotes: normalizedNotes });
-        await saveSegmentPatch(segmentId, { pitchContourNotes: normalizedNotes });
-      }
+      const normalizedNotes = [...contourDraftNotes].sort((a, b) => a.absoluteMs - b.absoluteMs);
+      const response = await fetch(`/api/songs/${songId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pitchContourNotes: normalizedNotes }),
+      });
 
-      setContourDraftBySegment({});
+      if (!response.ok) {
+        throw new Error('Contour save failed');
+      }
       setIsContourRecording(false);
     } catch {
       setDeleteError('Failed to save contour answer key. Please try again.');
@@ -832,11 +936,12 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         if (!response.ok) {
           return;
         }
-        const data = (await response.json()) as { audioUrl?: string; title?: string };
+        const data = (await response.json()) as { audioUrl?: string; title?: string; pitchContourNotes?: SongPitchContourNote[] };
         if (!cancelled) {
           setAudioUrl(data.audioUrl ?? '');
           setSongTitle(data.title ?? '');
           setTitleDraft(data.title ?? '');
+          setContourDraftNotes([...(data.pitchContourNotes ?? [])].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id)));
           setSongLoaded(true);
         }
       } catch {
@@ -905,13 +1010,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl">
+    <div className={`mx-auto w-full ${isContourEditorOpen ? 'max-w-[92rem]' : 'max-w-6xl'}`}>
       {/* Header */}
       <div className="mb-4">
         <h2 className="text-2xl font-bold text-gray-900">Edit Song</h2>
       </div>
 
       {/* Song title */}
+      {!isContourRecording ? (
       <div className="mb-4 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
         <label className="block text-xs font-semibold text-indigo-700 mb-1">Song title</label>
         <div className="flex items-center gap-2">
@@ -927,8 +1033,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
         </div>
       </div>
+      ) : null}
 
       {/* Replace audio (collapsible) */}
+      {!isContourRecording ? (
       <div className="mb-4">
         <button
           type="button"
@@ -954,6 +1062,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           </div>
         )}
       </div>
+      ) : null}
 
       {deleteError && (
         <div role="alert" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -986,26 +1095,36 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       <div className="mb-4 rounded-xl border border-indigo-100 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            <p className="text-sm font-semibold text-indigo-800">Sections</p>
-            <button
-              type="button"
-              data-testid="segment-editor-new-section"
-              onClick={handleAddNew}
-              className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
-            >
-              + New section
-            </button>
-            <button
-              type="button"
-              data-testid="segment-editor-bulk-open"
-              onClick={() => {
-                setDeleteError(null);
-                setShowBulkImport((previous) => !previous);
-              }}
-              className="px-3 py-1 border border-indigo-300 text-indigo-700 text-sm rounded hover:bg-indigo-50"
-            >
-              Bulk Lyrics
-            </button>
+            <p className="text-sm font-semibold text-indigo-800">
+              {isContourRecording ? 'Answer key recording' : hasContourDraft ? 'Answer key editing' : 'Sections'}
+            </p>
+            {!isContourEditorOpen ? (
+              <>
+                <button
+                  type="button"
+                  data-testid="segment-editor-new-section"
+                  onClick={handleAddNew}
+                  className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+                >
+                  + New section
+                </button>
+                <button
+                  type="button"
+                  data-testid="segment-editor-bulk-open"
+                  onClick={() => {
+                    setDeleteError(null);
+                    setShowBulkImport((previous) => !previous);
+                  }}
+                  className="px-3 py-1 border border-indigo-300 text-indigo-700 text-sm rounded hover:bg-indigo-50"
+                >
+                  Bulk Lyrics
+                </button>
+              </>
+            ) : (
+              <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                {isContourRecording ? 'Tap bar is active' : 'Draft dots are editable'}
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
             <p className="w-full text-xs text-gray-500 md:w-auto">Drag top bar to move • Drag edges to resize</p>
@@ -1035,10 +1154,9 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
         <div
           data-testid="segment-editor-playback-controls"
-          className="mb-3 rounded-lg bg-indigo-50/40 p-3"
+          className="sticky top-2 z-50 mb-3 rounded-lg border border-indigo-200 bg-white/95 p-3 shadow-sm backdrop-blur"
         >
-          <div className="flex flex-row items-stretch gap-3">
-            <div className="min-w-0 flex-1 space-y-2">
+          <div className="min-w-0 space-y-2">
               <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:flex-nowrap">
                 <button
                   type="button"
@@ -1081,6 +1199,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                     <span>+5s</span>
                   </span>
                 </button>
+                {isContourRecording ? (
                 <label className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-indigo-800">
                   Speed
                   <select
@@ -1094,6 +1213,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                     ))}
                   </select>
                 </label>
+                ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
                 <span data-testid="segment-editor-current-ms">{formatMs(currentMs)}</span>
@@ -1113,88 +1233,38 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                       : 'border border-indigo-300 bg-white text-indigo-800 hover:bg-indigo-50'
                   }`}
                 >
-                  {isContourRecording ? 'Stop answer key recording' : 'Record answer key'}
+                  {isContourRecording ? 'Stop answer key recording' : hasContourDraft ? 'Resume recording' : 'Record answer key'}
                 </button>
-                <button
-                  type="button"
-                  data-testid="segment-editor-contour-save"
-                  onClick={() => { void saveContourDraft(); }}
-                  disabled={!hasContourDraft || isSavingContourDraft}
-                  className="rounded bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  Save pass
-                </button>
-                <button
-                  type="button"
-                  data-testid="segment-editor-contour-clear-draft"
-                  onClick={clearContourDraft}
-                  disabled={!hasContourDraft || isSavingContourDraft}
-                  className="rounded border border-indigo-300 bg-white px-2 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
-                >
-                  Clear draft
-                </button>
-                <span className="text-xs text-indigo-800">
-                  Draft points: <strong data-testid="segment-editor-contour-draft-count">{contourDraftPointCount}</strong>
-                </span>
+                {(isContourRecording || hasContourDraft) ? (
+                  <>
+                    <button
+                      type="button"
+                      data-testid="segment-editor-contour-save"
+                      onClick={() => { void saveContourDraft(); }}
+                      disabled={!hasContourDraft || isSavingContourDraft}
+                      className="rounded bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      Save pass
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="segment-editor-contour-clear-draft"
+                      onClick={clearContourDraft}
+                      disabled={!hasContourDraft || isSavingContourDraft}
+                      className="rounded border border-indigo-300 bg-white px-2 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
+                    >
+                      Clear draft
+                    </button>
+                    <span className="text-xs text-indigo-800">
+                      Draft points: <strong data-testid="segment-editor-contour-draft-count">{contourDraftPointCount}</strong>
+                    </span>
+                  </>
+                ) : null}
               </div>
-            </div>
-
-            <div className="w-16 shrink-0">
-              <div
-                ref={contourTapBarRef}
-                data-testid="segment-editor-contour-tapbar"
-                aria-label="Contour tap bar"
-                className={`relative h-full min-h-[280px] rounded-xl border-2 ${
-                  isContourRecording
-                    ? 'border-indigo-500 bg-gradient-to-b from-indigo-100 via-white to-indigo-100'
-                    : 'border-slate-300 bg-slate-100'
-                }`}
-                onPointerDown={(event) => {
-                  if (!isContourRecording) {
-                    return;
-                  }
-                  event.preventDefault();
-                  if (typeof event.currentTarget.setPointerCapture === 'function') {
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                  }
-                  activeContourCaptureRef.current = {
-                    id: crypto.randomUUID(),
-                    startMs: currentMs,
-                    lane: getLaneFromClientY(event.clientY),
-                    pointerId: event.pointerId,
-                  };
-                }}
-                onPointerMove={(event) => {
-                  const activeCapture = activeContourCaptureRef.current;
-                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
-                    return;
-                  }
-                  activeCapture.lane = getLaneFromClientY(event.clientY);
-                }}
-                onPointerUp={(event) => {
-                  const activeCapture = activeContourCaptureRef.current;
-                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
-                    return;
-                  }
-                  finalizeContourCapture(getLaneFromClientY(event.clientY));
-                }}
-                onPointerCancel={(event) => {
-                  const activeCapture = activeContourCaptureRef.current;
-                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
-                    return;
-                  }
-                  finalizeContourCapture(getLaneFromClientY(event.clientY));
-                }}
-              >
-                <div className="pointer-events-none absolute inset-x-2 top-2 rounded bg-indigo-200/70 px-1 py-0.5 text-center text-[10px] font-semibold text-indigo-800">
-                  Tap
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
-        {showBulkImport ? (
+        {showBulkImport && !isContourEditorOpen ? (
           <div data-testid="segment-editor-bulk-panel" className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
             <div className="mb-2 grid gap-2 md:grid-cols-[1fr,180px]">
               <label className="text-xs font-semibold text-indigo-800">
@@ -1256,6 +1326,105 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           </div>
         ) : null}
 
+        <div className={isContourRecording ? 'grid gap-3 lg:grid-cols-[minmax(0,1fr)_9rem]' : ''}>
+          <div className="min-w-0">
+          {isContourEditorOpen && focusedRecordingSegment ? (
+            <div className="rounded-2xl border border-indigo-300 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 px-3 py-2">
+                <button
+                  type="button"
+                  data-testid="segment-editor-recording-prev"
+                  onClick={() => selectRecordingSegment(focusedRecordingSegmentIndex - 1)}
+                  disabled={focusedRecordingSegmentIndex <= 0}
+                  className="h-9 rounded-xl border border-indigo-300 px-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <div className="min-w-0 text-center">
+                  <p className="truncate text-sm font-semibold text-indigo-950">
+                    {focusedRecordingSegment.label}
+                  </p>
+                  <p className="text-xs text-indigo-600">
+                    {formatMs(focusedRecordingSegment.startMs)} / {formatMs(focusedRecordingSegment.endMs)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-testid="segment-editor-recording-next"
+                  onClick={() => selectRecordingSegment(focusedRecordingSegmentIndex + 1)}
+                  disabled={focusedRecordingSegmentIndex < 0 || focusedRecordingSegmentIndex >= orderedSegments.length - 1}
+                  className="h-9 rounded-xl border border-indigo-300 px-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+              <div className="grid gap-3 p-3 md:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)]">
+                <div className="min-h-[16rem] rounded-xl border border-indigo-100 bg-indigo-50/30 p-3">
+                  <p className="text-center text-sm font-semibold text-indigo-950">{focusedRecordingSegment.label}</p>
+                  <div className="mt-3 max-h-[18rem] overflow-y-auto whitespace-pre-wrap rounded-lg border border-indigo-100 bg-white p-3 text-sm leading-6 text-slate-900">
+                    {focusedRecordingSegment.lyricText || 'No lyrics for this section.'}
+                  </div>
+                </div>
+                <div
+                  ref={focusedContourCardRef}
+                  data-testid="segment-editor-recording-card"
+                  className="relative h-[52dvh] min-h-[24rem] touch-none select-none overflow-hidden rounded-xl border border-indigo-200 bg-gradient-to-b from-sky-50 via-white to-amber-50"
+                >
+                  <div
+                    className="pointer-events-none absolute inset-y-0 w-0.5 bg-rose-500/80"
+                    style={{
+                      left: `${Math.max(0, Math.min(100, ((currentMs - focusedRecordingSegment.startMs) / focusedSegmentDurationMs) * 100))}%`,
+                    }}
+                  />
+                  {focusedContourDraftPoints.map((point) => {
+                    const left = Math.round(((point.absoluteMs - focusedRecordingSegment.startMs) / focusedSegmentDurationMs) * 1000) / 10;
+                    const top = Math.round((1 - point.lane) * 1000) / 10;
+                    const width = Math.round(Math.max(2, (point.durationMs / focusedSegmentDurationMs) * 100) * 10) / 10;
+                    const label = point.direction ?? 'S';
+                    return (
+                      <div
+                        key={`focused-draft-note-${point.id}`}
+                        data-testid="segment-editor-focused-contour-note"
+                        className="absolute h-4 -translate-y-1/2 rounded-full bg-sky-300/55 shadow-sm"
+                        style={{ left: `${left}%`, top: `${top}%`, width: `${width}%` }}
+                      >
+                        <button
+                          type="button"
+                          data-testid="segment-editor-focused-contour-dot"
+                          aria-label={`Adjust focused contour dot ${label}`}
+                          className="absolute left-0 top-1/2 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 touch-none select-none items-center justify-center rounded-full border-2 border-white bg-sky-600 text-xs font-bold text-white shadow-md"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            if (typeof event.currentTarget.setPointerCapture === 'function') {
+                              event.currentTarget.setPointerCapture(event.pointerId);
+                            }
+                            updateContourDraftLane(point.id, getFocusedContourLaneFromClientY(event.clientY));
+                          }}
+                          onPointerMove={(event) => {
+                            if (event.buttons === 0) {
+                              return;
+                            }
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateContourDraftLane(point.id, getFocusedContourLaneFromClientY(event.clientY));
+                          }}
+                          onPointerUp={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateContourDraftLane(point.id, getFocusedContourLaneFromClientY(event.clientY));
+                          }}
+                        >
+                          {label}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
+          <>
           <div className="overflow-x-auto rounded-lg border border-indigo-300">
             <div
               ref={boardRef}
@@ -1397,7 +1566,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                     placeholder="lyrics"
                   />
                   <PitchContourThumbnail
-                    notes={contourDraftBySegment[segment.id] ?? segment.pitchContourNotes ?? []}
+                    notes={getSegmentPitchContourNotes(contourDraftNotes, segment)}
                     segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
                   />
                   <div className="mt-auto flex items-center justify-between text-xs text-indigo-700">
@@ -1424,6 +1593,54 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
             );
           })}
           {timelineDurationMs > 0 && (
+            <>
+              {contourDraftPoints.map((point) => {
+                const left = Math.round((point.absoluteMs / timelineDurationMs) * 1000) / 10;
+                const top = Math.round((1 - point.lane) * 1000) / 10;
+                const width = Math.round(Math.max(1.2, (point.durationMs / timelineDurationMs) * 100) * 10) / 10;
+                const label = point.direction ?? 'S';
+                return (
+                  <div
+                    key={`draft-note-${point.id}`}
+                    data-testid="segment-editor-contour-draft-note"
+                    className="absolute z-50 h-3 -translate-y-1/2 rounded-full bg-sky-300/50 shadow-sm"
+                    style={{ left: `${left}%`, top: `${top}%`, width: `${width}%` }}
+                  >
+                    <button
+                      type="button"
+                      data-testid="segment-editor-contour-draft-dot"
+                      aria-label={`Adjust contour dot ${label}`}
+                      className="absolute left-0 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 touch-none select-none items-center justify-center rounded-full border-2 border-white bg-sky-600 text-xs font-bold text-white shadow-md"
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (typeof event.currentTarget.setPointerCapture === 'function') {
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                        }
+                        updateContourDraftLane(point.id, getBoardLaneFromClientY(event.clientY));
+                      }}
+                      onPointerMove={(event) => {
+                        if (event.buttons === 0) {
+                          return;
+                        }
+                        event.preventDefault();
+                        event.stopPropagation();
+                        updateContourDraftLane(point.id, getBoardLaneFromClientY(event.clientY));
+                      }}
+                      onPointerUp={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        updateContourDraftLane(point.id, getBoardLaneFromClientY(event.clientY));
+                      }}
+                    >
+                      {label}
+                    </button>
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {timelineDurationMs > 0 && (
             <div
               data-testid="segment-editor-canvas-playhead"
               className="pointer-events-none absolute inset-y-0 z-40 w-0.5 bg-rose-500/80"
@@ -1436,6 +1653,76 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         <div className="mt-2 flex items-center justify-between text-sm text-indigo-800">
           <span>0:00</span>
           <span>{Math.floor(timelineDurationMs / 60000)}:{String(Math.floor((timelineDurationMs % 60000) / 1000)).padStart(2, '0')}</span>
+        </div>
+          </>
+          )}
+          </div>
+
+          {isContourRecording ? (
+            <div className="min-h-[50dvh] lg:min-h-0">
+              <div
+                ref={contourTapBarRef}
+                data-testid="segment-editor-contour-tapbar"
+                aria-label="Contour tap bar"
+                className="sticky top-[7rem] h-[50dvh] min-h-[360px] touch-none select-none overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm lg:h-[calc(100dvh-12rem)]"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  if (typeof event.currentTarget.setPointerCapture === 'function') {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  }
+                  activeContourCaptureRef.current = {
+                    id: crypto.randomUUID(),
+                    startMs: currentMs,
+                    lane: getLaneFromClientY(event.clientY),
+                    pointerId: event.pointerId,
+                  };
+                }}
+                onPointerMove={(event) => {
+                  const activeCapture = activeContourCaptureRef.current;
+                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                    return;
+                  }
+                  activeCapture.lane = getLaneFromClientY(event.clientY);
+                }}
+                onPointerUp={(event) => {
+                  const activeCapture = activeContourCaptureRef.current;
+                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                    return;
+                  }
+                  finalizeContourCapture(getLaneFromClientY(event.clientY));
+                }}
+                onPointerCancel={(event) => {
+                  const activeCapture = activeContourCaptureRef.current;
+                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                    return;
+                  }
+                  finalizeContourCapture(getLaneFromClientY(event.clientY));
+                }}
+              >
+                <div className="pointer-events-none absolute inset-0">
+                  <div className="absolute inset-x-0 top-0 flex h-16 items-start justify-center bg-gradient-to-b from-emerald-200/45 to-transparent pt-4 text-emerald-700">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 19V5" />
+                      <path d="M6 11l6-6 6 6" />
+                    </svg>
+                  </div>
+                  <div className="absolute inset-x-0 bottom-0 flex h-16 items-end justify-center bg-gradient-to-t from-amber-200/55 to-transparent pb-4 text-amber-700">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 5v14" />
+                      <path d="M18 13l-6 6-6-6" />
+                    </svg>
+                  </div>
+                  <div className="absolute inset-x-3 top-1/2 -translate-y-1/2 rounded-xl border border-indigo-200 bg-white/70 py-2 text-center text-indigo-500 shadow-sm">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="mx-auto h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 5v14" />
+                      <path d="M6 11l6-6 6 6" />
+                      <path d="M18 13l-6 6-6-6" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div data-testid="segment-editor-song-timeline" className="mt-4 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-3">
@@ -1477,6 +1764,18 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
             <span>{Math.floor(Math.max(0, currentMs) / 60000)}:{String(Math.floor((Math.max(0, currentMs) % 60000) / 1000)).padStart(2, '0')}</span>
             <span>{Math.floor(timelineDurationMs / 60000)}:{String(Math.floor((timelineDurationMs % 60000) / 1000)).padStart(2, '0')}</span>
           </div>
+        </div>
+
+        <div className="sticky bottom-2 z-50 mt-3 flex justify-center">
+          <button
+            type="button"
+            data-testid="segment-editor-bottom-play-toggle"
+            onClick={handleTogglePlay}
+            aria-label={isPlaying ? 'Pause from bottom controls' : 'Play from bottom controls'}
+            className="flex h-12 min-w-28 items-center justify-center rounded-2xl bg-indigo-600 px-5 text-lg font-semibold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700"
+          >
+            {isPlaying ? '⏸' : '▶'}
+          </button>
         </div>
       </div>
 

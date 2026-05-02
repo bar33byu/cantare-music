@@ -12,6 +12,7 @@ import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/au
 import { getMasteryPercent } from "../lib/masteryColors";
 import { buildContourDirectionEvents, compareContourAttemptDetailed } from "../lib/contourPractice";
 import type { AttemptNoteStatus } from "../lib/contourPractice";
+import { getSegmentPitchContourNotes } from "../lib/pitchContour";
 
 interface TransportDebugState {
   playToggleClicks: number;
@@ -169,6 +170,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     lastActionAt: new Date().toISOString(),
   });
   const hasSegments = song.segments.length > 0;
+  const hasTapAnswers = (song.pitchContourNotes?.length ?? 0) > 0;
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
   const tapBarRef = React.useRef<HTMLDivElement | null>(null);
   const activeTapCaptureRef = React.useRef<ActiveTapCapture | null>(null);
@@ -200,25 +202,29 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
   const currentAttemptNotes = currentSegment ? (tapAttemptsBySegment[currentSegment.id] ?? []) : [];
+  const currentSegmentPitchContourNotes = useMemo(
+    () => (currentSegment ? getSegmentPitchContourNotes(song.pitchContourNotes, currentSegment) : []),
+    [currentSegment, song.pitchContourNotes]
+  );
   const currentSegmentMatch = useMemo(() => {
     if (!currentSegment) {
       return null;
     }
 
     return compareContourAttemptDetailed(
-      currentSegment.pitchContourNotes ?? [],
+      currentSegmentPitchContourNotes,
       currentAttemptNotes,
       TAP_MATCH_OPTIONS
     );
-  }, [currentAttemptNotes, currentSegment]);
+  }, [currentAttemptNotes, currentSegment, currentSegmentPitchContourNotes]);
   const answerDirectionLetters = useMemo(() => {
     if (!currentSegment) {
       return new Map<string, "U" | "D" | "S">();
     }
-    const sortedNotes = [...(currentSegment.pitchContourNotes ?? [])].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+    const sortedNotes = [...currentSegmentPitchContourNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
     const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
     return new Map(events.map((event, index) => [sortedNotes[index + 1]?.id, toDirectionLetter(event.direction)]).filter((entry): entry is [string, "U" | "D" | "S"] => Boolean(entry[0])));
-  }, [currentSegment]);
+  }, [currentSegment, currentSegmentPitchContourNotes]);
   const attemptDirectionLetters = useMemo(() => {
     const sortedNotes = [...currentAttemptNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
     const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
@@ -259,6 +265,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       ),
     [tapHeatMapBySegment]
   );
+
+  useEffect(() => {
+    if (!hasTapAnswers && isTapPracticeMode) {
+      setIsTapPracticeMode(false);
+      activeTapCaptureRef.current = null;
+    }
+  }, [hasTapAnswers, isTapPracticeMode]);
   const hasAutoplayedSongRef = React.useRef<string | null>(null);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
   const requestPlay = React.useCallback((startMs: number, endMs: number) => {
@@ -944,8 +957,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const segmentId = currentSegment.id;
     const latestForSegment = tapAttemptsRef.current[segmentId] ?? [];
     const nextSegmentNotes = [...latestForSegment, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-    const immediateMatch = compareContourAttemptDetailed(
-      currentSegment.pitchContourNotes ?? [],
+      const immediateMatch = compareContourAttemptDetailed(
+      currentSegmentPitchContourNotes,
       nextSegmentNotes,
       TAP_MATCH_OPTIONS
     );
@@ -1201,7 +1214,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       }
       loopHandledRef.current = loopKey;
       const loopMatch = compareContourAttemptDetailed(
-        currentSegment.pitchContourNotes ?? [],
+        currentSegmentPitchContourNotes,
         tapAttemptsBySegment[currentSegment.id] ?? [],
         TAP_MATCH_OPTIONS
       );
@@ -1373,6 +1386,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   useEffect(() => {
     let cancelled = false;
 
+    if (!hasTapAnswers) {
+      setTapHeatMapBySegment({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const loadTapHeatMap = async () => {
       try {
         const response = await fetch(`/api/songs/${song.id}/tap-heatmap`);
@@ -1399,7 +1419,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [song.id]);
+  }, [hasTapAnswers, song.id]);
 
   return (
     <div
@@ -1518,21 +1538,23 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               Card contour: {showCardContourMap ? "On" : "Off"}
             </button>
           ) : null}
-          <button
-            type="button"
-            data-testid="practice-tap-mode-toggle"
-            onClick={() => {
-              setIsTapPracticeMode((previous) => !previous);
-              activeTapCaptureRef.current = null;
-            }}
-            className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
-              isTapPracticeMode
-                ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
-                : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
-            }`}
-          >
-            Tap practice: {isTapPracticeMode ? "On" : "Off"}
-          </button>
+          {hasTapAnswers ? (
+            <button
+              type="button"
+              data-testid="practice-tap-mode-toggle"
+              onClick={() => {
+                setIsTapPracticeMode((previous) => !previous);
+                activeTapCaptureRef.current = null;
+              }}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                isTapPracticeMode
+                  ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
+                  : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+              }`}
+            >
+              Tap practice: {isTapPracticeMode ? "On" : "Off"}
+            </button>
+          ) : null}
           {isTapPracticeMode && hasSegments && currentSegment ? (
             <button
               type="button"
@@ -1649,7 +1671,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   className={`relative z-10 h-full min-h-0 ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}
                 >
                   <SegmentCard
-                    segment={currentSegment}
+                    segment={{ ...currentSegment, pitchContourNotes: currentSegmentPitchContourNotes }}
                     currentRating={currentRating}
                     onRate={handleRateCurrentSegment}
                     playbackMs={currentMs}
@@ -1665,7 +1687,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden rounded-2xl border border-indigo-200/30 bg-indigo-50/10" data-testid="practice-piano-roll-overlay">
                     <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
                       <line x1="0" y1="50" x2="100" y2="50" stroke="rgb(199 210 254)" strokeWidth="0.5" opacity="0.45" />
-                      {showSameLaneGuides ? (currentSegment.pitchContourNotes ?? []).map((note) => {
+                      {showSameLaneGuides ? currentSegmentPitchContourNotes.map((note) => {
                         const x = getRollX(note.timeOffsetMs);
                         if (x < -5 || x > 105) {
                           return null;
@@ -1691,7 +1713,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                           </g>
                         );
                       }) : null}
-                      {(currentSegment.pitchContourNotes ?? []).map((note) => {
+                      {currentSegmentPitchContourNotes.map((note) => {
                         const x = getRollX(note.timeOffsetMs);
                         if (x < -5 || x > 105) {
                           return null;
@@ -1826,21 +1848,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               }}
             >
               <div className="pointer-events-none absolute inset-0">
-                {Array.from({ length: 9 }, (_, index) => {
-                  const yPercent = (index + 1) * 10;
-                  const isMajor = (index + 1) % 5 === 0;
-                  return (
-                    <div
-                      key={`tap-guide-${yPercent}`}
-                      data-testid="practice-tap-graduation"
-                      className={`absolute left-0 right-0 border-t ${isMajor ? "border-indigo-300/80" : "border-slate-300/45"}`}
-                      style={{ top: `${yPercent}%` }}
-                    >
-                      <span className={`absolute -top-px right-2 h-px ${isMajor ? "w-8 bg-indigo-300" : "w-4 bg-slate-300"}`} />
-                      <span className={`absolute -top-px left-2 h-px ${isMajor ? "w-8 bg-indigo-300" : "w-4 bg-slate-300"}`} />
-                    </div>
-                  );
-                })}
                 <div className="absolute inset-x-0 top-0 flex h-16 items-start justify-center bg-gradient-to-b from-emerald-200/45 to-transparent pt-4 text-emerald-700">
                   <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 19V5" />

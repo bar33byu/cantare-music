@@ -169,12 +169,22 @@ describe('Home page', () => {
     render(<Home />);
 
     expect(screen.getByText('Cantare Music')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-playlist-browser')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('library-tab'));
     fireEvent.click(screen.getByTestId('mock-select-song'));
 
     await waitFor(() => {
       expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
     });
+  });
+
+  it('falls back to playlists when the hash view is missing or invalid', async () => {
+    window.history.replaceState(null, '', '/#view=unknown');
+
+    render(<Home />);
+
+    expect(await screen.findByTestId('mock-playlist-browser')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-select-song')).not.toBeInTheDocument();
   });
 
   it('allows updating segment preroll from settings panel', async () => {
@@ -346,7 +356,7 @@ describe('Home page', () => {
     }));
   });
 
-  it('writes hash route on navigation and supports browser back', async () => {
+  it('writes hash route on navigation and keeps tabs navigable', async () => {
     render(<Home />);
 
     await waitFor(() => {
@@ -360,8 +370,7 @@ describe('Home page', () => {
     });
     expect(window.location.hash).toContain('view=song_practice');
 
-    window.location.hash = '#view=library';
-    fireEvent(window, new HashChangeEvent('hashchange'));
+    fireEvent.click(screen.getByText('Songs'));
 
     await waitFor(() => {
       expect(screen.getByTestId('mock-select-song')).toBeInTheDocument();

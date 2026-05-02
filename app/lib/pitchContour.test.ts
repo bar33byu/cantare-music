@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitAbsoluteContourNoteBySegments, validatePitchContourNotes } from "./pitchContour";
+import { getSegmentPitchContourNotes, splitAbsoluteContourNoteBySegments, validatePitchContourNotes, validateSongPitchContourNotes } from "./pitchContour";
 
 describe("validatePitchContourNotes", () => {
   it("accepts undefined", () => {
@@ -74,5 +74,26 @@ describe("validatePitchContourNotes", () => {
         lane: 0.65,
       },
     });
+  });
+});
+
+describe("validateSongPitchContourNotes", () => {
+  it("accepts song-timeline contour notes", () => {
+    expect(validateSongPitchContourNotes([
+      { id: "n-1", absoluteMs: 1200, durationMs: 100, lane: 0.5 },
+    ])).toEqual({ ok: true });
+  });
+});
+
+describe("getSegmentPitchContourNotes", () => {
+  it("projects absolute notes into every segment window they overlap", () => {
+    const notes = [{ id: "n-1", absoluteMs: 900, durationMs: 300, lane: 0.4 }];
+
+    expect(getSegmentPitchContourNotes(notes, { startMs: 0, endMs: 1000 })).toEqual([
+      { id: "n-1", timeOffsetMs: 900, durationMs: 100, lane: 0.4 },
+    ]);
+    expect(getSegmentPitchContourNotes(notes, { startMs: 1000, endMs: 2000 })).toEqual([
+      { id: "n-1", timeOffsetMs: 0, durationMs: 200, lane: 0.4 },
+    ]);
   });
 });

@@ -6,6 +6,7 @@ import {
   listTapPracticeSessionsForSong,
 } from '../../../../../db/queries';
 import { computeContourNoteHeatMap } from '../../../../lib/contourPractice';
+import { getSegmentPitchContourNotes } from '../../../../lib/pitchContour';
 import { resolveRequestUserId } from '../../../_user';
 
 function formatError(error: unknown) {
@@ -53,7 +54,7 @@ export async function GET(
 
         return [
           segment.id,
-          computeContourNoteHeatMap(segment.pitchContourNotes ?? [], attempts, {
+          computeContourNoteHeatMap(getSegmentPitchContourNotes(song.pitchContourNotes ?? [], segment), attempts, {
             timeToleranceMs: 400,
             sameDeadZone: 0.05,
             durationToleranceRatio: 0.6,

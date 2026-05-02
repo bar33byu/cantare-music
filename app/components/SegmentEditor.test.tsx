@@ -631,6 +631,9 @@ describe('SegmentEditor', () => {
 
     fireEvent.click(screen.getByTestId('segment-editor-play-toggle'));
     expect(play).toHaveBeenCalledWith(2000, 60000);
+
+    fireEvent.click(screen.getByTestId('segment-editor-bottom-play-toggle'));
+    expect(play).toHaveBeenCalledWith(2000, 60000);
   });
 
   it('play toggle still requests playback before readiness settles', async () => {
@@ -1119,9 +1122,13 @@ describe('SegmentEditor', () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('segment-editor-playback-rate')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
     });
 
+    expect(screen.queryByTestId('segment-editor-playback-rate')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+
+    expect(screen.getByTestId('segment-editor-playback-rate')).toBeInTheDocument();
     fireEvent.change(screen.getByTestId('segment-editor-playback-rate'), { target: { value: '0.5' } });
     expect(setPlaybackRate).toHaveBeenCalledWith(0.5);
   });
@@ -1161,20 +1168,60 @@ describe('SegmentEditor', () => {
       expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
     });
 
+    expect(screen.queryByTestId('segment-editor-contour-tapbar')).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
 
     const tapBar = screen.getByTestId('segment-editor-contour-tapbar');
+    expect(tapBar).toHaveClass('lg:h-[calc(100dvh-12rem)]');
+    expect(screen.getByTestId('segment-editor-recording-card')).toBeInTheDocument();
+    expect(screen.getByTestId('segment-editor-recording-next')).toBeInTheDocument();
+    expect(screen.queryByTestId('segment-editor-board')).not.toBeInTheDocument();
+
     fireEvent.pointerDown(tapBar, { pointerId: 31, clientY: 40 });
     fireEvent.pointerUp(tapBar, { pointerId: 31, clientY: 44 });
 
     expect(screen.getByTestId('segment-editor-contour-draft-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('segment-editor-focused-contour-note')).toBeInTheDocument();
+    expect(screen.getByTestId('segment-editor-focused-contour-dot')).toHaveTextContent('S');
+
+    const recordingCard = screen.getByTestId('segment-editor-recording-card');
+    vi.spyOn(recordingCard, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+    const draftDot = screen.getByTestId('segment-editor-focused-contour-dot');
+    fireEvent.pointerDown(draftDot, { pointerId: 41, clientY: 180 });
+    fireEvent.pointerMove(draftDot, { pointerId: 41, clientY: 20, buttons: 1 });
+
+    expect(screen.getByTestId('segment-editor-focused-contour-note')).toHaveStyle({ top: '10%' });
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+
+    expect(screen.queryByTestId('segment-editor-contour-tapbar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('segment-editor-playback-rate')).not.toBeInTheDocument();
+    expect(screen.getByTestId('segment-editor-recording-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('segment-editor-board')).not.toBeInTheDocument();
+    expect(screen.getByTestId('segment-editor-contour-record-toggle')).toHaveTextContent('Resume recording');
+
+    fireEvent.pointerDown(draftDot, { pointerId: 42, clientY: 20 });
+    fireEvent.pointerMove(draftDot, { pointerId: 42, clientY: 100, buttons: 1 });
+
+    expect(screen.getByTestId('segment-editor-focused-contour-note')).toHaveStyle({ top: '50%' });
 
     fireEvent.click(screen.getByTestId('segment-editor-contour-save'));
 
     await waitFor(() => {
       const contourPatchCall = mockFetch.mock.calls.find(
         ([url, init]) =>
-          String(url).includes('/api/songs/song-1/segments/seg-1') &&
+          String(url).endsWith('/api/songs/song-1') &&
           init?.method === 'PATCH' &&
           String(init?.body ?? '').includes('pitchContourNotes')
       );
@@ -1182,7 +1229,7 @@ describe('SegmentEditor', () => {
       const body = JSON.parse(String(contourPatchCall?.[1]?.body ?? '{}'));
       expect(Array.isArray(body.pitchContourNotes)).toBe(true);
       expect(body.pitchContourNotes.length).toBe(1);
-      expect(body.pitchContourNotes[0].timeOffsetMs).toBe(5000);
+      expect(body.pitchContourNotes[0].absoluteMs).toBe(5000);
       expect(body.pitchContourNotes[0].durationMs).toBe(80);
     });
   });

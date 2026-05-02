@@ -17,6 +17,13 @@ export interface SegmentPitchContourPoint {
   durationMs: number;
 }
 
+export interface SongPitchContourPoint {
+  id: string;
+  absoluteMs: number;
+  lane: number;
+  durationMs: number;
+}
+
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -31,6 +38,10 @@ export const songs = pgTable(
     title: text("title").notNull(),
     artist: text("artist"),
     audioKey: text("audio_key"),
+    pitchContourNotes: jsonb("pitch_contour_notes")
+      .$type<SongPitchContourPoint[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     createdAt: timestamp("created_at").defaultNow(),
     lastPracticedAt: timestamp("last_practiced_at"),
   },

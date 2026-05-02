@@ -40,12 +40,12 @@ export async function GET(request: NextRequest) {
       getLatestRatingTimeBySongIds(songIds, userId),
       getSongKnowledgeBySongIds(songIds, userId),
       Promise.all(
-        songIds.map(async (songId) => {
-          const segments = await getSegmentsBySongId(songId);
+        songs.map(async (song) => {
+          const segments = await getSegmentsBySongId(song.id);
           const hasSegments = segments.length > 0;
-          const hasTapKeys = segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0);
+          const hasTapKeys = (song.pitchContourNotes?.length ?? 0) > 0;
 
-          return [songId, { hasSegments, hasTapKeys }] as const;
+          return [song.id, { hasSegments, hasTapKeys }] as const;
         })
       ).then((entries) => Object.fromEntries(entries)),
     ]);

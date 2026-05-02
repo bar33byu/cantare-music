@@ -27,6 +27,7 @@ describe('GET /api/songs', () => {
       title: 'Song 1',
       artist: null,
       audioKey: null,
+      pitchContourNotes: [{ id: 'n-1', absoluteMs: 0, durationMs: 100, lane: 0.5 }],
       createdAt: new Date('2024-01-01T00:00:00.000Z'),
       lastPracticedAt: new Date('2024-01-02T00:00:00.000Z'),
     }];

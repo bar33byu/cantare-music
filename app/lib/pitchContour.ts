@@ -1,4 +1,4 @@
-import { PitchContourNote } from "../types/index";
+import { PitchContourNote, Segment, SongPitchContourNote } from "../types/index";
 
 const MAX_CONTOUR_NOTES = 2000;
 
@@ -51,6 +51,24 @@ function isValidContourNote(note: unknown): note is PitchContourNote {
   );
 }
 
+function isValidSongContourNote(note: unknown): note is SongPitchContourNote {
+  if (!isObject(note)) {
+    return false;
+  }
+
+  return (
+    typeof note.id === "string" &&
+    note.id.trim().length > 0 &&
+    isValidNumber(note.absoluteMs) &&
+    note.absoluteMs >= 0 &&
+    isValidNumber(note.durationMs) &&
+    note.durationMs >= 0 &&
+    isValidNumber(note.lane) &&
+    note.lane >= 0 &&
+    note.lane <= 1
+  );
+}
+
 export function validatePitchContourNotes(notes: unknown): PitchContourValidationResult {
   if (notes === undefined) {
     return { ok: true };
@@ -75,6 +93,60 @@ export function validatePitchContourNotes(notes: unknown): PitchContourValidatio
   }
 
   return { ok: true };
+}
+
+export function validateSongPitchContourNotes(notes: unknown): PitchContourValidationResult {
+  if (notes === undefined) {
+    return { ok: true };
+  }
+
+  if (!Array.isArray(notes)) {
+    return { ok: false, error: "Pitch contour notes must be an array" };
+  }
+
+  if (notes.length > MAX_CONTOUR_NOTES) {
+    return { ok: false, error: `Pitch contour notes cannot exceed ${MAX_CONTOUR_NOTES} points` };
+  }
+
+  for (const note of notes) {
+    if (!isValidSongContourNote(note)) {
+      return {
+        ok: false,
+        error:
+          "Each pitch contour note must include id, non-negative absoluteMs/durationMs, and lane between 0 and 1",
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
+export function getSegmentPitchContourNotes(
+  songContourNotes: SongPitchContourNote[] | undefined,
+  segment: Pick<Segment, "startMs" | "endMs">
+): PitchContourNote[] {
+  if (!songContourNotes || songContourNotes.length === 0) {
+    return [];
+  }
+
+  return songContourNotes
+    .flatMap((note): PitchContourNote[] => {
+      const noteStartMs = Math.max(0, note.absoluteMs);
+      const noteEndMs = Math.max(noteStartMs, noteStartMs + note.durationMs);
+      const overlapStartMs = Math.max(noteStartMs, segment.startMs);
+      const overlapEndMs = Math.min(noteEndMs, segment.endMs);
+      if (overlapEndMs <= overlapStartMs) {
+        return [];
+      }
+
+      return [{
+        id: note.id,
+        timeOffsetMs: overlapStartMs - segment.startMs,
+        durationMs: overlapEndMs - overlapStartMs,
+        lane: Math.min(1, Math.max(0, note.lane)),
+      }];
+    })
+    .sort((a, b) => a.timeOffsetMs - b.timeOffsetMs || a.id.localeCompare(b.id));
 }
 
 export function splitAbsoluteContourNoteBySegments(

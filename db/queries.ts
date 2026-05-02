@@ -44,6 +44,7 @@ export interface PlaylistSongItem {
   title: string;
   artist?: string;
   audioUrl: string;
+  pitchContourNotes: SongRow["pitchContourNotes"];
   ratingCount: number;
   segments: SegmentRow[];
   createdAt: string;
@@ -310,6 +311,23 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
     primaryError = error;
   }
 
+  if (isMissingPitchContourNotesColumnError(primaryError)) {
+    return db()
+      .select({
+        id: songs.id,
+        userId: songs.userId,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        createdAt: songs.createdAt,
+        lastPracticedAt: songs.lastPracticedAt,
+      })
+      .from(songs)
+      .where(eq(songs.userId, userId))
+      .orderBy(desc(songs.createdAt))
+      .then((rows) => rows.map((row) => ({ ...row, pitchContourNotes: [] } as SongRow)));
+  }
+
   if (isMissingUserIdColumnError(primaryError)) {
     try {
       const legacyRows = await db()
@@ -324,7 +342,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
         .from(songs)
         .orderBy(desc(songs.createdAt));
 
-      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID } as SongRow));
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, pitchContourNotes: [] } as SongRow));
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -341,7 +359,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
         .from(songs)
         .orderBy(desc(songs.createdAt));
 
-      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null } as SongRow));
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
     }
   }
 
@@ -359,7 +377,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
       .where(eq(songs.userId, userId))
       .orderBy(desc(songs.createdAt));
 
-    return legacyRows.map((row) => ({ ...row, lastPracticedAt: null } as SongRow));
+    return legacyRows.map((row) => ({ ...row, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
   } catch {
     throw primaryError;
   }
@@ -381,6 +399,25 @@ export async function getSongById(
     primaryError = error;
   }
 
+  if (isMissingPitchContourNotesColumnError(primaryError)) {
+    const rows = await db()
+      .select({
+        id: songs.id,
+        userId: songs.userId,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        createdAt: songs.createdAt,
+        lastPracticedAt: songs.lastPracticedAt,
+      })
+      .from(songs)
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
+      .limit(1);
+
+    const row = rows[0];
+    return row ? ({ ...row, pitchContourNotes: [] } as SongRow) : undefined;
+  }
+
   if (isMissingUserIdColumnError(primaryError)) {
     try {
       const rows = await db()
@@ -399,7 +436,7 @@ export async function getSongById(
       if (!row) {
         return undefined;
       }
-      return { ...row, userId: DEFAULT_QUERY_USER_ID } as SongRow;
+      return { ...row, userId: DEFAULT_QUERY_USER_ID, pitchContourNotes: [] } as SongRow;
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -422,7 +459,7 @@ export async function getSongById(
         return undefined;
       }
 
-      return { ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null } as SongRow;
+      return { ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
     }
   }
 
@@ -445,7 +482,7 @@ export async function getSongById(
       return undefined;
     }
 
-    return { ...row, lastPracticedAt: null } as SongRow;
+    return { ...row, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
   } catch {
     throw primaryError;
   }
@@ -502,13 +539,33 @@ export async function updateSongAudioKey(
 
 export async function updateSong(
   id: string,
-  updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist'>>,
+  updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist' | 'pitchContourNotes'>>,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
-  await db()
-    .update(songs)
-    .set(updates)
-    .where(and(eq(songs.id, id), eq(songs.userId, userId)));
+  try {
+    await db()
+      .update(songs)
+      .set(updates)
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)));
+  } catch (error) {
+    if (!isMissingPitchContourNotesColumnError(error)) {
+      throw error;
+    }
+
+    const { pitchContourNotes: _pitchContourNotes, ...legacyUpdates } = updates;
+    if (Object.keys(legacyUpdates).length === 0) {
+      const migrationError = new Error(
+        'Song pitch contour notes require database migration 0008_song_timeline_contour.sql before they can be saved.'
+      ) as Error & { code?: string };
+      migrationError.code = 'SONG_PITCH_CONTOUR_MIGRATION_REQUIRED';
+      throw migrationError;
+    }
+
+    await db()
+      .update(songs)
+      .set(legacyUpdates)
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)));
+  }
 }
 
 export async function markSongPracticed(
@@ -1330,6 +1387,7 @@ export async function getPlaylistById(
     title: string;
     artist: string | null;
     audioKey: string | null;
+    pitchContourNotes: SongRow["pitchContourNotes"];
     createdAt: Date | null;
     lastPracticedAt: Date | null;
   }>;
@@ -1342,6 +1400,7 @@ export async function getPlaylistById(
         title: songs.title,
         artist: songs.artist,
         audioKey: songs.audioKey,
+        pitchContourNotes: songs.pitchContourNotes,
         createdAt: songs.createdAt,
         lastPracticedAt: songs.lastPracticedAt,
       })
@@ -1350,7 +1409,7 @@ export async function getPlaylistById(
       .where(and(eq(playlistSongs.playlistId, id), eq(songs.userId, playlist.userId)))
       .orderBy(asc(playlistSongs.position));
   } catch (error) {
-    if (!isMissingUserIdColumnError(error)) {
+    if (!isMissingUserIdColumnError(error) && !isMissingPitchContourNotesColumnError(error)) {
       throw error;
     }
 
@@ -1362,6 +1421,7 @@ export async function getPlaylistById(
         title: songs.title,
         artist: songs.artist,
         audioKey: songs.audioKey,
+        pitchContourNotes: sql<SongRow["pitchContourNotes"]>`'[]'::jsonb`,
         createdAt: songs.createdAt,
         lastPracticedAt: songs.lastPracticedAt,
       })
@@ -1384,6 +1444,7 @@ export async function getPlaylistById(
     title: songRow.title,
     artist: songRow.artist ?? undefined,
     audioUrl: songRow.audioKey ?? "",
+    pitchContourNotes: songRow.pitchContourNotes ?? [],
     ratingCount: ratingCounts[songRow.songId] ?? 0,
     segments: segmentsBySong[i],
     createdAt: toIso(songRow.createdAt),

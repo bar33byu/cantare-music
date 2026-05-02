@@ -94,6 +94,7 @@ describe("getAllSongs", () => {
       {
         ...fallbackRows[0],
         lastPracticedAt: null,
+        pitchContourNotes: [],
       },
     ]);
   });
@@ -126,6 +127,7 @@ describe("getAllSongs", () => {
       {
         ...fallbackRows[0],
         lastPracticedAt: null,
+        pitchContourNotes: [],
       },
     ]);
   });

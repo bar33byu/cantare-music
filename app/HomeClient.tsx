@@ -141,7 +141,7 @@ function parseHashRoute(hash: string): HashRouteState {
     view === "playlist_detail" ||
     view === "playlist_practice"
       ? view
-      : "library";
+      : "playlists";
 
   return {
     view: safeView,

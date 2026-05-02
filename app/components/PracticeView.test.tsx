@@ -86,6 +86,10 @@ const makeSong = (numSegments = 3): Song => ({
   title: "Amazing Grace",
   artist: "John Newton",
   audioUrl: "https://cdn.example.com/audio/song-1/audio.mp3",
+  pitchContourNotes: [
+    { id: "key-1", absoluteMs: 0, durationMs: 100, lane: 0.25 },
+    { id: "key-2", absoluteMs: 100, durationMs: 100, lane: 0.75 },
+  ],
   segments: Array.from({ length: numSegments }, (_, i) => ({
     id: `seg-${i}`,
     songId: "song-1",
@@ -353,7 +357,7 @@ describe("PracticeView", () => {
     expect(screen.queryByTestId("practice-prev-segment")).not.toBeInTheDocument();
     expect(screen.queryByTestId("practice-next-segment")).not.toBeInTheDocument();
     expect(screen.getByTestId("practice-tap-bar")).toHaveClass("w-28");
-    expect(screen.getAllByTestId("practice-tap-graduation")).toHaveLength(9);
+    expect(screen.queryByTestId("practice-tap-graduation")).not.toBeInTheDocument();
     expect(screen.getByTestId("practice-overlay-toggle")).toBeInTheDocument();
   });
 
@@ -421,13 +425,11 @@ describe("PracticeView", () => {
 
   it("hides the card contour toggle when the song has no tap data", async () => {
     const song = makeSong(2);
+    song.pitchContourNotes = [];
     await renderAndWaitForRatings(song);
 
-    await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-heatmap`);
-    });
-
     expect(screen.queryByTestId("practice-card-contour-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("practice-tap-mode-toggle")).not.toBeInTheDocument();
     expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
   });
 
@@ -446,13 +448,10 @@ describe("PracticeView", () => {
     });
 
     const song = makeSong(1);
-    song.segments[0] = {
-      ...song.segments[0],
-      pitchContourNotes: [
-        { id: "k1", timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
-        { id: "k2", timeOffsetMs: 10, durationMs: 100, lane: 0.8 },
-      ],
-    };
+    song.pitchContourNotes = [
+      { id: "k1", absoluteMs: song.segments[0].startMs, durationMs: 100, lane: 0.2 },
+      { id: "k2", absoluteMs: song.segments[0].startMs + 10, durationMs: 100, lane: 0.8 },
+    ];
 
     await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
@@ -972,13 +971,10 @@ describe("PracticeView", () => {
     });
 
     const song = makeSong(1);
-    song.segments[0] = {
-      ...song.segments[0],
-      pitchContourNotes: [
-        { id: "k1", timeOffsetMs: 0, durationMs: 120, lane: 0.2 },
-        { id: "k2", timeOffsetMs: 100, durationMs: 120, lane: 0.8 },
-      ],
-    };
+    song.pitchContourNotes = [
+      { id: "k1", absoluteMs: song.segments[0].startMs, durationMs: 120, lane: 0.2 },
+      { id: "k2", absoluteMs: song.segments[0].startMs + 100, durationMs: 120, lane: 0.8 },
+    ];
 
     await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));

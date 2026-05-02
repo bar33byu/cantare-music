@@ -5,6 +5,13 @@ export interface PitchContourNote {
   durationMs: number;
 }
 
+export interface SongPitchContourNote {
+  id: string;
+  absoluteMs: number;
+  lane: number;
+  durationMs: number;
+}
+
 export interface ContourNoteHeatStat {
   sessionCount: number;
   missCount: number;
@@ -28,6 +35,7 @@ export interface Song {
   artist?: string;
   description?: string;
   audioUrl: string;
+  pitchContourNotes?: SongPitchContourNote[];
   segments: Segment[];
   createdAt: string;
   lastPracticedAt?: string | null;

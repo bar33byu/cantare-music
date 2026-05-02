@@ -33,6 +33,7 @@ describe('GET /api/songs/[id]', () => {
       title: 'Song 1',
       artist: 'Artist',
       audioKey: 'key.mp3',
+      pitchContourNotes: [{ id: 'n-1', absoluteMs: 0, durationMs: 100, lane: 0.5 }],
       createdAt: new Date('2023-01-01'),
       lastPracticedAt: new Date('2023-01-04'),
     };
@@ -51,6 +52,7 @@ describe('GET /api/songs/[id]', () => {
       title: 'Song 1',
       artist: 'Artist',
       audioUrl: 'https://example.com/key.mp3',
+      pitchContourNotes: [{ id: 'n-1', absoluteMs: 0, durationMs: 100, lane: 0.5 }],
       segments: [{
         id: 'seg1',
         songId: '123',
