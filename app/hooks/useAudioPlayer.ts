@@ -5,6 +5,7 @@ export interface AudioPlayerControls {
   isReady: boolean;
   currentMs: number;
   durationMs: number;
+  endedCount?: number;
   playbackRate?: number;
   playbackError: string | null;
   debugInfo: AudioDebugInfo;
@@ -122,6 +123,7 @@ export function useAudioPlayer(
   const [isReady, setIsReady] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
+  const [endedCount, setEndedCount] = useState(0);
   const [playbackRate, setPlaybackRateState] = useState(1);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<AudioDebugInfo>(() => makeDefaultDebugInfo(audioUrl));
@@ -278,6 +280,7 @@ export function useAudioPlayer(
     setIsPlaying(false);
     setCurrentMs(0);
     setDurationMs(0);
+    setEndedCount(0);
     setPlaybackError(null);
     setDebugInfo(makeDefaultDebugInfo(audioUrl));
     endMsRef.current = 0;
@@ -322,7 +325,11 @@ export function useAudioPlayer(
 
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
-    const handleEnded = () => setIsPlaying(false);
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setEndedCount((previous) => previous + 1);
+      updateDebugInfo(audio, 'ended');
+    };
     const handleCanPlay = () => {
       setIsReady(true);
       updateDebugInfo(audio, 'canplay');
@@ -468,6 +475,7 @@ export function useAudioPlayer(
     isReady,
     currentMs,
     durationMs,
+    endedCount,
     playbackRate,
     playbackError,
     debugInfo,

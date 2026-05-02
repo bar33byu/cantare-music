@@ -57,7 +57,7 @@ describe('GET /api/audio/[...key]', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('audio/mpeg');
-    expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=1209600');
     expect(getObjectCommandCalls[0]).toEqual({
       Bucket: 'cantare-audio',
       Key: 'audio/song/file.mp3',

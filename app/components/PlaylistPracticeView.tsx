@@ -64,6 +64,19 @@ interface PlaylistPracticeViewProps {
 }
 
 const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
+const AUDIO_CACHE_NAME = 'cantare-audio-v2';
+const AUDIO_CACHED_AT_HEADER = 'x-cantare-cached-at';
+
+function withAudioCachedAt(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set(AUDIO_CACHED_AT_HEADER, String(Date.now()));
+  headers.set('Cache-Control', 'public, max-age=1209600');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
   const [livePlaylist, setLivePlaylist] = useState(playlist);
@@ -198,8 +211,7 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
   }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
   const {
-    currentMs: playbackCurrentMs,
-    durationMs: playbackDurationMs,
+    endedCount: playbackEndedCount = 0,
     pause: pauseAudio,
     play: playAudio,
     playbackError,
@@ -281,24 +293,20 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
   ]);
 
   useEffect(() => {
-    if (
-      mode !== 'listen' ||
-      playbackDurationMs <= 0 ||
-      currentSongIndex >= listenQueue.length - 1
-    ) {
+    if (mode !== 'listen' || !isListenPlaying || playbackEndedCount <= 0) {
       return;
     }
 
-    if (playbackCurrentMs >= playbackDurationMs - 1000) {
-      const nextPlayableIndex = findNextPlayableIndex(currentSongIndex + 1);
-      if (nextPlayableIndex === -1) {
-        setIsListenPlaying(false);
-        listenStartedSongIdRef.current = null;
-      } else {
-        setCurrentSongIndex(nextPlayableIndex);
-      }
+    const nextPlayableIndex = findNextPlayableIndex(currentSongIndex + 1);
+    if (nextPlayableIndex === -1) {
+      setIsListenPlaying(false);
+      listenStartedSongIdRef.current = null;
+      return;
     }
-  }, [mode, playbackCurrentMs, playbackDurationMs, currentSongIndex, findNextPlayableIndex, listenQueue.length]);
+
+    listenStartedSongIdRef.current = null;
+    setCurrentSongIndex(nextPlayableIndex);
+  }, [currentSongIndex, findNextPlayableIndex, isListenPlaying, mode, playbackEndedCount]);
 
   const handleListenPlayPause = () => {
     if (audioPlayer.isPlaying || isListenPlaying) {
@@ -407,7 +415,8 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
       }
 
       try {
-        const cache = await window.caches.open(PLAYLIST_PRACTICE_CACHE_NAME);
+        const playlistCache = await window.caches.open(PLAYLIST_PRACTICE_CACHE_NAME);
+        const audioCache = await window.caches.open(AUDIO_CACHE_NAME);
 
         await Promise.allSettled(
           livePlaylist.songs.map(async (song) => {
@@ -417,7 +426,7 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
             });
             const songResponse = await fetch(songRequest, { cache: 'force-cache' });
             if (songResponse.ok) {
-              await cache.put(songRequest, songResponse.clone());
+              await playlistCache.put(songRequest, songResponse.clone());
             }
 
             const proxyAudioUrl = buildProxyAudioUrl(parseAudioKey(song.audioUrl));
@@ -426,9 +435,9 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
             }
 
             const audioRequest = new Request(proxyAudioUrl);
-            const audioResponse = await fetch(audioRequest, { cache: 'force-cache' });
-            if (audioResponse.ok) {
-              await cache.put(audioRequest, audioResponse.clone());
+            const audioResponse = await fetch(audioRequest, { cache: 'reload' });
+            if (audioResponse.ok && audioResponse.status === 200) {
+              await audioCache.put(audioRequest, withAudioCachedAt(audioResponse.clone()));
             }
           })
         );

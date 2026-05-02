@@ -239,6 +239,12 @@ export default function Home() {
       return;
     }
 
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/cantare-audio-sw.js").catch(() => {
+        // The app still works without offline audio caching.
+      });
+    }
+
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
     setUserSettings(storedSettings);
     settingsLoadedRef.current = true;

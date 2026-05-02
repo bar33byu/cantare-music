@@ -271,6 +271,60 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
+  it('advances to the next playable song when the current song ends', async () => {
+    let started = false;
+    const play = vi.fn(() => {
+      started = true;
+    });
+    let endedCount = 0;
+
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: started && endedCount === 0,
+      isReady: true,
+      currentMs: endedCount === 0 ? 11000 : 0,
+      durationMs: 12000,
+      endedCount,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: endedCount > 0 ? 'ended' : 'playing',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    const view = render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /listen/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Play playlist' }));
+
+    expect(screen.getByRole('heading', { name: 'Alpha' })).toBeInTheDocument();
+
+    endedCount = 1;
+    view.rerender(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Beta' })).toBeInTheDocument();
+    });
+  });
+
   it('refreshes stale playlist song readiness from playlist detail in the background', async () => {
     const stalePlaylist: Playlist = {
       ...playlist,

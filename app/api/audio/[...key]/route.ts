@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 const hasR2Credentials =
   typeof process.env.R2_ACCESS_KEY_ID === 'string' && process.env.R2_ACCESS_KEY_ID.trim().length > 0 &&
   typeof process.env.R2_SECRET_ACCESS_KEY === 'string' && process.env.R2_SECRET_ACCESS_KEY.trim().length > 0;
+const AUDIO_CACHE_CONTROL = 'public, max-age=1209600';
 
 function toKey(pathSegments: string[]): string {
   return pathSegments.map((segment) => decodeURIComponent(segment)).join('/');
@@ -51,8 +52,7 @@ export async function GET(
         headers.set('Content-Type', contentType);
         headers.set('Accept-Ranges', response.headers.get('accept-ranges') ?? 'bytes');
 
-        const cacheControl = response.headers.get('cache-control');
-        if (cacheControl) headers.set('Cache-Control', cacheControl);
+        headers.set('Cache-Control', AUDIO_CACHE_CONTROL);
 
         const contentLength = response.headers.get('content-length');
         if (contentLength) headers.set('Content-Length', contentLength);
@@ -112,8 +112,7 @@ export async function GET(
     headers.set('Content-Type', object.ContentType ?? 'audio/mpeg');
     headers.set('Accept-Ranges', 'bytes');
 
-    const cacheControl = object.CacheControl ?? 'public, max-age=3600';
-    headers.set('Cache-Control', cacheControl);
+    headers.set('Cache-Control', AUDIO_CACHE_CONTROL);
 
     const contentLength = getHeaderValue(object.ContentLength);
     if (contentLength) headers.set('Content-Length', contentLength);

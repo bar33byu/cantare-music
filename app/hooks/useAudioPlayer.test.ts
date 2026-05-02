@@ -110,6 +110,20 @@ describe('useAudioPlayer', () => {
     expect(result.current.isReady).toBe(true);
   });
 
+  it('increments endedCount when native playback ends', () => {
+    const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
+
+    expect(result.current.endedCount).toBe(0);
+
+    act(() => {
+      stub.emit('ended');
+    });
+
+    expect(result.current.isPlaying).toBe(false);
+    expect(result.current.endedCount).toBe(1);
+    expect(result.current.debugInfo.lastEvent).toBe('ended');
+  });
+
   it('attempts playback immediately before audio is ready', async () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
 
