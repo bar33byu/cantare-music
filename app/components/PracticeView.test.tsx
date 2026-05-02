@@ -356,7 +356,11 @@ describe("PracticeView", () => {
 
     expect(screen.queryByTestId("practice-prev-segment")).not.toBeInTheDocument();
     expect(screen.queryByTestId("practice-next-segment")).not.toBeInTheDocument();
-    expect(screen.getByTestId("practice-tap-bar")).toHaveClass("w-28");
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    expect(tapBar).toHaveClass("tap-input-surface");
+    expect(tapBar).toHaveClass("w-28");
+    expect(fireEvent.contextMenu(tapBar)).toBe(false);
+    expect(fireEvent.doubleClick(tapBar)).toBe(false);
     expect(screen.queryByTestId("practice-tap-graduation")).not.toBeInTheDocument();
     expect(screen.getByTestId("practice-overlay-toggle")).toBeInTheDocument();
   });

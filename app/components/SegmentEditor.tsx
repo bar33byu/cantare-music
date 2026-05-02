@@ -1665,9 +1665,22 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                 ref={contourTapBarRef}
                 data-testid="segment-editor-contour-tapbar"
                 aria-label="Contour tap bar"
-                className="sticky top-[7rem] h-[50dvh] min-h-[360px] touch-none select-none overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm lg:h-[calc(100dvh-12rem)]"
+                className="tap-input-surface sticky top-[7rem] h-[50dvh] min-h-[360px] touch-none select-none overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm lg:h-[calc(100dvh-12rem)]"
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onDoubleClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onDragStart={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
                 onPointerDown={(event) => {
                   event.preventDefault();
+                  event.stopPropagation();
                   if (typeof event.currentTarget.setPointerCapture === 'function') {
                     event.currentTarget.setPointerCapture(event.pointerId);
                   }
@@ -1683,6 +1696,8 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                   if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
                     return;
                   }
+                  event.preventDefault();
+                  event.stopPropagation();
                   activeCapture.lane = getLaneFromClientY(event.clientY);
                 }}
                 onPointerUp={(event) => {
@@ -1690,6 +1705,8 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                   if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
                     return;
                   }
+                  event.preventDefault();
+                  event.stopPropagation();
                   finalizeContourCapture(getLaneFromClientY(event.clientY));
                 }}
                 onPointerCancel={(event) => {
@@ -1697,6 +1714,8 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                   if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
                     return;
                   }
+                  event.preventDefault();
+                  event.stopPropagation();
                   finalizeContourCapture(getLaneFromClientY(event.clientY));
                 }}
               >

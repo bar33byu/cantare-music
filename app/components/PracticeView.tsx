@@ -1808,12 +1808,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               ref={tapBarRef}
               data-testid="practice-tap-bar"
               aria-label="Tap contour bar"
-              className="relative h-full min-h-[28rem] w-28 shrink-0 overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm sm:w-32"
+              className="tap-input-surface relative h-full min-h-[28rem] w-28 shrink-0 overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm sm:w-32"
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onDragStart={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
               onPointerDown={(event) => {
                 if (!currentSegment) {
                   return;
                 }
                 event.preventDefault();
+                event.stopPropagation();
                 if (typeof event.currentTarget.setPointerCapture === "function") {
                   event.currentTarget.setPointerCapture(event.pointerId);
                 }
@@ -1834,6 +1847,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
                   return;
                 }
+                event.preventDefault();
+                event.stopPropagation();
                 activeCapture.lane = getTapLane(event.clientY);
               }}
               onPointerUp={(event) => {
@@ -1841,6 +1856,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
                   return;
                 }
+                event.preventDefault();
+                event.stopPropagation();
                 finalizeTapCapture(getTapLane(event.clientY));
               }}
               onPointerCancel={(event) => {
@@ -1848,6 +1865,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
                   return;
                 }
+                event.preventDefault();
+                event.stopPropagation();
                 finalizeTapCapture(getTapLane(event.clientY));
               }}
             >

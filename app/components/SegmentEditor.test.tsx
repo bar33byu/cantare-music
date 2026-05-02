@@ -1173,7 +1173,10 @@ describe('SegmentEditor', () => {
     fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
 
     const tapBar = screen.getByTestId('segment-editor-contour-tapbar');
+    expect(tapBar).toHaveClass('tap-input-surface');
     expect(tapBar).toHaveClass('lg:h-[calc(100dvh-12rem)]');
+    expect(fireEvent.contextMenu(tapBar)).toBe(false);
+    expect(fireEvent.doubleClick(tapBar)).toBe(false);
     expect(screen.getByTestId('segment-editor-recording-card')).toBeInTheDocument();
     expect(screen.getByTestId('segment-editor-recording-next')).toBeInTheDocument();
     expect(screen.queryByTestId('segment-editor-board')).not.toBeInTheDocument();
