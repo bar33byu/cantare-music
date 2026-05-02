@@ -3,6 +3,7 @@
 import React from "react";
 import type { PitchContourNote } from "../types";
 import {
+  DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   buildContourDirectionEvents,
   compareContourAttemptDetailed,
   type ContourDirection,
@@ -10,7 +11,7 @@ import {
 
 const DEFAULT_TIMELINE_MS = 4000;
 const DEFAULT_NOTE_DURATION_MS = 120;
-const DEFAULT_SAME_DEAD_ZONE = 0.05;
+const DEFAULT_SAME_DEAD_ZONE = DEFAULT_CONTOUR_SAME_DEAD_ZONE;
 const PAUSED_CAPTURE_ADVANCE_MS = 350;
 
 type EditorMode = "answer" | "attempt";

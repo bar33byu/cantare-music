@@ -46,13 +46,15 @@ export interface ContourNoteHeatStat {
   missRate: number;
 }
 
+export const DEFAULT_CONTOUR_SAME_DEAD_ZONE = 0.035;
+
 const DEFAULT_MATCH_OPTIONS: ContourMatchOptions = {
   timeToleranceMs: 400,
-  sameDeadZone: 0.05,
+  sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   durationToleranceRatio: 0.6,
 };
 
-function toDirection(deltaLane: number, deadZone: number): ContourDirection {
+export function classifyContourDirection(deltaLane: number, deadZone: number = DEFAULT_CONTOUR_SAME_DEAD_ZONE): ContourDirection {
   if (deltaLane > deadZone) {
     return 'up';
   }
@@ -186,7 +188,7 @@ export function buildContourDirectionEvents(
     const previous = sorted[i - 1];
     const next = sorted[i];
     events.push({
-      direction: toDirection(next.lane - previous.lane, effective.sameDeadZone),
+      direction: classifyContourDirection(next.lane - previous.lane, effective.sameDeadZone),
       timeOffsetMs: next.timeOffsetMs,
     });
   }

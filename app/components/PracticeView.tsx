@@ -10,7 +10,11 @@ import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
-import { buildContourDirectionEvents, compareContourAttemptDetailed } from "../lib/contourPractice";
+import {
+  DEFAULT_CONTOUR_SAME_DEAD_ZONE,
+  buildContourDirectionEvents,
+  compareContourAttemptDetailed,
+} from "../lib/contourPractice";
 import type { AttemptNoteStatus } from "../lib/contourPractice";
 import { getSegmentPitchContourNotes } from "../lib/pitchContour";
 
@@ -57,7 +61,7 @@ const TAP_PRACTICE_COUNT_IN_MS = 2000;
 const SHOW_AUXILIARY_TAP_DEBUG_CONTROLS = false;
 const TAP_MATCH_OPTIONS = {
   timeToleranceMs: 400,
-  sameDeadZone: 0.05,
+  sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   durationToleranceRatio: 0.6,
 } as const;
 

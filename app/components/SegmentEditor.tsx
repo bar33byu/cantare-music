@@ -8,6 +8,7 @@ import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
 import { getDefaultNewSegmentPlacement, getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
 import { getSegmentPitchContourNotes } from '../lib/pitchContour';
+import { classifyContourDirection } from '../lib/contourPractice';
 
 const MIN_SEGMENT_MS = 1000;
 const MIN_ZOOM = 1;
@@ -43,11 +44,11 @@ function formatMs(ms: number): string {
 }
 
 function getContourDirectionLabel(previousLane: number, nextLane: number): 'U' | 'D' | 'S' {
-  const delta = nextLane - previousLane;
-  if (delta > 0.05) {
+  const direction = classifyContourDirection(nextLane - previousLane);
+  if (direction === 'up') {
     return 'U';
   }
-  if (delta < -0.05) {
+  if (direction === 'down') {
     return 'D';
   }
   return 'S';

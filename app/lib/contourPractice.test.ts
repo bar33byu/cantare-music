@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   buildContourDirectionEvents,
+  classifyContourDirection,
   compareContourAttempt,
   compareContourAttemptDetailed,
   compareContourAttemptStable,
@@ -26,6 +28,13 @@ describe('contourPractice', () => {
     ]);
 
     expect(events.map((event) => event.direction)).toEqual(['up']);
+  });
+
+  it('classifies same only while the next center remains inside the previous dot bounds', () => {
+    expect(classifyContourDirection(DEFAULT_CONTOUR_SAME_DEAD_ZONE - 0.001)).toBe('same');
+    expect(classifyContourDirection(-DEFAULT_CONTOUR_SAME_DEAD_ZONE + 0.001)).toBe('same');
+    expect(classifyContourDirection(DEFAULT_CONTOUR_SAME_DEAD_ZONE + 0.001)).toBe('up');
+    expect(classifyContourDirection(-DEFAULT_CONTOUR_SAME_DEAD_ZONE - 0.001)).toBe('down');
   });
 
   it('does not match when the attempt is outside the time tolerance window', () => {

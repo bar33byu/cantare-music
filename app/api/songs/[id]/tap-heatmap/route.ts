@@ -5,7 +5,7 @@ import {
   getTapPracticeSessionDetail,
   listTapPracticeSessionsForSong,
 } from '../../../../../db/queries';
-import { computeContourNoteHeatMap } from '../../../../lib/contourPractice';
+import { DEFAULT_CONTOUR_SAME_DEAD_ZONE, computeContourNoteHeatMap } from '../../../../lib/contourPractice';
 import { getSegmentPitchContourNotes } from '../../../../lib/pitchContour';
 import { resolveRequestUserId } from '../../../_user';
 
@@ -56,7 +56,7 @@ export async function GET(
           segment.id,
           computeContourNoteHeatMap(getSegmentPitchContourNotes(song.pitchContourNotes ?? [], segment), attempts, {
             timeToleranceMs: 400,
-            sameDeadZone: 0.05,
+            sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
             durationToleranceRatio: 0.6,
           }),
         ];
