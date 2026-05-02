@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
@@ -173,6 +173,14 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
   const currentSong = listenQueue[currentSongIndex];
   const currentSongId = currentSong?.id;
   const hasCurrentSongAudio = Boolean(currentSong?.audioUrl.trim());
+  const findNextPlayableIndex = useCallback((startIndex: number) => {
+    for (let index = Math.max(0, startIndex); index < listenQueue.length; index += 1) {
+      if (listenQueue[index]?.audioUrl.trim()) {
+        return index;
+      }
+    }
+    return -1;
+  }, [listenQueue]);
   const proxyAudioUrl = useMemo(
     () => buildProxyAudioUrl(parseAudioKey(currentSong?.audioUrl ?? '')),
     [currentSong?.audioUrl]
@@ -239,18 +247,19 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     setCurrentSongIndex((prev) => Math.min(prev, Math.max(listenQueue.length - 1, 0)));
   }, [listenQueue.length, mode]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (mode !== 'listen' || !isListenPlaying || !currentSongId) {
       return;
     }
 
     if (!hasCurrentSongAudio) {
       listenStartedSongIdRef.current = currentSongId;
-      if (currentSongIndex < listenQueue.length - 1) {
-        setCurrentSongIndex((prev) => prev + 1);
-      } else {
+      const nextPlayableIndex = findNextPlayableIndex(currentSongIndex + 1);
+      if (nextPlayableIndex === -1) {
         setIsListenPlaying(false);
         listenStartedSongIdRef.current = null;
+      } else {
+        setCurrentSongIndex(nextPlayableIndex);
       }
       return;
     }
@@ -264,9 +273,9 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
   }, [
     currentSongId,
     currentSongIndex,
+    findNextPlayableIndex,
     hasCurrentSongAudio,
     isListenPlaying,
-    listenQueue.length,
     mode,
     requestPlay,
   ]);
@@ -281,14 +290,15 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     }
 
     if (playbackCurrentMs >= playbackDurationMs - 1000) {
-      if (currentSongIndex < listenQueue.length - 1) {
-        setCurrentSongIndex((prev) => prev + 1);
-      } else {
+      const nextPlayableIndex = findNextPlayableIndex(currentSongIndex + 1);
+      if (nextPlayableIndex === -1) {
         setIsListenPlaying(false);
         listenStartedSongIdRef.current = null;
+      } else {
+        setCurrentSongIndex(nextPlayableIndex);
       }
     }
-  }, [mode, playbackCurrentMs, playbackDurationMs, currentSongIndex, listenQueue.length]);
+  }, [mode, playbackCurrentMs, playbackDurationMs, currentSongIndex, findNextPlayableIndex, listenQueue.length]);
 
   const handleListenPlayPause = () => {
     if (audioPlayer.isPlaying || isListenPlaying) {
@@ -302,7 +312,16 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     if (currentSongId && hasCurrentSongAudio) {
       listenStartedSongIdRef.current = currentSongId;
       requestPlay(0, 0);
+      return;
     }
+
+    const nextPlayableIndex = findNextPlayableIndex(currentSongIndex);
+    if (nextPlayableIndex === -1) {
+      setIsListenPlaying(false);
+      return;
+    }
+
+    setCurrentSongIndex(nextPlayableIndex);
   };
 
   const handleNextSong = () => {
