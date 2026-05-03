@@ -1,6 +1,6 @@
 # Cantare
 
-A practice application for singers to learn and master songs through deliberate, segment-based repetition.
+Version 2.0 of Cantare is a practice application for singers to learn and master songs through deliberate, segment-based repetition, melodic contour training, playlists, and isolated multi-user libraries.
 
 > **Credits:** Cantare is a clone built to replicate the core functionality of [Musicators.com](https://www.musicators.com). All credit for the original concept and feature design goes to the Musicators team.
 
@@ -8,13 +8,16 @@ A practice application for singers to learn and master songs through deliberate,
 
 Cantare lets you upload songs, divide them into labeled segments (verses, choruses, bridges, etc.), and practice those segments one at a time. After each playback you rate your recall from 1-5. The app tracks your ratings over time and surfaces a **knowledge score** so you can see at a glance how well you know each song and which segments still need work.
 
-**Core features:**
+**Current features:**
 
 - **Song library** - upload audio files, add titles and artist info, and browse your collection
 - **Segment editor** - a visual timeline interface for slicing a song into segments, setting start/end times by dragging, attaching lyrics, and recording contour answer keys
+- **Contour answer-key autosave** - captured contour taps are saved automatically, can be saved on demand, and can be cleared for one section or the whole song
+- **User-aware editing** - segment and contour editor requests carry the active user context so shared instances keep each user's song data isolated
 - **Practice view** - plays each segment in sequence with configurable pre-roll, shows or hides lyrics, and lets you rate your memory after each repetition
-- **Tap practice** - tap melodic contour attempts during practice and compare them against saved answer keys
-- **Contour review heat map** - the card contour can color recent trouble spots so repeated misses stand out visually
+- **Tap practice** - tap melodic contour attempts during practice and compare them against saved answer keys, with background persistence and buffered early taps
+- **Contour review heat map** - the card contour can color recent trouble spots from saved tap attempts and refreshes after new attempts are saved
+- **Answer-key reset behavior** - updating contour answer keys clears older tap-practice history for that song so future heat maps compare against the current key
 - **Tap debug tools** - inspect persisted tap sessions and review contour-matching diagnostics
 - **Knowledge bar** - color-coded mastery visualization across all segments of a song
 - **Playlists** - group songs together for a rehearsal or event, with aggregate knowledge scores across the whole playlist
@@ -82,6 +85,8 @@ npm test
   - While playback is active in the editor, start is anchored to `max(currentPlaybackMs, latestEnd + 500ms)`
 - Updating `startMs` or `endMs` re-normalizes ordering server-side to keep timeline position and sequence consistent.
 - If playback falls back from a public audio URL to the proxied source, pending play requests resume automatically once the fallback source is ready.
+- Contour answer keys autosave shortly after edits. The manual save button is still available for immediate confirmation.
+- Clearing section taps removes only the notes overlapping the focused segment, while clearing all taps resets the entire song contour.
 
 ## Tap practice notes
 
@@ -91,3 +96,4 @@ npm test
 - Replaying from the beginning or seeking back to the active segment start resets the current tap run so old dots do not pollute a new attempt.
 - Contour scoring is time-anchored to the whole segment first and then checked for `up` / `down` / `same`, which keeps later taps aligned to the part of the music you actually attempted.
 - The card contour can color each note by recent miss rate, using saved tap sessions as a lightweight practice heat map.
+- Heat-map data is fetched with fresh requests and refreshed after successful tap persistence so practice feedback stays current.

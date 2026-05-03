@@ -20,7 +20,7 @@ describe('POST /api/songs/[id]/practice', () => {
     const response = await POST(request as any, { params: Promise.resolve({ id: 'song-1' }) });
 
     expect(response.status).toBe(204);
-    expect(markSongPracticed).toHaveBeenCalledWith('song-1', expect.any(Date));
+    expect(markSongPracticed).toHaveBeenCalledWith('song-1', 'default', expect.any(Date));
   });
 
   it('returns 404 when song does not exist', async () => {

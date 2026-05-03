@@ -155,7 +155,7 @@ describe('PlaylistBrowser', () => {
         json: async () => ({
           id: 'pl-1',
           songs: [
-            { id: 's1', audioUrl: '/a1.mp3', segments: [{ id: 'seg-1', pitchContourNotes: [{ id: 'n1' }] }] },
+            { id: 's1', audioUrl: '/a1.mp3', pitchContourNotes: [{ id: 'n1' }], segments: [{ id: 'seg-1' }] },
             { id: 's2', audioUrl: '/a2.mp3', segments: [{ id: 'seg-2', pitchContourNotes: [] }] },
             { id: 's3', audioUrl: '', segments: [] },
           ],
@@ -178,7 +178,7 @@ describe('PlaylistBrowser', () => {
       const headers = new Headers(init?.headers);
       const userHeader = headers.get('X-User-ID');
 
-      if (url.startsWith('/api/playlists?')) {
+      if (url === '/api/playlists' || url.startsWith('/api/playlists?')) {
         return {
           ok: true,
           json: async () => ({
@@ -220,16 +220,9 @@ describe('PlaylistBrowser', () => {
       expect(screen.getByTestId('playlist-name-pl-2')).toHaveTextContent('Test User Set');
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/playlists?'),
-      expect.objectContaining({
-        cache: 'no-store',
-        headers: expect.any(Headers),
-      })
-    );
     const matchingCall = mockFetch.mock.calls.find(
       ([calledUrl, calledInit]) =>
-        String(calledUrl).startsWith('/api/playlists?') &&
+        (String(calledUrl) === '/api/playlists' || String(calledUrl).startsWith('/api/playlists?')) &&
         calledInit &&
         new Headers((calledInit as RequestInit).headers).get('X-User-ID') === 'test-user'
     );
@@ -245,13 +238,13 @@ describe('PlaylistBrowser', () => {
       const headers = new Headers(init?.headers);
       const userHeader = headers.get('X-User-ID');
 
-      if (url.startsWith('/api/playlists?') && !userHeader) {
+      if ((url === '/api/playlists' || url.startsWith('/api/playlists?')) && !userHeader) {
         return new Promise<Response>((resolve) => {
           resolveDefaultList = resolve;
         });
       }
 
-      if (url.startsWith('/api/playlists?') && userHeader === 'test-user') {
+      if ((url === '/api/playlists' || url.startsWith('/api/playlists?')) && userHeader === 'test-user') {
         return new Promise<Response>((resolve) => {
           resolveTestUserList = resolve;
         });

@@ -1118,6 +1118,26 @@ export async function addTapPracticeTap(
   }
 }
 
+export async function deleteTapPracticeSessionsForSong(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<void> {
+  try {
+    await db()
+      .delete(tapPracticeSessions)
+      .where(and(eq(tapPracticeSessions.songId, songId), eq(tapPracticeSessions.userId, userId)));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .delete(tapPracticeSessions)
+        .where(and(eq(tapPracticeSessions.songId, songId), eq(tapPracticeSessions.userId, userId)));
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function listTapPracticeSessionsForSong(
   songId: string,
   userId: string = DEFAULT_QUERY_USER_ID,

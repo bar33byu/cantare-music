@@ -145,6 +145,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [showSameLaneGuides, setShowSameLaneGuides] = React.useState(false);
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
   const [tapHeatMapBySegment, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
+  const [tapHeatMapRefreshToken, setTapHeatMapRefreshToken] = React.useState(0);
   const [tapSessionResetToken, setTapSessionResetToken] = React.useState(0);
   const [tapPracticeCountIn, setTapPracticeCountIn] = React.useState<number | null>(null);
   const [accuracyToast, setAccuracyToast] = React.useState<{ text: string; visible: boolean } | null>(null);
@@ -432,6 +433,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         showTapPersistenceWarning("Tap saving is temporarily unavailable. We will keep retrying in the background.");
       } else {
         clearTapPersistenceWarning();
+        setTapHeatMapRefreshToken((previous) => previous + 1);
       }
     });
   }, [clearTapPersistenceWarning, showTapPersistenceWarning, song.id]);
@@ -1414,7 +1416,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     const loadTapHeatMap = async () => {
       try {
-        const response = await fetch(`/api/songs/${song.id}/tap-heatmap`);
+        const response = await fetch(`/api/songs/${song.id}/tap-heatmap`, { cache: "no-store" });
         if (!response.ok) {
           throw new Error(`Failed to load tap heat map (${response.status})`);
         }
@@ -1438,7 +1440,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [hasTapAnswers, song.id]);
+  }, [hasTapAnswers, song.id, tapHeatMapRefreshToken]);
 
   return (
     <div
@@ -1551,7 +1553,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             <button
               type="button"
               data-testid="practice-card-contour-toggle"
-              onClick={() => setShowCardContourMap((previous) => !previous)}
+              onClick={() => {
+                setShowCardContourMap((previous) => !previous);
+                if (!showCardContourMap) {
+                  setTapHeatMapRefreshToken((previous) => previous + 1);
+                }
+              }}
               className="rounded-full border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
             >
               Card contour: {showCardContourMap ? "On" : "Off"}

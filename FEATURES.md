@@ -1,5 +1,14 @@
 # Cantare Feature Roadmap
 
+## Version 2.0: Stable Tap Practice and Multi-User Release
+- [x] Multi-user song, playlist, rating, segment, contour, and tap-practice isolation
+- [x] Segment editor active-user request context
+- [x] Contour answer-key autosave with manual save fallback
+- [x] Section-level and song-level contour tap clearing
+- [x] Tap-practice persistence with buffered early taps
+- [x] Card contour heat map refreshed from saved tap attempts
+- [x] Tap-practice history reset when contour answer keys change
+
 ## Version 2.x (Post-Stable Tap Practice)
 
 ### 2.1: Two-Version Audio Support
@@ -37,9 +46,9 @@
 - [ ] Add auto-repeat for low-rated segments
 - [ ] Ensure accessibility with screen readers
 
-## Version 3.0: Multi-User Support
+## Version 3.0: Collaboration and Sharing
 - [ ] User invitations and playlist sharing
 - [ ] Collaborative challenges and games
 - [ ] Shared practice sessions
-- [ ] User profiles and leaderboards
+- [ ] Expanded user profiles and leaderboards
 - [ ] Cross-user playlist imports

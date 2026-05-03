@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSongById, deleteSong, updateSong, getSegmentsBySongId, recordOrphanedAudioKey } from '../../../../db/queries';
+import {
+  getSongById,
+  deleteSong,
+  updateSong,
+  getSegmentsBySongId,
+  recordOrphanedAudioKey,
+  deleteTapPracticeSessionsForSong,
+} from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
 import { resolveRequestUserId } from '../../_user';
@@ -140,6 +147,9 @@ export async function PATCH(
     }
 
     await updateSong(id, updates, userId);
+    if (updates.pitchContourNotes !== undefined) {
+      await deleteTapPracticeSessionsForSong(id, userId);
+    }
     return NextResponse.json({ success: true });
   } catch (error) {
     const errorCode = (error as { code?: string })?.code;

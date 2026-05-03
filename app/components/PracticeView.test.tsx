@@ -566,6 +566,67 @@ describe("PracticeView", () => {
     });
   });
 
+  it("refreshes the card contour heat map after saving tap practice attempts", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    await waitFor(() => {
+      const heatMapCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-heatmap` && init?.cache === "no-store"
+      );
+      expect(heatMapCalls).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+    });
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 191, clientY: 60 });
+    fireEvent.pointerUp(tapBar, { pointerId: 191, clientY: 60 });
+
+    await waitFor(() => {
+      const persistCall = mockFetch.mock.calls.find(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions/tap-session-1` && init?.method === "POST"
+      );
+      expect(persistCall).toBeTruthy();
+    });
+
+    await waitFor(() => {
+      const heatMapCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-heatmap` && init?.cache === "no-store"
+      );
+      expect(heatMapCalls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   it("persists integer millisecond tap timings when playback time is fractional", async () => {
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: true,

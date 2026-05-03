@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Segment, SongPitchContourNote } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { PitchContourThumbnail } from './PitchContourThumbnail';
@@ -20,6 +20,7 @@ const BULK_REQUEST_RETRIES = 4;
 const BULK_REQUEST_RETRY_DELAY_MS = 250;
 const CONTOUR_PLAYBACK_RATES = [0.5, 0.75, 1] as const;
 const MIN_CONTOUR_TAP_DURATION_MS = 80;
+const CONTOUR_AUTOSAVE_DELAY_MS = 650;
 
 interface ActiveContourCapture {
   id: string;
@@ -68,10 +69,11 @@ interface ActiveInteraction {
 
 interface SegmentEditorProps {
   songId: string;
+  userId?: string;
   onSongUpdated?: () => void;
 }
 
-export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
+export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -99,12 +101,16 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const [isContourRecording, setIsContourRecording] = useState(false);
   const [contourDraftNotes, setContourDraftNotes] = useState<SongPitchContourNote[]>([]);
   const [isSavingContourDraft, setIsSavingContourDraft] = useState(false);
+  const [isAutoSavingContourDraft, setIsAutoSavingContourDraft] = useState(false);
   const [contourSaveMessage, setContourSaveMessage] = useState<string | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const focusedContourCardRef = useRef<HTMLDivElement | null>(null);
   const contourTapBarRef = useRef<HTMLDivElement | null>(null);
   const activeContourCaptureRef = useRef<ActiveContourCapture | null>(null);
   const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
+  const contourLastSavedSnapshotRef = useRef<string>('[]');
+  const contourAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contourAutoSaveGenerationRef = useRef(0);
 
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(audioUrl)), [audioUrl]);
   const playbackAudioUrl = useMemo(() => {
@@ -133,6 +139,24 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     [segments, selectedSegmentId]
   );
 
+  const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
+    if (!userId) {
+      return init;
+    }
+
+    const headers = new Headers(init?.headers);
+    headers.set('X-User-ID', userId);
+
+    return {
+      ...init,
+      headers,
+    };
+  }, [userId]);
+
+  const request = useCallback((url: string, init?: RequestInit) => {
+    return fetch(url, withUserHeader(init));
+  }, [withUserHeader]);
+
   const hasContourDraft = contourDraftNotes.length > 0;
 
   const contourDraftPointCount = useMemo(
@@ -146,6 +170,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     setContourSaveMessage(null);
     setContourDraftNotes((previous) => previous.map((note) => (note.id === noteId ? { ...note, lane } : note)));
   };
+
+  const normalizeContourNotes = useCallback((notes: SongPitchContourNote[]) => {
+    return [...notes].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id));
+  }, []);
+
+  const serializeContourNotes = useCallback((notes: SongPitchContourNote[]) => {
+    return JSON.stringify(normalizeContourNotes(notes));
+  }, [normalizeContourNotes]);
 
   const getLaneFromClientY = (clientY: number): number => {
     const rect = contourTapBarRef.current?.getBoundingClientRect();
@@ -199,7 +231,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     activeContourCaptureRef.current = null;
   };
 
-  const getContourDraftNotesForSave = () => {
+  const getContourDraftNotesForSave = useCallback(() => {
     const activeCapture = activeContourCaptureRef.current;
     const activeNote = activeCapture
       ? {
@@ -210,11 +242,11 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         }
       : null;
 
-    return [
+    return normalizeContourNotes([
       ...contourDraftNotes,
       ...(activeNote ? [activeNote] : []),
-    ].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id));
-  };
+    ]);
+  }, [contourDraftNotes, normalizeContourNotes]);
 
   const updateLocalSegment = (segmentId: string, updates: Partial<Segment>) => {
     setSegments((previous) =>
@@ -225,7 +257,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const saveSegmentPatch = async (segmentId: string, updates: Partial<Segment>) => {
     try {
       setSavingSegmentId(segmentId);
-      const response = await fetch(`/api/songs/${songId}/segments/${segmentId}`, {
+      const response = await request(`/api/songs/${songId}/segments/${segmentId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -262,7 +294,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       lyricText: '',
     };
 
-    const response = await fetch(`/api/songs/${songId}/segments`, {
+    const response = await request(`/api/songs/${songId}/segments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -452,7 +484,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
           if (existing) {
             const patchResponse = await requestWithRetry(() =>
-              fetch(`/api/songs/${songId}/segments/${existing.id}`, {
+              request(`/api/songs/${songId}/segments/${existing.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -476,7 +508,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           }
 
           const createResponse = await requestWithRetry(() =>
-            fetch(`/api/songs/${songId}/segments`, {
+            request(`/api/songs/${songId}/segments`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -503,7 +535,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         // If deletes fail (for example due to historical rating references), keep them.
         for (let i = sections.length; i < orderedExisting.length; i += 1) {
           const extra = orderedExisting[i];
-          const deleteResponse = await fetch(`/api/songs/${songId}/segments/${extra.id}`, {
+          const deleteResponse = await request(`/api/songs/${songId}/segments/${extra.id}`, {
             method: 'DELETE',
           });
           if (!deleteResponse.ok) {
@@ -515,7 +547,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       } else {
         for (let i = 0; i < sections.length; i += 1) {
           const createResponse = await requestWithRetry(() =>
-            fetch(`/api/songs/${songId}/segments`, {
+            request(`/api/songs/${songId}/segments`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -566,7 +598,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const handleDelete = async (segment: Segment) => {
     setDeleteError(null);
     try {
-      const response = await fetch(`/api/songs/${songId}/segments/${segment.id}`, {
+      const response = await request(`/api/songs/${songId}/segments/${segment.id}`, {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error('Delete failed');
@@ -588,7 +620,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     const restored = lastDeletedSection;
     dismissUndo();
     try {
-      const response = await fetch(`/api/songs/${songId}/segments`, {
+      const response = await request(`/api/songs/${songId}/segments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -869,6 +901,22 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     setContourDraftNotes([]);
   };
 
+  const clearFocusedSegmentContourDraft = () => {
+    if (!focusedRecordingSegment) {
+      return;
+    }
+
+    activeContourCaptureRef.current = null;
+    setContourSaveMessage(null);
+    setContourDraftNotes((previous) =>
+      previous.filter((note) => {
+        const noteStartMs = note.absoluteMs;
+        const noteEndMs = noteStartMs + note.durationMs;
+        return !(noteEndMs > focusedRecordingSegment.startMs && noteStartMs < focusedRecordingSegment.endMs);
+      })
+    );
+  };
+
   const handleToggleContourRecording = () => {
     if (isContourRecording) {
       finalizeContourCapture();
@@ -898,21 +946,30 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     seek(nextSegment.startMs);
   };
 
-  const saveContourDraft = async () => {
-    const normalizedNotes = getContourDraftNotesForSave();
-    activeContourCaptureRef.current = null;
-    setContourDraftNotes(normalizedNotes);
-
-    if (normalizedNotes.length === 0) {
-      return;
+  const persistContourDraft = useCallback(async (
+    notes: SongPitchContourNote[],
+    options: { mode: 'auto' | 'manual' } = { mode: 'manual' }
+  ) => {
+    const normalizedNotes = normalizeContourNotes(notes);
+    const snapshot = serializeContourNotes(normalizedNotes);
+    if (snapshot === contourLastSavedSnapshotRef.current) {
+      if (options.mode === 'manual') {
+        setIsContourRecording(false);
+        setContourSaveMessage(`Saved ${normalizedNotes.length} answer key point${normalizedNotes.length === 1 ? '' : 's'}.`);
+      }
+      return false;
     }
 
-    setDeleteError(null);
-    setContourSaveMessage(null);
-    setIsSavingContourDraft(true);
+    const generation = contourAutoSaveGenerationRef.current + 1;
+    contourAutoSaveGenerationRef.current = generation;
+    if (options.mode === 'auto') {
+      setIsAutoSavingContourDraft(true);
+    } else {
+      setIsSavingContourDraft(true);
+    }
 
     try {
-      const response = await fetch(`/api/songs/${songId}`, {
+      const response = await request(`/api/songs/${songId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pitchContourNotes: normalizedNotes }),
@@ -922,14 +979,44 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(payload.error ?? `Contour save failed (${response.status})`);
       }
-      setIsContourRecording(false);
-      setContourSaveMessage(`Saved ${normalizedNotes.length} answer key point${normalizedNotes.length === 1 ? '' : 's'}.`);
+
+      contourLastSavedSnapshotRef.current = snapshot;
+      setContourDraftNotes(normalizedNotes);
+      if (options.mode === 'manual') {
+        setIsContourRecording(false);
+        setContourSaveMessage(`Saved ${normalizedNotes.length} answer key point${normalizedNotes.length === 1 ? '' : 's'}.`);
+      } else {
+        setContourSaveMessage('Answer key autosaved.');
+      }
+      setSongLoadKey((previous) => previous + 1);
+      onSongUpdated?.();
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Please try again.';
       setDeleteError(`Failed to save contour answer key. ${message}`);
+      return false;
     } finally {
-      setIsSavingContourDraft(false);
+      if (contourAutoSaveGenerationRef.current === generation) {
+        setIsAutoSavingContourDraft(false);
+        setIsSavingContourDraft(false);
+      } else if (options.mode === 'manual') {
+        setIsSavingContourDraft(false);
+      }
     }
+  }, [normalizeContourNotes, onSongUpdated, request, serializeContourNotes, songId]);
+
+  const saveContourDraft = async () => {
+    const normalizedNotes = getContourDraftNotesForSave();
+    activeContourCaptureRef.current = null;
+    setContourDraftNotes(normalizedNotes);
+
+    setDeleteError(null);
+    setContourSaveMessage(null);
+    if (contourAutoSaveTimerRef.current) {
+      clearTimeout(contourAutoSaveTimerRef.current);
+      contourAutoSaveTimerRef.current = null;
+    }
+    await persistContourDraft(normalizedNotes, { mode: 'manual' });
   };
 
   useEffect(() => {
@@ -937,7 +1024,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
     const loadSegments = async () => {
       try {
-        const response = await fetch(`/api/songs/${songId}/segments`);
+        const response = await request(`/api/songs/${songId}/segments`, { cache: 'no-store' });
         if (!response.ok) {
           return;
         }
@@ -955,23 +1042,25 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, [songId, refreshKey]);
+  }, [request, songId, refreshKey]);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadSong = async () => {
       try {
-        const response = await fetch(`/api/songs/${songId}`);
+        const response = await request(`/api/songs/${songId}`, { cache: 'no-store' });
         if (!response.ok) {
           return;
         }
         const data = (await response.json()) as { audioUrl?: string; title?: string; pitchContourNotes?: SongPitchContourNote[] };
         if (!cancelled) {
+          const loadedContourNotes = normalizeContourNotes(data.pitchContourNotes ?? []);
+          contourLastSavedSnapshotRef.current = serializeContourNotes(loadedContourNotes);
           setAudioUrl(data.audioUrl ?? '');
           setSongTitle(data.title ?? '');
           setTitleDraft(data.title ?? '');
-          setContourDraftNotes([...(data.pitchContourNotes ?? [])].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id)));
+          setContourDraftNotes(loadedContourNotes);
           setSongLoaded(true);
         }
       } catch {
@@ -987,7 +1076,34 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, [songId, songLoadKey]);
+  }, [normalizeContourNotes, request, serializeContourNotes, songId, songLoadKey]);
+
+  useEffect(() => {
+    if (!songLoaded) {
+      return;
+    }
+
+    const snapshot = serializeContourNotes(contourDraftNotes);
+    if (snapshot === contourLastSavedSnapshotRef.current) {
+      return;
+    }
+
+    if (contourAutoSaveTimerRef.current) {
+      clearTimeout(contourAutoSaveTimerRef.current);
+    }
+
+    contourAutoSaveTimerRef.current = setTimeout(() => {
+      contourAutoSaveTimerRef.current = null;
+      void persistContourDraft(contourDraftNotes, { mode: 'auto' });
+    }, CONTOUR_AUTOSAVE_DELAY_MS);
+
+    return () => {
+      if (contourAutoSaveTimerRef.current) {
+        clearTimeout(contourAutoSaveTimerRef.current);
+        contourAutoSaveTimerRef.current = null;
+      }
+    };
+  }, [contourDraftNotes, persistContourDraft, serializeContourNotes, songLoaded]);
 
   const handleAudioUploaded = () => {
     setSongLoadKey((previous) => previous + 1);
@@ -999,7 +1115,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     if (!trimmed || trimmed === songTitle) return;
     setSavingTitle(true);
     try {
-      const response = await fetch(`/api/songs/${songId}`, {
+      const response = await request(`/api/songs/${songId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: trimmed }),
@@ -1251,6 +1367,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                 <span>{formatMs(timelineDurationMs)}</span>
                 {savingSegmentId ? <span className="text-indigo-600">Saving...</span> : null}
                 {isSavingContourDraft ? <span className="text-indigo-600">Saving contour...</span> : null}
+                {isAutoSavingContourDraft ? <span className="text-indigo-600">Autosaving answer key...</span> : null}
                 {contourSaveMessage ? (
                   <span data-testid="segment-editor-contour-save-message" className="text-emerald-700">
                     {contourSaveMessage}
@@ -1276,19 +1393,30 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                       type="button"
                       data-testid="segment-editor-contour-save"
                       onClick={() => { void saveContourDraft(); }}
-                      disabled={!hasContourDraft || isSavingContourDraft}
+                      disabled={isSavingContourDraft}
                       className="rounded bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
                     >
-                      Save pass
+                      Save now
                     </button>
+                    {focusedRecordingSegment ? (
+                      <button
+                        type="button"
+                        data-testid="segment-editor-contour-clear-segment"
+                        onClick={clearFocusedSegmentContourDraft}
+                        disabled={isSavingContourDraft}
+                        className="rounded border border-rose-300 bg-white px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                      >
+                        Clear section taps
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       data-testid="segment-editor-contour-clear-draft"
                       onClick={clearContourDraft}
-                      disabled={!hasContourDraft || isSavingContourDraft}
+                      disabled={isSavingContourDraft}
                       className="rounded border border-indigo-300 bg-white px-2 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
                     >
-                      Clear draft
+                      Clear all taps
                     </button>
                     <span className="text-xs text-indigo-800">
                       Draft points: <strong data-testid="segment-editor-contour-draft-count">{contourDraftPointCount}</strong>
@@ -1715,6 +1843,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                 onPointerDown={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
+                  finalizeContourCapture();
                   if (typeof event.currentTarget.setPointerCapture === 'function') {
                     event.currentTarget.setPointerCapture(event.pointerId);
                   }
@@ -1751,6 +1880,13 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                   event.preventDefault();
                   event.stopPropagation();
                   finalizeContourCapture(getLaneFromClientY(event.clientY));
+                }}
+                onLostPointerCapture={(event) => {
+                  const activeCapture = activeContourCaptureRef.current;
+                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                    return;
+                  }
+                  finalizeContourCapture();
                 }}
               >
                 <div className="pointer-events-none absolute inset-0">

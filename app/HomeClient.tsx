@@ -653,6 +653,7 @@ export default function Home() {
           />
           <SegmentEditor
             songId={selectedSong.id}
+            userId={activeUserId}
             onSongUpdated={refreshSelectedSong}
           />
         </div>
