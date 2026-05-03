@@ -1,27 +1,33 @@
+function decodeAudioPath(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => decodeURIComponent(segment))
+    .join("/");
+}
+
 export function parseAudioKey(audioUrl: string): string | null {
-  const trimmedInput = audioUrl?.trim();
-  if (!trimmedInput) {
+  const trimmed = audioUrl.trim();
+  if (!trimmed) {
     return null;
   }
 
-  const decodePath = (value: string): string =>
-    value
-      .split("/")
-      .map((segment) => decodeURIComponent(segment))
-      .join("/");
+  if (!/^https?:\/\//i.test(trimmed)) {
+    const proxyPrefix = "/api/audio/";
+    if (trimmed.startsWith(proxyPrefix)) {
+      const rawKey = trimmed.slice(proxyPrefix.length);
+      return rawKey ? decodeAudioPath(rawKey) : null;
+    }
 
-  const normalizeCandidate = (value: string): string => value.replace(/^\/+/, "");
+    const trimmedPath = trimmed.replace(/^\/+/, "");
+    if (trimmedPath.startsWith("audio/") || trimmedPath.includes("/audio/")) {
+      return decodeAudioPath(trimmedPath);
+    }
 
-  const looksLikeAudioKey = (value: string): boolean =>
-    value.startsWith("audio/") || value.startsWith("users/");
-
-  const directCandidate = normalizeCandidate(trimmedInput);
-  if (looksLikeAudioKey(directCandidate)) {
-    return decodePath(directCandidate);
+    return null;
   }
 
   try {
-    const normalized = new URL(trimmedInput, "http://localhost");
+    const normalized = new URL(trimmed);
     const path = normalized.pathname;
     const proxyPrefix = "/api/audio/";
 
@@ -30,12 +36,16 @@ export function parseAudioKey(audioUrl: string): string | null {
       if (!rawKey) {
         return null;
       }
-      return decodePath(rawKey);
+      return decodeAudioPath(rawKey);
     }
 
-    const trimmedPath = normalizeCandidate(path);
-    if (looksLikeAudioKey(trimmedPath)) {
-      return decodePath(trimmedPath);
+    const trimmedPath = path.replace(/^\/+/, "");
+    if (trimmedPath.startsWith("audio/")) {
+      return decodeAudioPath(trimmedPath);
+    }
+
+    if (trimmedPath.includes("/audio/")) {
+      return decodeAudioPath(trimmedPath);
     }
 
     return null;

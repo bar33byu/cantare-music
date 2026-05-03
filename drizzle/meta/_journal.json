@@ -43,6 +43,20 @@
       "when": 1775533167443,
       "tag": "0005_orphaned_audio_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1775900000000,
+      "tag": "0007_tap_practice_debug",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777694400000,
+      "tag": "0008_song_timeline_contour",
+      "breakpoints": true
     }
   ]
 }

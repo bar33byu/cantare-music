@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AudioPlayer } from "./AudioPlayer";
+import { getMasteryColor } from "../lib/masteryColors";
 
 describe("AudioPlayer", () => {
   const defaultProps = {
@@ -142,7 +143,7 @@ describe("AudioPlayer", () => {
 
     expect(screen.getByTestId("audio-piece-mastery-bar")).toBeInTheDocument();
     expect(screen.getByTestId("audio-piece-mastery-chunk-1")).toHaveStyle({
-      backgroundColor: "rgb(114, 107, 234)",
+      backgroundColor: getMasteryColor(80),
     });
   });
 

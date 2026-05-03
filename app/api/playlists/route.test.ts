@@ -21,6 +21,8 @@ describe('GET /api/playlists', () => {
     expect(response.status).toBe(200);
     expect(data.playlists).toHaveLength(1);
     expect(getAllPlaylists).toHaveBeenCalledWith('default', false);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(response.headers.get('Vary')).toBe('X-User-ID');
   });
 
   it('supports includeRetired query param', async () => {

@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { vi } from "vitest";
 import SegmentCard from "./SegmentCard";
@@ -142,6 +142,46 @@ describe("SegmentCard", () => {
     expect(screen.getByTestId("segment-lyric-text")).toHaveStyle({
       fontSize: "clamp(0.95rem, 2.7vw, 1.5rem)",
     });
+  });
+
+  it("shrinks lyrics based on measured rendered height when the length bucket is too large", async () => {
+    const getComputedStyleSpy = vi
+      .spyOn(window, "getComputedStyle")
+      .mockImplementation((element) => ({
+        fontSize:
+          element === document.documentElement
+            ? "16px"
+            : (element as HTMLElement).style.fontSize.endsWith("px")
+              ? (element as HTMLElement).style.fontSize
+              : "32px",
+      } as CSSStyleDeclaration));
+
+    render(
+      <SegmentCard
+        {...defaultProps}
+        segment={{ ...mockSegment, lyricText: "This lyric wraps into enough lines that the initial bucket is too tall." }}
+      />
+    );
+
+    const container = screen.getByTestId("segment-lyric-scroll-container");
+    const lyric = screen.getByTestId("segment-lyric-text");
+
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(lyric, "scrollHeight", {
+      configurable: true,
+      get: () => Number.parseFloat((lyric as HTMLElement).style.fontSize || "32") * 10,
+    });
+
+    fireEvent(window, new Event("resize"));
+
+    await waitFor(() => {
+      expect(Number.parseFloat((lyric as HTMLElement).style.fontSize)).toBeLessThan(21);
+    });
+
+    getComputedStyleSpy.mockRestore();
   });
 
   it("keeps lyric scrollbar visible on larger screens", () => {

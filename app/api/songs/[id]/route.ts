@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSongById, deleteSong, updateSong, getSegmentsBySongId, recordOrphanedAudioKey } from '../../../../db/queries';
+import {
+  getSongById,
+  deleteSong,
+  updateSong,
+  getSegmentsBySongId,
+  recordOrphanedAudioKey,
+  deleteTapPracticeSessionsForSong,
+} from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
 import { resolveRequestUserId } from '../../_user';
+import { validateSongPitchContourNotes } from '../../../lib/pitchContour';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -33,6 +41,7 @@ export async function GET(
       title: song.title,
       artist: song.artist,
       audioUrl: song.audioKey ? getPublicUrl(song.audioKey) : '',
+      pitchContourNotes: song.pitchContourNotes ?? [],
       segments: segments.map(segment => ({
         id: segment.id,
         songId: segment.songId,
@@ -41,7 +50,7 @@ export async function GET(
         lyricText: segment.lyricText,
         startMs: segment.startMs,
         endMs: segment.endMs,
-        pitchContourNotes: segment.pitchContourNotes ?? [],
+        pitchContourNotes: [],
       })),
       createdAt: song.createdAt,
       lastPracticedAt: song.lastPracticedAt,
@@ -107,17 +116,23 @@ export async function PATCH(
     const userId = resolveRequestUserId(request);
     const { id } = await params;
     const body = await request.json();
-    const { audioKey, title, artist } = body;
+    const { audioKey, title, artist, pitchContourNotes } = body;
 
     const existingSong = await getSongById(id, userId);
     if (!existingSong) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
-    const updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist'>> = {};
+    const pitchContourValidation = validateSongPitchContourNotes(pitchContourNotes);
+    if (!pitchContourValidation.ok) {
+      return NextResponse.json({ error: pitchContourValidation.error }, { status: 400 });
+    }
+
+    const updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist' | 'pitchContourNotes'>> = {};
     if (audioKey !== undefined) updates.audioKey = audioKey;
     if (title !== undefined) updates.title = title;
     if (artist !== undefined) updates.artist = artist;
+    if (pitchContourNotes !== undefined) updates.pitchContourNotes = pitchContourNotes;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
@@ -132,8 +147,18 @@ export async function PATCH(
     }
 
     await updateSong(id, updates, userId);
+    if (updates.pitchContourNotes !== undefined) {
+      await deleteTapPracticeSessionsForSong(id, userId);
+    }
     return NextResponse.json({ success: true });
   } catch (error) {
+    const errorCode = (error as { code?: string })?.code;
+    if (errorCode === 'SONG_PITCH_CONTOUR_MIGRATION_REQUIRED') {
+      return NextResponse.json(
+        { error: 'Song pitch contour saving is unavailable until migration 0008_song_timeline_contour.sql is applied.' },
+        { status: 409 }
+      );
+    }
     console.error('Error updating song:', error);
     return NextResponse.json(formatError(error), { status: 500 });
   }

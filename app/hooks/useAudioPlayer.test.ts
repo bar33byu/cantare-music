@@ -110,6 +110,20 @@ describe('useAudioPlayer', () => {
     expect(result.current.isReady).toBe(true);
   });
 
+  it('increments endedCount when native playback ends', () => {
+    const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
+
+    expect(result.current.endedCount).toBe(0);
+
+    act(() => {
+      stub.emit('ended');
+    });
+
+    expect(result.current.isPlaying).toBe(false);
+    expect(result.current.endedCount).toBe(1);
+    expect(result.current.debugInfo.lastEvent).toBe('ended');
+  });
+
   it('attempts playback immediately before audio is ready', async () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
 
@@ -134,6 +148,31 @@ describe('useAudioPlayer', () => {
 
     expect(result.current.playbackError).toContain('Unable to load audio');
     expect(result.current.isReady).toBe(false);
+  });
+
+  it('ignores interrupted play() AbortErrors caused by pause races', async () => {
+    const abortError = new Error('The play() request was interrupted by a call to pause().');
+    abortError.name = 'AbortError';
+    stub.play = vi.fn().mockReturnValue({
+      then: (_resolve: () => void, reject: (reason: unknown) => void) => {
+        reject(abortError);
+      },
+    });
+    factory = vi.fn().mockReturnValue(stub) as unknown as (url: string) => HTMLAudioElement;
+
+    const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
+
+    await act(async () => {
+      result.current.play(0, 4000);
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.playbackError).toBeNull();
+    expect(result.current.isPlaying).toBe(false);
+    expect(result.current.debugInfo.playRejected).toBe(1);
   });
 
   it('does not surface decoder errors before user presses play', () => {

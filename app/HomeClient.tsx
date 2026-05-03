@@ -141,7 +141,7 @@ function parseHashRoute(hash: string): HashRouteState {
     view === "playlist_detail" ||
     view === "playlist_practice"
       ? view
-      : "library";
+      : "playlists";
 
   return {
     view: safeView,
@@ -218,18 +218,13 @@ export default function Home() {
   const usersHydratedFromDbRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
   const activeUserId = userSettings.currentUserId;
-  const scopedUserId = activeUserId === DEFAULT_USER_ID ? undefined : activeUserId;
 
   const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
-    if (!scopedUserId) {
-      return init;
-    }
-
     return {
       ...init,
       headers: {
         ...(init?.headers ?? {}),
-        "X-User-ID": scopedUserId,
+        "X-User-ID": activeUserId,
       },
     };
   };
@@ -242,6 +237,12 @@ export default function Home() {
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
+    }
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/cantare-audio-sw.js").catch(() => {
+        // The app still works without offline audio caching.
+      });
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
@@ -652,6 +653,7 @@ export default function Home() {
           />
           <SegmentEditor
             songId={selectedSong.id}
+            userId={activeUserId}
             onSongUpdated={refreshSelectedSong}
           />
         </div>
@@ -686,8 +688,9 @@ export default function Home() {
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="mx-auto max-w-4xl">
           <PlaylistDetail
+            key={`playlist-detail:${activeUserId}:${selectedPlaylist.id}`}
             playlistId={selectedPlaylist.id}
-            userId={scopedUserId}
+            userId={activeUserId}
             onBack={() => setActiveView("playlists")}
             onPractice={(playlist) => {
               setSelectedPlaylist(playlist);
@@ -708,17 +711,24 @@ export default function Home() {
         <div className="mx-auto max-w-4xl">
           <PlaylistPracticeView
             playlist={selectedPlaylist}
+            userId={activeUserId}
             onExit={() => setActiveView("playlists")}
             onManage={() => setActiveView("playlist_detail")}
-            onSelectSong={async (songId) => {
-              try {
-                const fullSong = await loadSongById(songId);
-                if (!fullSong) throw new Error("Failed to fetch song");
-                setSelectedSong(fullSong);
-                setActiveView("song_practice");
-              } catch (err) {
-                console.error("Failed to load song:", err);
-              }
+            onSelectSong={(song) => {
+              setSelectedSong(song);
+              setActiveView("song_practice");
+
+              void (async () => {
+                try {
+                  const fullSong = await loadSongById(song.id);
+                  if (!fullSong) {
+                    return;
+                  }
+                  setSelectedSong((current) => (current?.id === fullSong.id ? fullSong : current));
+                } catch (err) {
+                  console.error("Failed to refresh song:", err);
+                }
+              })();
             }}
           />
         </div>
@@ -900,11 +910,12 @@ export default function Home() {
         {activeView === "library" ? (
           <>
             <SongBrowser
+              key={`songs:${activeUserId}:${refreshTrigger}`}
               onSelectSong={handleSelectSong}
               onDeleteSong={handleSongDeleted}
               selectedSongId={selectedSong?.id || null}
               refreshTrigger={refreshTrigger}
-              userId={scopedUserId}
+              userId={activeUserId}
             />
             {/* Plus button for adding songs */}
             <button
@@ -931,7 +942,8 @@ export default function Home() {
 
         {activeView === "playlists" ? (
           <PlaylistBrowser
-            userId={scopedUserId}
+            key={`playlists:${activeUserId}:${refreshTrigger}`}
+            userId={activeUserId}
             refreshTrigger={refreshTrigger}
             onSelectPlaylist={async (playlist) => {
               try {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validatePitchContourNotes } from "./pitchContour";
+import { getSegmentPitchContourNotes, splitAbsoluteContourNoteBySegments, validatePitchContourNotes, validateSongPitchContourNotes } from "./pitchContour";
 
 describe("validatePitchContourNotes", () => {
   it("accepts undefined", () => {
@@ -41,5 +41,59 @@ describe("validatePitchContourNotes", () => {
   it("rejects non-array payload", () => {
     const result = validatePitchContourNotes({});
     expect(result).toEqual({ ok: false, error: "Pitch contour notes must be an array" });
+  });
+
+  it("splits an absolute contour note across segment boundaries", () => {
+    const segmented = splitAbsoluteContourNoteBySegments(
+      {
+        id: "abs-1",
+        startMs: 900,
+        durationMs: 400,
+        lane: 0.65,
+      },
+      [
+        { id: "seg-1", startMs: 0, endMs: 1000 },
+        { id: "seg-2", startMs: 1000, endMs: 2000 },
+      ]
+    );
+
+    expect(segmented).toHaveLength(2);
+    expect(segmented[0]).toMatchObject({
+      segmentId: "seg-1",
+      note: {
+        timeOffsetMs: 900,
+        durationMs: 100,
+        lane: 0.65,
+      },
+    });
+    expect(segmented[1]).toMatchObject({
+      segmentId: "seg-2",
+      note: {
+        timeOffsetMs: 0,
+        durationMs: 300,
+        lane: 0.65,
+      },
+    });
+  });
+});
+
+describe("validateSongPitchContourNotes", () => {
+  it("accepts song-timeline contour notes", () => {
+    expect(validateSongPitchContourNotes([
+      { id: "n-1", absoluteMs: 1200, durationMs: 100, lane: 0.5 },
+    ])).toEqual({ ok: true });
+  });
+});
+
+describe("getSegmentPitchContourNotes", () => {
+  it("projects absolute notes into every segment window they overlap", () => {
+    const notes = [{ id: "n-1", absoluteMs: 900, durationMs: 300, lane: 0.4 }];
+
+    expect(getSegmentPitchContourNotes(notes, { startMs: 0, endMs: 1000 })).toEqual([
+      { id: "n-1", timeOffsetMs: 900, durationMs: 100, lane: 0.4 },
+    ]);
+    expect(getSegmentPitchContourNotes(notes, { startMs: 1000, endMs: 2000 })).toEqual([
+      { id: "n-1", timeOffsetMs: 0, durationMs: 200, lane: 0.4 },
+    ]);
   });
 });

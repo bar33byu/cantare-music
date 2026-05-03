@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
-import { buildProxyAudioUrl, parseAudioKey } from '../lib/audioUrls';
+import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
+import { SongReadinessIcons } from './SongReadinessIcons';
+import { useAudioPlayer } from '../hooks/useAudioPlayer';
 
 type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
 interface SortState { key: SortKey; asc: boolean }
@@ -46,17 +48,301 @@ function getLastPracticedLabel(value?: string | null): string {
   return 'Last practiced just now';
 }
 
-interface PlaylistPracticeViewProps {
-  playlist: Playlist;
-  onExit: () => void;
-  onManage?: () => void;
-  onSelectSong: (songId: string) => void;
+function formatMs(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
+interface PlaylistPracticeViewProps {
+  playlist: Playlist;
+  userId?: string;
+  onExit: () => void;
+  onManage?: () => void;
+  onSelectSong: (song: Playlist["songs"][number]) => void;
+}
+
+const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
+const AUDIO_CACHE_NAME = 'cantare-audio-v2';
+const AUDIO_CACHED_AT_HEADER = 'x-cantare-cached-at';
+
+function withAudioCachedAt(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set(AUDIO_CACHED_AT_HEADER, String(Date.now()));
+  headers.set('Cache-Control', 'public, max-age=1209600');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
+  const [livePlaylist, setLivePlaylist] = useState(playlist);
   const [playlistScore, setPlaylistScore] = useState(0);
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
+  const [mode, setMode] = useState<'practice' | 'listen'>('practice');
+  const [currentSongIndex, setCurrentSongIndex] = useState(0);
+  const [isListenPlaying, setIsListenPlaying] = useState(false);
+  const [useProxyFallback, setUseProxyFallback] = useState(false);
+  const listenStartedSongIdRef = useRef<string | null>(null);
+  const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
+
+  const userScopedHeaders = useMemo(() => {
+    return userId ? { 'X-User-ID': userId } : undefined;
+  }, [userId]);
+
+  const playlistDetailRequest = useMemo(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    return new Request(new URL(`/api/playlists/${playlist.id}`, origin), {
+      headers: userScopedHeaders,
+    });
+  }, [playlist.id, userScopedHeaders]);
+
+  useEffect(() => {
+    setLivePlaylist(playlist);
+  }, [playlist]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFromCacheThenRevalidate = async () => {
+      const canUseCacheStorage = typeof window !== 'undefined' && 'caches' in window;
+      let cache: Cache | null = null;
+
+      if (canUseCacheStorage) {
+        try {
+          cache = await window.caches.open(PLAYLIST_PRACTICE_CACHE_NAME);
+          const cachedResponse = await cache.match(playlistDetailRequest);
+          if (cachedResponse?.ok) {
+            const cachedPlaylist = (await cachedResponse.clone().json()) as Playlist;
+            if (!cancelled && cachedPlaylist.id === playlist.id) {
+              setLivePlaylist(cachedPlaylist);
+            }
+          }
+        } catch {
+          cache = null;
+        }
+      }
+
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return;
+      }
+
+      try {
+        const response = await fetch(playlistDetailRequest, { cache: 'no-store' });
+        if (!response.ok) {
+          return;
+        }
+
+        const freshPlaylist = (await response.clone().json()) as Playlist;
+        if (!cancelled && freshPlaylist.id === playlist.id) {
+          setLivePlaylist(freshPlaylist);
+        }
+
+        if (cache) {
+          await cache.put(playlistDetailRequest, response);
+        }
+      } catch {
+        // Cached playlist data is enough to keep practice usable offline.
+      }
+    };
+
+    void loadFromCacheThenRevalidate();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [playlist.id, playlistDetailRequest]);
+
+  const displayedSongs = useMemo(() => {
+    const dir = sort.asc ? 1 : -1;
+    return [...livePlaylist.songs].sort((a, b) => {
+      switch (sort.key) {
+        case 'alphabetical':
+          return dir * a.title.localeCompare(b.title);
+        case 'date-added':
+          return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
+        case 'date-practiced': {
+          const aTime = a.lastPracticedAt ?? '';
+          const bTime = b.lastPracticedAt ?? '';
+          if (!aTime && !bTime) return 0;
+          if (!aTime) return dir;
+          if (!bTime) return -dir;
+          return dir * aTime.localeCompare(bTime);
+        }
+        case 'memory-score':
+          return dir * ((a.masteryPercent ?? 0) - (b.masteryPercent ?? 0));
+        default:
+          return 0;
+      }
+    });
+  }, [livePlaylist.songs, sort]);
+
+  const listenQueue = displayedSongs;
+  const currentSong = listenQueue[currentSongIndex];
+  const currentSongId = currentSong?.id;
+  const hasCurrentSongAudio = Boolean(currentSong?.audioUrl.trim());
+  const findNextPlayableIndex = useCallback((startIndex: number) => {
+    for (let index = Math.max(0, startIndex); index < listenQueue.length; index += 1) {
+      if (listenQueue[index]?.audioUrl.trim()) {
+        return index;
+      }
+    }
+    return -1;
+  }, [listenQueue]);
+  const proxyAudioUrl = useMemo(
+    () => buildProxyAudioUrl(parseAudioKey(currentSong?.audioUrl ?? '')),
+    [currentSong?.audioUrl]
+  );
+  const directPlaybackAudioUrl = useMemo(
+    () => toPlayableAudioUrl(currentSong?.audioUrl ?? ''),
+    [currentSong?.audioUrl]
+  );
+  const canFallbackToProxy = proxyAudioUrl !== null && proxyAudioUrl !== directPlaybackAudioUrl;
+  const playbackAudioUrl = useMemo(() => {
+    if (useProxyFallback && canFallbackToProxy && proxyAudioUrl) {
+      return proxyAudioUrl;
+    }
+    return directPlaybackAudioUrl;
+  }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
+  const audioPlayer = useAudioPlayer(playbackAudioUrl);
+  const {
+    endedCount: playbackEndedCount = 0,
+    pause: pauseAudio,
+    play: playAudio,
+    playbackError,
+  } = audioPlayer;
+  const requestPlay = useCallback((startMs: number, endMs: number) => {
+    pendingFallbackPlayRangeRef.current = !useProxyFallback && canFallbackToProxy
+      ? { startMs, endMs }
+      : null;
+    playAudio(startMs, endMs);
+  }, [canFallbackToProxy, playAudio, useProxyFallback]);
+
+  useEffect(() => {
+    setUseProxyFallback(false);
+    pendingFallbackPlayRangeRef.current = null;
+  }, [currentSongId]);
+
+  useEffect(() => {
+    if (!playbackError || useProxyFallback || !canFallbackToProxy) {
+      return;
+    }
+    setUseProxyFallback(true);
+  }, [canFallbackToProxy, playbackError, useProxyFallback]);
+
+  useEffect(() => {
+    if (!useProxyFallback) {
+      return;
+    }
+
+    const pendingRange = pendingFallbackPlayRangeRef.current;
+    if (!pendingRange) {
+      return;
+    }
+
+    pendingFallbackPlayRangeRef.current = null;
+    playAudio(pendingRange.startMs, pendingRange.endMs);
+  }, [playAudio, useProxyFallback]);
+
+  useEffect(() => {
+    if (mode !== 'listen') {
+      setIsListenPlaying(false);
+      listenStartedSongIdRef.current = null;
+      return;
+    }
+
+    setCurrentSongIndex((prev) => Math.min(prev, Math.max(listenQueue.length - 1, 0)));
+  }, [listenQueue.length, mode]);
+
+  useLayoutEffect(() => {
+    if (mode !== 'listen' || !isListenPlaying || !currentSongId) {
+      return;
+    }
+
+    if (!hasCurrentSongAudio) {
+      listenStartedSongIdRef.current = currentSongId;
+      const nextPlayableIndex = findNextPlayableIndex(currentSongIndex + 1);
+      if (nextPlayableIndex === -1) {
+        setIsListenPlaying(false);
+        listenStartedSongIdRef.current = null;
+      } else {
+        setCurrentSongIndex(nextPlayableIndex);
+      }
+      return;
+    }
+
+    if (listenStartedSongIdRef.current === currentSongId) {
+      return;
+    }
+
+    listenStartedSongIdRef.current = currentSongId;
+    requestPlay(0, 0);
+  }, [
+    currentSongId,
+    currentSongIndex,
+    findNextPlayableIndex,
+    hasCurrentSongAudio,
+    isListenPlaying,
+    mode,
+    requestPlay,
+  ]);
+
+  useEffect(() => {
+    if (mode !== 'listen' || !isListenPlaying || playbackEndedCount <= 0) {
+      return;
+    }
+
+    const nextPlayableIndex = findNextPlayableIndex(currentSongIndex + 1);
+    if (nextPlayableIndex === -1) {
+      setIsListenPlaying(false);
+      listenStartedSongIdRef.current = null;
+      return;
+    }
+
+    listenStartedSongIdRef.current = null;
+    setCurrentSongIndex(nextPlayableIndex);
+  }, [currentSongIndex, findNextPlayableIndex, isListenPlaying, mode, playbackEndedCount]);
+
+  const handleListenPlayPause = () => {
+    if (audioPlayer.isPlaying || isListenPlaying) {
+      setIsListenPlaying(false);
+      listenStartedSongIdRef.current = null;
+      pauseAudio();
+      return;
+    }
+
+    setIsListenPlaying(true);
+    if (currentSongId && hasCurrentSongAudio) {
+      listenStartedSongIdRef.current = currentSongId;
+      requestPlay(0, 0);
+      return;
+    }
+
+    const nextPlayableIndex = findNextPlayableIndex(currentSongIndex);
+    if (nextPlayableIndex === -1) {
+      setIsListenPlaying(false);
+      return;
+    }
+
+    setCurrentSongIndex(nextPlayableIndex);
+  };
+
+  const handleNextSong = () => {
+    if (currentSongIndex < listenQueue.length - 1) {
+      setCurrentSongIndex(prev => prev + 1);
+    }
+  };
+
+  const handlePrevSong = () => {
+    if (currentSongIndex > 0) {
+      setCurrentSongIndex(prev => prev - 1);
+    }
+  };
 
   useEffect(() => {
     try {
@@ -84,7 +370,9 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`/api/playlists/${playlist.id}/knowledge`);
+        const res = await fetch(`/api/playlists/${playlist.id}/knowledge`, {
+          headers: userScopedHeaders,
+        });
         if (res.ok) {
           const data = (await res.json()) as { score?: number };
           setPlaylistScore(Math.min(Math.round(data.score ?? 0), 100));
@@ -92,7 +380,17 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
       } catch { /* ignore */ }
     };
     void load();
-  }, [playlist.id]);
+  }, [playlist.id, refetchTrigger, userScopedHeaders]);
+
+  useEffect(() => {
+    const handleRatingsUpdated = () => {
+      setRefetchTrigger(prev => prev + 1);
+    };
+    window.addEventListener('ratingsUpdated', handleRatingsUpdated);
+    return () => {
+      window.removeEventListener('ratingsUpdated', handleRatingsUpdated);
+    };
+  }, []);
 
   useEffect(() => {
     const maybePrecachePlaylist = async () => {
@@ -117,14 +415,18 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
       }
 
       try {
-        const cache = await window.caches.open('cantare-playlist-practice-v1');
+        const playlistCache = await window.caches.open(PLAYLIST_PRACTICE_CACHE_NAME);
+        const audioCache = await window.caches.open(AUDIO_CACHE_NAME);
 
         await Promise.allSettled(
-          playlist.songs.map(async (song) => {
-            const songRequest = new Request(`/api/songs/${song.id}`);
-            const songResponse = await fetch(songRequest, { cache: 'reload' });
+          livePlaylist.songs.map(async (song) => {
+            const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+            const songRequest = new Request(new URL(`/api/songs/${song.id}`, origin), {
+              headers: userScopedHeaders,
+            });
+            const songResponse = await fetch(songRequest, { cache: 'force-cache' });
             if (songResponse.ok) {
-              await cache.put(songRequest, songResponse.clone());
+              await playlistCache.put(songRequest, songResponse.clone());
             }
 
             const proxyAudioUrl = buildProxyAudioUrl(parseAudioKey(song.audioUrl));
@@ -134,8 +436,8 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
 
             const audioRequest = new Request(proxyAudioUrl);
             const audioResponse = await fetch(audioRequest, { cache: 'reload' });
-            if (audioResponse.ok) {
-              await cache.put(audioRequest, audioResponse.clone());
+            if (audioResponse.ok && audioResponse.status === 200) {
+              await audioCache.put(audioRequest, withAudioCachedAt(audioResponse.clone()));
             }
           })
         );
@@ -145,33 +447,9 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
     };
 
     void maybePrecachePlaylist();
-  }, [playlist.songs]);
+  }, [livePlaylist.songs, userScopedHeaders]);
 
-  const displayedSongs = useMemo(() => {
-    const dir = sort.asc ? 1 : -1;
-    return [...playlist.songs].sort((a, b) => {
-      switch (sort.key) {
-        case 'alphabetical':
-          return dir * a.title.localeCompare(b.title);
-        case 'date-added':
-          return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
-        case 'date-practiced': {
-          const aTime = a.lastPracticedAt ?? '';
-          const bTime = b.lastPracticedAt ?? '';
-          if (!aTime && !bTime) return 0;
-          if (!aTime) return 1;
-          if (!bTime) return -1;
-          return dir * aTime.localeCompare(bTime);
-        }
-        case 'memory-score':
-          return dir * ((a.masteryPercent ?? 0) - (b.masteryPercent ?? 0));
-        default:
-          return 0;
-      }
-    });
-  }, [playlist.songs, sort]);
-
-  if (playlist.songs.length === 0) {
+  if (livePlaylist.songs.length === 0) {
     return (
       <section data-testid="playlist-practice-empty" className="space-y-4">
         <header className="space-y-3">
@@ -185,7 +463,7 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
                 Playlists
               </button>
               <span>/</span>
-              <span className="text-gray-900">{playlist.name}</span>
+              <span className="text-gray-900">{livePlaylist.name}</span>
             </div>
             {onManage ? (
               <button
@@ -226,14 +504,21 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
               Playlists
             </button>
             <span>/</span>
-            <span className="text-gray-900">{playlist.name}</span>
+            <span className="text-gray-900">{livePlaylist.name}</span>
           </div>
-          <h2 className="text-2xl font-bold">{playlist.name}</h2>
+          <h2 className="text-2xl font-bold">{livePlaylist.name}</h2>
           <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
             Playlist Knowledge: {playlistScore}%
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setMode(mode === 'practice' ? 'listen' : 'practice')}
+            className="flex h-10 items-center gap-2 rounded border border-indigo-300 px-3 text-indigo-700 hover:bg-indigo-50"
+          >
+            {mode === 'practice' ? '🎧 Listen' : '🎼 Practice'}
+          </button>
           {onManage ? (
             <button
               data-testid="playlist-practice-manage"
@@ -251,107 +536,192 @@ export function PlaylistPracticeView({ playlist, onExit, onManage, onSelectSong 
         </div>
       </header>
 
-      {/* Sort toolbar */}
-      <div className="flex items-center gap-2">
-        <div className="relative ml-auto">
-          <button
-            type="button"
-            data-testid="playlist-sort-toggle"
-            onClick={() => setShowSortMenu((prev) => !prev)}
-            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm text-gray-500 hover:bg-gray-100"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <line x1="8" y1="6" x2="21" y2="6" />
-              <line x1="8" y1="12" x2="21" y2="12" />
-              <line x1="8" y1="18" x2="21" y2="18" />
-              <polyline points="3 6 4 7 6 5" />
-              <polyline points="3 12 4 13 6 11" />
-              <polyline points="3 18 4 19 6 17" />
-            </svg>
-            {sortDirLabel[sort.key][sort.asc ? 1 : 0]}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-          {showSortMenu && (
-            <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-gray-200 bg-white shadow-lg">
-              {(['alphabetical', 'date-added', 'date-practiced', 'memory-score'] as const).map((key) => {
-                const isActive = sort.key === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    data-testid={`playlist-sort-${key}`}
-                    onClick={() => {
-                      updateSort({ key, asc: isActive ? !sort.asc : defaultAscForKey(key) });
-                      setShowSortMenu(false);
-                    }}
-                    className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg hover:bg-gray-50 ${
-                      isActive ? 'font-semibold text-blue-600' : 'text-gray-700'
-                    }`}
-                  >
-                    {sortKeyLabel[key]}
-                    {isActive && (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                        {sort.asc
-                          ? <polyline points="18 15 12 9 6 15" />
-                          : <polyline points="6 9 12 15 18 9" />}
-                      </svg>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="playlist-song-grid">
-        {displayedSongs.map((song) => {
-          const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
-          const masteryColor = getMasteryColor(mastery);
-          const hasAudio = Boolean(song.audioUrl?.trim());
-          const hasSegments = song.segments.length > 0;
-          const readinessNotes: string[] = [];
-          if (!hasAudio) {
-            readinessNotes.push('Missing audio');
-          }
-          if (!hasSegments) {
-            readinessNotes.push('Missing segments');
-          }
-          return (
-            <div
-              key={song.id}
-              data-testid={`playlist-practice-song-${song.id}`}
-              className="relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent"
-              onClick={() => onSelectSong(song.id)}
-            >
-              <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
-                <div
-                  className="h-full rounded-tl-lg"
-                  style={{ width: `${mastery}%`, backgroundColor: masteryColor }}
-                />
-              </div>
-              <p className="absolute right-2 top-1 text-[11px] font-semibold text-gray-700">{mastery}%</p>
-              <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
-              {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
-              {readinessNotes.length > 0 ? (
-                <div data-testid={`playlist-practice-song-status-${song.id}`} className="mb-2 flex flex-wrap gap-1">
-                  {readinessNotes.map((note) => (
-                    <span
-                      key={`${song.id}-${note}`}
-                      className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"
-                    >
-                      {note}
-                    </span>
-                  ))}
+      {mode === 'practice' && (
+        <>
+          {/* Sort toolbar */}
+          <div className="flex items-center gap-2">
+            <div className="relative ml-auto">
+              <button
+                type="button"
+                data-testid="playlist-sort-toggle"
+                onClick={() => setShowSortMenu((prev) => !prev)}
+                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm text-gray-500 hover:bg-gray-100"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                  <line x1="8" y1="6" x2="21" y2="6" />
+                  <line x1="8" y1="12" x2="21" y2="12" />
+                  <line x1="8" y1="18" x2="21" y2="18" />
+                  <polyline points="3 6 4 7 6 5" />
+                  <polyline points="3 12 4 13 6 11" />
+                  <polyline points="3 18 4 19 6 17" />
+                </svg>
+                {sortDirLabel[sort.key][sort.asc ? 1 : 0]}
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              {showSortMenu && (
+                <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {(['alphabetical', 'date-added', 'date-practiced', 'memory-score'] as const).map((key) => {
+                    const isActive = sort.key === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        data-testid={`playlist-sort-${key}`}
+                        onClick={() => {
+                          updateSort({ key, asc: isActive ? !sort.asc : defaultAscForKey(key) });
+                          setShowSortMenu(false);
+                        }}
+                        className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg hover:bg-gray-50 ${
+                          isActive ? 'font-semibold text-blue-600' : 'text-gray-700'
+                        }`}
+                      >
+                        {sortKeyLabel[key]}
+                        {isActive && (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                            {sort.asc
+                              ? <polyline points="18 15 12 9 6 15" />
+                              : <polyline points="6 9 12 15 18 9" />}
+                          </svg>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
-              ) : null}
-              <p className="text-xs text-gray-500 mt-2">{getLastPracticedLabel(song.lastPracticedAt)}</p>
+              )}
             </div>
-          );
-        })}
-      </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="playlist-song-grid">
+            {displayedSongs.map((song) => {
+              const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
+              const masteryColor = getMasteryColor(mastery);
+              const shouldRenderLabelInsideBar = mastery >= 10;
+              const hasAudio = Boolean(song.audioUrl?.trim());
+              const hasSegments = song.segments.length > 0;
+              const hasTapKeys = (song.pitchContourNotes?.length ?? 0) > 0;
+              return (
+                <div
+                  key={song.id}
+                  data-testid={`playlist-practice-song-${song.id}`}
+                  className="relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent"
+                  onClick={() => onSelectSong(song)}
+                >
+                  <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
+                    <div
+                      className="relative h-full rounded-tl-lg"
+                      style={{ width: `${mastery}%`, backgroundColor: masteryColor }}
+                    >
+                      {shouldRenderLabelInsideBar ? (
+                        <span
+                          data-testid={`playlist-practice-mastery-label-${song.id}`}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-white"
+                        >
+                          {mastery}%
+                        </span>
+                      ) : null}
+                    </div>
+                    {!shouldRenderLabelInsideBar ? (
+                      <span
+                        data-testid={`playlist-practice-mastery-label-${song.id}`}
+                        className="absolute top-1/2 -translate-y-1/2 text-[11px] font-semibold text-gray-700"
+                        style={{ left: `calc(${mastery}% + 4px)` }}
+                      >
+                        {mastery}%
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
+                  {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
+                  <div className="absolute bottom-3 right-3">
+                    <SongReadinessIcons
+                      hasAudio={hasAudio}
+                      hasSegments={hasSegments}
+                      hasTapKeys={hasTapKeys}
+                      testIdPrefix={`playlist-practice-song-${song.id}`}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">{getLastPracticedLabel(song.lastPracticedAt)}</p>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {mode === 'listen' && currentSong && (
+        <div className="space-y-4">
+          <div className="text-center">
+            <h3 className="text-2xl font-semibold">{currentSong.title}</h3>
+            {currentSong.artist && <p className="text-gray-600">{currentSong.artist}</p>}
+            <p className="text-sm text-gray-500">{currentSongIndex + 1} of {listenQueue.length}</p>
+          </div>
+          <div className="flex justify-center gap-4">
+            <button
+              type="button"
+              aria-label="Previous song"
+              onClick={handlePrevSong}
+              disabled={currentSongIndex === 0}
+              className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
+            >
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-label={audioPlayer.isPlaying || isListenPlaying ? "Pause playlist" : "Play playlist"}
+              onClick={handleListenPlayPause}
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              {audioPlayer.isPlaying || isListenPlaying ? (
+                <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 3l14 9-14 9V3z" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              aria-label="Next song"
+              onClick={handleNextSong}
+              disabled={currentSongIndex === listenQueue.length - 1}
+              className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
+            >
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          </div>
+          <div className="mx-auto max-w-md">
+            <div className="relative">
+              <input
+                type="range"
+                min="0"
+                max={audioPlayer.durationMs}
+                value={audioPlayer.currentMs}
+                onChange={(e) => audioPlayer.seek(Number(e.target.value))}
+                className="w-full"
+              />
+              <div className="flex justify-between text-sm text-gray-500 mt-1">
+                <span>{formatMs(audioPlayer.currentMs)}</span>
+                <span>{formatMs(audioPlayer.durationMs)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mode === 'listen' && !currentSong && (
+        <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This playlist does not have any songs yet.
+        </div>
+      )}
     </section>
   );
 }

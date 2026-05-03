@@ -10,13 +10,27 @@ interface RatingBarProps {
 }
 
 const RATINGS: MemoryRating[] = [1, 2, 3, 4, 5];
-
-const SELECTED_RATING_CLASS: Record<MemoryRating, string> = {
-  1: "bg-indigo-200 text-indigo-950",
-  2: "bg-indigo-300 text-indigo-950",
-  3: "bg-indigo-500 text-white",
-  4: "bg-indigo-700 text-white",
-  5: "bg-indigo-950 text-white",
+const RATING_STYLES: Record<MemoryRating, { filled: string; empty: string }> = {
+  1: {
+    filled: "bg-indigo-200 text-indigo-950",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
+  2: {
+    filled: "bg-indigo-300 text-indigo-950",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
+  3: {
+    filled: "bg-indigo-500 text-white",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
+  4: {
+    filled: "bg-indigo-700 text-white",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
+  5: {
+    filled: "bg-slate-950 text-white",
+    empty: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  },
 };
 
 const RatingBar: React.FC<RatingBarProps> = ({
@@ -29,6 +43,7 @@ const RatingBar: React.FC<RatingBarProps> = ({
       {RATINGS.map((rating) => {
         const isExactSelection = currentRating === rating;
         const isFilled = currentRating !== undefined && rating <= currentRating;
+        const ratingStyle = RATING_STYLES[rating];
 
         return (
         <button
@@ -39,10 +54,11 @@ const RatingBar: React.FC<RatingBarProps> = ({
           aria-label={`Rate ${rating}`}
           aria-pressed={isExactSelection ? "true" : "false"}
           className={[
-            "w-10 h-10 rounded-full text-sm font-semibold transition-colors",
+            "w-10 h-10 rounded-full text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2",
             isFilled
-              ? SELECTED_RATING_CLASS[rating]
-              : "bg-gray-100 text-gray-700 hover:bg-indigo-100",
+              ? ratingStyle.filled
+              : ratingStyle.empty,
+            isExactSelection ? "shadow-sm ring-2 ring-indigo-300 ring-offset-2" : "",
             disabled ? "opacity-40 cursor-not-allowed" : "",
           ]
             .filter(Boolean)

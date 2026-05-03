@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { songs, segments, practiceRatings, playlists, playlistSongs, users, orphanedAudioKeys } from "./schema";
+import {
+  songs,
+  segments,
+  practiceRatings,
+  playlists,
+  playlistSongs,
+  users,
+  orphanedAudioKeys,
+  tapPracticeSessions,
+  tapPracticeTaps,
+} from "./schema";
 
 describe("schema tables", () => {
   it("users table has expected columns", () => {
@@ -62,5 +72,25 @@ describe("schema tables", () => {
     expect(cols).toContain("userId");
     expect(cols).toContain("audioKey");
     expect(cols).toContain("failedAt");
+  });
+
+  it("tapPracticeSessions table has expected columns", () => {
+    const cols = Object.keys(tapPracticeSessions);
+    expect(cols).toContain("id");
+    expect(cols).toContain("userId");
+    expect(cols).toContain("songId");
+    expect(cols).toContain("startedAt");
+  });
+
+  it("tapPracticeTaps table has expected columns", () => {
+    const cols = Object.keys(tapPracticeTaps);
+    expect(cols).toContain("id");
+    expect(cols).toContain("sessionId");
+    expect(cols).toContain("segmentId");
+    expect(cols).toContain("noteId");
+    expect(cols).toContain("timeOffsetMs");
+    expect(cols).toContain("durationMs");
+    expect(cols).toContain("laneMilli");
+    expect(cols).toContain("createdAt");
   });
 });

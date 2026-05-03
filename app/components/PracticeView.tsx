@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useReducer } from "react";
-import { Song, MemoryRating } from "../types/index";
+import { Song, MemoryRating, PitchContourNote, ContourNoteHeatStat } from "../types/index";
 import { sessionReducer, SessionState } from "../lib/sessionReducer";
 import { computeKnowledgeScore } from "../lib/knowledgeUtils";
 import SegmentCard from "./SegmentCard";
@@ -10,6 +10,13 @@ import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
+import {
+  DEFAULT_CONTOUR_SAME_DEAD_ZONE,
+  buildContourDirectionEvents,
+  compareContourAttemptDetailed,
+} from "../lib/contourPractice";
+import type { AttemptNoteStatus } from "../lib/contourPractice";
+import { getSegmentPitchContourNotes } from "../lib/pitchContour";
 
 interface TransportDebugState {
   playToggleClicks: number;
@@ -45,6 +52,55 @@ const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
 const PRACTICED_PLAYBACK_THRESHOLD_MS = 10_000;
 const PREV_SEGMENT_GO_BACK_THRESHOLD_MS = 3_000;
 const OFFLINE_RATING_QUEUE_PREFIX = "cantare:offline-ratings:";
+const MIN_TAP_DURATION_MS = 80;
+const ROLL_WINDOW_MS = 6000;
+const TAP_PERSISTENCE_WARNING_MS = 3500;
+const TAP_PRACTICE_COUNT_IN_MS = 2000;
+// TODO: If we do not restore these debugging controls, remove the supporting
+// code paths instead of keeping them hidden indefinitely.
+const SHOW_AUXILIARY_TAP_DEBUG_CONTROLS = false;
+const TAP_MATCH_OPTIONS = {
+  timeToleranceMs: 400,
+  sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
+  durationToleranceRatio: 0.6,
+} as const;
+
+function hasActiveUserActivation(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  const userActivation = (navigator as Navigator & {
+    userActivation?: { isActive?: boolean };
+  }).userActivation;
+
+  return userActivation?.isActive === true;
+}
+
+function toDirectionLetter(direction: "up" | "down" | "same"): "U" | "D" | "S" {
+  if (direction === "up") {
+    return "U";
+  }
+  if (direction === "down") {
+    return "D";
+  }
+  return "S";
+}
+
+interface ActiveTapCapture {
+  id: string;
+  startOffsetMs: number;
+  lane: number;
+  pointerId: number;
+}
+
+interface PersistedTapPayload {
+  segmentId: string;
+  noteId: string;
+  timeOffsetMs: number;
+  durationMs: number;
+  lane: number;
+}
 
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
   if (mode === "full") {
@@ -83,6 +139,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(false);
+  const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
+  const [showCardContourMap, setShowCardContourMap] = React.useState(false);
+  const [showTapOverlay, setShowTapOverlay] = React.useState(true);
+  const [showSameLaneGuides, setShowSameLaneGuides] = React.useState(false);
+  const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
+  const [tapHeatMapBySegment, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
+  const [tapHeatMapRefreshToken, setTapHeatMapRefreshToken] = React.useState(0);
+  const [tapSessionResetToken, setTapSessionResetToken] = React.useState(0);
+  const [tapPracticeCountIn, setTapPracticeCountIn] = React.useState<number | null>(null);
+  const [accuracyToast, setAccuracyToast] = React.useState<{ text: string; visible: boolean } | null>(null);
+  const [tapPersistenceWarning, setTapPersistenceWarning] = React.useState<string | null>(null);
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
   const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
   const practicedRecordedRef = React.useRef(false);
@@ -97,7 +164,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(song.audioUrl)), [song.audioUrl]);
-  const playbackAudioUrl = useMemo(() => proxyAudioUrl ?? toPlayableAudioUrl(song.audioUrl), [proxyAudioUrl, song.audioUrl]);
+  const directPlaybackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
+  const canFallbackToProxy = proxyAudioUrl !== null && proxyAudioUrl !== directPlaybackAudioUrl;
+  const [useProxyFallback, setUseProxyFallback] = React.useState(false);
+  const pendingFallbackPlayRangeRef = React.useRef<{ startMs: number; endMs: number } | null>(null);
+  const playbackAudioUrl = useMemo(() => {
+    if (useProxyFallback && canFallbackToProxy && proxyAudioUrl) {
+      return proxyAudioUrl;
+    }
+    return directPlaybackAudioUrl;
+  }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
   const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(playbackAudioUrl);
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
@@ -111,14 +187,116 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     lastActionAt: new Date().toISOString(),
   });
   const hasSegments = song.segments.length > 0;
+  const hasTapAnswers = (song.pitchContourNotes?.length ?? 0) > 0;
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
+  const tapBarRef = React.useRef<HTMLDivElement | null>(null);
+  const activeTapCaptureRef = React.useRef<ActiveTapCapture | null>(null);
+  const toastTimerRef = React.useRef<number | null>(null);
+  const tapWarningTimerRef = React.useRef<number | null>(null);
+  const tapCountInIntervalRef = React.useRef<number | null>(null);
+  const tapCountInTimeoutRef = React.useRef<number | null>(null);
+  const loopHandledRef = React.useRef<string | null>(null);
+  const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
+  const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
+  const tapSessionIdRef = React.useRef<string | null>(null);
+  const tapSessionGenerationRef = React.useRef(0);
+  const pendingPersistedTapsRef = React.useRef<PersistedTapPayload[]>([]);
+  const persistTapChainRef = React.useRef<Promise<void>>(Promise.resolve());
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
+  const canRestartCurrentSegment = currentSegment
+    ? currentMs > currentSegment.startMs + PREV_SEGMENT_GO_BACK_THRESHOLD_MS
+    : false;
+  const canUsePrevSegment = hasSegments && (!isFirst || canRestartCurrentSegment);
+  const tapDebugHref = React.useMemo(() => {
+    const params = new URLSearchParams({ songId: song.id });
+    if (tapSessionId) {
+      params.set("sessionId", tapSessionId);
+    }
+    return `/debug-tap-practice?${params.toString()}`;
+  }, [song.id, tapSessionId]);
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
+  const currentAttemptNotes = currentSegment ? (tapAttemptsBySegment[currentSegment.id] ?? []) : [];
+  const currentSegmentPitchContourNotes = useMemo(
+    () => (currentSegment ? getSegmentPitchContourNotes(song.pitchContourNotes, currentSegment) : []),
+    [currentSegment, song.pitchContourNotes]
+  );
+  const currentSegmentMatch = useMemo(() => {
+    if (!currentSegment) {
+      return null;
+    }
+
+    return compareContourAttemptDetailed(
+      currentSegmentPitchContourNotes,
+      currentAttemptNotes,
+      TAP_MATCH_OPTIONS
+    );
+  }, [currentAttemptNotes, currentSegment, currentSegmentPitchContourNotes]);
+  const answerDirectionLetters = useMemo(() => {
+    if (!currentSegment) {
+      return new Map<string, "U" | "D" | "S">();
+    }
+    const sortedNotes = [...currentSegmentPitchContourNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+    const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
+    return new Map(events.map((event, index) => [sortedNotes[index + 1]?.id, toDirectionLetter(event.direction)]).filter((entry): entry is [string, "U" | "D" | "S"] => Boolean(entry[0])));
+  }, [currentSegment, currentSegmentPitchContourNotes]);
+  const attemptDirectionLetters = useMemo(() => {
+    const sortedNotes = [...currentAttemptNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+    const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
+    return new Map(events.map((event, index) => [sortedNotes[index + 1]?.id, toDirectionLetter(event.direction)]).filter((entry): entry is [string, "U" | "D" | "S"] => Boolean(entry[0])));
+  }, [currentAttemptNotes]);
+  const currentSegmentOffsetMs = currentSegment
+    ? Math.max(0, Math.min(currentSegment.endMs - currentSegment.startMs, currentMs - currentSegment.startMs))
+    : 0;
+  const previousTapLane = useMemo(() => {
+    if (currentAttemptNotes.length === 0) {
+      return null;
+    }
+
+    return [...currentAttemptNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs).at(-1)?.lane ?? null;
+  }, [currentAttemptNotes]);
+  const previousTapGuide = useMemo(() => {
+    if (previousTapLane === null) {
+      return null;
+    }
+
+    const zoneTopLane = Math.min(1, previousTapLane + TAP_MATCH_OPTIONS.sameDeadZone);
+    const zoneBottomLane = Math.max(0, previousTapLane - TAP_MATCH_OPTIONS.sameDeadZone);
+    const topPercent = (1 - zoneTopLane) * 100;
+    const bottomPercent = (1 - zoneBottomLane) * 100;
+    const centerPercent = (1 - previousTapLane) * 100;
+
+    return {
+      topPercent,
+      bottomPercent,
+      centerPercent,
+      heightPercent: Math.max(4, bottomPercent - topPercent),
+    };
+  }, [previousTapLane]);
+  const hasTapHeatMapData = useMemo(
+    () =>
+      Object.values(tapHeatMapBySegment).some((segmentHeatMap) =>
+        Object.values(segmentHeatMap).some((stat) => stat.sessionCount > 0)
+      ),
+    [tapHeatMapBySegment]
+  );
+
+  useEffect(() => {
+    if (!hasTapAnswers && isTapPracticeMode) {
+      setIsTapPracticeMode(false);
+      activeTapCaptureRef.current = null;
+    }
+  }, [hasTapAnswers, isTapPracticeMode]);
   const hasAutoplayedSongRef = React.useRef<string | null>(null);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
+  const requestPlay = React.useCallback((startMs: number, endMs: number) => {
+    pendingFallbackPlayRangeRef.current = !useProxyFallback && canFallbackToProxy
+      ? { startMs, endMs }
+      : null;
+    play(startMs, endMs);
+  }, [canFallbackToProxy, play, useProxyFallback]);
 
   const enqueueOfflineRatings = React.useCallback((snapshot: string) => {
     if (typeof window === "undefined") {
@@ -191,6 +369,80 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
   }, [clearOfflineRatingsQueue, dequeueOfflineRatings, postRatingsSnapshot]);
 
+  const clearTapPersistenceWarning = React.useCallback(() => {
+    if (tapWarningTimerRef.current !== null) {
+      window.clearTimeout(tapWarningTimerRef.current);
+      tapWarningTimerRef.current = null;
+    }
+    setTapPersistenceWarning(null);
+  }, []);
+
+  const showTapPersistenceWarning = React.useCallback((message: string) => {
+    if (tapWarningTimerRef.current !== null) {
+      window.clearTimeout(tapWarningTimerRef.current);
+      tapWarningTimerRef.current = null;
+    }
+
+    setTapPersistenceWarning(message);
+    tapWarningTimerRef.current = window.setTimeout(() => {
+      setTapPersistenceWarning(null);
+      tapWarningTimerRef.current = null;
+    }, TAP_PERSISTENCE_WARNING_MS);
+  }, []);
+
+  const flushPersistedTaps = React.useCallback((sessionIdOverride?: string) => {
+    const activeSessionId = sessionIdOverride ?? tapSessionIdRef.current;
+    if (!activeSessionId || pendingPersistedTapsRef.current.length === 0) {
+      return;
+    }
+
+    const payloads = pendingPersistedTapsRef.current.splice(0, pendingPersistedTapsRef.current.length);
+    persistTapChainRef.current = persistTapChainRef.current.then(async () => {
+      const failedPayloads: PersistedTapPayload[] = [];
+      let hadClientFailure = false;
+
+      for (const payload of payloads) {
+        try {
+          const response = await fetch(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            if (response.status >= 400 && response.status < 500) {
+              console.error(`Tap persistence rejected with ${response.status}; dropping payload.`, payload);
+              hadClientFailure = true;
+              continue;
+            }
+            throw new Error(`Failed to persist tap (${response.status})`);
+          }
+        } catch (error) {
+          console.error("Failed to persist tap practice tap:", error);
+          failedPayloads.push(payload);
+        }
+      }
+
+      if (failedPayloads.length > 0) {
+        pendingPersistedTapsRef.current.unshift(...failedPayloads);
+      }
+
+      if (hadClientFailure) {
+        showTapPersistenceWarning("Some taps could not be saved. Toggle Tap practice off and on to start a fresh session.");
+      } else if (failedPayloads.length > 0) {
+        showTapPersistenceWarning("Tap saving is temporarily unavailable. We will keep retrying in the background.");
+      } else {
+        clearTapPersistenceWarning();
+        setTapHeatMapRefreshToken((previous) => previous + 1);
+      }
+    });
+  }, [clearTapPersistenceWarning, showTapPersistenceWarning, song.id]);
+
+  const queuePersistedTap = React.useCallback((payload: PersistedTapPayload) => {
+    pendingPersistedTapsRef.current.push(payload);
+    flushPersistedTaps();
+  }, [flushPersistedTaps]);
+
   const getSegmentIndexAtMs = React.useCallback((ms: number) => {
     // During overlaps, prefer the later segment so rapid next-clicks keep advancing.
     for (let i = song.segments.length - 1; i >= 0; i -= 1) {
@@ -246,6 +498,32 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     accumulatedPlaybackMsRef.current = 0;
     playbackStartedAtRef.current = null;
   }, [song.id]);
+
+  useEffect(() => {
+    setUseProxyFallback(false);
+    pendingFallbackPlayRangeRef.current = null;
+  }, [song.id]);
+
+  useEffect(() => {
+    if (!playbackError || useProxyFallback || !canFallbackToProxy) {
+      return;
+    }
+    setUseProxyFallback(true);
+  }, [canFallbackToProxy, playbackError, useProxyFallback]);
+
+  useEffect(() => {
+    if (!useProxyFallback) {
+      return;
+    }
+
+    const pendingRange = pendingFallbackPlayRangeRef.current;
+    if (!pendingRange) {
+      return;
+    }
+
+    pendingFallbackPlayRangeRef.current = null;
+    play(pendingRange.startMs, pendingRange.endMs);
+  }, [play, useProxyFallback]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -324,18 +602,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     seek(currentSegment.startMs);
   }, [currentSegment, isPlaying, song.audioUrl, seek]);
 
-  useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!song.audioUrl) {
       return;
     }
     if (hasAutoplayedSongRef.current === song.id) {
-      return;
+      return undefined;
     }
     hasAutoplayedSongRef.current = song.id;
     seek(0);
-    const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
-    play(0, effectiveDurationMs);
-  }, [durationMs, play, seek, song.audioUrl, song.id]);
+    if (!hasActiveUserActivation()) {
+      return undefined;
+    }
+    requestPlay(0, Number.POSITIVE_INFINITY);
+    return () => {
+      if (hasAutoplayedSongRef.current === song.id) {
+        hasAutoplayedSongRef.current = null;
+      }
+    };
+  }, [requestPlay, seek, song.audioUrl, song.id]);
 
   useEffect(() => {
     if (!hasSegments || !isPlaying) {
@@ -373,6 +658,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     // In a gap between two segments: first half → show prior, second half → show next
     if (targetIndex === -1) {
+      const firstSegmentStartMs = song.segments[0]?.startMs ?? 0;
+      if (currentMs < firstSegmentStartMs) {
+        if (session.currentSegmentIndex !== 0) {
+          segmentIndexRef.current = 0;
+          dispatch({ type: "SET_SEGMENT_INDEX", index: 0 });
+        }
+        return;
+      }
+
       const gapBeforeIndex = song.segments.findIndex((seg, i) => {
         const next = song.segments[i + 1];
         return next !== undefined && currentMs >= seg.endMs && currentMs < next.startMs;
@@ -487,12 +781,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         };
       }
       if (isLooping) {
-        play(targetStartWithPreroll, targetSegment.endMs);
+        requestPlay(targetStartWithPreroll, targetSegment.endMs);
         return;
       }
 
       const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
-      play(targetStartWithPreroll, effectiveDurationMs);
+      requestPlay(targetStartWithPreroll, effectiveDurationMs);
       return;
     }
     seek(targetSegment.startMs);
@@ -506,8 +800,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastActionAt: new Date().toISOString(),
     }));
     if (isPlaying) {
+      cancelTapPracticeCountIn();
       pausedByUserRef.current = true;
       pause();
+      return;
+    }
+
+    if (tapPracticeCountIn !== null) {
+      cancelTapPracticeCountIn();
       return;
     }
 
@@ -518,12 +818,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       const resumeMs = currentMs >= currentSegment.endMs
         ? segmentStartWithPreroll
         : Math.max(currentMs, segmentStartWithPreroll);
-      play(resumeMs, currentSegment.endMs);
+      startTapPracticePlayback(resumeMs, currentSegment.endMs);
       return;
     }
     const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
     const fullPieceResumeMs = durationMs > 0 && currentMs >= durationMs ? 0 : currentMs;
-    play(fullPieceResumeMs, effectiveDurationMs);
+    startTapPracticePlayback(fullPieceResumeMs, effectiveDurationMs, {
+      resetTapRun: isTapPracticeMode && fullPieceResumeMs === 0,
+    });
   };
 
   const handleSkipBy = (deltaMs: number) => {
@@ -602,6 +904,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastActionAt: new Date().toISOString(),
     }));
     navigationGuardRef.current = null;
+    cancelTapPracticeCountIn();
+    const seeksToSegmentStart = currentSegment
+      ? ms <= currentSegment.startMs + 50 && currentMs > currentSegment.startMs + 250
+      : false;
+    if (isTapPracticeMode && ((ms === 0 && currentMs > 0) || seeksToSegmentStart)) {
+      resetTapPracticeRun();
+    }
     seek(ms);
     const targetIndex = getSegmentIndexAtMs(ms);
     if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex) {
@@ -609,6 +918,169 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
     }
   };
+
+  const handleToggleLoop = React.useCallback(() => {
+    if (!isLooping) {
+      const targetIndex = getSegmentIndexAtMs(currentMs);
+      if (targetIndex !== -1 && targetIndex !== session.currentSegmentIndex) {
+        segmentIndexRef.current = targetIndex;
+        dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
+      }
+    }
+
+    setIsLooping((previous) => !previous);
+  }, [currentMs, getSegmentIndexAtMs, isLooping, session.currentSegmentIndex]);
+
+  const getTapLane = React.useCallback((clientY: number) => {
+    const rect = tapBarRef.current?.getBoundingClientRect();
+    if (!rect || rect.height <= 0) {
+      return 0.5;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    return 1 - ratio;
+  }, []);
+
+  const showAccuracyToast = React.useCallback((text: string) => {
+    setAccuracyToast({ text, visible: true });
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setAccuracyToast(null);
+      toastTimerRef.current = null;
+    }, 1600);
+  }, []);
+
+  const finalizeTapCapture = React.useCallback((endLane?: number) => {
+    const capture = activeTapCaptureRef.current;
+    if (!capture || !currentSegment) {
+      activeTapCaptureRef.current = null;
+      return;
+    }
+
+    const segmentDurationMs = Math.max(1, currentSegment.endMs - currentSegment.startMs);
+    const latestOffsetMs = Math.min(segmentDurationMs, Math.max(0, Math.round(currentMs - currentSegment.startMs)));
+    const minEndOffsetMs = Math.min(segmentDurationMs, capture.startOffsetMs + MIN_TAP_DURATION_MS);
+    const endOffsetMs = Math.max(minEndOffsetMs, latestOffsetMs);
+    if (endOffsetMs <= capture.startOffsetMs) {
+      activeTapCaptureRef.current = null;
+      return;
+    }
+
+    const note: PitchContourNote = {
+      id: capture.id,
+      timeOffsetMs: capture.startOffsetMs,
+      durationMs: endOffsetMs - capture.startOffsetMs,
+      lane: Math.min(1, Math.max(0, typeof endLane === "number" ? endLane : capture.lane)),
+    };
+
+    const segmentId = currentSegment.id;
+    const latestForSegment = tapAttemptsRef.current[segmentId] ?? [];
+    const nextSegmentNotes = [...latestForSegment, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+      const immediateMatch = compareContourAttemptDetailed(
+      currentSegmentPitchContourNotes,
+      nextSegmentNotes,
+      TAP_MATCH_OPTIONS
+    );
+    const missedTap = immediateMatch.attemptNoteStatuses[note.id] === "mismatched";
+
+    setTapAttemptsBySegment((previous) => ({
+      ...previous,
+      [segmentId]: nextSegmentNotes,
+    }));
+
+    if (missedTap) {
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+        navigator.vibrate([35, 20, 35]);
+      }
+      showAccuracyToast("Missed tap");
+    }
+
+    queuePersistedTap({
+      segmentId,
+      noteId: note.id,
+      timeOffsetMs: note.timeOffsetMs,
+      durationMs: note.durationMs,
+      lane: note.lane,
+    });
+
+    activeTapCaptureRef.current = null;
+  }, [currentMs, currentSegment, queuePersistedTap, showAccuracyToast]);
+
+  const clearCurrentSegmentTaps = React.useCallback(() => {
+    if (!currentSegment) {
+      return;
+    }
+    setTapAttemptsBySegment((previous) => ({
+      ...previous,
+      [currentSegment.id]: [],
+    }));
+    activeTapCaptureRef.current = null;
+  }, [currentSegment]);
+
+  const resetTapPracticeRun = React.useCallback(() => {
+    activeTapCaptureRef.current = null;
+    loopHandledRef.current = null;
+    pendingPersistedTapsRef.current = [];
+    setTapAttemptsBySegment({});
+    setTapSessionResetToken((previous) => previous + 1);
+  }, []);
+
+  const cancelTapPracticeCountIn = React.useCallback(() => {
+    if (tapCountInIntervalRef.current !== null) {
+      window.clearInterval(tapCountInIntervalRef.current);
+      tapCountInIntervalRef.current = null;
+    }
+    if (tapCountInTimeoutRef.current !== null) {
+      window.clearTimeout(tapCountInTimeoutRef.current);
+      tapCountInTimeoutRef.current = null;
+    }
+    setTapPracticeCountIn(null);
+  }, []);
+
+  const startTapPracticePlayback = React.useCallback((
+    startMs: number,
+    endMs: number,
+    options?: { resetTapRun?: boolean }
+  ) => {
+    if (!isTapPracticeMode) {
+      requestPlay(startMs, endMs);
+      return;
+    }
+
+    cancelTapPracticeCountIn();
+
+    if (options?.resetTapRun) {
+      resetTapPracticeRun();
+    }
+
+    const deadline = Date.now() + TAP_PRACTICE_COUNT_IN_MS;
+    setTapPracticeCountIn(2);
+    tapCountInIntervalRef.current = window.setInterval(() => {
+      const remainingMs = Math.max(0, deadline - Date.now());
+      const nextCount = remainingMs <= 0 ? null : Math.max(1, Math.ceil(remainingMs / 1000));
+      setTapPracticeCountIn(nextCount);
+    }, 100);
+    tapCountInTimeoutRef.current = window.setTimeout(() => {
+      cancelTapPracticeCountIn();
+      requestPlay(startMs, endMs);
+    }, TAP_PRACTICE_COUNT_IN_MS);
+  }, [cancelTapPracticeCountIn, isTapPracticeMode, requestPlay, resetTapPracticeRun]);
+
+  const getRollX = React.useCallback((noteOffsetMs: number) => {
+    return 100 - ((currentSegmentOffsetMs - noteOffsetMs) / ROLL_WINDOW_MS) * 100;
+  }, [currentSegmentOffsetMs]);
+
+  const getAttemptStatusColor = React.useCallback((status: AttemptNoteStatus) => {
+    if (status === "matched") {
+      return "rgb(22 163 74)";
+    }
+    if (status === "mismatched") {
+      return "rgb(220 38 38)";
+    }
+    return "rgb(245 158 11)";
+  }, []);
 
   const handleRateCurrentSegment = React.useCallback((rating: MemoryRating) => {
     if (!currentSegment) {
@@ -628,7 +1100,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastAction: "debug-play-test",
       lastActionAt: new Date().toISOString(),
     }));
-    play(0, 10000);
+    requestPlay(0, 10000);
   };
 
   useEffect(() => {
@@ -715,7 +1187,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       if (event.key === "r") {
         event.preventDefault();
-        setIsLooping((previous) => !previous);
+        handleToggleLoop();
         return;
       }
 
@@ -727,7 +1199,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleTogglePlay, setIsLooping]);
+}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
@@ -752,13 +1224,39 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (isPlaying) {
       // Reset the user-pause flag whenever playback is active.
       pausedByUserRef.current = false;
+      loopHandledRef.current = null;
       return;
     }
     if (pausedByUserRef.current) return;
     if (currentMs >= currentSegment.endMs - 50) {
-      play(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
+      const loopKey = `${currentSegment.id}:${Math.floor(currentMs)}`;
+      if (loopHandledRef.current === loopKey) {
+        return;
+      }
+      loopHandledRef.current = loopKey;
+      const loopMatch = compareContourAttemptDetailed(
+        currentSegmentPitchContourNotes,
+        tapAttemptsBySegment[currentSegment.id] ?? [],
+        TAP_MATCH_OPTIONS
+      );
+      showAccuracyToast(`Loop accuracy ${Math.round(loopMatch.score * 100)}%`);
+      setTapAttemptsBySegment((previous) => ({
+        ...previous,
+        [currentSegment.id]: [],
+      }));
+      activeTapCaptureRef.current = null;
+      requestPlay(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
-  }, [currentMs, currentSegment, getSegmentStartWithPreroll, isLooping, isPlaying, play]);
+  }, [
+    currentMs,
+    currentSegment,
+    getSegmentStartWithPreroll,
+    isLooping,
+    isPlaying,
+    play,
+    showAccuracyToast,
+    tapAttemptsBySegment,
+  ]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;
@@ -768,6 +1266,100 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       previousSegmentIndexRef.current = session.currentSegmentIndex;
     }
   }, [session.currentSegmentIndex]);
+
+  useEffect(() => {
+    tapAttemptsRef.current = tapAttemptsBySegment;
+  }, [tapAttemptsBySegment]);
+
+  useEffect(() => {
+    tapSessionIdRef.current = tapSessionId;
+  }, [tapSessionId]);
+
+  useEffect(() => {
+    tapSessionGenerationRef.current += 1;
+    pendingPersistedTapsRef.current = [];
+    setTapSessionId(null);
+    tapSessionIdRef.current = null;
+    clearTapPersistenceWarning();
+
+    if (!isTapPracticeMode) {
+      return;
+    }
+
+    const generation = tapSessionGenerationRef.current;
+
+    void fetch(`/api/songs/${song.id}/tap-sessions`, { method: "POST" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to create tap session (${response.status})`);
+        }
+
+        const payload = await response.json() as { session?: { id?: string } };
+        const nextSessionId = payload.session?.id;
+        if (typeof nextSessionId !== "string" || nextSessionId.length === 0) {
+          throw new Error("Tap session response did not include an id");
+        }
+
+        if (tapSessionGenerationRef.current !== generation) {
+          return;
+        }
+
+        setTapSessionId(nextSessionId);
+        tapSessionIdRef.current = nextSessionId;
+        flushPersistedTaps(nextSessionId);
+      })
+      .catch((error) => {
+        console.error("Failed to create tap practice session:", error);
+        showTapPersistenceWarning("Could not start tap persistence session. Check your connection and try again.");
+      });
+  }, [clearTapPersistenceWarning, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id, tapSessionResetToken]);
+
+  useEffect(() => {
+    activeTapCaptureRef.current = null;
+  }, [currentSegment?.id]);
+
+  useEffect(() => {
+    if (isTapPracticeMode) {
+      return;
+    }
+    cancelTapPracticeCountIn();
+  }, [cancelTapPracticeCountIn, isTapPracticeMode]);
+
+  useEffect(() => {
+    cancelTapPracticeCountIn();
+    setTapAttemptsBySegment({});
+    setIsTapPracticeMode(false);
+    setShowCardContourMap(false);
+    setShowTapOverlay(true);
+    setAccuracyToast(null);
+    activeTapCaptureRef.current = null;
+    loopHandledRef.current = null;
+    setTapSessionId(null);
+    tapSessionIdRef.current = null;
+    clearTapPersistenceWarning();
+    pendingPersistedTapsRef.current = [];
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+  }, [cancelTapPracticeCountIn, clearTapPersistenceWarning, song.id]);
+
+  useEffect(() => {
+    return () => {
+      cancelTapPracticeCountIn();
+    };
+  }, [cancelTapPracticeCountIn]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      if (tapWarningTimerRef.current !== null) {
+        window.clearTimeout(tapWarningTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (ratingsLoading || lastSavedRatingsRef.current === "unloaded") {
@@ -812,11 +1404,57 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     onSessionChange?.(session);
   }, [session, onSessionChange]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!hasTapAnswers) {
+      setTapHeatMapBySegment({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadTapHeatMap = async () => {
+      try {
+        const response = await fetch(`/api/songs/${song.id}/tap-heatmap`, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Failed to load tap heat map (${response.status})`);
+        }
+
+        const payload = await response.json() as {
+          heatMapBySegment?: Record<string, Record<string, ContourNoteHeatStat>>;
+        };
+
+        if (!cancelled) {
+          setTapHeatMapBySegment(payload.heatMapBySegment ?? {});
+        }
+      } catch {
+        if (!cancelled) {
+          setTapHeatMapBySegment({});
+        }
+      }
+    };
+
+    void loadTapHeatMap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasTapAnswers, song.id, tapHeatMapRefreshToken]);
+
   return (
     <div
       data-testid="practice-layout"
       className="relative flex h-dvh flex-col overflow-hidden bg-gray-50"
     >
+      {accuracyToast?.visible ? (
+        <div
+          data-testid="practice-accuracy-toast"
+          className="pointer-events-none fixed left-1/2 top-16 z-[120] -translate-x-1/2 rounded-full bg-slate-900/90 px-3 py-1.5 text-xs font-semibold text-white shadow-lg"
+        >
+          {accuracyToast.text}
+        </div>
+      ) : null}
       <header data-testid="practice-header" className="px-4 pb-2 pt-4 md:px-8">
         <div className="flex items-start justify-between gap-3">
           {breadcrumbRootLabel ? (
@@ -910,37 +1548,156 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         ) : (
           <KnowledgeBar percent={knowledgeScore.overall} />
         )}
+        <div className="mt-2 flex items-center gap-2">
+          {hasSegments && currentSegment && hasTapHeatMapData ? (
+            <button
+              type="button"
+              data-testid="practice-card-contour-toggle"
+              onClick={() => {
+                setShowCardContourMap((previous) => !previous);
+                if (!showCardContourMap) {
+                  setTapHeatMapRefreshToken((previous) => previous + 1);
+                }
+              }}
+              className="rounded-full border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+            >
+              Card contour: {showCardContourMap ? "On" : "Off"}
+            </button>
+          ) : null}
+          {hasTapAnswers ? (
+            <button
+              type="button"
+              data-testid="practice-tap-mode-toggle"
+              onClick={() => {
+                setIsTapPracticeMode((previous) => !previous);
+                activeTapCaptureRef.current = null;
+              }}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                isTapPracticeMode
+                  ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
+                  : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+              }`}
+            >
+              Tap practice: {isTapPracticeMode ? "On" : "Off"}
+            </button>
+          ) : null}
+          {isTapPracticeMode && hasSegments && currentSegment ? (
+            <button
+              type="button"
+              data-testid="practice-overlay-toggle"
+              onClick={() => setShowTapOverlay((previous) => !previous)}
+              className="rounded-full border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+            >
+              Overlay: {showTapOverlay ? "On" : "Off"}
+            </button>
+          ) : null}
+          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
+            <button
+              type="button"
+              data-testid="practice-same-lane-guides-toggle"
+              onClick={() => setShowSameLaneGuides((previous) => !previous)}
+              className="rounded-full border border-sky-300 bg-white px-3 py-1.5 text-sm font-semibold text-sky-700 hover:bg-sky-50"
+            >
+              Same lanes: {showSameLaneGuides ? "On" : "Off"}
+            </button>
+          ) : null}
+          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
+            <button
+              type="button"
+              data-testid="practice-clear-taps"
+              onClick={clearCurrentSegmentTaps}
+              className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            >
+              Clear segment taps
+            </button>
+          ) : null}
+          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode ? (
+            <a
+              href={tapDebugHref}
+              data-testid="practice-open-tap-debug"
+              className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Open Tap Debug
+            </a>
+          ) : null}
+        </div>
         {ratingsError ? (
           <p data-testid="ratings-load-error" className="mt-2 text-sm text-amber-700">
             {ratingsError}
           </p>
         ) : null}
+        {tapPersistenceWarning ? (
+          <div className="mt-2 flex items-start gap-2">
+            <p data-testid="practice-tap-persist-warning" className="text-sm text-amber-700">
+              {tapPersistenceWarning}
+            </p>
+            <button
+              type="button"
+              data-testid="practice-tap-persist-warning-dismiss"
+              onClick={clearTapPersistenceWarning}
+              className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      <main data-testid="practice-main" className="flex flex-1 justify-center overflow-hidden px-4 pb-44 pt-2 md:px-8 md:pb-48">
-        <section data-testid="practice-focus" className="flex h-full min-h-0 w-full max-w-3xl items-center justify-center gap-2 md:gap-3">
-          <button
-            type="button"
-            aria-label="Previous segment"
-            data-testid="practice-prev-segment"
-            onClick={handlePrevSegment}
-            disabled={!hasSegments || isFirst}
-            className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 12H6" />
-              <path d="M10 8l-4 4 4 4" />
-            </svg>
-          </button>
+      <main data-testid="practice-main" className="flex flex-1 justify-center overflow-y-auto px-4 pb-44 pt-2 md:px-8 md:pb-48">
+        <section data-testid="practice-focus" className={`flex h-full min-h-full w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
+          {!isTapPracticeMode ? (
+            <button
+              type="button"
+              aria-label="Previous segment"
+              data-testid="practice-prev-segment"
+              onClick={handlePrevSegment}
+              disabled={!canUsePrevSegment}
+              className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 12H6" />
+                <path d="M10 8l-4 4 4 4" />
+              </svg>
+            </button>
+          ) : null}
           <div className="h-full min-h-0 w-full max-w-md">
             {hasSegments && currentSegment ? (
               <div className="segment-stack-shell relative h-full min-h-0 overflow-visible">
+                {isTapPracticeMode ? (
+                  <div
+                    data-testid="practice-tap-feedback"
+                    className="pointer-events-none absolute left-3 top-3 z-20 rounded-full bg-white/85 px-2 py-1 text-[11px] font-semibold text-indigo-900 shadow-sm"
+                  >
+                    {Math.round((currentSegmentMatch?.score ?? 0) * 100)}% ({currentSegmentMatch?.matchedEvents ?? 0}/
+                    {currentSegmentMatch?.totalEvents ?? 0})
+                  </div>
+                ) : null}
+                {isTapPracticeMode && tapPracticeCountIn !== null ? (
+                  <div
+                    data-testid="practice-count-in"
+                    className="pointer-events-none absolute inset-x-0 top-20 z-20 mx-auto flex w-fit flex-col items-center rounded-[28px] border border-amber-200 bg-white/95 px-5 py-3 text-center text-amber-950 shadow-lg"
+                  >
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">
+                      Count-in
+                    </span>
+                    <span className="mt-1 text-3xl font-bold leading-none">{tapPracticeCountIn}</span>
+                    <span className="mt-1 text-xs font-medium text-amber-800">Get ready to tap</span>
+                  </div>
+                ) : null}
+                {isTapPracticeMode && showTapOverlay && showSameLaneGuides ? (
+                  <div
+                    data-testid="practice-same-lane-legend"
+                    className="pointer-events-none absolute right-3 top-3 z-20 max-w-[11rem] rounded-2xl border border-sky-200/80 bg-white/90 px-3 py-2 text-[11px] font-medium text-sky-950 shadow-sm"
+                  >
+                    Same lane zone: answer lane +/- {TAP_MATCH_OPTIONS.sameDeadZone.toFixed(2)}
+                  </div>
+                ) : null}
                 <div
                   key={`${currentSegment.id}-${transitionToken}`}
                   className={`relative z-10 h-full min-h-0 ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}
                 >
                   <SegmentCard
-                    segment={currentSegment}
+                    segment={{ ...currentSegment, pitchContourNotes: currentSegmentPitchContourNotes }}
                     currentRating={currentRating}
                     onRate={handleRateCurrentSegment}
                     playbackMs={currentMs}
@@ -948,8 +1705,113 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     masteryPercent={masteryPercentForSegment(currentSegment.id)}
                     lyricVisibilityMode={lyricVisibilityMode}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
+                    showContourMap={showCardContourMap && hasTapHeatMapData}
+                    contourHeatMap={tapHeatMapBySegment[currentSegment.id]}
                   />
                 </div>
+                {isTapPracticeMode && hasSegments && currentSegment && showTapOverlay ? (
+                  <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden rounded-2xl border border-indigo-200/30 bg-indigo-50/10" data-testid="practice-piano-roll-overlay">
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
+                      <line x1="0" y1="50" x2="100" y2="50" stroke="rgb(199 210 254)" strokeWidth="0.5" opacity="0.45" />
+                      {showSameLaneGuides ? currentSegmentPitchContourNotes.map((note) => {
+                        const x = getRollX(note.timeOffsetMs);
+                        if (x < -5 || x > 105) {
+                          return null;
+                        }
+                        const zoneTopLane = Math.min(1, note.lane + TAP_MATCH_OPTIONS.sameDeadZone);
+                        const zoneBottomLane = Math.max(0, note.lane - TAP_MATCH_OPTIONS.sameDeadZone);
+                        const topY = (1 - zoneTopLane) * 100;
+                        const bottomY = (1 - zoneBottomLane) * 100;
+                        const centerY = (1 - note.lane) * 100;
+                        return (
+                          <g key={`same-zone-${note.id}`} data-testid="practice-same-lane-guide">
+                            <rect
+                              x={0}
+                              y={topY}
+                              width={100}
+                              height={Math.max(0.8, bottomY - topY)}
+                              fill="rgb(14 165 233)"
+                              opacity="0.07"
+                            />
+                            <line x1="0" y1={topY} x2="100" y2={topY} stroke="rgb(14 165 233)" strokeWidth="0.35" opacity="0.26" />
+                            <line x1="0" y1={bottomY} x2="100" y2={bottomY} stroke="rgb(14 165 233)" strokeWidth="0.35" opacity="0.26" />
+                            <line x1={Math.max(0, x - 4)} y1={centerY} x2={Math.min(100, x + 4)} y2={centerY} stroke="rgb(2 132 199)" strokeWidth="0.8" opacity="0.5" />
+                          </g>
+                        );
+                      }) : null}
+                      {currentSegmentPitchContourNotes.map((note) => {
+                        const x = getRollX(note.timeOffsetMs);
+                        if (x < -5 || x > 105) {
+                          return null;
+                        }
+                        const y = (1 - note.lane) * 100;
+                        const directionLetter = answerDirectionLetters.get(note.id);
+                        return (
+                          <g key={`answer-${note.id}`}>
+                            <circle
+                              cx={x}
+                              cy={y}
+                              r={2.2}
+                              fill="rgb(99 102 241)"
+                              opacity="0.35"
+                            />
+                            {showSameLaneGuides && directionLetter ? (
+                              <text
+                                x={x}
+                                y={Math.max(4.5, y - 3.3)}
+                                textAnchor="middle"
+                                fontSize="4.4"
+                                fontWeight="700"
+                                fill="rgb(49 46 129)"
+                                opacity="0.95"
+                                data-testid="practice-answer-direction-label"
+                              >
+                                {directionLetter}
+                              </text>
+                            ) : null}
+                          </g>
+                        );
+                      })}
+                      {currentAttemptNotes.map((note) => {
+                        const x = getRollX(note.timeOffsetMs);
+                        if (x < -5 || x > 105) {
+                          return null;
+                        }
+                        const y = (1 - note.lane) * 100;
+                        const status = currentSegmentMatch?.attemptNoteStatuses[note.id] ?? "pending";
+                        const directionLetter = attemptDirectionLetters.get(note.id);
+                        return (
+                          <g key={`attempt-${note.id}`}>
+                            <circle
+                              data-testid="practice-attempt-dot"
+                              cx={x}
+                              cy={y}
+                              r={3.3}
+                              fill={getAttemptStatusColor(status)}
+                              opacity="0.72"
+                            />
+                            {showSameLaneGuides && directionLetter ? (
+                              <text
+                                x={x}
+                                y={Math.min(97, y + 1.6)}
+                                textAnchor="middle"
+                                dominantBaseline="middle"
+                                fontSize="4.6"
+                                fontWeight="800"
+                                fill="white"
+                                opacity="0.98"
+                                data-testid="practice-attempt-direction-label"
+                              >
+                                {directionLetter}
+                              </text>
+                            ) : null}
+                          </g>
+                        );
+                      })}
+                      <line x1="100" y1="0" x2="100" y2="100" stroke="rgb(79 70 229)" strokeWidth="1" opacity="0.7" />
+                    </svg>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div
@@ -963,19 +1825,135 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               </div>
             )}
           </div>
-          <button
-            type="button"
-            aria-label="Next segment"
-            data-testid="practice-next-segment"
-            onClick={handleNextSegment}
-            disabled={!hasSegments || isLast}
-            className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 12h12" />
-              <path d="M14 8l4 4-4 4" />
-            </svg>
-          </button>
+          {isTapPracticeMode && hasSegments && currentSegment ? (
+            <div
+              ref={tapBarRef}
+              data-testid="practice-tap-bar"
+              aria-label="Tap contour bar"
+              className="tap-input-surface relative h-full min-h-[28rem] w-28 shrink-0 overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm sm:w-32"
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onDragStart={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onPointerDown={(event) => {
+                if (!currentSegment) {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                if (typeof event.currentTarget.setPointerCapture === "function") {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }
+                const segmentDurationMs = Math.max(1, currentSegment.endMs - currentSegment.startMs);
+                const startOffsetMs = Math.min(
+                  segmentDurationMs,
+                  Math.max(0, Math.round(currentMs - currentSegment.startMs))
+                );
+                activeTapCaptureRef.current = {
+                  id: crypto.randomUUID(),
+                  startOffsetMs,
+                  lane: getTapLane(event.clientY),
+                  pointerId: event.pointerId,
+                };
+              }}
+              onPointerMove={(event) => {
+                const activeCapture = activeTapCaptureRef.current;
+                if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                activeCapture.lane = getTapLane(event.clientY);
+              }}
+              onPointerUp={(event) => {
+                const activeCapture = activeTapCaptureRef.current;
+                if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                finalizeTapCapture(getTapLane(event.clientY));
+              }}
+              onPointerCancel={(event) => {
+                const activeCapture = activeTapCaptureRef.current;
+                if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                finalizeTapCapture(getTapLane(event.clientY));
+              }}
+            >
+              <div className="pointer-events-none absolute inset-0">
+                <div className="absolute inset-x-0 top-0 flex h-16 items-start justify-center bg-gradient-to-b from-emerald-200/45 to-transparent pt-4 text-emerald-700">
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 19V5" />
+                    <path d="M6 11l6-6 6 6" />
+                  </svg>
+                </div>
+                <div className="absolute inset-x-0 bottom-0 flex h-16 items-end justify-center bg-gradient-to-t from-amber-200/55 to-transparent pb-4 text-amber-700">
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 5v14" />
+                    <path d="M18 13l-6 6-6-6" />
+                  </svg>
+                </div>
+                {previousTapGuide ? (
+                  <>
+                    <div
+                      data-testid="practice-tap-same-zone"
+                      className="absolute inset-x-1 rounded-xl border border-sky-400/75 bg-sky-200/35 shadow-[0_0_0_1px_rgba(14,165,233,0.12)]"
+                      style={{
+                        top: `${previousTapGuide.topPercent}%`,
+                        height: `${previousTapGuide.heightPercent}%`,
+                      }}
+                    />
+                    <div
+                      data-testid="practice-tap-previous-lane"
+                      className="absolute inset-x-0 border-t-2 border-sky-500"
+                      style={{ top: `${previousTapGuide.centerPercent}%` }}
+                    >
+                      <span className="absolute -top-2 left-1/2 flex h-4 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-sky-500 text-white shadow-sm">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <path d="M5 9h14" />
+                          <path d="M5 15h14" />
+                        </svg>
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="absolute inset-x-3 top-1/2 -translate-y-1/2 rounded-xl border border-indigo-200 bg-white/70 py-2 text-center text-indigo-500 shadow-sm">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="mx-auto h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 5v14" />
+                      <path d="M6 11l6-6 6 6" />
+                      <path d="M18 13l-6 6-6-6" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              aria-label="Next segment"
+              data-testid="practice-next-segment"
+              onClick={handleNextSegment}
+              disabled={!hasSegments || isLast}
+              className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 12h12" />
+                <path d="M14 8l4 4-4 4" />
+              </svg>
+            </button>
+          )}
         </section>
       </main>
 
@@ -1003,7 +1981,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           masteryBySegment={knowledgeScore.bySegment}
           currentSegmentIndex={session.currentSegmentIndex}
           isLooping={isLooping}
-          onToggleLoop={() => setIsLooping((prev) => !prev)}
+          onToggleLoop={handleToggleLoop}
           lyricModeLabel={LYRIC_MODE_LABELS[lyricVisibilityMode]}
           onToggleLyricMode={() => setLyricVisibilityMode((previous) => getNextLyricMode(previous))}
         />

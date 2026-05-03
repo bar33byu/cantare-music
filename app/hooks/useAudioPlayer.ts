@@ -1,16 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 export interface AudioPlayerControls {
   isPlaying: boolean;
   isReady: boolean;
   currentMs: number;
   durationMs: number;
+  endedCount?: number;
+  playbackRate?: number;
   playbackError: string | null;
   debugInfo: AudioDebugInfo;
   play: (startMs: number, endMs: number) => void;
   pause: () => void;
   seek: (ms: number) => void;
   setPlaybackEndMs: (endMs: number) => void;
+  setPlaybackRate?: (rate: number) => void;
 }
 
 export interface AudioDebugInfo {
@@ -47,6 +50,31 @@ type AudioFactory = (url: string) => HTMLAudioElement;
 
 const defaultFactory: AudioFactory = (url) => new Audio(url);
 
+function getPlaybackErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Playback failed';
+}
+
+function isBenignPlayAbort(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    error.name === 'AbortError' ||
+    message.includes('interrupted by a call to pause') ||
+    message.includes('play() request was interrupted')
+  );
+}
+
+function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as PromiseLike<T>).then === 'function'
+  );
+}
+
 function makeDefaultDebugInfo(audioUrl: string): AudioDebugInfo {
   return {
     src: audioUrl,
@@ -76,6 +104,7 @@ export function useAudioPlayer(
   audioUrl: string,
   audioFactory: AudioFactory = defaultFactory
 ): AudioPlayerControls {
+  const mountedRef = useRef(true);
   const audioFactoryRef = useRef(audioFactory);
   const previousAudioUrlRef = useRef<string | null>(null);
   const audioUrlChangeCountRef = useRef(0);
@@ -83,15 +112,19 @@ export function useAudioPlayer(
   const audioInstanceIdRef = useRef(0);
   const audioInstancesCreatedRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playRequestIdRef = useRef(0);
   const endMsRef = useRef<number>(0);
   const pendingSeekMsRef = useRef<number | null>(null);
   const pendingPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
+  const playbackRateRef = useRef(1);
   const hasUserPlayIntentRef = useRef(false);
   const lastErrorRef = useRef<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
+  const [endedCount, setEndedCount] = useState(0);
+  const [playbackRate, setPlaybackRateState] = useState(1);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<AudioDebugInfo>(() => makeDefaultDebugInfo(audioUrl));
 
@@ -133,6 +166,13 @@ export function useAudioPlayer(
     });
   }, [audioUrl]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const applyCurrentTime = useCallback(
     (audio: HTMLAudioElement, ms: number, eventName: string) => {
       try {
@@ -149,6 +189,11 @@ export function useAudioPlayer(
   );
 
   const startPlayback = useCallback((audio: HTMLAudioElement, startMs: number, endMs: number) => {
+    const playRequestId = playRequestIdRef.current + 1;
+    playRequestIdRef.current = playRequestId;
+
+    const isStalePlayRequest = () => !mountedRef.current || audioRef.current !== audio || playRequestIdRef.current !== playRequestId;
+
     hasUserPlayIntentRef.current = true;
     lastErrorRef.current = null;
     setPlaybackError(null);
@@ -158,6 +203,7 @@ export function useAudioPlayer(
       audio.load?.();
       updateDebugInfo(audio, 'load');
     }
+    audio.playbackRate = playbackRateRef.current;
     applyCurrentTime(audio, startMs, 'seek-before-play');
     setCurrentMs(startMs);
     updateDebugInfo(audio, 'play-attempt');
@@ -171,43 +217,60 @@ export function useAudioPlayer(
 
     try {
       const result = audio.play();
-      if (result instanceof Promise) {
-        result.then(() => {
-          setDebugInfo((previous) => ({
-            ...previous,
-            playResolved: (previous.playResolved ?? 0) + 1,
-            lastPlayOutcome: 'resolved',
-          }));
-          updateDebugInfo(audio, 'play-resolved');
-        });
-        result.catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : 'Playback failed';
-          setPlaybackError(message);
-          setIsPlaying(false);
-          setDebugInfo((previous) => ({
-            ...previous,
-            playRejected: (previous.playRejected ?? 0) + 1,
-            lastPlayOutcome: 'rejected',
-            lastPlayError: message,
-          }));
-          updateDebugInfo(audio, 'play-rejected');
-        });
+      if (isPromiseLike<void>(result)) {
+        result.then(
+          () => {
+            if (isStalePlayRequest()) {
+              return;
+            }
+            setDebugInfo((previous) => ({
+              ...previous,
+              playResolved: (previous.playResolved ?? 0) + 1,
+              lastPlayOutcome: 'resolved',
+            }));
+            updateDebugInfo(audio, 'play-resolved');
+          },
+          (error: unknown) => {
+            if (isStalePlayRequest()) {
+              return;
+            }
+            const message = getPlaybackErrorMessage(error);
+            const isBenignAbort = isBenignPlayAbort(error);
+            if (!isBenignAbort) {
+              setPlaybackError(message);
+            }
+            setIsPlaying(false);
+            setDebugInfo((previous) => ({
+              ...previous,
+              playRejected: (previous.playRejected ?? 0) + 1,
+              lastPlayOutcome: isBenignAbort ? 'aborted' : 'rejected',
+              lastPlayError: message,
+            }));
+            updateDebugInfo(audio, isBenignAbort ? 'play-aborted' : 'play-rejected');
+          }
+        );
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Playback failed';
-      setPlaybackError(message);
+      if (isStalePlayRequest()) {
+        return;
+      }
+      const message = getPlaybackErrorMessage(error);
+      const isBenignAbort = isBenignPlayAbort(error);
+      if (!isBenignAbort) {
+        setPlaybackError(message);
+      }
       setIsPlaying(false);
       setDebugInfo((previous) => ({
         ...previous,
         playRejected: (previous.playRejected ?? 0) + 1,
-        lastPlayOutcome: 'throw',
+        lastPlayOutcome: isBenignAbort ? 'aborted' : 'throw',
         lastPlayError: message,
       }));
-      updateDebugInfo(audio, 'play-throw');
+      updateDebugInfo(audio, isBenignAbort ? 'play-aborted' : 'play-throw');
     }
   }, [applyCurrentTime, updateDebugInfo]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     audioInitRunsRef.current += 1;
     if (previousAudioUrlRef.current !== audioUrl) {
       audioUrlChangeCountRef.current += 1;
@@ -217,6 +280,7 @@ export function useAudioPlayer(
     setIsPlaying(false);
     setCurrentMs(0);
     setDurationMs(0);
+    setEndedCount(0);
     setPlaybackError(null);
     setDebugInfo(makeDefaultDebugInfo(audioUrl));
     endMsRef.current = 0;
@@ -234,9 +298,10 @@ export function useAudioPlayer(
     updateDebugInfo(audio, 'audio-created');
 
     if ('preload' in audio) {
-      // Avoid eager decode/network churn before user interaction.
-      audio.preload = 'none';
+      audio.preload = 'metadata';
     }
+    audio.load?.();
+    audio.playbackRate = playbackRateRef.current;
 
     const flushPendingPlay = () => {
       if (!pendingPlayRangeRef.current) {
@@ -260,7 +325,11 @@ export function useAudioPlayer(
 
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
-    const handleEnded = () => setIsPlaying(false);
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setEndedCount((previous) => previous + 1);
+      updateDebugInfo(audio, 'ended');
+    };
     const handleCanPlay = () => {
       setIsReady(true);
       updateDebugInfo(audio, 'canplay');
@@ -338,6 +407,7 @@ export function useAudioPlayer(
     }
 
     return () => {
+      playRequestIdRef.current += 1;
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
@@ -390,5 +460,29 @@ export function useAudioPlayer(
     updateDebugInfo(audioRef.current, 'set-playback-end');
   }, [updateDebugInfo]);
 
-  return { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs };
+  const setPlaybackRate = useCallback((rate: number) => {
+    const nextRate = Math.min(2, Math.max(0.25, rate));
+    playbackRateRef.current = nextRate;
+    setPlaybackRateState(nextRate);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextRate;
+      updateDebugInfo(audioRef.current, 'set-playback-rate');
+    }
+  }, [updateDebugInfo]);
+
+  return {
+    isPlaying,
+    isReady,
+    currentMs,
+    durationMs,
+    endedCount,
+    playbackRate,
+    playbackError,
+    debugInfo,
+    play,
+    pause,
+    seek,
+    setPlaybackEndMs,
+    setPlaybackRate,
+  };
 }

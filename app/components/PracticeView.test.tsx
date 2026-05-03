@@ -13,6 +13,14 @@ const mockSetPlaybackEndMs = vi.fn();
 const mockUseAudioPlayer = vi.fn();
 const mockFetch = vi.fn();
 
+function makeFetchResponse(payload: unknown, ok = true, status = ok ? 200 : 500) {
+  return {
+    ok,
+    status,
+    json: async () => payload,
+  };
+}
+
 global.fetch = mockFetch;
 
 vi.mock("./SegmentCard", () => ({
@@ -21,13 +29,20 @@ vi.mock("./SegmentCard", () => ({
     onRate,
     currentRating,
     lyricVisibilityMode,
+    showContourMap,
   }: {
     segment: { id: string; label: string };
     onRate: (r: MemoryRating) => void;
     currentRating?: MemoryRating;
     lyricVisibilityMode?: "full" | "hint" | "hidden";
+    showContourMap?: boolean;
   }) => (
-    <div data-testid="mock-segment-card" data-segment-id={segment.id} data-lyric-mode={lyricVisibilityMode}>
+    <div
+      data-testid="mock-segment-card"
+      data-segment-id={segment.id}
+      data-lyric-mode={lyricVisibilityMode}
+      data-show-contour-map={showContourMap ? "true" : "false"}
+    >
       <span>{segment.label}</span>
       <span data-testid="mock-current-rating">{currentRating ?? "none"}</span>
       <button data-testid="rate-btn" onClick={() => onRate(4 as MemoryRating)}>Rate 4</button>
@@ -71,6 +86,10 @@ const makeSong = (numSegments = 3): Song => ({
   title: "Amazing Grace",
   artist: "John Newton",
   audioUrl: "https://cdn.example.com/audio/song-1/audio.mp3",
+  pitchContourNotes: [
+    { id: "key-1", absoluteMs: 0, durationMs: 100, lane: 0.25 },
+    { id: "key-2", absoluteMs: 100, durationMs: 100, lane: 0.75 },
+  ],
   segments: Array.from({ length: numSegments }, (_, i) => ({
     id: `seg-${i}`,
     songId: "song-1",
@@ -95,6 +114,13 @@ const makeSession = (song: Song): SessionState => ({
   currentSongId: song.id,
 });
 
+function setNavigatorUserActivation(isActive: boolean) {
+  Object.defineProperty(navigator, "userActivation", {
+    configurable: true,
+    value: { isActive },
+  });
+}
+
 describe("PracticeView", () => {
   const renderAndWaitForRatings = async (
     song: Song,
@@ -116,7 +142,26 @@ describe("PracticeView", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ratings: [] }) });
+    setNavigatorUserActivation(true);
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
+        return makeFetchResponse({ ratings: [] });
+      }
+      if (url.endsWith("/tap-sessions") && init?.method === "POST") {
+        return makeFetchResponse({ session: { id: "tap-session-1" } });
+      }
+      if (url.includes("/tap-sessions/") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/practice") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/ratings") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      return makeFetchResponse({});
+    });
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
       isReady: true,
@@ -192,11 +237,64 @@ describe("PracticeView", () => {
     expect(onBreadcrumbRootClick).toHaveBeenCalledTimes(1);
   });
 
-  it("disables previous segment transport action on first segment", async () => {
+  it("retries initial autoplay across React Strict Mode effect replay", async () => {
+    const song = makeSong();
+    render(
+      <React.StrictMode>
+        <PracticeView song={song} initialSession={makeSession(song)} />
+      </React.StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    });
+
+    expect(mockPlay.mock.calls.filter(([startMs]) => startMs === 0).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not attempt initial autoplay without active user activation", async () => {
+    setNavigatorUserActivation(false);
+    const song = makeSong();
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    });
+
+    expect(mockSeek).toHaveBeenCalledWith(0);
+    expect(mockPlay).not.toHaveBeenCalled();
+  });
+
+  it("disables previous segment transport action near the start of the first segment", async () => {
     const song = makeSong(3);
     await renderAndWaitForRatings(song);
+    expect(screen.getByTestId("practice-prev-segment")).toBeDisabled();
     fireEvent.click(screen.getByTestId("practice-prev-segment"));
     expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
+  });
+
+  it("enables previous segment transport to restart the first segment after the threshold", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 4200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("practice-prev-segment")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("practice-prev-segment"));
+
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 3");
+    expect(mockSeek).toHaveBeenCalledWith(0);
   });
 
   it("does not advance past last segment via transport next", async () => {
@@ -271,6 +369,829 @@ describe("PracticeView", () => {
     expect(within(transport).getByTestId("mock-audio-player")).toBeInTheDocument();
   });
 
+  it("hides segment arrows and shows tap bar in tap practice mode", async () => {
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    expect(screen.queryByTestId("practice-prev-segment")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("practice-next-segment")).not.toBeInTheDocument();
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    expect(tapBar).toHaveClass("tap-input-surface");
+    expect(tapBar).toHaveClass("w-28");
+    expect(fireEvent.contextMenu(tapBar)).toBe(false);
+    expect(fireEvent.doubleClick(tapBar)).toBe(false);
+    expect(screen.queryByTestId("practice-tap-graduation")).not.toBeInTheDocument();
+    expect(screen.getByTestId("practice-overlay-toggle")).toBeInTheDocument();
+  });
+
+  it("creates a tap session when tap practice is enabled", async () => {
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+    });
+
+    expect(screen.queryByTestId("practice-open-tap-debug")).not.toBeInTheDocument();
+  });
+
+  it("toggles static contour map on section card independently", async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
+        return makeFetchResponse({ ratings: [] });
+      }
+      if (url.endsWith("/tap-heatmap") && (!init || init.method === undefined)) {
+        return makeFetchResponse({
+          heatMapBySegment: {
+            "seg-0": {
+              "note-1": { sessionCount: 1, missCount: 0, missRate: 0 },
+            },
+          },
+        });
+      }
+      if (url.endsWith("/tap-sessions") && init?.method === "POST") {
+        return makeFetchResponse({ session: { id: "tap-session-1" } });
+      }
+      if (url.includes("/tap-sessions/") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/practice") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/ratings") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      return makeFetchResponse({});
+    });
+
+    const song = makeSong(2);
+    await renderAndWaitForRatings(song);
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+    });
+
+    const segmentCard = screen.getByTestId("mock-segment-card");
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "false");
+
+    fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
+
+    fireEvent.click(screen.getByTestId("practice-overlay-toggle"));
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
+  });
+
+  it("hides the card contour toggle when the song has no tap data", async () => {
+    const song = makeSong(2);
+    song.pitchContourNotes = [];
+    await renderAndWaitForRatings(song);
+
+    expect(screen.queryByTestId("practice-card-contour-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("practice-tap-mode-toggle")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
+  });
+
+  it("updates contour feedback as user taps in tap practice mode", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.pitchContourNotes = [
+      { id: "k1", absoluteMs: song.segments[0].startMs, durationMs: 100, lane: 0.2 },
+      { id: "k2", absoluteMs: song.segments[0].startMs + 10, durationMs: 100, lane: 0.8 },
+    ];
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 1, clientY: 180 });
+    fireEvent.pointerUp(tapBar, { pointerId: 1, clientY: 180 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-tap-same-zone")).toBeInTheDocument();
+      expect(screen.getByTestId("practice-tap-previous-lane")).toBeInTheDocument();
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 2, clientY: 20 });
+    fireEvent.pointerUp(tapBar, { pointerId: 2, clientY: 20 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-tap-feedback")).toHaveTextContent("100%");
+      expect(screen.getByTestId("practice-piano-roll-overlay")).toBeInTheDocument();
+    });
+  });
+
+  it("persists captured taps to the active tap session", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+    });
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 91, clientY: 60 });
+    fireEvent.pointerUp(tapBar, { pointerId: 91, clientY: 60 });
+
+    await waitFor(() => {
+      const persistCall = mockFetch.mock.calls.find(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions/tap-session-1` && init?.method === "POST"
+      );
+      expect(persistCall).toBeTruthy();
+
+      const payload = JSON.parse(String((persistCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+      expect(payload).toEqual(expect.objectContaining({
+        segmentId: "seg-0",
+        timeOffsetMs: 100,
+        durationMs: 80,
+      }));
+      expect(payload.noteId).toEqual(expect.any(String));
+      expect(typeof payload.lane).toBe("number");
+    });
+  });
+
+  it("refreshes the card contour heat map after saving tap practice attempts", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    await waitFor(() => {
+      const heatMapCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-heatmap` && init?.cache === "no-store"
+      );
+      expect(heatMapCalls).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+    });
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 191, clientY: 60 });
+    fireEvent.pointerUp(tapBar, { pointerId: 191, clientY: 60 });
+
+    await waitFor(() => {
+      const persistCall = mockFetch.mock.calls.find(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions/tap-session-1` && init?.method === "POST"
+      );
+      expect(persistCall).toBeTruthy();
+    });
+
+    await waitFor(() => {
+      const heatMapCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-heatmap` && init?.cache === "no-store"
+      );
+      expect(heatMapCalls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("persists integer millisecond tap timings when playback time is fractional", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100.5,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 301, clientY: 70 });
+    fireEvent.pointerUp(tapBar, { pointerId: 301, clientY: 70 });
+
+    await waitFor(() => {
+      const persistCall = mockFetch.mock.calls.find(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions/tap-session-1` && init?.method === "POST"
+      );
+      expect(persistCall).toBeTruthy();
+
+      const payload = JSON.parse(String((persistCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+      expect(Number.isInteger(payload.timeOffsetMs)).toBe(true);
+      expect(Number.isInteger(payload.durationMs)).toBe(true);
+      expect(payload.durationMs).toBeGreaterThan(0);
+    });
+  });
+
+  it("shows a warning when tap persistence is rejected by the API", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
+        return makeFetchResponse({ ratings: [] });
+      }
+      if (url.endsWith("/tap-sessions") && init?.method === "POST") {
+        return makeFetchResponse({ session: { id: "tap-session-1" } });
+      }
+      if (url.includes("/tap-sessions/") && init?.method === "POST") {
+        return makeFetchResponse({ error: "bad payload" }, false, 400);
+      }
+      if (url.endsWith("/practice") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/ratings") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      return makeFetchResponse({});
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 302, clientY: 100 });
+    fireEvent.pointerUp(tapBar, { pointerId: 302, clientY: 100 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-tap-persist-warning")).toHaveTextContent("Some taps could not be saved");
+    });
+  });
+
+  it("allows dismissing the tap persistence warning", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
+        return makeFetchResponse({ ratings: [] });
+      }
+      if (url.endsWith("/tap-sessions") && init?.method === "POST") {
+        return makeFetchResponse({ session: { id: "tap-session-1" } });
+      }
+      if (url.includes("/tap-sessions/") && init?.method === "POST") {
+        return makeFetchResponse({ error: "bad payload" }, false, 400);
+      }
+      if (url.endsWith("/practice") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/ratings") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      return makeFetchResponse({});
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 303, clientY: 100 });
+    fireEvent.pointerUp(tapBar, { pointerId: 303, clientY: 100 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-tap-persist-warning")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("practice-tap-persist-warning-dismiss"));
+
+    expect(screen.queryByTestId("practice-tap-persist-warning")).not.toBeInTheDocument();
+  });
+
+  it("can hide translucent contour overlay in tap mode", async () => {
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    expect(screen.getByTestId("practice-piano-roll-overlay")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("practice-overlay-toggle"));
+    expect(screen.queryByTestId("practice-piano-roll-overlay")).not.toBeInTheDocument();
+  });
+
+  it("hides auxiliary tap debugging controls from the simplified toolbar", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 120,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    expect(screen.queryByTestId("practice-same-lane-guides-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("practice-clear-taps")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("practice-open-tap-debug")).not.toBeInTheDocument();
+  });
+
+  it("starts a fresh tap run when replaying the full song from the end", async () => {
+    const playbackState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const song = makeSong(1);
+    const view = render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("ratings-loading-skeleton")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+    });
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 41, clientY: 40 });
+    fireEvent.pointerUp(tapBar, { pointerId: 41, clientY: 40 });
+    fireEvent.pointerDown(tapBar, { pointerId: 42, clientY: 140 });
+    fireEvent.pointerUp(tapBar, { pointerId: 42, clientY: 140 });
+    expect(screen.getAllByTestId("practice-attempt-dot")).toHaveLength(2);
+
+    playbackState.currentMs = 12000;
+    view.rerender(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+
+    expect(screen.getByTestId("practice-count-in")).toHaveTextContent("2");
+    expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
+
+    await waitFor(() => {
+      const sessionStartCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions` && init?.method === "POST"
+      );
+      expect(sessionStartCalls).toHaveLength(2);
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+    await waitFor(() => {
+      expect(mockPlay).toHaveBeenCalledWith(0, 12000);
+    });
+  });
+
+  it("shows a two-second count-in before starting playback in tap practice mode", async () => {
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+    });
+
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+
+    expect(mockPlay).not.toHaveBeenCalled();
+    expect(screen.getByTestId("practice-count-in")).toHaveTextContent("2");
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(screen.getByTestId("practice-count-in")).toHaveTextContent("1");
+    expect(mockPlay).not.toHaveBeenCalled();
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await waitFor(() => {
+      expect(screen.queryByTestId("practice-count-in")).not.toBeInTheDocument();
+      expect(mockPlay).toHaveBeenCalledWith(0, 12000);
+    });
+  });
+
+  it("starts a fresh tap run when seeking back to the current segment start", async () => {
+    const playbackState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 6600,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      startMs: 6000,
+      endMs: 9000,
+    };
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+    });
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 51, clientY: 50 });
+    fireEvent.pointerUp(tapBar, { pointerId: 51, clientY: 50 });
+    fireEvent.pointerDown(tapBar, { pointerId: 52, clientY: 150 });
+    fireEvent.pointerUp(tapBar, { pointerId: 52, clientY: 150 });
+    expect(screen.getAllByTestId("practice-attempt-dot")).toHaveLength(2);
+
+    fireEvent.click(screen.getByTestId("mock-seek-song"));
+
+    expect(mockSeek).toHaveBeenCalledWith(6000);
+    expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
+
+    await waitFor(() => {
+      const sessionStartCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions` && init?.method === "POST"
+      );
+      expect(sessionStartCalls).toHaveLength(2);
+    });
+  });
+
+  it("shows loop accuracy toast and clears taps when loop restarts", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 3995,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      startMs: 0,
+      endMs: 4000,
+    };
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+    fireEvent.pointerDown(tapBar, { pointerId: 31, clientY: 60 });
+    fireEvent.pointerUp(tapBar, { pointerId: 31, clientY: 60 });
+
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-accuracy-toast")).toHaveTextContent("Loop accuracy");
+      expect(mockPlay).toHaveBeenCalledWith(0, 4000);
+    });
+
+    expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
+  });
+
+  it("shows immediate miss feedback when a tap is classified as a miss", async () => {
+    const vibrate = vi.fn();
+    Object.defineProperty(window.navigator, "vibrate", {
+      configurable: true,
+      value: vibrate,
+    });
+
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.pitchContourNotes = [
+      { id: "k1", absoluteMs: song.segments[0].startMs, durationMs: 120, lane: 0.2 },
+      { id: "k2", absoluteMs: song.segments[0].startMs + 100, durationMs: 120, lane: 0.8 },
+    ];
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    // First tap high, second tap low => down contour against an up answer key.
+    fireEvent.pointerDown(tapBar, { pointerId: 11, clientY: 20 });
+    fireEvent.pointerUp(tapBar, { pointerId: 11, clientY: 20 });
+    fireEvent.pointerDown(tapBar, { pointerId: 12, clientY: 180 });
+    fireEvent.pointerUp(tapBar, { pointerId: 12, clientY: 180 });
+
+    await waitFor(() => {
+      const hasHaptic = vibrate.mock.calls.length > 0;
+      const hasToast = screen.getByTestId("practice-accuracy-toast").textContent?.includes("Missed tap");
+      expect(hasHaptic || hasToast).toBe(true);
+    });
+  });
+
+  it("buffers immediate taps until the tap session has been created", async () => {
+    let resolveSessionStart: ((value: any) => void) | null = null;
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/ratings") && method === "GET") {
+        return Promise.resolve({ ok: true, json: async () => ({ ratings: [] }) } as any);
+      }
+
+      if (url.endsWith("/tap-sessions") && method === "POST") {
+        return new Promise((resolve) => {
+          resolveSessionStart = resolve;
+        });
+      }
+
+      if (url.includes("/tap-sessions/tap-session-1") && method === "POST") {
+        return Promise.resolve({ ok: true } as any);
+      }
+
+      if (url.endsWith("/tap-sessions") && method === "GET") {
+        return Promise.resolve({ ok: true, json: async () => ({ sessions: [] }) } as any);
+      }
+
+      if (url.includes("/tap-sessions/") && method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            session: {
+              id: "tap-session-1",
+              songId: "song-1",
+              startedAt: "2026-04-11T12:00:00.000Z",
+              taps: [],
+            },
+          }),
+        } as any);
+      }
+
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 200,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 64,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(tapBar, { pointerId: 77, clientY: 120 });
+    fireEvent.pointerUp(tapBar, { pointerId: 77, clientY: 120 });
+
+    const persistedBeforeSession = mockFetch.mock.calls.find(([calledUrl, calledInit]) => (
+      String(calledUrl).includes(`/api/songs/${song.id}/tap-sessions/tap-session-1`) &&
+      (calledInit as RequestInit | undefined)?.method === "POST"
+    ));
+    expect(persistedBeforeSession).toBeFalsy();
+
+    resolveSessionStart?.({
+      ok: true,
+      json: async () => ({
+        session: {
+          id: "tap-session-1",
+          songId: "song-1",
+          startedAt: "2026-04-11T12:00:00.000Z",
+          tapCount: 0,
+        },
+      }),
+    });
+
+    await waitFor(() => {
+      const tapPersistCall = mockFetch.mock.calls.find(([calledUrl, calledInit]) => (
+        String(calledUrl).includes(`/api/songs/${song.id}/tap-sessions/tap-session-1`) &&
+        (calledInit as RequestInit | undefined)?.method === "POST"
+      ));
+      expect(tapPersistCall).toBeTruthy();
+    });
+  });
   it("fetches historical ratings on mount", async () => {
     const song = makeSong(2);
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
@@ -297,7 +1218,7 @@ describe("PracticeView", () => {
     });
   });
 
-  it("uses proxy audio URL immediately when audio key can be parsed", async () => {
+  it("prefers the direct audio URL before any proxy fallback", async () => {
     const song = makeSong(2);
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
@@ -317,7 +1238,35 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(mockUseAudioPlayer).toHaveBeenCalled();
       const args = mockUseAudioPlayer.mock.calls.map((call) => String(call[0]));
-      expect(args).toContain("/api/audio/audio/song-1/audio.mp3");
+      expect(args).toContain("https://cdn.example.com/audio/song-1/audio.mp3");
+    });
+  });
+
+  it("falls back to proxy playback when a direct public URL reports an error", async () => {
+    const song = {
+      ...makeSong(2),
+      audioUrl: "https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3",
+    };
+
+    mockUseAudioPlayer.mockImplementation((audioUrl: string) => ({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 12000,
+      playbackError: audioUrl.startsWith("https://") ? "Unable to load audio" : null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    }));
+
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      const args = mockUseAudioPlayer.mock.calls.map((call) => String(call[0]));
+      expect(args).toContain("https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3");
+      expect(args).toContain("/api/audio/users/default/audio/song-1/test%20file.mp3");
     });
   });
 
@@ -640,6 +1589,53 @@ describe("PracticeView", () => {
     );
   });
 
+  it("resets to the first segment when replay starts before an initial gap", async () => {
+    const playbackState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 10000,
+      durationMs: 10000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const gappedSong: Song = {
+      id: "gapped-song",
+      title: "Gapped",
+      audioUrl: "https://cdn.example.com/audio.mp3",
+      segments: [
+        { id: "g0", songId: "gapped-song", order: 0, label: "A", lyricText: "", startMs: 1000, endMs: 4000 },
+        { id: "g1", songId: "gapped-song", order: 1, label: "B", lyricText: "", startMs: 6000, endMs: 9000 },
+      ],
+      createdAt: new Date().toISOString(),
+    };
+    const endedSession = { ...makeSession(gappedSong), currentSegmentIndex: 1 };
+
+    const view = render(<PracticeView song={gappedSong} initialSession={endedSession} />);
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${gappedSong.id}/ratings`);
+    });
+
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 2");
+
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+    expect(mockPlay).toHaveBeenCalledWith(0, 10000);
+
+    playbackState.isPlaying = true;
+    playbackState.currentMs = 0;
+    view.rerender(<PracticeView song={gappedSong} initialSession={endedSession} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 1 of 2");
+    });
+  });
+
   it("clicking rating 1 twice toggles back to unrated", async () => {
     const song = makeSong(1);
     await renderAndWaitForRatings(song);
@@ -782,6 +1778,37 @@ describe("PracticeView", () => {
     expect(mockPlay).not.toHaveBeenCalled();
     expect(mockSeek).not.toHaveBeenCalled();
     expect(mockSetPlaybackEndMs).toHaveBeenCalledWith(8000);
+  });
+
+  it("syncs the card to the playhead segment before enabling loop mode", async () => {
+    const playbackState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 4500,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("mock-segment-card")).toHaveTextContent("Verse 1");
+
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-segment-card")).toHaveTextContent("Verse 2");
+    });
+
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+
+    expect(mockPlay).toHaveBeenCalledWith(4500, 8000);
   });
 
   it("auto-saves ratings to the server after a rating change but not during initial load", async () => {

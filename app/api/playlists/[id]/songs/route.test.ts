@@ -23,7 +23,7 @@ describe('POST /api/playlists/[id]/songs', () => {
 
     const response = await POST(request as any, { params: Promise.resolve({ id: 'pl-1' }) });
     expect(response.status).toBe(204);
-    expect(addSongToPlaylist).toHaveBeenCalledWith('pl-1', 'song-1', undefined, 'default');
+    expect(addSongToPlaylist).toHaveBeenCalledWith('pl-1', 'song-1', undefined);
   });
 
   it('returns 400 when songId missing', async () => {
@@ -52,6 +52,6 @@ describe('PATCH /api/playlists/[id]/songs', () => {
 
     const response = await PATCH(request as any, { params: Promise.resolve({ id: 'pl-1' }) });
     expect(response.status).toBe(204);
-    expect(reorderPlaylistSongs).toHaveBeenCalledWith('pl-1', ['song-2', 'song-1'], 'default');
+    expect(reorderPlaylistSongs).toHaveBeenCalledWith('pl-1', ['song-2', 'song-1']);
   });
 });

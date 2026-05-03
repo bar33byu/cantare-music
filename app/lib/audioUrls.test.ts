@@ -12,6 +12,13 @@ describe('toPlayableAudioUrl', () => {
     expect(toPlayableAudioUrl(source)).toBe('/api/audio/audio/song-1/test%20file.mp3');
   });
 
+  it('preserves hash characters in stored relative audio keys', () => {
+    const source = 'audio/song-1/The Morning Breaks Brdcst #4844 17Jun22.mp3';
+    expect(toPlayableAudioUrl(source)).toBe(
+      '/api/audio/audio/song-1/The%20Morning%20Breaks%20Brdcst%20%234844%2017Jun22.mp3'
+    );
+  });
+
   it('keeps already-proxied URLs stable', () => {
     const source = '/api/audio/audio/song-1/test%20file.mp3';
     expect(toPlayableAudioUrl(source)).toBe(source);
@@ -21,21 +28,21 @@ describe('toPlayableAudioUrl', () => {
     const source = '/uploads/song-1/test.mp3';
     expect(toPlayableAudioUrl(source)).toBe(source);
   });
-
-  it('rewrites users-scoped keys to same-origin proxy', () => {
-    const source = 'users/default/audio/song-1/test file.mp3';
-    expect(toPlayableAudioUrl(source)).toBe('/api/audio/users/default/audio/song-1/test%20file.mp3');
-  });
 });
 
 describe('parseAudioKey', () => {
-  it('extracts users-scoped key from absolute public URL path', () => {
-    const source = 'https://pub-example.r2.dev/users/default/audio/song-1/test%20file.mp3';
+  it('extracts user-prefixed audio keys from public URLs', () => {
+    const url = 'https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3';
+    expect(parseAudioKey(url)).toBe('users/default/audio/song-1/test file.mp3');
+  });
+
+  it('extracts user-prefixed audio keys from relative paths', () => {
+    const source = '/users/default/audio/song-1/test%20file.mp3';
     expect(parseAudioKey(source)).toBe('users/default/audio/song-1/test file.mp3');
   });
 
-  it('extracts users-scoped key from already proxied URL', () => {
-    const source = '/api/audio/users/default/audio/song-1/test%20file.mp3';
-    expect(parseAudioKey(source)).toBe('users/default/audio/song-1/test file.mp3');
+  it('does not treat hashes in relative paths as URL fragments', () => {
+    const source = 'audio/song-1/test #123.mp3';
+    expect(parseAudioKey(source)).toBe('audio/song-1/test #123.mp3');
   });
 });

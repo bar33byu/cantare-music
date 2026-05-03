@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { deletePlaylist, getPlaylistById, updatePlaylist } from '../../../../db/queries';
 import { resolveRequestUserId } from '../../_user';
 
+const userScopedHeaders = {
+  'Cache-Control': 'private, no-store',
+  Vary: 'X-User-ID',
+};
+
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
   const shouldExpose =
@@ -24,7 +29,9 @@ export async function GET(
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
 
-    return NextResponse.json(playlist);
+    return NextResponse.json(playlist, {
+      headers: userScopedHeaders,
+    });
   } catch (error) {
     console.error('Error fetching playlist:', error);
     return NextResponse.json(formatError(error), { status: 500 });

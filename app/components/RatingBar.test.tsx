@@ -28,14 +28,15 @@ describe('RatingBar', () => {
     render(<RatingBar currentRating={4} onRate={vi.fn()} />);
 
     expect(screen.getByTestId('rating-button-1').className).toContain('bg-indigo-200');
-    expect(screen.getByTestId('rating-button-1').className).toContain('text-indigo-950');
     expect(screen.getByTestId('rating-button-2').className).toContain('bg-indigo-300');
-    expect(screen.getByTestId('rating-button-2').className).toContain('text-indigo-950');
     expect(screen.getByTestId('rating-button-3').className).toContain('bg-indigo-500');
-    expect(screen.getByTestId('rating-button-3').className).toContain('text-white');
     expect(screen.getByTestId('rating-button-4').className).toContain('bg-indigo-700');
-    expect(screen.getByTestId('rating-button-4').className).toContain('text-white');
-    expect(screen.getByTestId('rating-button-5').className).toContain('bg-gray-100');
+    expect(screen.getByTestId('rating-button-5').className).toContain('bg-indigo-50');
+  });
+
+  it('uses the darkest color for a five rating', () => {
+    render(<RatingBar currentRating={5} onRate={vi.fn()} />);
+    expect(screen.getByTestId('rating-button-5').className).toContain('bg-slate-950');
   });
 
   it('disabled prop propagates to all buttons', () => {

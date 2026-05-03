@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { getMasteryColor } from '../lib/masteryColors';
+import { SongReadinessIcons } from './SongReadinessIcons';
 
 interface SongListItem {
   id: string;
@@ -11,6 +12,9 @@ interface SongListItem {
   createdAt: string;
   lastPracticedAt?: string | null;
   masteryPercent?: number;
+  hasAudio?: boolean;
+  hasSegments?: boolean;
+  hasTapKeys?: boolean;
 }
 
 interface SongBrowserProps {
@@ -90,7 +94,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   const sortDirLabel: Record<SortKey, [string, string]> = {
     alphabetical: ['Z–A', 'A–Z'],
     'date-added':   ['Newest', 'Oldest'],
-    'date-practiced': ['Recent', 'Oldest'],
+    'date-practiced': ['Recent', 'Longest ago'],
     'memory-score': ['Highest', 'Lowest'],
   };
 
@@ -114,9 +118,8 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           const aTime = a.lastPracticedAt ?? '';
           const bTime = b.lastPracticedAt ?? '';
           if (!aTime && !bTime) return 0;
-          // Always push unpracticed songs to the bottom regardless of direction
-          if (!aTime) return 1;
-          if (!bTime) return -1;
+          if (!aTime) return dir;
+          if (!bTime) return -dir;
           return dir * aTime.localeCompare(bTime);
         }
         case 'memory-score': {
@@ -360,6 +363,9 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
         {displayedSongs.map((song) => {
           const masteryPercent = clampPercent(song.masteryPercent);
           const masteryColor = getMasteryColor(masteryPercent);
+          const hasAudio = song.hasAudio ?? Boolean(song.audioKey?.trim());
+          const hasSegments = song.hasSegments ?? false;
+          const hasTapKeys = song.hasTapKeys ?? false;
 
           return (
           <div
@@ -388,6 +394,14 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
                 {song.artist}
               </p>
             )}
+            <div className="absolute bottom-3 right-3">
+              <SongReadinessIcons
+                hasAudio={hasAudio}
+                hasSegments={hasSegments}
+                hasTapKeys={hasTapKeys}
+                testIdPrefix={`song-item-${song.id}`}
+              />
+            </div>
             <p className="text-xs text-gray-500 mt-2" data-testid={`song-last-practiced-${song.id}`}>
               {getLastPracticedLabel(song.lastPracticedAt)}
             </p>

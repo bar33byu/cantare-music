@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Segment } from '../types/index';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Segment, SongPitchContourNote } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
+import { PitchContourThumbnail } from './PitchContourThumbnail';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
 import { getDefaultNewSegmentPlacement, getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
+import { getSegmentPitchContourNotes } from '../lib/pitchContour';
+import { classifyContourDirection } from '../lib/contourPractice';
 
 const MIN_SEGMENT_MS = 1000;
 const MIN_ZOOM = 1;
@@ -15,12 +18,41 @@ const DEFAULT_TIMELINE_FALLBACK_MS = 60000;
 const BULK_DURATION_PROBE_TIMEOUT_MS = 3000;
 const BULK_REQUEST_RETRIES = 4;
 const BULK_REQUEST_RETRY_DELAY_MS = 250;
+const CONTOUR_PLAYBACK_RATES = [0.5, 0.75, 1] as const;
+const MIN_CONTOUR_TAP_DURATION_MS = 80;
+const CONTOUR_AUTOSAVE_DELAY_MS = 650;
+
+interface ActiveContourCapture {
+  id: string;
+  startMs: number;
+  lane: number;
+  pointerId: number;
+}
+
+interface ContourDraftPoint {
+  id: string;
+  absoluteMs: number;
+  durationMs: number;
+  lane: number;
+  direction: 'U' | 'D' | 'S' | null;
+}
 
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getContourDirectionLabel(previousLane: number, nextLane: number): 'U' | 'D' | 'S' {
+  const direction = classifyContourDirection(nextLane - previousLane);
+  if (direction === 'up') {
+    return 'U';
+  }
+  if (direction === 'down') {
+    return 'D';
+  }
+  return 'S';
 }
 
 type ResizeEdge = 'start' | 'end';
@@ -37,10 +69,11 @@ interface ActiveInteraction {
 
 interface SegmentEditorProps {
   songId: string;
+  userId?: string;
   onSongUpdated?: () => void;
 }
 
-export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
+export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -65,7 +98,19 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const [bulkImportPending, setBulkImportPending] = useState(false);
   const [songLoaded, setSongLoaded] = useState(false);
   const [songLoadKey, setSongLoadKey] = useState(0);
+  const [isContourRecording, setIsContourRecording] = useState(false);
+  const [contourDraftNotes, setContourDraftNotes] = useState<SongPitchContourNote[]>([]);
+  const [isSavingContourDraft, setIsSavingContourDraft] = useState(false);
+  const [isAutoSavingContourDraft, setIsAutoSavingContourDraft] = useState(false);
+  const [contourSaveMessage, setContourSaveMessage] = useState<string | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
+  const focusedContourCardRef = useRef<HTMLDivElement | null>(null);
+  const contourTapBarRef = useRef<HTMLDivElement | null>(null);
+  const activeContourCaptureRef = useRef<ActiveContourCapture | null>(null);
+  const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
+  const contourLastSavedSnapshotRef = useRef<string>('[]');
+  const contourAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contourAutoSaveGenerationRef = useRef(0);
 
   const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(audioUrl)), [audioUrl]);
   const playbackAudioUrl = useMemo(() => {
@@ -75,12 +120,133 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     return toPlayableAudioUrl(audioUrl);
   }, [audioUrl, proxyAudioUrl, useProxyFallback]);
 
-  const { isPlaying, isReady, currentMs, durationMs, playbackError, play, pause, seek } = useAudioPlayer(playbackAudioUrl);
+  const audioPlayer = useAudioPlayer(playbackAudioUrl);
+  const {
+    isPlaying,
+    isReady,
+    currentMs,
+    durationMs,
+    playbackRate = 1,
+    playbackError,
+    play,
+    pause,
+    seek,
+    setPlaybackRate,
+  } = audioPlayer;
 
   const selectedSegment = useMemo(
     () => segments.find((segment) => segment.id === selectedSegmentId) ?? null,
     [segments, selectedSegmentId]
   );
+
+  const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
+    if (!userId) {
+      return init;
+    }
+
+    const headers = new Headers(init?.headers);
+    headers.set('X-User-ID', userId);
+
+    return {
+      ...init,
+      headers,
+    };
+  }, [userId]);
+
+  const request = useCallback((url: string, init?: RequestInit) => {
+    return fetch(url, withUserHeader(init));
+  }, [withUserHeader]);
+
+  const hasContourDraft = contourDraftNotes.length > 0;
+
+  const contourDraftPointCount = useMemo(
+    () => contourDraftNotes.length,
+    [contourDraftNotes]
+  );
+
+  const isContourEditorOpen = isContourRecording || hasContourDraft;
+
+  const updateContourDraftLane = (noteId: string, lane: number) => {
+    setContourSaveMessage(null);
+    setContourDraftNotes((previous) => previous.map((note) => (note.id === noteId ? { ...note, lane } : note)));
+  };
+
+  const normalizeContourNotes = useCallback((notes: SongPitchContourNote[]) => {
+    return [...notes].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id));
+  }, []);
+
+  const serializeContourNotes = useCallback((notes: SongPitchContourNote[]) => {
+    return JSON.stringify(normalizeContourNotes(notes));
+  }, [normalizeContourNotes]);
+
+  const getLaneFromClientY = (clientY: number): number => {
+    const rect = contourTapBarRef.current?.getBoundingClientRect();
+    if (!rect || rect.height <= 0) {
+      return 0.5;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    return 1 - ratio;
+  };
+
+  const getBoardLaneFromClientY = (clientY: number): number => {
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect || rect.height <= 0) {
+      return 0.5;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    return 1 - ratio;
+  };
+
+  const getFocusedContourLaneFromClientY = (clientY: number): number => {
+    const rect = focusedContourCardRef.current?.getBoundingClientRect();
+    if (!rect || rect.height <= 0) {
+      return 0.5;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    return 1 - ratio;
+  };
+
+  const finalizeContourCapture = (endLane?: number) => {
+    const capture = activeContourCaptureRef.current;
+    if (!capture) {
+      return;
+    }
+
+    const endMs = Math.max(capture.startMs + MIN_CONTOUR_TAP_DURATION_MS, currentMs);
+    const lane = typeof endLane === 'number' ? endLane : capture.lane;
+    setContourSaveMessage(null);
+    setContourDraftNotes((previous) => [
+      ...previous,
+      {
+        id: capture.id,
+        absoluteMs: capture.startMs,
+        durationMs: endMs - capture.startMs,
+        lane,
+      },
+    ].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id)));
+
+    activeContourCaptureRef.current = null;
+  };
+
+  const getContourDraftNotesForSave = useCallback(() => {
+    const activeCapture = activeContourCaptureRef.current;
+    const activeNote = activeCapture
+      ? {
+          id: activeCapture.id,
+          absoluteMs: activeCapture.startMs,
+          durationMs: Math.max(activeCapture.startMs + MIN_CONTOUR_TAP_DURATION_MS, currentMs) - activeCapture.startMs,
+          lane: activeCapture.lane,
+        }
+      : null;
+
+    return normalizeContourNotes([
+      ...contourDraftNotes,
+      ...(activeNote ? [activeNote] : []),
+    ]);
+  }, [contourDraftNotes, normalizeContourNotes]);
 
   const updateLocalSegment = (segmentId: string, updates: Partial<Segment>) => {
     setSegments((previous) =>
@@ -91,7 +257,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const saveSegmentPatch = async (segmentId: string, updates: Partial<Segment>) => {
     try {
       setSavingSegmentId(segmentId);
-      const response = await fetch(`/api/songs/${songId}/segments/${segmentId}`, {
+      const response = await request(`/api/songs/${songId}/segments/${segmentId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -100,8 +266,6 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       if (!response.ok) {
         throw new Error('Patch failed');
       }
-
-      setRefreshKey((previous) => previous + 1);
     } finally {
       setSavingSegmentId(null);
     }
@@ -130,7 +294,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       lyricText: '',
     };
 
-    const response = await fetch(`/api/songs/${songId}/segments`, {
+    const response = await request(`/api/songs/${songId}/segments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -166,13 +330,17 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   };
 
   const buildBulkTimings = (sectionCount: number, totalDurationMs: number) => {
-    const safeTotalDuration = Math.max(totalDurationMs, sectionCount * MIN_SEGMENT_MS);
+    const gapUnits = 2 + Math.max(0, sectionCount - 1) * 0.5;
+    const totalUnits = sectionCount + gapUnits;
+    const safeTotalDuration = Math.round(Math.max(totalDurationMs, totalUnits * MIN_SEGMENT_MS));
+    const segmentDuration = safeTotalDuration / totalUnits;
+    const betweenSegmentGap = segmentDuration / 2;
+    let cursorMs = segmentDuration;
 
-    return Array.from({ length: sectionCount }, (_, index) => {
-      const startMs = Math.round((index * safeTotalDuration) / sectionCount);
-      const endMs = index === sectionCount - 1
-        ? safeTotalDuration
-        : Math.round(((index + 1) * safeTotalDuration) / sectionCount);
+    return Array.from({ length: sectionCount }, () => {
+      const startMs = Math.round(cursorMs);
+      const endMs = Math.round(cursorMs + segmentDuration);
+      cursorMs += segmentDuration + betweenSegmentGap;
 
       return {
         startMs,
@@ -271,9 +439,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     const readErrorMessage = async (response: Response, fallback: string) => {
       try {
         const payload = (await response.json()) as { error?: string };
-        return payload.error || fallback;
+        const message = payload.error || fallback;
+        return `${message} (${response.status})`;
       } catch {
-        return fallback;
+        return `${fallback} (${response.status})`;
       }
     };
 
@@ -315,7 +484,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
           if (existing) {
             const patchResponse = await requestWithRetry(() =>
-              fetch(`/api/songs/${songId}/segments/${existing.id}`, {
+              request(`/api/songs/${songId}/segments/${existing.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -339,7 +508,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           }
 
           const createResponse = await requestWithRetry(() =>
-            fetch(`/api/songs/${songId}/segments`, {
+            request(`/api/songs/${songId}/segments`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -366,7 +535,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         // If deletes fail (for example due to historical rating references), keep them.
         for (let i = sections.length; i < orderedExisting.length; i += 1) {
           const extra = orderedExisting[i];
-          const deleteResponse = await fetch(`/api/songs/${songId}/segments/${extra.id}`, {
+          const deleteResponse = await request(`/api/songs/${songId}/segments/${extra.id}`, {
             method: 'DELETE',
           });
           if (!deleteResponse.ok) {
@@ -378,7 +547,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       } else {
         for (let i = 0; i < sections.length; i += 1) {
           const createResponse = await requestWithRetry(() =>
-            fetch(`/api/songs/${songId}/segments`, {
+            request(`/api/songs/${songId}/segments`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -402,14 +571,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         }
       }
 
-      setShowBulkImport(false);
-      setBulkText('');
       setRefreshKey((previous) => previous + 1);
       setSelectedSegmentId(null);
 
       if (failures.length > 0) {
         const failedSections = failures.map((failure) => failure.section).join(', ');
-        setDeleteError(`Bulk import completed with issues. Failed sections: ${failedSections}.`);
+        const firstFailure = failures[0]?.message ? ` First error: ${failures[0].message}` : '';
+        setShowBulkImport(true);
+        setDeleteError(`Bulk import completed with issues. Failed sections: ${failedSections}.${firstFailure}`);
       } else if (hadExtraDeleteFailure) {
         setDeleteError('Bulk import completed, but one or more extra sections could not be deleted.');
       }
@@ -429,7 +598,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   const handleDelete = async (segment: Segment) => {
     setDeleteError(null);
     try {
-      const response = await fetch(`/api/songs/${songId}/segments/${segment.id}`, {
+      const response = await request(`/api/songs/${songId}/segments/${segment.id}`, {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error('Delete failed');
@@ -451,7 +620,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     const restored = lastDeletedSection;
     dismissUndo();
     try {
-      const response = await fetch(`/api/songs/${songId}/segments`, {
+      const response = await request(`/api/songs/${songId}/segments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -484,6 +653,64 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     [segments]
   );
 
+  const playbackSegment = useMemo(
+    () => orderedSegments.find((segment) => currentMs >= segment.startMs && currentMs < segment.endMs) ?? null,
+    [currentMs, orderedSegments]
+  );
+
+  const focusedRecordingSegment = isContourRecording
+    ? playbackSegment ?? selectedSegment ?? orderedSegments[0] ?? null
+    : selectedSegment ?? playbackSegment ?? orderedSegments[0] ?? null;
+  const focusedRecordingSegmentIndex = focusedRecordingSegment
+    ? orderedSegments.findIndex((segment) => segment.id === focusedRecordingSegment.id)
+    : -1;
+  const focusedSegmentDurationMs = focusedRecordingSegment
+    ? Math.max(1, focusedRecordingSegment.endMs - focusedRecordingSegment.startMs)
+    : 1;
+
+  const contourDraftPoints = useMemo<ContourDraftPoint[]>(() => {
+    const points = [...contourDraftNotes]
+      .sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id))
+      .map((note) => ({
+        id: note.id,
+        absoluteMs: note.absoluteMs,
+        durationMs: note.durationMs,
+        lane: note.lane,
+        direction: null,
+      }));
+
+    return points.map((point, index) => ({
+      ...point,
+      direction: index === 0 ? null : getContourDirectionLabel(points[index - 1].lane, point.lane),
+    }));
+  }, [contourDraftNotes]);
+
+  const focusedContourDraftPoints = useMemo<ContourDraftPoint[]>(() => {
+    if (!focusedRecordingSegment) {
+      return [];
+    }
+
+    const points = contourDraftNotes
+      .filter((note) => {
+        const noteStartMs = note.absoluteMs;
+        const noteEndMs = noteStartMs + note.durationMs;
+        return noteEndMs > focusedRecordingSegment.startMs && noteStartMs < focusedRecordingSegment.endMs;
+      })
+      .sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id))
+      .map((note) => ({
+        id: note.id,
+        absoluteMs: note.absoluteMs,
+        durationMs: note.durationMs,
+        lane: note.lane,
+        direction: null,
+      }));
+
+    return points.map((point, index) => ({
+      ...point,
+      direction: index === 0 ? null : getContourDirectionLabel(points[index - 1].lane, point.lane),
+    }));
+  }, [contourDraftNotes, focusedRecordingSegment]);
+
   const msFromClientX = (clientX: number): number => {
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || timelineDurationMs <= 0) {
@@ -491,6 +718,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     }
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     return Math.round(ratio * timelineDurationMs);
+  };
+
+  const handleBoardSeek = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    seek(msFromClientX(event.clientX));
   };
 
   const handleInteractionMove = (clientX: number, pointerId: number) => {
@@ -568,6 +803,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   }, [activeInteraction, finishInteraction, handleInteractionMove]);
 
   useEffect(() => {
+    setStableDurationMs(0);
+  }, [audioUrl]);
+
+  useEffect(() => {
     if (durationMs > 0) {
       setStableDurationMs((previous) => Math.max(previous, durationMs));
     }
@@ -596,6 +835,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
   useEffect(() => {
     setUseProxyFallback(false);
+    setIsContourRecording(false);
+    setContourDraftNotes([]);
+    activeContourCaptureRef.current = null;
+    pendingFallbackPlayRangeRef.current = null;
   }, [songId]);
 
   useEffect(() => {
@@ -604,6 +847,20 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     }
     setUseProxyFallback(true);
   }, [playbackError, proxyAudioUrl, useProxyFallback]);
+
+  useEffect(() => {
+    if (!useProxyFallback) {
+      return;
+    }
+
+    const pendingRange = pendingFallbackPlayRangeRef.current;
+    if (!pendingRange) {
+      return;
+    }
+
+    pendingFallbackPlayRangeRef.current = null;
+    play(pendingRange.startMs, pendingRange.endMs);
+  }, [play, useProxyFallback]);
 
   // Clean up undo timer on unmount to avoid memory leaks
   useEffect(() => {
@@ -618,7 +875,17 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       return;
     }
     const safeDuration = timelineDurationMs > 0 ? timelineDurationMs : Number.POSITIVE_INFINITY;
-    const startMs = Math.max(0, Math.min(currentMs, safeDuration));
+    const atOrPastEnd =
+      Number.isFinite(safeDuration) &&
+      safeDuration > 0 &&
+      currentMs >= Math.max(0, safeDuration - 250);
+    const startMs = atOrPastEnd
+      ? 0
+      : Math.max(0, Math.min(currentMs, safeDuration));
+    pendingFallbackPlayRangeRef.current = {
+      startMs,
+      endMs: safeDuration,
+    };
     play(startMs, safeDuration);
   };
 
@@ -628,12 +895,136 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     seek(targetMs);
   };
 
+  const clearContourDraft = () => {
+    activeContourCaptureRef.current = null;
+    setContourSaveMessage(null);
+    setContourDraftNotes([]);
+  };
+
+  const clearFocusedSegmentContourDraft = () => {
+    if (!focusedRecordingSegment) {
+      return;
+    }
+
+    activeContourCaptureRef.current = null;
+    setContourSaveMessage(null);
+    setContourDraftNotes((previous) =>
+      previous.filter((note) => {
+        const noteStartMs = note.absoluteMs;
+        const noteEndMs = noteStartMs + note.durationMs;
+        return !(noteEndMs > focusedRecordingSegment.startMs && noteStartMs < focusedRecordingSegment.endMs);
+      })
+    );
+  };
+
+  const handleToggleContourRecording = () => {
+    if (isContourRecording) {
+      finalizeContourCapture();
+      setIsContourRecording(false);
+      return;
+    }
+
+    setDeleteError(null);
+    setContourSaveMessage(null);
+    if (!hasContourDraft) {
+      clearContourDraft();
+    }
+    const startingSegment = playbackSegment ?? selectedSegment ?? orderedSegments[0] ?? null;
+    if (startingSegment) {
+      setSelectedSegmentId(startingSegment.id);
+    }
+    setIsContourRecording(true);
+  };
+
+  const selectRecordingSegment = (index: number) => {
+    const nextSegment = orderedSegments[index];
+    if (!nextSegment) {
+      return;
+    }
+
+    setSelectedSegmentId(nextSegment.id);
+    seek(nextSegment.startMs);
+  };
+
+  const persistContourDraft = useCallback(async (
+    notes: SongPitchContourNote[],
+    options: { mode: 'auto' | 'manual' } = { mode: 'manual' }
+  ) => {
+    const normalizedNotes = normalizeContourNotes(notes);
+    const snapshot = serializeContourNotes(normalizedNotes);
+    if (snapshot === contourLastSavedSnapshotRef.current) {
+      if (options.mode === 'manual') {
+        setIsContourRecording(false);
+        setContourSaveMessage(`Saved ${normalizedNotes.length} answer key point${normalizedNotes.length === 1 ? '' : 's'}.`);
+      }
+      return false;
+    }
+
+    const generation = contourAutoSaveGenerationRef.current + 1;
+    contourAutoSaveGenerationRef.current = generation;
+    if (options.mode === 'auto') {
+      setIsAutoSavingContourDraft(true);
+    } else {
+      setIsSavingContourDraft(true);
+    }
+
+    try {
+      const response = await request(`/api/songs/${songId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pitchContourNotes: normalizedNotes }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? `Contour save failed (${response.status})`);
+      }
+
+      contourLastSavedSnapshotRef.current = snapshot;
+      setContourDraftNotes(normalizedNotes);
+      if (options.mode === 'manual') {
+        setIsContourRecording(false);
+        setContourSaveMessage(`Saved ${normalizedNotes.length} answer key point${normalizedNotes.length === 1 ? '' : 's'}.`);
+      } else {
+        setContourSaveMessage('Answer key autosaved.');
+      }
+      setSongLoadKey((previous) => previous + 1);
+      onSongUpdated?.();
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Please try again.';
+      setDeleteError(`Failed to save contour answer key. ${message}`);
+      return false;
+    } finally {
+      if (contourAutoSaveGenerationRef.current === generation) {
+        setIsAutoSavingContourDraft(false);
+        setIsSavingContourDraft(false);
+      } else if (options.mode === 'manual') {
+        setIsSavingContourDraft(false);
+      }
+    }
+  }, [normalizeContourNotes, onSongUpdated, request, serializeContourNotes, songId]);
+
+  const saveContourDraft = async () => {
+    const normalizedNotes = getContourDraftNotesForSave();
+    activeContourCaptureRef.current = null;
+    setContourDraftNotes(normalizedNotes);
+
+    setDeleteError(null);
+    setContourSaveMessage(null);
+    if (contourAutoSaveTimerRef.current) {
+      clearTimeout(contourAutoSaveTimerRef.current);
+      contourAutoSaveTimerRef.current = null;
+    }
+    await persistContourDraft(normalizedNotes, { mode: 'manual' });
+  };
+
   useEffect(() => {
     let cancelled = false;
 
     const loadSegments = async () => {
       try {
-        const response = await fetch(`/api/songs/${songId}/segments`);
+        const response = await request(`/api/songs/${songId}/segments`, { cache: 'no-store' });
         if (!response.ok) {
           return;
         }
@@ -651,22 +1042,25 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, [songId, refreshKey]);
+  }, [request, songId, refreshKey]);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadSong = async () => {
       try {
-        const response = await fetch(`/api/songs/${songId}`);
+        const response = await request(`/api/songs/${songId}`, { cache: 'no-store' });
         if (!response.ok) {
           return;
         }
-        const data = (await response.json()) as { audioUrl?: string; title?: string };
+        const data = (await response.json()) as { audioUrl?: string; title?: string; pitchContourNotes?: SongPitchContourNote[] };
         if (!cancelled) {
+          const loadedContourNotes = normalizeContourNotes(data.pitchContourNotes ?? []);
+          contourLastSavedSnapshotRef.current = serializeContourNotes(loadedContourNotes);
           setAudioUrl(data.audioUrl ?? '');
           setSongTitle(data.title ?? '');
           setTitleDraft(data.title ?? '');
+          setContourDraftNotes(loadedContourNotes);
           setSongLoaded(true);
         }
       } catch {
@@ -682,7 +1076,34 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, [songId, songLoadKey]);
+  }, [normalizeContourNotes, request, serializeContourNotes, songId, songLoadKey]);
+
+  useEffect(() => {
+    if (!songLoaded) {
+      return;
+    }
+
+    const snapshot = serializeContourNotes(contourDraftNotes);
+    if (snapshot === contourLastSavedSnapshotRef.current) {
+      return;
+    }
+
+    if (contourAutoSaveTimerRef.current) {
+      clearTimeout(contourAutoSaveTimerRef.current);
+    }
+
+    contourAutoSaveTimerRef.current = setTimeout(() => {
+      contourAutoSaveTimerRef.current = null;
+      void persistContourDraft(contourDraftNotes, { mode: 'auto' });
+    }, CONTOUR_AUTOSAVE_DELAY_MS);
+
+    return () => {
+      if (contourAutoSaveTimerRef.current) {
+        clearTimeout(contourAutoSaveTimerRef.current);
+        contourAutoSaveTimerRef.current = null;
+      }
+    };
+  }, [contourDraftNotes, persistContourDraft, serializeContourNotes, songLoaded]);
 
   const handleAudioUploaded = () => {
     setSongLoadKey((previous) => previous + 1);
@@ -694,7 +1115,7 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
     if (!trimmed || trimmed === songTitle) return;
     setSavingTitle(true);
     try {
-      const response = await fetch(`/api/songs/${songId}`, {
+      const response = await request(`/api/songs/${songId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: trimmed }),
@@ -735,13 +1156,14 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl">
+    <div className={`mx-auto w-full ${isContourEditorOpen ? 'max-w-[92rem]' : 'max-w-6xl'}`}>
       {/* Header */}
       <div className="mb-4">
         <h2 className="text-2xl font-bold text-gray-900">Edit Song</h2>
       </div>
 
       {/* Song title */}
+      {!isContourRecording ? (
       <div className="mb-4 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
         <label className="block text-xs font-semibold text-indigo-700 mb-1">Song title</label>
         <div className="flex items-center gap-2">
@@ -757,8 +1179,10 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
         </div>
       </div>
+      ) : null}
 
       {/* Replace audio (collapsible) */}
+      {!isContourRecording ? (
       <div className="mb-4">
         <button
           type="button"
@@ -780,10 +1204,11 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         </button>
         {showReplaceAudio && (
           <div className="mt-2">
-            <ReplaceAudioForm songId={songId} onReplaced={onSongUpdated} />
+            <ReplaceAudioForm songId={songId} onReplaced={handleAudioUploaded} />
           </div>
         )}
       </div>
+      ) : null}
 
       {deleteError && (
         <div role="alert" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -816,26 +1241,36 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
       <div className="mb-4 rounded-xl border border-indigo-100 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            <p className="text-sm font-semibold text-indigo-800">Sections</p>
-            <button
-              type="button"
-              data-testid="segment-editor-new-section"
-              onClick={handleAddNew}
-              className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
-            >
-              + New section
-            </button>
-            <button
-              type="button"
-              data-testid="segment-editor-bulk-open"
-              onClick={() => {
-                setDeleteError(null);
-                setShowBulkImport((previous) => !previous);
-              }}
-              className="px-3 py-1 border border-indigo-300 text-indigo-700 text-sm rounded hover:bg-indigo-50"
-            >
-              Bulk Lyrics
-            </button>
+            <p className="text-sm font-semibold text-indigo-800">
+              {isContourRecording ? 'Answer key recording' : hasContourDraft ? 'Answer key editing' : 'Sections'}
+            </p>
+            {!isContourEditorOpen ? (
+              <>
+                <button
+                  type="button"
+                  data-testid="segment-editor-new-section"
+                  onClick={handleAddNew}
+                  className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+                >
+                  + New section
+                </button>
+                <button
+                  type="button"
+                  data-testid="segment-editor-bulk-open"
+                  onClick={() => {
+                    setDeleteError(null);
+                    setShowBulkImport((previous) => !previous);
+                  }}
+                  className="px-3 py-1 border border-indigo-300 text-indigo-700 text-sm rounded hover:bg-indigo-50"
+                >
+                  Bulk Lyrics
+                </button>
+              </>
+            ) : (
+              <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                {isContourRecording ? 'Tap bar is active' : 'Draft dots are editable'}
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
             <p className="w-full text-xs text-gray-500 md:w-auto">Drag top bar to move • Drag edges to resize</p>
@@ -865,60 +1300,134 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
 
         <div
           data-testid="segment-editor-playback-controls"
-          className="mb-3 flex flex-col items-center gap-2 rounded-lg bg-indigo-50/40 p-3"
+          className="sticky top-2 z-50 mb-3 rounded-lg border border-indigo-200 bg-white/95 p-3 shadow-sm backdrop-blur"
         >
-          <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:flex-nowrap">
-            <button
-              type="button"
-              data-testid="segment-editor-skip-back"
-              onClick={() => handleSkipBy(-5000)}
-              aria-label="Skip backward 5 seconds"
-              disabled={!isReady}
-              className="flex h-8 w-[76px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
-            >
-              <span className="inline-flex items-center gap-1 font-semibold">
-                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 8H5v4" />
-                  <path d="M5 12a7 7 0 1 0 2-5" />
-                </svg>
-                <span>-5s</span>
-              </span>
-            </button>
-            <button
-              type="button"
-              data-testid="segment-editor-play-toggle"
-              onClick={handleTogglePlay}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
-              className="h-8 w-12 rounded-xl bg-indigo-600 text-base text-white hover:bg-indigo-700"
-            >
-              {isPlaying ? '⏸' : '▶'}
-            </button>
-            <button
-              type="button"
-              data-testid="segment-editor-skip-forward"
-              onClick={() => handleSkipBy(5000)}
-              aria-label="Skip forward 5 seconds"
-              disabled={!isReady}
-              className="flex h-8 w-[76px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
-            >
-              <span className="inline-flex items-center gap-1 font-semibold">
-                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M15 8h4v4" />
-                  <path d="M19 12a7 7 0 1 1-2-5" />
-                </svg>
-                <span>+5s</span>
-              </span>
-            </button>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-gray-600">
-            <span data-testid="segment-editor-current-ms">{formatMs(currentMs)}</span>
-            <span className="text-gray-400">/</span>
-            <span>{formatMs(timelineDurationMs)}</span>
-            {savingSegmentId ? <span className="text-indigo-600">Saving...</span> : null}
+          <div className="min-w-0 space-y-2">
+              <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:flex-nowrap">
+                <button
+                  type="button"
+                  data-testid="segment-editor-skip-back"
+                  onClick={() => handleSkipBy(-5000)}
+                  aria-label="Skip backward 5 seconds"
+                  disabled={!isReady}
+                  className="flex h-8 w-[76px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
+                >
+                  <span className="inline-flex items-center gap-1 font-semibold">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 8H5v4" />
+                      <path d="M5 12a7 7 0 1 0 2-5" />
+                    </svg>
+                    <span>-5s</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="segment-editor-play-toggle"
+                  onClick={handleTogglePlay}
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  className="h-8 w-12 rounded-xl bg-indigo-600 text-base text-white hover:bg-indigo-700"
+                >
+                  {isPlaying ? '⏸' : '▶'}
+                </button>
+                <button
+                  type="button"
+                  data-testid="segment-editor-skip-forward"
+                  onClick={() => handleSkipBy(5000)}
+                  aria-label="Skip forward 5 seconds"
+                  disabled={!isReady}
+                  className="flex h-8 w-[76px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
+                >
+                  <span className="inline-flex items-center gap-1 font-semibold">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15 8h4v4" />
+                      <path d="M19 12a7 7 0 1 1-2-5" />
+                    </svg>
+                    <span>+5s</span>
+                  </span>
+                </button>
+                {isContourRecording ? (
+                <label className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-indigo-800">
+                  Speed
+                  <select
+                    data-testid="segment-editor-playback-rate"
+                    value={String(playbackRate)}
+                    onChange={(event) => setPlaybackRate?.(Number(event.target.value))}
+                    className="rounded border border-indigo-300 bg-white px-1 py-0.5 text-xs text-indigo-800"
+                  >
+                    {CONTOUR_PLAYBACK_RATES.map((rate) => (
+                      <option key={rate} value={rate}>{rate}x</option>
+                    ))}
+                  </select>
+                </label>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                <span data-testid="segment-editor-current-ms">{formatMs(currentMs)}</span>
+                <span className="text-gray-400">/</span>
+                <span>{formatMs(timelineDurationMs)}</span>
+                {savingSegmentId ? <span className="text-indigo-600">Saving...</span> : null}
+                {isSavingContourDraft ? <span className="text-indigo-600">Saving contour...</span> : null}
+                {isAutoSavingContourDraft ? <span className="text-indigo-600">Autosaving answer key...</span> : null}
+                {contourSaveMessage ? (
+                  <span data-testid="segment-editor-contour-save-message" className="text-emerald-700">
+                    {contourSaveMessage}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="segment-editor-contour-record-toggle"
+                  onClick={handleToggleContourRecording}
+                  className={`rounded px-2 py-1 text-xs font-semibold transition ${
+                    isContourRecording
+                      ? 'bg-rose-600 text-white hover:bg-rose-700'
+                      : 'border border-indigo-300 bg-white text-indigo-800 hover:bg-indigo-50'
+                  }`}
+                >
+                  {isContourRecording ? 'Stop answer key recording' : hasContourDraft ? 'Resume recording' : 'Record answer key'}
+                </button>
+                {(isContourRecording || hasContourDraft) ? (
+                  <>
+                    <button
+                      type="button"
+                      data-testid="segment-editor-contour-save"
+                      onClick={() => { void saveContourDraft(); }}
+                      disabled={isSavingContourDraft}
+                      className="rounded bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      Save now
+                    </button>
+                    {focusedRecordingSegment ? (
+                      <button
+                        type="button"
+                        data-testid="segment-editor-contour-clear-segment"
+                        onClick={clearFocusedSegmentContourDraft}
+                        disabled={isSavingContourDraft}
+                        className="rounded border border-rose-300 bg-white px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                      >
+                        Clear section taps
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      data-testid="segment-editor-contour-clear-draft"
+                      onClick={clearContourDraft}
+                      disabled={isSavingContourDraft}
+                      className="rounded border border-indigo-300 bg-white px-2 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
+                    >
+                      Clear all taps
+                    </button>
+                    <span className="text-xs text-indigo-800">
+                      Draft points: <strong data-testid="segment-editor-contour-draft-count">{contourDraftPointCount}</strong>
+                    </span>
+                  </>
+                ) : null}
+              </div>
           </div>
         </div>
 
-        {showBulkImport ? (
+        {showBulkImport && !isContourEditorOpen ? (
           <div data-testid="segment-editor-bulk-panel" className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
             <div className="mb-2 grid gap-2 md:grid-cols-[1fr,180px]">
               <label className="text-xs font-semibold text-indigo-800">
@@ -980,13 +1489,113 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
           </div>
         ) : null}
 
-        <div className="overflow-x-auto rounded-lg border border-indigo-300">
-          <div
-            ref={boardRef}
-            data-testid="segment-editor-board"
-            className="relative h-[560px] min-w-full overflow-hidden bg-gradient-to-b from-indigo-50/40 to-white touch-none"
-            style={{ width: `${zoomPercent}%` }}
-          >
+        <div className={isContourRecording ? 'grid gap-3 lg:grid-cols-[minmax(0,1fr)_9rem]' : ''}>
+          <div className="min-w-0">
+          {isContourEditorOpen && focusedRecordingSegment ? (
+            <div className="rounded-2xl border border-indigo-300 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 px-3 py-2">
+                <button
+                  type="button"
+                  data-testid="segment-editor-recording-prev"
+                  onClick={() => selectRecordingSegment(focusedRecordingSegmentIndex - 1)}
+                  disabled={focusedRecordingSegmentIndex <= 0}
+                  className="h-9 rounded-xl border border-indigo-300 px-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <div className="min-w-0 text-center">
+                  <p className="truncate text-sm font-semibold text-indigo-950">
+                    {focusedRecordingSegment.label}
+                  </p>
+                  <p className="text-xs text-indigo-600">
+                    {formatMs(focusedRecordingSegment.startMs)} / {formatMs(focusedRecordingSegment.endMs)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-testid="segment-editor-recording-next"
+                  onClick={() => selectRecordingSegment(focusedRecordingSegmentIndex + 1)}
+                  disabled={focusedRecordingSegmentIndex < 0 || focusedRecordingSegmentIndex >= orderedSegments.length - 1}
+                  className="h-9 rounded-xl border border-indigo-300 px-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+              <div className="grid gap-3 p-3 md:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)]">
+                <div className="min-h-[16rem] rounded-xl border border-indigo-100 bg-indigo-50/30 p-3">
+                  <p className="text-center text-sm font-semibold text-indigo-950">{focusedRecordingSegment.label}</p>
+                  <div className="mt-3 max-h-[18rem] overflow-y-auto whitespace-pre-wrap rounded-lg border border-indigo-100 bg-white p-3 text-sm leading-6 text-slate-900">
+                    {focusedRecordingSegment.lyricText || 'No lyrics for this section.'}
+                  </div>
+                </div>
+                <div
+                  ref={focusedContourCardRef}
+                  data-testid="segment-editor-recording-card"
+                  className="relative h-[52dvh] min-h-[24rem] touch-none select-none overflow-hidden rounded-xl border border-indigo-200 bg-gradient-to-b from-sky-50 via-white to-amber-50"
+                >
+                  <div
+                    className="pointer-events-none absolute inset-y-0 w-0.5 bg-rose-500/80"
+                    style={{
+                      left: `${Math.max(0, Math.min(100, ((currentMs - focusedRecordingSegment.startMs) / focusedSegmentDurationMs) * 100))}%`,
+                    }}
+                  />
+                  {focusedContourDraftPoints.map((point) => {
+                    const left = Math.round(((point.absoluteMs - focusedRecordingSegment.startMs) / focusedSegmentDurationMs) * 1000) / 10;
+                    const top = Math.round((1 - point.lane) * 1000) / 10;
+                    const width = Math.round(Math.max(2, (point.durationMs / focusedSegmentDurationMs) * 100) * 10) / 10;
+                    const label = point.direction ?? 'S';
+                    return (
+                      <div
+                        key={`focused-draft-note-${point.id}`}
+                        data-testid="segment-editor-focused-contour-note"
+                        className="absolute h-4 -translate-y-1/2 rounded-full bg-sky-300/55 shadow-sm"
+                        style={{ left: `${left}%`, top: `${top}%`, width: `${width}%` }}
+                      >
+                        <button
+                          type="button"
+                          data-testid="segment-editor-focused-contour-dot"
+                          aria-label={`Adjust focused contour dot ${label}`}
+                          className="absolute left-0 top-1/2 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 touch-none select-none items-center justify-center rounded-full border-2 border-white bg-sky-600 text-xs font-bold text-white shadow-md"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            if (typeof event.currentTarget.setPointerCapture === 'function') {
+                              event.currentTarget.setPointerCapture(event.pointerId);
+                            }
+                            updateContourDraftLane(point.id, getFocusedContourLaneFromClientY(event.clientY));
+                          }}
+                          onPointerMove={(event) => {
+                            if (event.buttons === 0) {
+                              return;
+                            }
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateContourDraftLane(point.id, getFocusedContourLaneFromClientY(event.clientY));
+                          }}
+                          onPointerUp={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateContourDraftLane(point.id, getFocusedContourLaneFromClientY(event.clientY));
+                          }}
+                        >
+                          {label}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
+          <>
+          <div className="overflow-x-auto rounded-lg border border-indigo-300">
+            <div
+              ref={boardRef}
+              data-testid="segment-editor-board"
+              className="relative h-[560px] min-w-full overflow-hidden bg-gradient-to-b from-indigo-50/40 to-white touch-none"
+              style={{ width: `${zoomPercent}%` }}
+              onClick={handleBoardSeek}
+            >
           {orderedSegments.map((segment, index) => {
             const left = (segment.startMs / timelineDurationMs) * 100;
             const width = Math.max(1.5, ((segment.endMs - segment.startMs) / timelineDurationMs) * 100);
@@ -1081,13 +1690,17 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                       type="text"
                       value={segment.label}
                       onChange={(event) => updateLocalSegment(segment.id, { label: event.target.value })}
-                      onBlur={() => {
-                        void saveSegmentPatch(segment.id, { label: segment.label });
+                      onBlur={(event) => {
+                        const nextLabel = event.currentTarget.value;
+                        updateLocalSegment(segment.id, { label: nextLabel });
+                        void saveSegmentPatch(segment.id, { label: nextLabel });
                         setEditingLabelId(null);
                       }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
-                          void saveSegmentPatch(segment.id, { label: segment.label });
+                          const nextLabel = event.currentTarget.value;
+                          updateLocalSegment(segment.id, { label: nextLabel });
+                          void saveSegmentPatch(segment.id, { label: nextLabel });
                           setEditingLabelId(null);
                         }
                         if (event.key === 'Escape') {
@@ -1107,11 +1720,17 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
                   <textarea
                     value={segment.lyricText}
                     onChange={(event) => updateLocalSegment(segment.id, { lyricText: event.target.value })}
-                    onBlur={() => {
-                      void saveSegmentPatch(segment.id, { lyricText: segment.lyricText });
+                    onBlur={(event) => {
+                      const nextLyricText = event.currentTarget.value;
+                      updateLocalSegment(segment.id, { lyricText: nextLyricText });
+                      void saveSegmentPatch(segment.id, { lyricText: nextLyricText });
                     }}
                     className="min-h-[180px] flex-1 rounded border border-indigo-200 px-2 py-2 text-sm leading-5 resize-none overflow-y-auto"
                     placeholder="lyrics"
+                  />
+                  <PitchContourThumbnail
+                    notes={getSegmentPitchContourNotes(contourDraftNotes, segment)}
+                    segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
                   />
                   <div className="mt-auto flex items-center justify-between text-xs text-indigo-700">
                     <span>{Math.floor(segment.startMs / 1000)}s</span>
@@ -1137,6 +1756,54 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
             );
           })}
           {timelineDurationMs > 0 && (
+            <>
+              {contourDraftPoints.map((point) => {
+                const left = Math.round((point.absoluteMs / timelineDurationMs) * 1000) / 10;
+                const top = Math.round((1 - point.lane) * 1000) / 10;
+                const width = Math.round(Math.max(1.2, (point.durationMs / timelineDurationMs) * 100) * 10) / 10;
+                const label = point.direction ?? 'S';
+                return (
+                  <div
+                    key={`draft-note-${point.id}`}
+                    data-testid="segment-editor-contour-draft-note"
+                    className="absolute z-50 h-3 -translate-y-1/2 rounded-full bg-sky-300/50 shadow-sm"
+                    style={{ left: `${left}%`, top: `${top}%`, width: `${width}%` }}
+                  >
+                    <button
+                      type="button"
+                      data-testid="segment-editor-contour-draft-dot"
+                      aria-label={`Adjust contour dot ${label}`}
+                      className="absolute left-0 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 touch-none select-none items-center justify-center rounded-full border-2 border-white bg-sky-600 text-xs font-bold text-white shadow-md"
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (typeof event.currentTarget.setPointerCapture === 'function') {
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                        }
+                        updateContourDraftLane(point.id, getBoardLaneFromClientY(event.clientY));
+                      }}
+                      onPointerMove={(event) => {
+                        if (event.buttons === 0) {
+                          return;
+                        }
+                        event.preventDefault();
+                        event.stopPropagation();
+                        updateContourDraftLane(point.id, getBoardLaneFromClientY(event.clientY));
+                      }}
+                      onPointerUp={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        updateContourDraftLane(point.id, getBoardLaneFromClientY(event.clientY));
+                      }}
+                    >
+                      {label}
+                    </button>
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {timelineDurationMs > 0 && (
             <div
               data-testid="segment-editor-canvas-playhead"
               className="pointer-events-none absolute inset-y-0 z-40 w-0.5 bg-rose-500/80"
@@ -1149,6 +1816,103 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
         <div className="mt-2 flex items-center justify-between text-sm text-indigo-800">
           <span>0:00</span>
           <span>{Math.floor(timelineDurationMs / 60000)}:{String(Math.floor((timelineDurationMs % 60000) / 1000)).padStart(2, '0')}</span>
+        </div>
+          </>
+          )}
+          </div>
+
+          {isContourRecording ? (
+            <div className="flex min-h-[calc(100svh-8rem)] justify-start lg:block lg:min-h-0">
+              <div
+                ref={contourTapBarRef}
+                data-testid="segment-editor-contour-tapbar"
+                aria-label="Contour tap bar"
+                className="tap-input-surface sticky top-[7rem] h-[calc(100svh-8rem)] min-h-[70svh] w-[calc(100%-3rem)] touch-none select-none overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm lg:h-[calc(100dvh-12rem)] lg:min-h-0 lg:w-full"
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onDoubleClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onDragStart={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  finalizeContourCapture();
+                  if (typeof event.currentTarget.setPointerCapture === 'function') {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  }
+                  activeContourCaptureRef.current = {
+                    id: crypto.randomUUID(),
+                    startMs: currentMs,
+                    lane: getLaneFromClientY(event.clientY),
+                    pointerId: event.pointerId,
+                  };
+                }}
+                onPointerMove={(event) => {
+                  const activeCapture = activeContourCaptureRef.current;
+                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  activeCapture.lane = getLaneFromClientY(event.clientY);
+                }}
+                onPointerUp={(event) => {
+                  const activeCapture = activeContourCaptureRef.current;
+                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  finalizeContourCapture(getLaneFromClientY(event.clientY));
+                }}
+                onPointerCancel={(event) => {
+                  const activeCapture = activeContourCaptureRef.current;
+                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  finalizeContourCapture(getLaneFromClientY(event.clientY));
+                }}
+                onLostPointerCapture={(event) => {
+                  const activeCapture = activeContourCaptureRef.current;
+                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
+                    return;
+                  }
+                  finalizeContourCapture();
+                }}
+              >
+                <div className="pointer-events-none absolute inset-0">
+                  <div className="absolute inset-x-0 top-0 flex h-16 items-start justify-center bg-gradient-to-b from-emerald-200/45 to-transparent pt-4 text-emerald-700">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 19V5" />
+                      <path d="M6 11l6-6 6 6" />
+                    </svg>
+                  </div>
+                  <div className="absolute inset-x-0 bottom-0 flex h-16 items-end justify-center bg-gradient-to-t from-amber-200/55 to-transparent pb-4 text-amber-700">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 5v14" />
+                      <path d="M18 13l-6 6-6-6" />
+                    </svg>
+                  </div>
+                  <div className="absolute inset-x-3 top-1/2 -translate-y-1/2 rounded-xl border border-indigo-200 bg-white/70 py-2 text-center text-indigo-500 shadow-sm">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="mx-auto h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 5v14" />
+                      <path d="M6 11l6-6 6 6" />
+                      <path d="M18 13l-6 6-6-6" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div data-testid="segment-editor-song-timeline" className="mt-4 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-3">
@@ -1190,6 +1954,18 @@ export function SegmentEditor({ songId, onSongUpdated }: SegmentEditorProps) {
             <span>{Math.floor(Math.max(0, currentMs) / 60000)}:{String(Math.floor((Math.max(0, currentMs) % 60000) / 1000)).padStart(2, '0')}</span>
             <span>{Math.floor(timelineDurationMs / 60000)}:{String(Math.floor((timelineDurationMs % 60000) / 1000)).padStart(2, '0')}</span>
           </div>
+        </div>
+
+        <div className="sticky bottom-2 z-50 mt-3 flex justify-center">
+          <button
+            type="button"
+            data-testid="segment-editor-bottom-play-toggle"
+            onClick={handleTogglePlay}
+            aria-label={isPlaying ? 'Pause from bottom controls' : 'Play from bottom controls'}
+            className="flex h-12 min-w-28 items-center justify-center rounded-2xl bg-indigo-600 px-5 text-lg font-semibold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700"
+          >
+            {isPlaying ? '⏸' : '▶'}
+          </button>
         </div>
       </div>
 

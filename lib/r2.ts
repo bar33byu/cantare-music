@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, PutBucketCorsCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 function normalizeEnv(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -25,8 +25,9 @@ function normalizeEndpoint(value: string | undefined): string | undefined {
 }
 
 const R2_ACCOUNT_ID = normalizeEnv(process.env.R2_ACCOUNT_ID);
+const configuredR2Endpoint = normalizeEnv(process.env.R2_ENDPOINT);
 const R2_ENDPOINT = normalizeEndpoint(
-  process.env.R2_ENDPOINT ??
+  configuredR2Endpoint ||
     (R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : undefined),
 );
 const R2_ACCESS_KEY_ID = normalizeEnv(process.env.R2_ACCESS_KEY_ID) ?? '';
@@ -36,13 +37,14 @@ export const r2Client = new S3Client({
   endpoint: R2_ENDPOINT,
   region: 'auto',
   forcePathStyle: true,
+  requestChecksumCalculation: 'WHEN_REQUIRED',
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID,
     secretAccessKey: R2_SECRET_ACCESS_KEY,
   },
 });
 
-export const BUCKET = process.env.R2_BUCKET_NAME ?? process.env.R2_BUCKET ?? 'cantare-audio';
+export const BUCKET = normalizeEnv(process.env.R2_BUCKET_NAME) ?? normalizeEnv(process.env.R2_BUCKET) ?? 'cantare-audio';
 
 function firstTruthy(...candidates: Array<string | undefined>): string | undefined {
   for (const c of candidates) {
@@ -60,7 +62,6 @@ export function getPublicUrl(key: string): string {
   const configuredPublicUrl = firstTruthy(
     process.env.R2_PUBLIC_URL,
     process.env.R2_PUBLIC_BASE_URL,
-    process.env.R2_PUBLIC_BASE_UR,
   );
 
   if (!configuredPublicUrl) {
@@ -71,8 +72,8 @@ export function getPublicUrl(key: string): string {
   return `${configuredPublicUrl.replace(/\/$/, '')}/${encodedKey}`;
 }
 
-export function generateUploadKey(userId: string, songId: string, filename: string): string {
-  return `users/${userId}/audio/${songId}/${Date.now()}-${filename}`;
+export function generateUploadKey(songId: string, filename: string): string {
+  return `audio/${songId}/${Date.now()}-${filename}`;
 }
 
 export async function deleteObject(key: string): Promise<void> {
@@ -82,44 +83,4 @@ export async function deleteObject(key: string): Promise<void> {
       Key: key,
     }),
   );
-}
-
-// Lazily ensure the R2 bucket has CORS configured to allow direct browser uploads.
-// This must succeed before issuing signed upload URLs, otherwise browser PUTs fail.
-let corsConfigured = false;
-let corsConfigPromise: Promise<void> | null = null;
-
-export function ensureBucketCors(): Promise<void> {
-  if (corsConfigured) {
-    return Promise.resolve();
-  }
-  if (corsConfigPromise) {
-    return corsConfigPromise;
-  }
-
-  corsConfigPromise = r2Client
-    .send(
-      new PutBucketCorsCommand({
-        Bucket: BUCKET,
-        CORSConfiguration: {
-          CORSRules: [
-            {
-              AllowedOrigins: ['*'],
-              AllowedMethods: ['PUT', 'GET', 'HEAD'],
-              AllowedHeaders: ['*'],
-              MaxAgeSeconds: 3600,
-            },
-          ],
-        },
-      }),
-    )
-    .then(() => {
-      corsConfigured = true;
-    })
-    .catch((err: unknown) => {
-      corsConfigPromise = null; // allow retry on next request
-      throw err;
-    });
-
-  return corsConfigPromise;
 }

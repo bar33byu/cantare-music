@@ -141,7 +141,7 @@ describe('SegmentEditor', () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-1/segments');
+      expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-1/segments', expect.objectContaining({ cache: 'no-store' }));
     });
 
     fireEvent.click(screen.getByTestId('segment-editor-new-section'));
@@ -164,10 +164,12 @@ describe('SegmentEditor', () => {
       expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
     });
 
+    const pastedLyrics = ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n');
+
     fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
     fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
       target: {
-        value: ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n'),
+        value: pastedLyrics,
       },
     });
     fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
@@ -181,12 +183,12 @@ describe('SegmentEditor', () => {
       const firstPatchBody = JSON.parse(String(patchCalls[patchCalls.length - 2][1]?.body ?? '{}'));
       const secondPatchBody = JSON.parse(String(patchCalls[patchCalls.length - 1][1]?.body ?? '{}'));
 
-      expect(firstPatchBody.startMs).toBe(0);
-      expect(firstPatchBody.endMs).toBe(30000);
+      expect(firstPatchBody.startMs).toBe(13333);
+      expect(firstPatchBody.endMs).toBe(26667);
       expect(firstPatchBody.lyricText).toBe('Line A1\nLine A2');
 
-      expect(secondPatchBody.startMs).toBe(30000);
-      expect(secondPatchBody.endMs).toBe(60000);
+      expect(secondPatchBody.startMs).toBe(33333);
+      expect(secondPatchBody.endMs).toBe(46667);
       expect(secondPatchBody.lyricText).toBe('Line B1\nLine B2');
 
       const createCalls = mockFetch.mock.calls.filter(
@@ -195,6 +197,162 @@ describe('SegmentEditor', () => {
 
       // No new sections are needed when there are already 2 existing sections.
       expect(createCalls.length).toBe(0);
+      expect(screen.getByTestId('segment-editor-bulk-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-bulk-text')).toHaveValue(pastedLyrics);
+    });
+  });
+
+  it('keeps bulk lyrics editable when a partial import fails', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => sampleSegments,
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments/') && method === 'PATCH') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        if (body.label === '2') {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ error: 'Database write failed' }),
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
+    });
+
+    const pastedLyrics = ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n');
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
+      target: { value: pastedLyrics },
+    });
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('segment-editor-bulk-panel')).toBeInTheDocument();
+        expect(screen.getByTestId('segment-editor-bulk-text')).toHaveValue(pastedLyrics);
+        expect(screen.getByText(/Failed sections: 2/i)).toBeInTheDocument();
+        expect(screen.getByText(/First error: Database write failed \(500\)/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
+  });
+
+  it('rounds bulk import timings before sending create payloads', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 180244.89800000002,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => [],
+        } as Response;
+      }
+
+      if (url.endsWith('/api/songs/song-1/segments') && method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-replace'));
+    fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
+      target: { value: ['One', '*', 'Two', '*', 'Three'].join('\n') },
+    });
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
+
+    await waitFor(() => {
+      const createCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).endsWith('/api/songs/song-1/segments') && init?.method === 'POST'
+      );
+      expect(createCalls).toHaveLength(3);
+
+      for (const [, init] of createCalls) {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        expect(Number.isInteger(body.startMs)).toBe(true);
+        expect(Number.isInteger(body.endMs)).toBe(true);
+      }
+
+      const lastCreateBody = JSON.parse(String(createCalls[2][1]?.body ?? '{}'));
+      expect(lastCreateBody.endMs).toBe(150204);
     });
   });
 
@@ -299,13 +457,46 @@ describe('SegmentEditor', () => {
       const firstCreateBody = JSON.parse(String(createCalls[0][1]?.body ?? '{}'));
       const secondCreateBody = JSON.parse(String(createCalls[1][1]?.body ?? '{}'));
 
-      expect(firstCreateBody.startMs).toBe(0);
-      expect(firstCreateBody.endMs).toBe(90000);
-      expect(secondCreateBody.startMs).toBe(90000);
-      expect(secondCreateBody.endMs).toBe(180000);
+      expect(firstCreateBody.startMs).toBe(40000);
+      expect(firstCreateBody.endMs).toBe(80000);
+      expect(secondCreateBody.startMs).toBe(100000);
+      expect(secondCreateBody.endMs).toBe(140000);
     });
 
     vi.stubGlobal('Audio', originalAudio);
+  });
+
+  it('keeps a second lyric draft intact when the first lyric field is blurred and saved', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByPlaceholderText('lyrics')).toHaveLength(2);
+    });
+
+    const lyricAreas = screen.getAllByPlaceholderText('lyrics') as HTMLTextAreaElement[];
+    fireEvent.change(lyricAreas[0], { target: { value: 'Updated line 1' } });
+    fireEvent.change(lyricAreas[1], { target: { value: 'Updated line 2 draft' } });
+    fireEvent.blur(lyricAreas[0], { target: { value: 'Updated line 1' } });
+
+    await waitFor(() => {
+      const patchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/') && init?.method === 'PATCH'
+      );
+      expect(patchCalls.length).toBeGreaterThan(0);
+    });
+
+    const patchCalls = mockFetch.mock.calls.filter(
+      ([url, init]) => String(url).includes('/api/songs/song-1/segments/') && init?.method === 'PATCH'
+    );
+    const firstPatchBody = JSON.parse(String(patchCalls.at(-1)?.[1]?.body ?? '{}'));
+
+    expect(firstPatchBody.lyricText).toBe('Updated line 1');
+    expect((screen.getAllByPlaceholderText('lyrics')[1] as HTMLTextAreaElement).value).toBe('Updated line 2 draft');
+
+    const segmentGetCalls = mockFetch.mock.calls.filter(
+      ([url, init]) => String(url).includes('/api/songs/song-1/segments') && (init?.method ?? 'GET') === 'GET'
+    );
+    expect(segmentGetCalls).toHaveLength(1);
   });
 
   it('probes proxy audio URL for duration before first play when direct probe fails', async () => {
@@ -343,7 +534,7 @@ describe('SegmentEditor', () => {
         return {
           ok: true,
           json: async () => ({
-            audioUrl: 'https://pub-example.r2.dev/users/default/audio/song-1/test.mp3',
+            audioUrl: '/audio/song-1/test.mp3',
             title: 'My Song',
           }),
         } as Response;
@@ -439,6 +630,9 @@ describe('SegmentEditor', () => {
     });
 
     fireEvent.click(screen.getByTestId('segment-editor-play-toggle'));
+    expect(play).toHaveBeenCalledWith(2000, 60000);
+
+    fireEvent.click(screen.getByTestId('segment-editor-bottom-play-toggle'));
     expect(play).toHaveBeenCalledWith(2000, 60000);
   });
 
@@ -563,6 +757,90 @@ describe('SegmentEditor', () => {
     expect(seek).toHaveBeenCalledWith(15000);
   });
 
+  it('seeks when clicking an empty area of the section board', async () => {
+    const seek = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek,
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    const board = await screen.findByTestId('segment-editor-board');
+    vi.spyOn(board, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 560,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 560,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.click(board, { clientX: 500 });
+
+    expect(seek).toHaveBeenCalledWith(30000);
+  });
+
+  it('does not seek when clicking on a section block', async () => {
+    const seek = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek,
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    const segment = await screen.findByTestId('segment-block-seg-1');
+    fireEvent.click(segment);
+
+    expect(seek).not.toHaveBeenCalled();
+  });
+
   it('saves selected label changes via patch on blur', async () => {
     render(<SegmentEditor songId="song-1" />);
 
@@ -676,7 +954,7 @@ describe('SegmentEditor', () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-1/segments');
+      expect(mockFetch).toHaveBeenCalledWith('/api/songs/song-1/segments', expect.objectContaining({ cache: 'no-store' }));
     });
 
     fireEvent.click(screen.getByTestId('segment-editor-new-section'));
@@ -809,5 +1087,406 @@ describe('SegmentEditor', () => {
     const style = playhead.getAttribute('style') ?? '';
     expect(style).toMatch(/left/);
     expect(style).not.toBe('left: 0%');
+  });
+
+  it('updates playback rate from answer-key controls', async () => {
+    const setPlaybackRate = vi.fn();
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 10000,
+      durationMs: 60000,
+      playbackRate: 1,
+      setPlaybackRate,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('segment-editor-playback-rate')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+
+    expect(screen.getByTestId('segment-editor-playback-rate')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('segment-editor-playback-rate'), { target: { value: '0.5' } });
+    expect(setPlaybackRate).toHaveBeenCalledWith(0.5);
+  });
+
+  it('records contour taps and saves them to the matching segment', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackRate: 1,
+      setPlaybackRate: vi.fn(),
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('segment-editor-contour-tapbar')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+
+    const tapBar = screen.getByTestId('segment-editor-contour-tapbar');
+    expect(tapBar).toHaveClass('tap-input-surface');
+    expect(tapBar).toHaveClass('h-[calc(100svh-8rem)]');
+    expect(tapBar).toHaveClass('w-[calc(100%-3rem)]');
+    expect(tapBar).toHaveClass('lg:h-[calc(100dvh-12rem)]');
+    expect(fireEvent.contextMenu(tapBar)).toBe(false);
+    expect(fireEvent.doubleClick(tapBar)).toBe(false);
+    expect(screen.getByTestId('segment-editor-recording-card')).toBeInTheDocument();
+    expect(screen.getByTestId('segment-editor-recording-next')).toBeInTheDocument();
+    expect(screen.queryByTestId('segment-editor-board')).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(tapBar, { pointerId: 31, clientY: 40 });
+    fireEvent.pointerUp(tapBar, { pointerId: 31, clientY: 44 });
+
+    expect(screen.getByTestId('segment-editor-contour-draft-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('segment-editor-focused-contour-note')).toBeInTheDocument();
+    expect(screen.getByTestId('segment-editor-focused-contour-dot')).toHaveTextContent('S');
+
+    const recordingCard = screen.getByTestId('segment-editor-recording-card');
+    vi.spyOn(recordingCard, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 200,
+      toJSON: () => ({}),
+    });
+    const draftDot = screen.getByTestId('segment-editor-focused-contour-dot');
+    fireEvent.pointerDown(draftDot, { pointerId: 41, clientY: 180 });
+    fireEvent.pointerMove(draftDot, { pointerId: 41, clientY: 20, buttons: 1 });
+
+    expect(screen.getByTestId('segment-editor-focused-contour-note')).toHaveStyle({ top: '10%' });
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+
+    expect(screen.queryByTestId('segment-editor-contour-tapbar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('segment-editor-playback-rate')).not.toBeInTheDocument();
+    expect(screen.getByTestId('segment-editor-recording-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('segment-editor-board')).not.toBeInTheDocument();
+    expect(screen.getByTestId('segment-editor-contour-record-toggle')).toHaveTextContent('Resume recording');
+
+    fireEvent.pointerDown(draftDot, { pointerId: 42, clientY: 20 });
+    fireEvent.pointerMove(draftDot, { pointerId: 42, clientY: 100, buttons: 1 });
+
+    expect(screen.getByTestId('segment-editor-focused-contour-note')).toHaveStyle({ top: '50%' });
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-save'));
+
+    await waitFor(() => {
+      const contourPatchCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith('/api/songs/song-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(contourPatchCall).toBeTruthy();
+      const body = JSON.parse(String(contourPatchCall?.[1]?.body ?? '{}'));
+      expect(Array.isArray(body.pitchContourNotes)).toBe(true);
+      expect(body.pitchContourNotes.length).toBe(1);
+      expect(body.pitchContourNotes[0].absoluteMs).toBe(5000);
+      expect(body.pitchContourNotes[0].durationMs).toBe(80);
+    });
+    expect(await screen.findByTestId('segment-editor-contour-save-message')).toHaveTextContent('Saved 1 answer key point.');
+  });
+
+  it('saves contour passes with the active user header', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackRate: 1,
+      setPlaybackRate: vi.fn(),
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" userId="test-user-vwzm4k" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+    const tapBar = screen.getByTestId('segment-editor-contour-tapbar');
+    fireEvent.pointerDown(tapBar, { pointerId: 31, clientY: 40 });
+    fireEvent.pointerUp(tapBar, { pointerId: 31, clientY: 44 });
+    fireEvent.click(screen.getByTestId('segment-editor-contour-save'));
+
+    await waitFor(() => {
+      const contourPatchCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith('/api/songs/song-1') &&
+          init?.method === 'PATCH' &&
+          String(init?.body ?? '').includes('pitchContourNotes')
+      );
+      expect(new Headers(contourPatchCall?.[1]?.headers).get('X-User-ID')).toBe('test-user-vwzm4k');
+    });
+  });
+
+  it('autosaves contour taps after they are captured', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackRate: 1,
+      setPlaybackRate: vi.fn(),
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+    const tapBar = screen.getByTestId('segment-editor-contour-tapbar');
+    fireEvent.pointerDown(tapBar, { pointerId: 31, clientY: 40 });
+    fireEvent.pointerUp(tapBar, { pointerId: 31, clientY: 44 });
+
+    await waitFor(
+      () => {
+        const contourPatchCall = mockFetch.mock.calls.find(
+          ([url, init]) =>
+            String(url).endsWith('/api/songs/song-1') &&
+            init?.method === 'PATCH' &&
+            String(init?.body ?? '').includes('pitchContourNotes')
+        );
+        expect(contourPatchCall).toBeTruthy();
+        const body = JSON.parse(String(contourPatchCall?.[1]?.body ?? '{}'));
+        expect(body.pitchContourNotes).toHaveLength(1);
+      },
+      { timeout: 2000 }
+    );
+
+    expect(await screen.findByTestId('segment-editor-contour-save-message')).toHaveTextContent('Answer key autosaved.');
+  });
+
+  it('clears and autosaves taps for the focused section', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({
+            audioUrl: '/audio/song.mp3',
+            title: 'My Song',
+            pitchContourNotes: [
+              { id: 'n-1', absoluteMs: 5000, durationMs: 80, lane: 0.2 },
+              { id: 'n-2', absoluteMs: 25000, durationMs: 80, lane: 0.8 },
+            ],
+          }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => sampleSegments,
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({ error: 'Unexpected request' }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-clear-segment'));
+
+    await waitFor(
+      () => {
+        const contourPatchCall = mockFetch.mock.calls.find(
+          ([url, init]) =>
+            String(url).endsWith('/api/songs/song-1') &&
+            init?.method === 'PATCH' &&
+            String(init?.body ?? '').includes('pitchContourNotes')
+        );
+        expect(contourPatchCall).toBeTruthy();
+        const body = JSON.parse(String(contourPatchCall?.[1]?.body ?? '{}'));
+        expect(body.pitchContourNotes).toEqual([
+          { id: 'n-2', absoluteMs: 25000, durationMs: 80, lane: 0.8 },
+        ]);
+      },
+      { timeout: 2000 }
+    );
+  });
+
+  it('shows the server error when contour pass saving is rejected', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 60000,
+      playbackRate: 1,
+      setPlaybackRate: vi.fn(),
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    });
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '/audio/song.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'PATCH') {
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({ error: 'Pitch contour notes cannot exceed 2000 points' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => sampleSegments,
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({ error: 'Unexpected request' }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-contour-record-toggle')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-contour-record-toggle'));
+    const tapBar = screen.getByTestId('segment-editor-contour-tapbar');
+    fireEvent.pointerDown(tapBar, { pointerId: 31, clientY: 40 });
+    fireEvent.pointerUp(tapBar, { pointerId: 31, clientY: 44 });
+    fireEvent.click(screen.getByTestId('segment-editor-contour-save'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Pitch contour notes cannot exceed 2000 points');
   });
 });

@@ -1,9 +1,10 @@
-import { eq, asc, desc, inArray, and, count } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, count, lte, sql } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow } from "./schema";
 
 const DEFAULT_QUERY_USER_ID = "default";
+let ensureTapPracticeTablesPromise: Promise<void> | null = null;
 
 export type PersistedMemoryRating = 1 | 2 | 3 | 4 | 5;
 
@@ -14,11 +15,36 @@ export interface PersistedSegmentRating {
   ratedAt: string;
 }
 
+export interface PersistedTapPracticeTap {
+  id: string;
+  noteId: string;
+  segmentId: string;
+  timeOffsetMs: number;
+  durationMs: number;
+  lane: number;
+  createdAt: string;
+}
+
+export interface PersistedTapPracticeSessionSummary {
+  id: string;
+  songId: string;
+  startedAt: string;
+  tapCount: number;
+}
+
+export interface PersistedTapPracticeSessionDetail {
+  id: string;
+  songId: string;
+  startedAt: string;
+  taps: PersistedTapPracticeTap[];
+}
+
 export interface PlaylistSongItem {
   id: string;
   title: string;
   artist?: string;
   audioUrl: string;
+  pitchContourNotes: SongRow["pitchContourNotes"];
   ratingCount: number;
   segments: SegmentRow[];
   createdAt: string;
@@ -150,6 +176,91 @@ function isMissingUsersTableError(error: unknown): boolean {
   return false;
 }
 
+function isMissingTapPracticeTableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const mentionsTapTables =
+    message.includes("tap_practice_sessions") ||
+    message.includes("tap_practice_taps") ||
+    (message.includes("tap_practice") && message.includes("does not exist"));
+
+  if (mentionsTapTables && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    const causeMentionsTapTables =
+      causeMessage.includes("tap_practice_sessions") ||
+      causeMessage.includes("tap_practice_taps") ||
+      causeMessage.includes("tap_practice");
+
+    if (causeCode === "42P01" && causeMentionsTapTables) {
+      return true;
+    }
+
+    if (causeMentionsTapTables && causeMessage.includes("does not exist")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function ensureTapPracticeTables(): Promise<void> {
+  if (!ensureTapPracticeTablesPromise) {
+    ensureTapPracticeTablesPromise = (async () => {
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "tap_practice_sessions" (
+          "id" text PRIMARY KEY NOT NULL,
+          "user_id" text NOT NULL DEFAULT 'default',
+          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
+          "started_at" timestamp NOT NULL DEFAULT now()
+        )
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "tap_practice_taps" (
+          "id" text PRIMARY KEY NOT NULL,
+          "session_id" text NOT NULL REFERENCES "tap_practice_sessions"("id") ON DELETE cascade,
+          "segment_id" text NOT NULL REFERENCES "segments"("id") ON DELETE cascade,
+          "note_id" text NOT NULL,
+          "time_offset_ms" integer NOT NULL,
+          "duration_ms" integer NOT NULL,
+          "lane_milli" integer NOT NULL,
+          "created_at" timestamp NOT NULL DEFAULT now()
+        )
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_started_at"
+          ON "tap_practice_sessions" ("user_id", "started_at")
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_song_started_at"
+          ON "tap_practice_sessions" ("user_id", "song_id", "started_at")
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_taps_session_created_at"
+          ON "tap_practice_taps" ("session_id", "created_at")
+      `));
+    })().catch((error) => {
+      ensureTapPracticeTablesPromise = null;
+      throw error;
+    });
+  }
+
+  await ensureTapPracticeTablesPromise;
+}
+
 // ── Users ─────────────────────────────────────────────────────────────────
 
 export async function getAllUsers(): Promise<Array<{ id: string; name: string }>> {
@@ -200,6 +311,23 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
     primaryError = error;
   }
 
+  if (isMissingPitchContourNotesColumnError(primaryError)) {
+    return db()
+      .select({
+        id: songs.id,
+        userId: songs.userId,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        createdAt: songs.createdAt,
+        lastPracticedAt: songs.lastPracticedAt,
+      })
+      .from(songs)
+      .where(eq(songs.userId, userId))
+      .orderBy(desc(songs.createdAt))
+      .then((rows) => rows.map((row) => ({ ...row, pitchContourNotes: [] } as SongRow)));
+  }
+
   if (isMissingUserIdColumnError(primaryError)) {
     try {
       const legacyRows = await db()
@@ -214,7 +342,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
         .from(songs)
         .orderBy(desc(songs.createdAt));
 
-      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID } as SongRow));
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, pitchContourNotes: [] } as SongRow));
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -231,7 +359,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
         .from(songs)
         .orderBy(desc(songs.createdAt));
 
-      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null } as SongRow));
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
     }
   }
 
@@ -249,7 +377,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
       .where(eq(songs.userId, userId))
       .orderBy(desc(songs.createdAt));
 
-    return legacyRows.map((row) => ({ ...row, lastPracticedAt: null } as SongRow));
+    return legacyRows.map((row) => ({ ...row, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
   } catch {
     throw primaryError;
   }
@@ -271,6 +399,25 @@ export async function getSongById(
     primaryError = error;
   }
 
+  if (isMissingPitchContourNotesColumnError(primaryError)) {
+    const rows = await db()
+      .select({
+        id: songs.id,
+        userId: songs.userId,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        createdAt: songs.createdAt,
+        lastPracticedAt: songs.lastPracticedAt,
+      })
+      .from(songs)
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
+      .limit(1);
+
+    const row = rows[0];
+    return row ? ({ ...row, pitchContourNotes: [] } as SongRow) : undefined;
+  }
+
   if (isMissingUserIdColumnError(primaryError)) {
     try {
       const rows = await db()
@@ -289,7 +436,7 @@ export async function getSongById(
       if (!row) {
         return undefined;
       }
-      return { ...row, userId: DEFAULT_QUERY_USER_ID } as SongRow;
+      return { ...row, userId: DEFAULT_QUERY_USER_ID, pitchContourNotes: [] } as SongRow;
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -312,7 +459,7 @@ export async function getSongById(
         return undefined;
       }
 
-      return { ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null } as SongRow;
+      return { ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
     }
   }
 
@@ -335,7 +482,7 @@ export async function getSongById(
       return undefined;
     }
 
-    return { ...row, lastPracticedAt: null } as SongRow;
+    return { ...row, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
   } catch {
     throw primaryError;
   }
@@ -392,13 +539,33 @@ export async function updateSongAudioKey(
 
 export async function updateSong(
   id: string,
-  updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist'>>,
+  updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist' | 'pitchContourNotes'>>,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
-  await db()
-    .update(songs)
-    .set(updates)
-    .where(and(eq(songs.id, id), eq(songs.userId, userId)));
+  try {
+    await db()
+      .update(songs)
+      .set(updates)
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)));
+  } catch (error) {
+    if (!isMissingPitchContourNotesColumnError(error)) {
+      throw error;
+    }
+
+    const { pitchContourNotes: _pitchContourNotes, ...legacyUpdates } = updates;
+    if (Object.keys(legacyUpdates).length === 0) {
+      const migrationError = new Error(
+        'Song pitch contour notes require database migration 0008_song_timeline_contour.sql before they can be saved.'
+      ) as Error & { code?: string };
+      migrationError.code = 'SONG_PITCH_CONTOUR_MIGRATION_REQUIRED';
+      throw migrationError;
+    }
+
+    await db()
+      .update(songs)
+      .set(legacyUpdates)
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)));
+  }
 }
 
 export async function markSongPracticed(
@@ -832,6 +999,298 @@ export async function deleteRatingsForSong(
     .where(inArray(practiceRatings.segmentId, songSegments.map((segment) => segment.id)));
 }
 
+// ── Tap Practice ─────────────────────────────────────────────────────────
+
+function mapTapPracticeSession(row: Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">): PersistedTapPracticeSessionSummary {
+  return {
+    id: row.id,
+    songId: row.songId,
+    startedAt: row.startedAt.toISOString(),
+    tapCount: 0,
+  };
+}
+
+function laneToMilli(lane: number): number {
+  return Math.max(0, Math.min(1000, Math.round(lane * 1000)));
+}
+
+function laneFromMilli(laneMilli: number): number {
+  return Math.max(0, Math.min(1, laneMilli / 1000));
+}
+
+export async function deleteExpiredTapPracticeData(
+  userId: string = DEFAULT_QUERY_USER_ID,
+  cutoff: Date = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+): Promise<void> {
+  try {
+    await db()
+      .delete(tapPracticeSessions)
+      .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .delete(tapPracticeSessions)
+        .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function createTapPracticeSession(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  startedAt: Date = new Date()
+): Promise<PersistedTapPracticeSessionSummary> {
+  try {
+    const rows = await db()
+      .insert(tapPracticeSessions)
+      .values({
+        id: crypto.randomUUID(),
+        userId,
+        songId,
+        startedAt,
+      })
+      .returning();
+
+    return mapTapPracticeSession(rows[0]);
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      const rows = await db()
+        .insert(tapPracticeSessions)
+        .values({
+          id: crypto.randomUUID(),
+          userId,
+          songId,
+          startedAt,
+        })
+        .returning();
+
+      return mapTapPracticeSession(rows[0]);
+    }
+    throw error;
+  }
+}
+
+export async function addTapPracticeTap(
+  sessionId: string,
+  data: {
+    segmentId: string;
+    noteId: string;
+    timeOffsetMs: number;
+    durationMs: number;
+    lane: number;
+  }
+): Promise<void> {
+  try {
+    await db()
+      .insert(tapPracticeTaps)
+      .values({
+        id: crypto.randomUUID(),
+        sessionId,
+        segmentId: data.segmentId,
+        noteId: data.noteId,
+        timeOffsetMs: data.timeOffsetMs,
+        durationMs: data.durationMs,
+        laneMilli: laneToMilli(data.lane),
+        createdAt: new Date(),
+      });
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .insert(tapPracticeTaps)
+        .values({
+          id: crypto.randomUUID(),
+          sessionId,
+          segmentId: data.segmentId,
+          noteId: data.noteId,
+          timeOffsetMs: data.timeOffsetMs,
+          durationMs: data.durationMs,
+          laneMilli: laneToMilli(data.lane),
+          createdAt: new Date(),
+        });
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function deleteTapPracticeSessionsForSong(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<void> {
+  try {
+    await db()
+      .delete(tapPracticeSessions)
+      .where(and(eq(tapPracticeSessions.songId, songId), eq(tapPracticeSessions.userId, userId)));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .delete(tapPracticeSessions)
+        .where(and(eq(tapPracticeSessions.songId, songId), eq(tapPracticeSessions.userId, userId)));
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function listTapPracticeSessionsForSong(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  limit: number = 20
+): Promise<PersistedTapPracticeSessionSummary[]> {
+  let sessions: Array<Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">> = [];
+  try {
+    sessions = await db()
+      .select({
+        id: tapPracticeSessions.id,
+        songId: tapPracticeSessions.songId,
+        startedAt: tapPracticeSessions.startedAt,
+      })
+      .from(tapPracticeSessions)
+      .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+      .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
+      .orderBy(desc(tapPracticeSessions.startedAt));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      sessions = await db()
+        .select({
+          id: tapPracticeSessions.id,
+          songId: tapPracticeSessions.songId,
+          startedAt: tapPracticeSessions.startedAt,
+        })
+        .from(tapPracticeSessions)
+        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+        .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
+        .orderBy(desc(tapPracticeSessions.startedAt));
+    } else {
+      throw error;
+    }
+  }
+
+  const selectedSessions = sessions.slice(0, Math.max(1, limit));
+  if (selectedSessions.length === 0) {
+    return [];
+  }
+
+  const sessionIds = selectedSessions.map((row) => row.id);
+  let tapRows: Array<{ sessionId: string }> = [];
+  try {
+    tapRows = await db()
+      .select({ sessionId: tapPracticeTaps.sessionId })
+      .from(tapPracticeTaps)
+      .where(inArray(tapPracticeTaps.sessionId, sessionIds));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      tapRows = await db()
+        .select({ sessionId: tapPracticeTaps.sessionId })
+        .from(tapPracticeTaps)
+        .where(inArray(tapPracticeTaps.sessionId, sessionIds));
+    } else {
+      throw error;
+    }
+  }
+
+  const tapCountBySession = tapRows.reduce<Record<string, number>>((accumulator, row) => {
+    accumulator[row.sessionId] = (accumulator[row.sessionId] ?? 0) + 1;
+    return accumulator;
+  }, {});
+
+  return selectedSessions.map((row) => ({
+    ...mapTapPracticeSession(row),
+    tapCount: tapCountBySession[row.id] ?? 0,
+  }));
+}
+
+export async function getTapPracticeSessionDetail(
+  sessionId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedTapPracticeSessionDetail | null> {
+  let sessionRows: Array<Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">> = [];
+  try {
+    sessionRows = await db()
+      .select({
+        id: tapPracticeSessions.id,
+        songId: tapPracticeSessions.songId,
+        startedAt: tapPracticeSessions.startedAt,
+      })
+      .from(tapPracticeSessions)
+      .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+      .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
+      .limit(1);
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      sessionRows = await db()
+        .select({
+          id: tapPracticeSessions.id,
+          songId: tapPracticeSessions.songId,
+          startedAt: tapPracticeSessions.startedAt,
+        })
+        .from(tapPracticeSessions)
+        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+        .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
+        .limit(1);
+    } else {
+      throw error;
+    }
+  }
+
+  const sessionRow = sessionRows[0];
+  if (!sessionRow) {
+    return null;
+  }
+
+  let taps: Array<{
+    id: string;
+    noteId: string;
+    segmentId: string;
+    timeOffsetMs: number;
+    durationMs: number;
+    laneMilli: number;
+    createdAt: Date;
+  }> = [];
+  try {
+    taps = await db()
+      .select()
+      .from(tapPracticeTaps)
+      .where(eq(tapPracticeTaps.sessionId, sessionId))
+      .orderBy(asc(tapPracticeTaps.createdAt));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      taps = await db()
+        .select()
+        .from(tapPracticeTaps)
+        .where(eq(tapPracticeTaps.sessionId, sessionId))
+        .orderBy(asc(tapPracticeTaps.createdAt));
+    } else {
+      throw error;
+    }
+  }
+
+  return {
+    id: sessionRow.id,
+    songId: sessionRow.songId,
+    startedAt: sessionRow.startedAt.toISOString(),
+    taps: taps.map((tap) => ({
+      id: tap.id,
+      noteId: tap.noteId,
+      segmentId: tap.segmentId,
+      timeOffsetMs: tap.timeOffsetMs,
+      durationMs: tap.durationMs,
+      lane: laneFromMilli(tap.laneMilli),
+      createdAt: tap.createdAt.toISOString(),
+    })),
+  };
+}
+
 // ── Playlists ─────────────────────────────────────────────────────────────
 
 function toIso(value: Date | null): string {
@@ -948,6 +1407,7 @@ export async function getPlaylistById(
     title: string;
     artist: string | null;
     audioKey: string | null;
+    pitchContourNotes: SongRow["pitchContourNotes"];
     createdAt: Date | null;
     lastPracticedAt: Date | null;
   }>;
@@ -960,6 +1420,7 @@ export async function getPlaylistById(
         title: songs.title,
         artist: songs.artist,
         audioKey: songs.audioKey,
+        pitchContourNotes: songs.pitchContourNotes,
         createdAt: songs.createdAt,
         lastPracticedAt: songs.lastPracticedAt,
       })
@@ -968,7 +1429,7 @@ export async function getPlaylistById(
       .where(and(eq(playlistSongs.playlistId, id), eq(songs.userId, playlist.userId)))
       .orderBy(asc(playlistSongs.position));
   } catch (error) {
-    if (!isMissingUserIdColumnError(error)) {
+    if (!isMissingUserIdColumnError(error) && !isMissingPitchContourNotesColumnError(error)) {
       throw error;
     }
 
@@ -980,6 +1441,7 @@ export async function getPlaylistById(
         title: songs.title,
         artist: songs.artist,
         audioKey: songs.audioKey,
+        pitchContourNotes: sql<SongRow["pitchContourNotes"]>`'[]'::jsonb`,
         createdAt: songs.createdAt,
         lastPracticedAt: songs.lastPracticedAt,
       })
@@ -1002,6 +1464,7 @@ export async function getPlaylistById(
     title: songRow.title,
     artist: songRow.artist ?? undefined,
     audioUrl: songRow.audioKey ?? "",
+    pitchContourNotes: songRow.pitchContourNotes ?? [],
     ratingCount: ratingCounts[songRow.songId] ?? 0,
     segments: segmentsBySong[i],
     createdAt: toIso(songRow.createdAt),

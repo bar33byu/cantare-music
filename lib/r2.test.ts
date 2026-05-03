@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sendMock = vi.fn();
 const deleteObjectCommandCalls: unknown[] = [];
+const s3ClientConfigCalls: unknown[] = [];
 
 class S3ClientMock {
   send = sendMock;
 
-  constructor(_config?: unknown) {}
+  constructor(config?: unknown) {
+    s3ClientConfigCalls.push(config);
+  }
 }
 
 class DeleteObjectCommandMock {
@@ -28,6 +31,7 @@ describe('r2 helpers', () => {
     vi.clearAllMocks();
     vi.resetModules();
     deleteObjectCommandCalls.length = 0;
+    s3ClientConfigCalls.length = 0;
 
     process.env.R2_PUBLIC_URL = 'https://cdn.example.com';
     process.env.R2_BUCKET_NAME = 'cantare-audio';
@@ -62,16 +66,29 @@ describe('r2 helpers', () => {
   it('getPublicUrl does not use private R2_ENDPOINT for browser playback', async () => {
     process.env.R2_PUBLIC_URL = '';
     process.env.R2_PUBLIC_BASE_URL = '';
-    process.env.R2_PUBLIC_BASE_UR = '';
     process.env.R2_ENDPOINT = 'https://acct123.r2.cloudflarestorage.com';
     const { getPublicUrl } = await import('./r2');
 
     expect(getPublicUrl('audio/song-1/file.mp3')).toBe('/api/audio/audio/song-1/file.mp3');
   });
 
-  it('generateUploadKey returns string scoped by user namespace', async () => {
+  it('uses account-based R2 endpoint when R2_ENDPOINT is blank', async () => {
+    process.env.R2_ENDPOINT = '';
+    process.env.R2_ACCOUNT_ID = 'acct123';
+
+    await import('./r2');
+
+    expect(s3ClientConfigCalls[0]).toMatchObject({
+      endpoint: 'https://acct123.r2.cloudflarestorage.com',
+      forcePathStyle: true,
+      region: 'auto',
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+    });
+  });
+
+  it('generateUploadKey returns string starting with audio/', async () => {
     const { generateUploadKey } = await import('./r2');
-    expect(generateUploadKey('user-1', 'song-1', 'clip.mp3')).toMatch(/^users\/user-1\/audio\//);
+    expect(generateUploadKey('song-1', 'clip.mp3')).toMatch(/^audio\//);
   });
 
   it('deleteObject calls S3Client.send with DeleteObjectCommand', async () => {
