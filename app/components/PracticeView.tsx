@@ -133,6 +133,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const lastSyncedSegmentIdRef = React.useRef<string | null>(initialSegmentId);
   const previousSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
   const lastSavedRatingsRef = React.useRef<string>("unloaded");
+  const sessionRatingsRef = React.useRef(initialSession.ratings);
   const [transitionDirection, setTransitionDirection] = React.useState<"forward" | "backward">("forward");
   const [transitionToken, setTransitionToken] = React.useState(0);
   const [ratingsLoading, setRatingsLoading] = React.useState(true);
@@ -218,7 +219,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
-  const currentAttemptNotes = currentSegment ? (tapAttemptsBySegment[currentSegment.id] ?? []) : [];
+  const currentAttemptNotes = useMemo(
+    () => (currentSegment ? (tapAttemptsBySegment[currentSegment.id] ?? []) : []),
+    [currentSegment, tapAttemptsBySegment]
+  );
   const currentSegmentPitchContourNotes = useMemo(
     () => (currentSegment ? getSegmentPitchContourNotes(song.pitchContourNotes, currentSegment) : []),
     [currentSegment, song.pitchContourNotes]
@@ -470,6 +474,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     segmentIndexRef.current = session.currentSegmentIndex;
   }, [session.currentSegmentIndex]);
 
+  useEffect(() => {
+    sessionRatingsRef.current = session.ratings;
+  }, [session.ratings]);
+
   const flushPlayedTime = React.useCallback(() => {
     if (playbackStartedAtRef.current === null) {
       return;
@@ -719,11 +727,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               dispatch({ type: "LOAD_RATINGS", ratings: Array.isArray(queuedRatings) ? queuedRatings : [] });
               lastSavedRatingsRef.current = queuedSnapshot;
             } catch {
-              lastSavedRatingsRef.current = JSON.stringify(session.ratings);
+              lastSavedRatingsRef.current = JSON.stringify(sessionRatingsRef.current);
             }
           } else {
             // Load failed — treat existing state as already saved to avoid erasing server data
-            lastSavedRatingsRef.current = JSON.stringify(session.ratings);
+            lastSavedRatingsRef.current = JSON.stringify(sessionRatingsRef.current);
           }
           setRatingsError('Could not load previous ratings. Practice is still available.');
         }
@@ -1006,7 +1014,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     });
 
     activeTapCaptureRef.current = null;
-  }, [currentMs, currentSegment, queuePersistedTap, showAccuracyToast]);
+  }, [currentMs, currentSegment, currentSegmentPitchContourNotes, queuePersistedTap, showAccuracyToast]);
 
   const clearCurrentSegmentTaps = React.useCallback(() => {
     if (!currentSegment) {
@@ -1199,7 +1207,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay]);
+});
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
@@ -1253,9 +1261,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     getSegmentStartWithPreroll,
     isLooping,
     isPlaying,
-    play,
+    requestPlay,
     showAccuracyToast,
     tapAttemptsBySegment,
+    currentSegmentPitchContourNotes,
   ]);
 
   useEffect(() => {

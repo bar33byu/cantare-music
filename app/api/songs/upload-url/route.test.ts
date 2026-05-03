@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
-import { r2Client, generateUploadKey } from '../../../../lib/r2';
+import { generateUploadKey } from '../../../../lib/r2';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getSongById } from '../../../../db/queries';
 

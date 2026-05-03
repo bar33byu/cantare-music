@@ -5,6 +5,17 @@ interface SongFormProps {
   onSuccess: (songId: string) => void;
 }
 
+function getErrorMessage(payload: unknown, fallback: string) {
+  return (
+    payload &&
+    typeof payload === 'object' &&
+    'error' in payload &&
+    typeof payload.error === 'string'
+  )
+    ? payload.error
+    : fallback;
+}
+
 export function SongForm({ onSuccess }: SongFormProps) {
   const [title, setTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -63,7 +74,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
         if (!updateResponse.ok) {
           const updateError = await updateResponse.json().catch(() => null);
-          const msg = (updateError && (updateError as any).error) || 'Failed to update song with audio key';
+          const msg = getErrorMessage(updateError, 'Failed to update song with audio key');
           throw new Error(msg);
         }
       }

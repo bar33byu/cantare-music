@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type MouseEvent, type SyntheticEvent } from "react";
+import { useCallback, useMemo, useState, type MouseEvent, type SyntheticEvent } from "react";
 import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
 import { buildProxyAudioUrl, parseAudioKey } from "../lib/audioUrls";
 import type { Segment } from "../types";
@@ -61,6 +61,11 @@ type FetchProbeState = {
 
 let audioPlayerMountCounter = 0;
 
+function getNextAudioPlayerMountId() {
+  audioPlayerMountCounter += 1;
+  return audioPlayerMountCounter;
+}
+
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -76,7 +81,6 @@ export function AudioPlayer({
   segmentEndMs,
   isPlaying,
   isReady,
-  playbackError,
   debugInfo,
   transportDebug,
   onPlayPause,
@@ -109,11 +113,7 @@ export function AudioPlayer({
     contentRange: null,
     checkedAt: null,
   });
-  const mountIdRef = useRef(0);
-  if (mountIdRef.current === 0) {
-    audioPlayerMountCounter += 1;
-    mountIdRef.current = audioPlayerMountCounter;
-  }
+  const [mountId] = useState(getNextAudioPlayerMountId);
   const [localClickAck, setLocalClickAck] = useState({
     playButtonClicks: 0,
     debugPlayButtonClicks: 0,
@@ -291,17 +291,6 @@ export function AudioPlayer({
     void runProxyFetchProbe();
   }, [runProxyFetchProbe]);
 
-  if (!audioUrl) {
-    return (
-      <div
-        data-testid="audio-player-no-audio"
-        className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-      >
-        This song does not have an audio file yet.
-      </div>
-    );
-  }
-
   const safeDurationMs = Math.max(durationMs, segmentEndMs);
   const segmentWidth = safeDurationMs > 0 ? ((segmentEndMs - segmentStartMs) / safeDurationMs) * 100 : 0;
   const segmentOffset = safeDurationMs > 0 ? (segmentStartMs / safeDurationMs) * 100 : 0;
@@ -320,6 +309,17 @@ export function AudioPlayer({
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
     onSeekSong(Math.round(ratio * safeDurationMs));
   }, [onSeekSong, safeDurationMs]);
+
+  if (!audioUrl) {
+    return (
+      <div
+        data-testid="audio-player-no-audio"
+        className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+      >
+        This song does not have an audio file yet.
+      </div>
+    );
+  }
 
   return (
     <div data-testid="audio-player" className="space-y-2">
@@ -534,7 +534,7 @@ export function AudioPlayer({
             <p data-testid="audio-debug-open">debugOpen: {String(isDebugOpen)}</p>
             <p data-testid="audio-debug-audio-url" className="break-all">audioUrl: {audioUrl}</p>
             <p data-testid="audio-debug-proxy-url" className="break-all">proxyAudioUrl: {proxyAudioUrl ?? "n/a"}</p>
-            <p data-testid="audio-debug-mount-id">audioPlayerMountId: {mountIdRef.current}</p>
+            <p data-testid="audio-debug-mount-id">audioPlayerMountId: {mountId}</p>
             <p data-testid="audio-debug-local-play-clicks">localPlayButtonClicks: {localClickAck.playButtonClicks}</p>
             <p data-testid="audio-debug-local-debug-play-clicks">localDebugPlayButtonClicks: {localClickAck.debugPlayButtonClicks}</p>
             <p data-testid="audio-debug-local-fetch-clicks">localFetchProbeButtonClicks: {localClickAck.fetchProbeButtonClicks}</p>

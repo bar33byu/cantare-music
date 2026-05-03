@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PracticeView from "./components/PracticeView";
 import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
@@ -20,8 +20,6 @@ interface SongListItem {
   createdAt: string;
   lastPracticedAt?: string | null;
 }
-
-type ViewMode = "list" | "practice" | "segment_editor" | "add";
 
 type AppView =
   | "library"
@@ -219,7 +217,7 @@ export default function Home() {
   const isApplyingHashRouteRef = useRef(false);
   const activeUserId = userSettings.currentUserId;
 
-  const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
+  const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     return {
       ...init,
       headers: {
@@ -227,12 +225,12 @@ export default function Home() {
         "X-User-ID": activeUserId,
       },
     };
-  };
+  }, [activeUserId]);
 
-  const request = (url: string, init?: RequestInit) => {
+  const request = useCallback((url: string, init?: RequestInit) => {
     const scopedInit = withUserHeader(init);
     return scopedInit ? fetch(url, scopedInit) : fetch(url);
-  };
+  }, [withUserHeader]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -356,23 +354,23 @@ export default function Home() {
     }
   };
 
-  const loadSongById = async (songId: string): Promise<Song | null> => {
+  const loadSongById = useCallback(async (songId: string): Promise<Song | null> => {
     const response = await request(`/api/songs/${songId}`);
     if (!response.ok) {
       return null;
     }
     return (await response.json()) as Song;
-  };
+  }, [request]);
 
-  const loadPlaylistById = async (playlistId: string): Promise<Playlist | null> => {
+  const loadPlaylistById = useCallback(async (playlistId: string): Promise<Playlist | null> => {
     const response = await request(`/api/playlists/${playlistId}`);
     if (!response.ok) {
       return null;
     }
     return (await response.json()) as Playlist;
-  };
+  }, [request]);
 
-  const applyHashRoute = async (hash: string) => {
+  const applyHashRoute = useCallback(async (hash: string) => {
     isApplyingHashRouteRef.current = true;
     try {
       const route = parseHashRoute(hash);
@@ -436,7 +434,7 @@ export default function Home() {
     } finally {
       isApplyingHashRouteRef.current = false;
     }
-  };
+  }, [loadPlaylistById, loadSongById]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -463,7 +461,7 @@ export default function Home() {
       window.removeEventListener("hashchange", onHashChange);
       window.removeEventListener("popstate", onPopState);
     };
-  }, []);
+  }, [applyHashRoute]);
 
   const currentHash = useMemo(() => {
     if (activeView === "song_practice" && selectedSong) {
@@ -533,12 +531,6 @@ export default function Home() {
     } catch (err) {
       console.error("Failed to load song:", err);
     }
-  };
-
-  const handleBackToList = () => {
-    setSelectedSong(null);
-    setRefreshTrigger((previous) => previous + 1);
-    setActiveView("library");
   };
 
   const refreshSelectedSong = async () => {

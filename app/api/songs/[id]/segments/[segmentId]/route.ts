@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSegmentsBySongId, updateSegment, deleteSegment, reorderSegments } from '../../../../../../db/queries';
 import { inferTimelineOrder } from '../../../../../lib/segmentTiming';
 import { validatePitchContourNotes } from '../../../../../lib/pitchContour';
+import type { SegmentRow } from '../../../../../../db/schema';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -70,7 +71,7 @@ export async function PATCH(
     }
 
     // Prepare updates object
-    const updates: Record<string, any> = {};
+    const updates: Partial<Pick<SegmentRow, 'label' | 'startMs' | 'endMs' | 'lyricText' | 'pitchContourNotes'>> = {};
     if (label !== undefined) updates.label = label;
     if (startMs !== undefined) updates.startMs = startMs;
     if (endMs !== undefined) updates.endMs = endMs;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 
 type PlaylistListItem = {
@@ -41,7 +41,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
   const latestFetchIdRef = useRef(0);
   const fetchControllerRef = useRef<AbortController | null>(null);
 
-  const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
+  const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     const scopedInit: RequestInit = {
       ...init,
       cache: 'no-store',
@@ -57,14 +57,14 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
     }
 
     return scopedInit;
-  };
+  }, [userId]);
 
-  const request = (url: string, init?: RequestInit) => {
+  const request = useCallback((url: string, init?: RequestInit) => {
     const scopedInit = withUserHeader(init);
     return scopedInit ? fetch(url, scopedInit) : fetch(url);
-  };
+  }, [withUserHeader]);
 
-  const fetchPlaylists = async (includeRetired: boolean) => {
+  const fetchPlaylists = useCallback(async (includeRetired: boolean) => {
     const fetchId = latestFetchIdRef.current + 1;
     latestFetchIdRef.current = fetchId;
     fetchControllerRef.current?.abort();
@@ -137,11 +137,11 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
         setLoading(false);
       }
     }
-  };
+  }, [request]);
 
   useEffect(() => {
     void fetchPlaylists(showArchived);
-  }, [showArchived, refreshTrigger, userId, refetchTrigger]);
+  }, [fetchPlaylists, showArchived, refreshTrigger, userId, refetchTrigger]);
 
   useEffect(() => {
     return () => {

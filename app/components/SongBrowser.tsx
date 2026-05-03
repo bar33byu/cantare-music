@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo } from 'react';
 import { getMasteryColor } from '../lib/masteryColors';
 import { SongReadinessIcons } from './SongReadinessIcons';
 
@@ -43,7 +43,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
 
-  const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
+  const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     if (!userId) {
       return init;
     }
@@ -55,7 +55,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
         'X-User-ID': userId,
       },
     };
-  };
+  }, [userId]);
 
   // Load persisted sort from localStorage on mount
   useEffect(() => {
@@ -133,11 +133,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
     });
   }, [songs, filterText, sort]);
 
-  useEffect(() => {
-    fetchSongs();
-  }, [refreshTrigger, userId]);
-
-  const fetchSongs = async () => {
+  const fetchSongs = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -161,7 +157,11 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
     } finally {
       setLoading(false);
     }
-  };
+  }, [refreshTrigger, withUserHeader]);
+
+  useEffect(() => {
+    void fetchSongs();
+  }, [fetchSongs]);
 
   const handleDeleteSong = async (song: SongListItem) => {
     const shouldDelete = window.confirm(`Delete \"${song.title}\"? This cannot be undone.`);

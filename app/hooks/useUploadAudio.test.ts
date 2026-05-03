@@ -108,7 +108,7 @@ describe('useUploadAudio', () => {
     await act(async () => {
       try {
         await result.current.upload('song-123', largeFile);
-      } catch (err) {
+      } catch {
         // Expected to throw
       }
     });
@@ -161,7 +161,7 @@ describe('useUploadAudio', () => {
     await act(async () => {
       try {
         await result.current.upload('song-123', file);
-      } catch (err) {
+      } catch {
         // Expected to throw
       }
     });

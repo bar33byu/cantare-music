@@ -276,6 +276,8 @@ export function useAudioPlayer(
       audioUrlChangeCountRef.current += 1;
       previousAudioUrlRef.current = audioUrl;
     }
+    // Audio element replacement needs an immediate UI reset before native events arrive.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsReady(false);
     setIsPlaying(false);
     setCurrentMs(0);
@@ -423,7 +425,7 @@ export function useAudioPlayer(
       audio.removeEventListener('pause', handlePauseDebug);
       audio.pause();
     };
-  }, [audioUrl]);
+  }, [applyCurrentTime, audioUrl, startPlayback, updateDebugInfo]);
 
   const play = useCallback((startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;

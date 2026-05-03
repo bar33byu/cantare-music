@@ -1,4 +1,4 @@
-import type { Segment, Song, PracticeSession, SegmentRating } from "../types/index";
+import type { Segment, Song, SegmentRating } from "../types/index";
 import type { SessionState } from "./sessionReducer";
 
 export function makeSegment(overrides?: Partial<Segment>): Segment {

@@ -2,12 +2,18 @@
 
 import { useState, useEffect } from "react";
 
+type DebugInfo = Record<string, unknown>;
+
+function getUnknownErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function DebugAudioPage() {
   const [key, setKey] = useState("audio/sample.mp3");
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<any | null>(null);
+  const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
 
   useEffect(() => {
     return () => {
@@ -30,21 +36,21 @@ export default function DebugAudioPage() {
       const resp = await fetch(`/api/audio/${segments}`);
       if (!resp.ok) {
         let bodyText = null;
-        try { bodyText = await resp.text(); } catch (e) { bodyText = null; }
+        try { bodyText = await resp.text(); } catch { bodyText = null; }
         let bodyJson = null;
-        try { bodyJson = bodyText ? JSON.parse(bodyText) : null; } catch (e) { bodyJson = null; }
+        try { bodyJson = bodyText ? JSON.parse(bodyText) : null; } catch { bodyJson = null; }
         const headers: Record<string,string> = {};
         resp.headers.forEach((v,k) => { headers[k] = v; });
 
         const info = { audioFetch: { status: resp.status, statusText: resp.statusText, bodyText, bodyJson, headers } };
-        setDebugInfo((prev: any) => ({ ...(prev || {}), ...info }));
+        setDebugInfo((prev) => ({ ...(prev || {}), ...info }));
 
         if (resp.status >= 500) {
           try {
             const dbgResp = await fetch(`/api/debug/r2?key=${segments}`);
             const dbgJson = await dbgResp.json();
-            setDebugInfo((prev: any) => ({ ...(prev || {}), r2Check: dbgJson }));
-          } catch (e) {
+            setDebugInfo((prev) => ({ ...(prev || {}), r2Check: dbgJson }));
+          } catch {
             // ignore
           }
         }
@@ -55,8 +61,8 @@ export default function DebugAudioPage() {
       const blob = await resp.blob();
       const objectUrl = URL.createObjectURL(blob);
       setUrl(objectUrl);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setError(getUnknownErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -77,8 +83,8 @@ export default function DebugAudioPage() {
       } else {
         setError(null);
       }
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setError(getUnknownErrorMessage(e));
     } finally {
       setLoading(false);
     }

@@ -1587,7 +1587,7 @@ export async function addSongToPlaylist(
   playlistId: string,
   songId: string,
   position?: number,
-  userId: string = DEFAULT_QUERY_USER_ID
+  _userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
   let nextPosition = position;
   if (nextPosition === undefined) {
@@ -1613,7 +1613,7 @@ export async function addSongToPlaylist(
 export async function removeSongFromPlaylist(
   playlistId: string,
   songId: string,
-  userId: string = DEFAULT_QUERY_USER_ID
+  _userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
   await db()
     .delete(playlistSongs)
@@ -1623,7 +1623,7 @@ export async function removeSongFromPlaylist(
 export async function reorderPlaylistSongs(
   playlistId: string,
   orderedSongIds: string[],
-  userId: string = DEFAULT_QUERY_USER_ID
+  _userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
   await Promise.all(
     orderedSongIds.map((songId, position) =>

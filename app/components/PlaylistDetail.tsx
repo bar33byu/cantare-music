@@ -1,6 +1,6 @@
 "use client";
 
-import { DragEvent, useEffect, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useState } from 'react';
 import type { Playlist, Song } from '../types';
 
 interface PlaylistDetailProps {
@@ -23,7 +23,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const [inlineCreatePending, setInlineCreatePending] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
 
-  const withUserHeader = (init?: RequestInit): RequestInit | undefined => {
+  const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     if (!userId) {
       return init;
     }
@@ -35,14 +35,14 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
         'X-User-ID': userId,
       },
     };
-  };
+  }, [userId]);
 
-  const request = (url: string, init?: RequestInit) => {
+  const request = useCallback((url: string, init?: RequestInit) => {
     const scopedInit = withUserHeader(init);
     return scopedInit ? fetch(url, scopedInit) : fetch(url);
-  };
+  }, [withUserHeader]);
 
-  const fetchPlaylist = async () => {
+  const fetchPlaylist = useCallback(async () => {
     const response = await request(`/api/playlists/${playlistId}`);
     if (!response.ok) {
       setPlaylist(null);
@@ -52,11 +52,11 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     const data = (await response.json()) as Playlist;
     setPlaylist(data);
     setLoading(false);
-  };
+  }, [playlistId, request]);
 
   useEffect(() => {
     void fetchPlaylist();
-  }, [playlistId, userId]);
+  }, [fetchPlaylist]);
 
   const openSongPicker = async () => {
     setPickerError(null);
