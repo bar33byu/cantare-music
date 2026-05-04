@@ -63,7 +63,8 @@ interface PlaylistPracticeViewProps {
   onSelectSong: (song: Playlist["songs"][number]) => void;
 }
 
-const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
+const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v2';
+const OLD_PLAYLIST_PRACTICE_CACHE_NAMES = ['cantare-playlist-practice-v1'];
 const AUDIO_CACHE_NAME = 'cantare-audio-v2';
 const AUDIO_CACHED_AT_HEADER = 'x-cantare-cached-at';
 
@@ -105,6 +106,20 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
   useEffect(() => {
     setLivePlaylist(playlist);
   }, [playlist]);
+
+  useEffect(() => {
+    const deleteOldPlaylistCaches = async () => {
+      if (typeof window === 'undefined' || !('caches' in window) || typeof window.caches.delete !== 'function') {
+        return;
+      }
+
+      await Promise.allSettled(
+        OLD_PLAYLIST_PRACTICE_CACHE_NAMES.map((cacheName) => window.caches.delete(cacheName))
+      );
+    };
+
+    void deleteOldPlaylistCaches();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -506,7 +521,7 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
             <span>/</span>
             <span className="text-gray-900">{livePlaylist.name}</span>
           </div>
-          <h2 className="text-2xl font-bold">{livePlaylist.name}</h2>
+          <h2 className="text-2xl font-bold text-slate-950">{livePlaylist.name}</h2>
           <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
             Playlist Knowledge: {playlistScore}%
           </p>
@@ -633,7 +648,7 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
                     ) : null}
                   </div>
 
-                  <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
+                  <h3 className="mb-2 text-xl font-semibold text-slate-950">{song.title}</h3>
                   {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
                   <div className="absolute bottom-3 right-3">
                     <SongReadinessIcons
@@ -654,7 +669,7 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
       {mode === 'listen' && currentSong && (
         <div className="space-y-4">
           <div className="text-center">
-            <h3 className="text-2xl font-semibold">{currentSong.title}</h3>
+            <h3 className="text-2xl font-semibold text-slate-950">{currentSong.title}</h3>
             {currentSong.artist && <p className="text-gray-600">{currentSong.artist}</p>}
             <p className="text-sm text-gray-500">{currentSongIndex + 1} of {listenQueue.length}</p>
           </div>
