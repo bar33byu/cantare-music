@@ -34,9 +34,17 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full bg-white text-neutral-900 antialiased`}
+      style={{ backgroundColor: "#ffffff", color: "#171717" }}
     >
-      <body className="min-h-full flex flex-col">
+      <body
+        className="min-h-full flex flex-col bg-white text-neutral-900 font-sans"
+        style={{
+          backgroundColor: "#ffffff",
+          color: "#171717",
+          fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+        }}
+      >
         <AppBuildBadge version={version} branch={branch} commitSha={commitSha} />
         {children}
       </body>
