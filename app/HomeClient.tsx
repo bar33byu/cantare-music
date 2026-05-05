@@ -498,6 +498,44 @@ export default function Home() {
     window.history.pushState(null, "", currentHash);
   }, [currentHash]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    let lastRefreshAt = 0;
+    const maybeRefreshAfterResume = () => {
+      const now = Date.now();
+      if (now - lastRefreshAt < 1500) {
+        return;
+      }
+      lastRefreshAt = now;
+      setRefreshTrigger((previous) => previous + 1);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        maybeRefreshAfterResume();
+      }
+    };
+
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        maybeRefreshAfterResume();
+      }
+    };
+
+    window.addEventListener("focus", maybeRefreshAfterResume);
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", maybeRefreshAfterResume);
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
   const openSongEditor = async (songId: string, returnView: SongEditorReturnView) => {
     try {
       const fullSong = await loadSongById(songId);
