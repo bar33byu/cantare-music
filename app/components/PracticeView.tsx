@@ -65,18 +65,6 @@ const TAP_MATCH_OPTIONS = {
   durationToleranceRatio: 0.6,
 } as const;
 
-function hasActiveUserActivation(): boolean {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-
-  const userActivation = (navigator as Navigator & {
-    userActivation?: { isActive?: boolean };
-  }).userActivation;
-
-  return userActivation?.isActive === true;
-}
-
 function toDirectionLetter(direction: "up" | "down" | "same"): "U" | "D" | "S" {
   if (direction === "up") {
     return "U";
@@ -279,7 +267,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       activeTapCaptureRef.current = null;
     }
   }, [hasTapAnswers, isTapPracticeMode]);
-  const hasAutoplayedSongRef = React.useRef<string | null>(null);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
   const requestPlay = React.useCallback((startMs: number, endMs: number) => {
     play(startMs, endMs);
@@ -562,26 +549,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     seek(currentSegment.startMs);
   }, [currentSegment, isPlaying, song.audioUrl, seek]);
-
-  React.useLayoutEffect(() => {
-    if (!song.audioUrl) {
-      return;
-    }
-    if (hasAutoplayedSongRef.current === song.id) {
-      return undefined;
-    }
-    hasAutoplayedSongRef.current = song.id;
-    seek(0);
-    if (!hasActiveUserActivation()) {
-      return undefined;
-    }
-    requestPlay(0, Number.POSITIVE_INFINITY);
-    return () => {
-      if (hasAutoplayedSongRef.current === song.id) {
-        hasAutoplayedSongRef.current = null;
-      }
-    };
-  }, [requestPlay, seek, song.audioUrl, song.id]);
 
   useEffect(() => {
     if (!hasSegments || !isPlaying) {

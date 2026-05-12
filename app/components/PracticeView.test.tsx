@@ -114,13 +114,6 @@ const makeSession = (song: Song): SessionState => ({
   currentSongId: song.id,
 });
 
-function setNavigatorUserActivation(isActive: boolean) {
-  Object.defineProperty(navigator, "userActivation", {
-    configurable: true,
-    value: { isActive },
-  });
-}
-
 describe("PracticeView", () => {
   const renderAndWaitForRatings = async (
     song: Song,
@@ -142,7 +135,6 @@ describe("PracticeView", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    setNavigatorUserActivation(true);
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
@@ -237,7 +229,7 @@ describe("PracticeView", () => {
     expect(onBreadcrumbRootClick).toHaveBeenCalledTimes(1);
   });
 
-  it("retries initial autoplay across React Strict Mode effect replay", async () => {
+  it("does not autoplay on initial render in React Strict Mode", async () => {
     const song = makeSong();
     render(
       <React.StrictMode>
@@ -249,11 +241,10 @@ describe("PracticeView", () => {
       expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
     });
 
-    expect(mockPlay.mock.calls.filter(([startMs]) => startMs === 0).length).toBeGreaterThanOrEqual(2);
+    expect(mockPlay).not.toHaveBeenCalled();
   });
 
-  it("does not attempt initial autoplay without active user activation", async () => {
-    setNavigatorUserActivation(false);
+  it("does not seek or play on initial render", async () => {
     const song = makeSong();
     render(<PracticeView song={song} initialSession={makeSession(song)} />);
 
@@ -261,7 +252,7 @@ describe("PracticeView", () => {
       expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
     });
 
-    expect(mockSeek).toHaveBeenCalledWith(0);
+    expect(mockSeek).not.toHaveBeenCalled();
     expect(mockPlay).not.toHaveBeenCalled();
   });
 
