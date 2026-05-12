@@ -42,6 +42,7 @@ interface PracticeViewProps {
 }
 
 type LyricVisibilityMode = "full" | "hint" | "hidden";
+type AudioVersion = "prominent" | "blend";
 
 const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
   full: "Full",
@@ -49,6 +50,7 @@ const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
   hidden: "Hidden",
 };
 
+const AUDIO_VERSION_STORAGE_KEY = "cantare:practice-audio-version";
 const PRACTICED_PLAYBACK_THRESHOLD_MS = 10_000;
 const PREV_SEGMENT_GO_BACK_THRESHOLD_MS = 3_000;
 const OFFLINE_RATING_QUEUE_PREFIX = "cantare:offline-ratings:";
@@ -151,7 +153,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // Snapshot of the current playback state readable in effects without adding each
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
-  const directPlaybackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
+  const [audioVersion, setAudioVersion] = React.useState<AudioVersion>("prominent");
+  const hasAlternateAudio = Boolean(song.alternateAudioUrl?.trim());
+  const activeAudioVersion: AudioVersion = hasAlternateAudio ? audioVersion : "prominent";
+  const activeAudioUrl = activeAudioVersion === "blend" ? (song.alternateAudioUrl ?? "") : song.audioUrl;
+  const directPlaybackAudioUrl = useMemo(() => toPlayableAudioUrl(activeAudioUrl), [activeAudioUrl]);
+  const pendingAudioVersionSwitchRef = React.useRef<{
+    currentMs: number;
+    endMs: number;
+    wasPlaying: boolean;
+  } | null>(null);
   const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(directPlaybackAudioUrl);
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
@@ -260,6 +271,30 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       ),
     [tapHeatMapBySegment]
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const stored = window.localStorage.getItem(AUDIO_VERSION_STORAGE_KEY);
+    setAudioVersion(hasAlternateAudio && stored === "blend" ? "blend" : "prominent");
+  }, [hasAlternateAudio, song.id]);
+
+  useEffect(() => {
+    const pending = pendingAudioVersionSwitchRef.current;
+    if (!pending) {
+      return;
+    }
+
+    pendingAudioVersionSwitchRef.current = null;
+    seek(pending.currentMs);
+    if (pending.wasPlaying) {
+      play(pending.currentMs, pending.endMs);
+      return;
+    }
+    setPlaybackEndMs(pending.endMs);
+  }, [directPlaybackAudioUrl, play, seek, setPlaybackEndMs]);
 
   useEffect(() => {
     if (!hasTapAnswers && isTapPracticeMode) {
@@ -531,7 +566,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [song.title, breadcrumbRootLabel]);
 
   useEffect(() => {
-    if (!song.audioUrl || !currentSegment) {
+    if (!activeAudioUrl || !currentSegment) {
       return;
     }
 
@@ -548,7 +583,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     seek(currentSegment.startMs);
-  }, [currentSegment, isPlaying, song.audioUrl, seek]);
+  }, [activeAudioUrl, currentSegment, isPlaying, seek]);
 
   useEffect(() => {
     if (!hasSegments || !isPlaying) {
@@ -858,6 +893,28 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     setIsLooping((previous) => !previous);
   }, [currentMs, getSegmentIndexAtMs, isLooping, session.currentSegmentIndex]);
+
+  const handleAudioVersionChange = React.useCallback((nextVersion: AudioVersion) => {
+    if (nextVersion === activeAudioVersion || (nextVersion === "blend" && !hasAlternateAudio)) {
+      return;
+    }
+
+    pendingAudioVersionSwitchRef.current = {
+      currentMs,
+      endMs: isLooping && currentSegment
+        ? currentSegment.endMs
+        : durationMs > 0
+          ? durationMs
+          : Number.POSITIVE_INFINITY,
+      wasPlaying: isPlaying,
+    };
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(AUDIO_VERSION_STORAGE_KEY, nextVersion);
+    }
+
+    setAudioVersion(nextVersion);
+  }, [activeAudioVersion, currentMs, currentSegment, durationMs, hasAlternateAudio, isLooping, isPlaying]);
 
   const getTapLane = React.useCallback((clientY: number) => {
     const rect = tapBarRef.current?.getBoundingClientRect();
@@ -1477,6 +1534,29 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           <KnowledgeBar percent={knowledgeScore.overall} />
         )}
         <div className="mt-2 flex items-center gap-2">
+          {hasAlternateAudio ? (
+            <div
+              className="inline-flex rounded-full border border-indigo-300 bg-white p-0.5"
+              data-testid="practice-audio-version-toggle"
+            >
+              {(["prominent", "blend"] as const).map((version) => (
+                <button
+                  key={version}
+                  type="button"
+                  data-testid={`practice-audio-version-${version}`}
+                  aria-pressed={activeAudioVersion === version}
+                  onClick={() => handleAudioVersionChange(version)}
+                  className={`rounded-full px-3 py-1 text-sm font-semibold transition ${
+                    activeAudioVersion === version
+                      ? "bg-indigo-600 text-white"
+                      : "text-indigo-700 hover:bg-indigo-50"
+                  }`}
+                >
+                  {version === "prominent" ? "Prominent" : "Blend"}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {hasSegments && currentSegment && hasTapHeatMapData ? (
             <button
               type="button"
@@ -1890,7 +1970,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
       >
         <AudioPlayer
-          audioUrl={song.audioUrl}
+          audioUrl={activeAudioUrl}
           currentMs={currentMs}
           durationMs={totalDurationMs}
           segmentStartMs={activeStartMs}

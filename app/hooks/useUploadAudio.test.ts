@@ -143,6 +143,7 @@ describe('useUploadAudio', () => {
         filename: 'test.mp3',
         contentType: 'audio/mpeg',
         size: file.size,
+        audioVersion: 'prominent',
       }),
     });
   });

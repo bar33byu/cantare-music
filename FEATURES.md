@@ -12,11 +12,11 @@
 ## Version 2.x (Post-Stable Tap Practice)
 
 ### 2.1: Two-Version Audio Support
-- [ ] Extend song schema to include `alternateAudioUrl` field
-- [ ] Update song upload form to allow second audio file
-- [ ] Add audio version toggle in PracticeView (prominent/blend)
-- [ ] Ensure direct R2 audio URLs work for both versions
-- [ ] Test playback switching without interruption
+- [x] Extend song schema to include `alternateAudioUrl` field
+- [x] Update song upload form to allow second audio file
+- [x] Add audio version toggle in PracticeView (prominent/blend)
+- [x] Ensure direct R2 audio URLs work for both versions
+- [x] Test playback switching without interruption
 
 ### 2.2: Segment-Focused Playlist Practice
 - [ ] Add "Focus Queue" mode to PlaylistPracticeView

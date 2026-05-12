@@ -93,6 +93,7 @@ describe("getAllSongs", () => {
     expect(result).toEqual([
       {
         ...fallbackRows[0],
+        alternateAudioKey: null,
         lastPracticedAt: null,
         pitchContourNotes: [],
       },
@@ -126,6 +127,7 @@ describe("getAllSongs", () => {
     expect(result).toEqual([
       {
         ...fallbackRows[0],
+        alternateAudioKey: null,
         lastPracticedAt: null,
         pitchContourNotes: [],
       },

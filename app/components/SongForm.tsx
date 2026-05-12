@@ -8,6 +8,7 @@ interface SongFormProps {
 export function SongForm({ onSuccess }: SongFormProps) {
   const [title, setTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedAlternateFile, setSelectedAlternateFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [debugMode, setDebugMode] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
@@ -46,13 +47,11 @@ export function SongForm({ onSuccess }: SongFormProps) {
       const newSongId = song.id;
       appendDebug(`Created song id=${newSongId}`);
 
-      // Upload file if selected
       if (selectedFile) {
-        appendDebug(`Uploading audio file ${selectedFile.name} for song ${newSongId}`);
-        const audioKey = await upload(newSongId, selectedFile);
-        appendDebug(`Upload result key=${audioKey}`);
+        appendDebug(`Uploading prominent audio file ${selectedFile.name} for song ${newSongId}`);
+        const audioKey = await upload(newSongId, selectedFile, 'prominent');
+        appendDebug(`Prominent upload result key=${audioKey}`);
 
-        // Update song with audioKey
         const updateResponse = await fetch(`/api/songs/${newSongId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -68,6 +67,26 @@ export function SongForm({ onSuccess }: SongFormProps) {
         }
       }
 
+      if (selectedAlternateFile) {
+        appendDebug(`Uploading blend audio file ${selectedAlternateFile.name} for song ${newSongId}`);
+        const alternateAudioKey = await upload(newSongId, selectedAlternateFile, 'blend');
+        appendDebug(`Blend upload result key=${alternateAudioKey}`);
+
+        const updateResponse = await fetch(`/api/songs/${newSongId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ alternateAudioKey }),
+        });
+
+        appendDebug(`PATCH alternate /api/songs/${newSongId} status=${updateResponse.status}`);
+
+        if (!updateResponse.ok) {
+          const updateError = await updateResponse.json().catch(() => null);
+          const msg = (updateError && (updateError as any).error) || 'Failed to update song with blend audio key';
+          throw new Error(msg);
+        }
+      }
+
       onSuccess(newSongId);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
@@ -79,6 +98,11 @@ export function SongForm({ onSuccess }: SongFormProps) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setSelectedFile(file);
+  };
+
+  const handleAlternateFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setSelectedAlternateFile(file);
   };
 
   const displayError = error || uploadError;
@@ -102,7 +126,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
       <div>
         <label htmlFor="audioFile" className="block text-sm font-medium text-gray-700">
-          Audio File (MP3)
+          Prominent Audio File (MP3)
         </label>
         <input
           id="audioFile"
@@ -113,6 +137,21 @@ export function SongForm({ onSuccess }: SongFormProps) {
           className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
         />
         <p className="mt-1 text-sm text-gray-500">Max 15 MB</p>
+      </div>
+
+      <div>
+        <label htmlFor="alternateAudioFile" className="block text-sm font-medium text-gray-700">
+          Blend Audio File (MP3)
+        </label>
+        <input
+          id="alternateAudioFile"
+          type="file"
+          accept="audio/mpeg,audio/mp3"
+          onChange={handleAlternateFileChange}
+          data-testid="alternate-audio-file-input"
+          className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+        />
+        <p className="mt-1 text-sm text-gray-500">Optional, max 15 MB</p>
         {uploading && (
           <div className="mt-2">
             <div className="w-full bg-gray-200 rounded-full h-2.5">

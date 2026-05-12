@@ -135,6 +135,7 @@ describe("PracticeView", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
@@ -184,6 +185,43 @@ describe("PracticeView", () => {
       const topBar = screen.getByTestId("practice-top-bar");
       expect(within(topBar).getByTestId("mock-knowledge-bar")).toBeInTheDocument();
     });
+  });
+
+  it("hides the audio version toggle when no blend audio exists", async () => {
+    const song = makeSong();
+    await renderAndWaitForRatings(song);
+
+    expect(screen.queryByTestId("practice-audio-version-toggle")).not.toBeInTheDocument();
+  });
+
+  it("switches to blend audio and resumes the current playback range", async () => {
+    const song: Song = {
+      ...makeSong(),
+      alternateAudioUrl: "https://cdn.example.com/audio/song-1/blend.mp3",
+    };
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 16000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.audioUrl);
+    fireEvent.click(screen.getByTestId("practice-audio-version-blend"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.alternateAudioUrl);
+    });
+    expect(mockSeek).toHaveBeenCalledWith(5000);
+    expect(mockPlay).toHaveBeenCalledWith(5000, 16000);
   });
 
   it("cycles lyric visibility mode between full, hints, and hidden", async () => {

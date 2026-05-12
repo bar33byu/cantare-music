@@ -44,7 +44,7 @@ describe("ReplaceAudioForm", () => {
     fireEvent.click(screen.getByTestId("replace-audio-submit"));
 
     await waitFor(() => {
-      expect(uploadMock).toHaveBeenCalledWith("song-1", file);
+      expect(uploadMock).toHaveBeenCalledWith("song-1", file, "prominent");
     });
 
     expect(global.fetch).toHaveBeenCalledWith("/api/songs/song-1", {
@@ -54,9 +54,31 @@ describe("ReplaceAudioForm", () => {
     });
 
     expect(await screen.findByTestId("replace-audio-success")).toHaveTextContent(
-      "Audio replaced successfully."
+      "Prominent audio replaced successfully."
     );
     expect(onReplaced).toHaveBeenCalledTimes(1);
+  });
+
+  it("patches the alternate audio key when blend is selected", async () => {
+    uploadMock.mockResolvedValue("audio/blend/new.mp3");
+    (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+
+    render(<ReplaceAudioForm songId="song-1" />);
+
+    fireEvent.change(screen.getByTestId("replace-audio-version"), { target: { value: "blend" } });
+    const file = new File(["x"], "blend.mp3", { type: "audio/mpeg" });
+    fireEvent.change(screen.getByTestId("replace-audio-input"), { target: { files: [file] } });
+    fireEvent.click(screen.getByTestId("replace-audio-submit"));
+
+    await waitFor(() => {
+      expect(uploadMock).toHaveBeenCalledWith("song-1", file, "blend");
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/songs/song-1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alternateAudioKey: "audio/blend/new.mp3" }),
+    });
   });
 
   it("shows API error message when patch fails", async () => {

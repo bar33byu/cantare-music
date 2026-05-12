@@ -48,8 +48,31 @@ describe('POST /api/songs/upload-url', () => {
       uploadUrl: 'https://example.r2.dev/presigned-url',
       key: 'audio/song-123/1234567-test.mp3',
     });
-    expect(generateUploadKey).toHaveBeenCalledWith('song-123', 'test.mp3');
+    expect(generateUploadKey).toHaveBeenCalledWith('song-123', 'test.mp3', 'prominent');
     expect(getSignedUrl).toHaveBeenCalled();
+  });
+
+  it('passes blend audio version into the upload key generator', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: 'song-123' } as any);
+    vi.mocked(generateUploadKey).mockReturnValue('audio/song-123/blend/1234567-test.mp3');
+    vi.mocked(getSignedUrl).mockResolvedValue('https://example.r2.dev/presigned-url');
+
+    const request = new Request('http://localhost/api/songs/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        songId: 'song-123',
+        filename: 'test.mp3',
+        contentType: 'audio/mpeg',
+        size: 1024,
+        audioVersion: 'blend',
+      }),
+    });
+
+    const response = await POST(request as any);
+
+    expect(response.status).toBe(200);
+    expect(generateUploadKey).toHaveBeenCalledWith('song-123', 'test.mp3', 'blend');
   });
 
   it('returns 400 when size is greater than 15 MB', async () => {

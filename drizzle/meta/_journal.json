@@ -57,6 +57,13 @@
       "when": 1777694400000,
       "tag": "0008_song_timeline_contour",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778544000000,
+      "tag": "0009_alternate_audio_key",
+      "breakpoints": true
     }
   ]
 }

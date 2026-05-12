@@ -27,9 +27,11 @@ describe('GET /api/songs', () => {
       title: 'Song 1',
       artist: null,
       audioKey: null,
+      alternateAudioKey: null,
       pitchContourNotes: [{ id: 'n-1', absoluteMs: 0, durationMs: 100, lane: 0.5 }],
       createdAt: new Date('2024-01-01T00:00:00.000Z'),
       lastPracticedAt: new Date('2024-01-02T00:00:00.000Z'),
+      userId: 'default',
     }];
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
@@ -145,7 +147,7 @@ describe('POST /api/songs', () => {
   });
 
   it('creates song and returns 201', async () => {
-    const mockSong = { id: 'uuid-123', title: 'New Song', artist: 'Artist', audioKey: null, createdAt: null, lastPracticedAt: null };
+    const mockSong = { id: 'uuid-123', title: 'New Song', artist: 'Artist', audioKey: null, alternateAudioKey: null, pitchContourNotes: [], createdAt: null, lastPracticedAt: null, userId: 'default' };
     vi.mocked(createSong).mockResolvedValue(mockSong);
 
     const request = new Request('http://localhost/api/songs', {

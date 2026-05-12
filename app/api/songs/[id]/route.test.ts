@@ -40,9 +40,11 @@ describe('GET /api/songs/[id]', () => {
       title: 'Song 1',
       artist: 'Artist',
       audioKey: 'key.mp3',
+      alternateAudioKey: 'blend-key.mp3',
       pitchContourNotes: [{ id: 'n-1', absoluteMs: 0, durationMs: 100, lane: 0.5 }],
       createdAt: new Date('2023-01-01'),
       lastPracticedAt: new Date('2023-01-04'),
+      userId: 'default',
     };
     const mockSegments = [{ id: 'seg1', songId: '123', label: 'Verse', order: 0, startMs: 0, endMs: 1000, lyricText: 'lyrics', pitchContourNotes: [] }];
     vi.mocked(getSongById).mockResolvedValue(mockSong);
@@ -59,6 +61,7 @@ describe('GET /api/songs/[id]', () => {
       title: 'Song 1',
       artist: 'Artist',
       audioUrl: 'https://example.com/key.mp3',
+      alternateAudioUrl: 'https://example.com/key.mp3',
       pitchContourNotes: [{ id: 'n-1', absoluteMs: 0, durationMs: 100, lane: 0.5 }],
       segments: [{
         id: 'seg1',
@@ -96,7 +99,7 @@ describe('DELETE /api/songs/[id]', () => {
   });
 
   it('returns 204 and calls deleteObject if audioKey exists', async () => {
-    const mockSong = { id: '123', title: 'Song 1', audioKey: 'key-123', artist: null, createdAt: null, lastPracticedAt: null };
+    const mockSong = { id: '123', title: 'Song 1', audioKey: 'key-123', alternateAudioKey: null, artist: null, createdAt: null, lastPracticedAt: null, userId: 'default', pitchContourNotes: [] };
     vi.mocked(getSongById).mockResolvedValue(mockSong);
 
     const request = new Request('http://localhost/api/songs/123', { method: 'DELETE' });
@@ -108,7 +111,7 @@ describe('DELETE /api/songs/[id]', () => {
   });
 
   it('returns 204 without calling deleteObject if no audioKey', async () => {
-    const mockSong = { id: '123', title: 'Song 1', artist: null, audioKey: null, createdAt: null, lastPracticedAt: null };
+    const mockSong = { id: '123', title: 'Song 1', artist: null, audioKey: null, alternateAudioKey: null, createdAt: null, lastPracticedAt: null, userId: 'default', pitchContourNotes: [] };
     vi.mocked(getSongById).mockResolvedValue(mockSong);
 
     const request = new Request('http://localhost/api/songs/123', { method: 'DELETE' });
@@ -120,7 +123,7 @@ describe('DELETE /api/songs/[id]', () => {
   });
 
   it('returns 204 and still deletes song when deleteObject fails', async () => {
-    const mockSong = { id: '123', title: 'Song 1', audioKey: 'key-123', artist: null, createdAt: null, lastPracticedAt: null };
+    const mockSong = { id: '123', title: 'Song 1', audioKey: 'key-123', alternateAudioKey: null, artist: null, createdAt: null, lastPracticedAt: null, userId: 'default', pitchContourNotes: [] };
     vi.mocked(getSongById).mockResolvedValue(mockSong);
     vi.mocked(deleteObject).mockRejectedValueOnce(new Error('SignatureDoesNotMatch'));
 

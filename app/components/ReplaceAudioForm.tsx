@@ -12,6 +12,7 @@ interface ReplaceAudioFormProps {
 export function ReplaceAudioForm({ songId, onReplaced, mode = 'replace' }: ReplaceAudioFormProps) {
   const { upload, uploading, progress, error: uploadError } = useUploadAudio();
   const [file, setFile] = useState<File | null>(null);
+  const [audioVersion, setAudioVersion] = useState<'prominent' | 'blend'>('prominent');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -27,11 +28,11 @@ export function ReplaceAudioForm({ songId, onReplaced, mode = 'replace' }: Repla
     setSuccess(null);
 
     try {
-      const audioKey = await upload(songId, file);
+      const uploadedKey = await upload(songId, file, audioVersion);
       const response = await fetch(`/api/songs/${songId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audioKey }),
+        body: JSON.stringify(audioVersion === 'blend' ? { alternateAudioKey: uploadedKey } : { audioKey: uploadedKey }),
       });
 
       if (!response.ok) {
@@ -39,7 +40,7 @@ export function ReplaceAudioForm({ songId, onReplaced, mode = 'replace' }: Repla
         throw new Error(data.error || "Failed to update song audio");
       }
 
-      setSuccess(isUpload ? "Audio uploaded successfully." : "Audio replaced successfully.");
+      setSuccess(`${audioVersion === 'blend' ? 'Blend' : 'Prominent'} audio ${isUpload ? 'uploaded' : 'replaced'} successfully.`);
       setFile(null);
       onReplaced?.();
     } catch (err) {
@@ -55,6 +56,23 @@ export function ReplaceAudioForm({ songId, onReplaced, mode = 'replace' }: Repla
       </p>
 
       <div className="mt-3">
+        <label htmlFor="replace-audio-version" className="mb-1 block text-sm font-medium text-gray-700">
+          Audio version
+        </label>
+        <select
+          id="replace-audio-version"
+          data-testid="replace-audio-version"
+          value={audioVersion}
+          onChange={(event) => {
+            setAudioVersion(event.target.value === 'blend' ? 'blend' : 'prominent');
+            setSuccess(null);
+            setError(null);
+          }}
+          className="mb-3 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800"
+        >
+          <option value="prominent">Prominent</option>
+          <option value="blend">Blend</option>
+        </select>
         <input
           type="file"
           accept="audio/mpeg,audio/mp3"
@@ -100,7 +118,7 @@ export function ReplaceAudioForm({ songId, onReplaced, mode = 'replace' }: Repla
           data-testid="replace-audio-submit"
           className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40"
         >
-          {uploading ? "Replacing..." : "Replace Audio"}
+          {uploading ? (isUpload ? "Uploading..." : "Replacing...") : isUpload ? "Upload Audio" : "Replace Audio"}
         </button>
       </div>
     </section>

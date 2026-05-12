@@ -73,8 +73,14 @@ export function getPublicUrl(key: string): string {
   return `${configuredPublicUrl.replace(/\/$/, '')}/${encodedKey}`;
 }
 
-export function generateUploadKey(songId: string, filename: string): string {
-  return `audio/${songId}/${Date.now()}-${filename}`;
+export type AudioUploadVersion = 'prominent' | 'blend';
+
+export function generateUploadKey(
+  songId: string,
+  filename: string,
+  version: AudioUploadVersion = 'prominent'
+): string {
+  return `audio/${songId}/${version}/${Date.now()}-${filename}`;
 }
 
 export async function deleteObject(key: string): Promise<void> {

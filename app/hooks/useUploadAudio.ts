@@ -1,18 +1,24 @@
 import { useState } from 'react';
 
 interface UseUploadAudioReturn {
-  upload: (songId: string, file: File) => Promise<string>;
+  upload: (songId: string, file: File, audioVersion?: AudioUploadVersion) => Promise<string>;
   uploading: boolean;
   progress: number;
   error: string | null;
 }
+
+export type AudioUploadVersion = 'prominent' | 'blend';
 
 export function useUploadAudio(): UseUploadAudioReturn {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  const upload = async (songId: string, file: File): Promise<string> => {
+  const upload = async (
+    songId: string,
+    file: File,
+    audioVersion: AudioUploadVersion = 'prominent'
+  ): Promise<string> => {
     setError(null);
     setProgress(0);
 
@@ -47,6 +53,7 @@ export function useUploadAudio(): UseUploadAudioReturn {
           filename: file.name,
           contentType: file.type,
           size: file.size,
+          audioVersion,
         }),
       });
 

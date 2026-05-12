@@ -38,6 +38,7 @@ export const songs = pgTable(
     title: text("title").notNull(),
     artist: text("artist"),
     audioKey: text("audio_key"),
+    alternateAudioKey: text("alternate_audio_key"),
     pitchContourNotes: jsonb("pitch_contour_notes")
       .$type<SongPitchContourPoint[]>()
       .notNull()
