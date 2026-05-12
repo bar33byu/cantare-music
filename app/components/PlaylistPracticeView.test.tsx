@@ -385,7 +385,7 @@ describe('PlaylistPracticeView', () => {
     expect(cache.put).toHaveBeenCalled();
   });
 
-  it('uses a normalized playable audio URL for listen mode playback', async () => {
+  it('uses direct playable audio URLs for listen mode playback', async () => {
     const useAudioPlayerSpy = vi.spyOn(audioPlayerHook, 'useAudioPlayer');
 
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
@@ -396,24 +396,24 @@ describe('PlaylistPracticeView', () => {
       expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://example.com/alpha.mp3');
     });
 
-    const proxiedPlaylist: Playlist = {
+    const r2Playlist: Playlist = {
       ...playlist,
       songs: [
         {
           ...playlist.songs[0],
-          audioUrl: '/audio/song-1/test.mp3',
+          audioUrl: 'https://pub-example.r2.dev/audio/song-1/test.mp3',
         },
       ],
     };
 
-    render(<PlaylistPracticeView playlist={proxiedPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+    render(<PlaylistPracticeView playlist={r2Playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
     await waitFor(() => {
-      expect(useAudioPlayerSpy).toHaveBeenCalledWith('/api/audio/audio/song-1/test.mp3');
+      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://pub-example.r2.dev/audio/song-1/test.mp3');
     });
   });
 
-  it('falls back to the proxy URL when direct listen playback reports an error', async () => {
+  it('does not fall back to the proxy URL when direct listen playback reports an error', async () => {
     const useAudioPlayerSpy = vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
       isPlaying: false,
       isReady: true,
@@ -460,7 +460,7 @@ describe('PlaylistPracticeView', () => {
     await waitFor(() => {
       const args = useAudioPlayerSpy.mock.calls.map((call) => String(call[0]));
       expect(args).toContain('https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3');
-      expect(args).toContain('/api/audio/users/default/audio/song-1/test%20file.mp3');
+      expect(args).not.toContain('/api/audio/users/default/audio/song-1/test%20file.mp3');
     });
   });
 

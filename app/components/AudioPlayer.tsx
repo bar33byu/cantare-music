@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type MouseEvent, type SyntheticEvent } from "react";
+import { useCallback, useId, useMemo, useState, type MouseEvent, type SyntheticEvent } from "react";
 import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
-import { buildProxyAudioUrl, parseAudioKey } from "../lib/audioUrls";
 import type { Segment } from "../types";
 import { buildMasteryTimelineChunks, getMasteryColor } from "../lib/masteryColors";
 
@@ -50,16 +49,27 @@ type ReachabilityState = {
   contentLength: number | null;
 };
 
-type FetchProbeState = {
-  status: "idle" | "checking" | "ok" | "error";
-  message: string;
-  httpStatus: number | null;
-  contentType: string | null;
-  contentRange: string | null;
-  checkedAt: string | null;
-};
+function getAudioKeyFromPublicUrl(audioUrl: string): string | null {
+  const trimmed = audioUrl.trim();
+  if (!trimmed) {
+    return null;
+  }
 
-let audioPlayerMountCounter = 0;
+  try {
+    const pathname = new URL(trimmed).pathname.replace(/^\/+/, "");
+    const audioIndex = pathname.indexOf("audio/");
+    if (audioIndex === -1) {
+      return null;
+    }
+    return pathname
+      .slice(audioIndex)
+      .split("/")
+      .map((segment) => decodeURIComponent(segment))
+      .join("/");
+  } catch {
+    return null;
+  }
+}
 
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -101,29 +111,14 @@ export function AudioPlayer({
     contentLength: null,
   });
   const [isDebugOpen, setIsDebugOpen] = useState(false);
-  const [fetchProbe, setFetchProbe] = useState<FetchProbeState>({
-    status: "idle",
-    message: "Not checked yet",
-    httpStatus: null,
-    contentType: null,
-    contentRange: null,
-    checkedAt: null,
-  });
-  const mountIdRef = useRef(0);
-  if (mountIdRef.current === 0) {
-    audioPlayerMountCounter += 1;
-    mountIdRef.current = audioPlayerMountCounter;
-  }
+  const mountId = useId();
   const [localClickAck, setLocalClickAck] = useState({
     playButtonClicks: 0,
     debugPlayButtonClicks: 0,
-    fetchProbeButtonClicks: 0,
     lastAck: "none",
     lastAckAt: "n/a",
   });
-
-  const audioKey = useMemo(() => parseAudioKey(audioUrl), [audioUrl]);
-  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(audioKey), [audioKey]);
+  const audioKey = useMemo(() => getAudioKeyFromPublicUrl(audioUrl), [audioUrl]);
 
   const checkReachability = useCallback(async () => {
     if (!audioKey) {
@@ -193,67 +188,14 @@ export function AudioPlayer({
     }
   }, [audioKey]);
 
-  const runProxyFetchProbe = useCallback(async () => {
-    if (!proxyAudioUrl) {
-      setFetchProbe({
-        status: "error",
-        message: "Proxy URL unavailable",
-        httpStatus: null,
-        contentType: null,
-        contentRange: null,
-        checkedAt: new Date().toISOString(),
-      });
-      return;
-    }
-
-    setFetchProbe({
-      status: "checking",
-      message: "Requesting first bytes from proxy...",
-      httpStatus: null,
-      contentType: null,
-      contentRange: null,
-      checkedAt: null,
-    });
-
-    try {
-      const response = await fetch(proxyAudioUrl, {
-        cache: "no-store",
-        headers: {
-          Range: "bytes=0-1023",
-        },
-      });
-
-      const statusOk = response.status === 200 || response.status === 206;
-      setFetchProbe({
-        status: statusOk ? "ok" : "error",
-        message: statusOk ? "Proxy responded with audio bytes" : `Unexpected status ${response.status}`,
-        httpStatus: response.status,
-        contentType: response.headers.get("content-type"),
-        contentRange: response.headers.get("content-range"),
-        checkedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Proxy fetch probe failed";
-      setFetchProbe({
-        status: "error",
-        message,
-        httpStatus: null,
-        contentType: null,
-        contentRange: null,
-        checkedAt: new Date().toISOString(),
-      });
-    }
-  }, [proxyAudioUrl]);
-
   const handleDebugToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
     const details = event.currentTarget;
     const opened = details.open;
     setIsDebugOpen(opened);
     if (opened) {
       void checkReachability();
-      void runProxyFetchProbe();
     }
-  }, [checkReachability, runProxyFetchProbe]);
+  }, [checkReachability]);
 
   const handlePlayPauseClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -279,29 +221,6 @@ export function AudioPlayer({
     onDebugPlayTest?.();
   }, [onDebugPlayTest]);
 
-  const handleFetchProbeClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setLocalClickAck((previous) => ({
-      ...previous,
-      fetchProbeButtonClicks: previous.fetchProbeButtonClicks + 1,
-      lastAck: "fetch-probe-button",
-      lastAckAt: new Date().toISOString(),
-    }));
-    void runProxyFetchProbe();
-  }, [runProxyFetchProbe]);
-
-  if (!audioUrl) {
-    return (
-      <div
-        data-testid="audio-player-no-audio"
-        className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-      >
-        This song does not have an audio file yet.
-      </div>
-    );
-  }
-
   const safeDurationMs = Math.max(durationMs, segmentEndMs);
   const segmentWidth = safeDurationMs > 0 ? ((segmentEndMs - segmentStartMs) / safeDurationMs) * 100 : 0;
   const segmentOffset = safeDurationMs > 0 ? (segmentStartMs / safeDurationMs) * 100 : 0;
@@ -320,6 +239,17 @@ export function AudioPlayer({
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
     onSeekSong(Math.round(ratio * safeDurationMs));
   }, [onSeekSong, safeDurationMs]);
+
+  if (!audioUrl) {
+    return (
+      <div
+        data-testid="audio-player-no-audio"
+        className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+      >
+        This song does not have an audio file yet.
+      </div>
+    );
+  }
 
   return (
     <div data-testid="audio-player" className="space-y-2">
@@ -510,14 +440,6 @@ export function AudioPlayer({
               >
                 Run Hook Play Test
               </button>
-              <button
-                type="button"
-                data-testid="audio-debug-run-fetch-probe"
-                onClick={handleFetchProbeClick}
-                className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
-              >
-                Run Proxy Fetch Probe
-              </button>
             </div>
             <p data-testid="audio-debug-reachability">reachability: {reachability.status}</p>
             <p data-testid="audio-debug-reachability-message" className="break-all">reachabilityMessage: {reachability.message}</p>
@@ -525,19 +447,12 @@ export function AudioPlayer({
             <p data-testid="audio-debug-reachability-content-type">reachabilityContentType: {reachability.contentType ?? "n/a"}</p>
             <p data-testid="audio-debug-reachability-content-length">reachabilityContentLength: {reachability.contentLength ?? "n/a"}</p>
             <p data-testid="audio-debug-reachability-checked-at">reachabilityCheckedAt: {reachability.checkedAt ?? "n/a"}</p>
-            <p data-testid="audio-debug-fetch-probe-status">proxyFetchProbe: {fetchProbe.status}</p>
-            <p data-testid="audio-debug-fetch-probe-message" className="break-all">proxyFetchProbeMessage: {fetchProbe.message}</p>
-            <p data-testid="audio-debug-fetch-probe-http-status">proxyFetchHttpStatus: {fetchProbe.httpStatus ?? "n/a"}</p>
-            <p data-testid="audio-debug-fetch-probe-content-type">proxyFetchContentType: {fetchProbe.contentType ?? "n/a"}</p>
-            <p data-testid="audio-debug-fetch-probe-content-range">proxyFetchContentRange: {fetchProbe.contentRange ?? "n/a"}</p>
-            <p data-testid="audio-debug-fetch-probe-checked-at">proxyFetchCheckedAt: {fetchProbe.checkedAt ?? "n/a"}</p>
             <p data-testid="audio-debug-open">debugOpen: {String(isDebugOpen)}</p>
             <p data-testid="audio-debug-audio-url" className="break-all">audioUrl: {audioUrl}</p>
-            <p data-testid="audio-debug-proxy-url" className="break-all">proxyAudioUrl: {proxyAudioUrl ?? "n/a"}</p>
-            <p data-testid="audio-debug-mount-id">audioPlayerMountId: {mountIdRef.current}</p>
+            <p data-testid="audio-debug-playback-error" className="break-all">playbackError: {playbackError ?? "null"}</p>
+            <p data-testid="audio-debug-mount-id">audioPlayerMountId: {mountId}</p>
             <p data-testid="audio-debug-local-play-clicks">localPlayButtonClicks: {localClickAck.playButtonClicks}</p>
             <p data-testid="audio-debug-local-debug-play-clicks">localDebugPlayButtonClicks: {localClickAck.debugPlayButtonClicks}</p>
-            <p data-testid="audio-debug-local-fetch-clicks">localFetchProbeButtonClicks: {localClickAck.fetchProbeButtonClicks}</p>
             <p data-testid="audio-debug-local-last-ack" className="break-all">localLastAck: {localClickAck.lastAck}</p>
             <p data-testid="audio-debug-local-last-ack-at">localLastAckAt: {localClickAck.lastAckAt}</p>
             <p data-testid="audio-debug-ui-play-toggle-clicks">uiPlayToggleClicks: {transportDebug?.playToggleClicks ?? 0}</p>
@@ -588,12 +503,6 @@ export function AudioPlayer({
             <div className="mt-3 rounded border border-slate-200 bg-white p-2" data-testid="audio-native-probe-wrap">
               <p className="font-semibold text-slate-800">Native Audio Probe (Direct URL)</p>
               <audio data-testid="audio-native-probe-direct" className="mt-2 w-full" controls preload="metadata" src={audioUrl} />
-              <p className="mt-2 font-semibold text-slate-800">Native Audio Probe (Proxy URL)</p>
-              {proxyAudioUrl ? (
-                <audio data-testid="audio-native-probe-proxy" className="mt-2 w-full" controls preload="metadata" src={proxyAudioUrl} />
-              ) : (
-                <p data-testid="audio-native-probe-proxy-unavailable">Proxy probe unavailable: could not derive audio key.</p>
-              )}
             </div>
             </div>
           </details>

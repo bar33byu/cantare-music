@@ -1218,7 +1218,7 @@ describe("PracticeView", () => {
     });
   });
 
-  it("prefers the direct audio URL before any proxy fallback", async () => {
+  it("uses the direct audio URL for playback", async () => {
     const song = makeSong(2);
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
@@ -1242,7 +1242,7 @@ describe("PracticeView", () => {
     });
   });
 
-  it("falls back to proxy playback when a direct public URL reports an error", async () => {
+  it("does not fall back to proxy playback when a direct public URL reports an error", async () => {
     const song = {
       ...makeSong(2),
       audioUrl: "https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3",
@@ -1266,7 +1266,7 @@ describe("PracticeView", () => {
     await waitFor(() => {
       const args = mockUseAudioPlayer.mock.calls.map((call) => String(call[0]));
       expect(args).toContain("https://cantare-audio.r2.dev/users/default/audio/song-1/test%20file.mp3");
-      expect(args).toContain("/api/audio/users/default/audio/song-1/test%20file.mp3");
+      expect(args).not.toContain("/api/audio/users/default/audio/song-1/test%20file.mp3");
     });
   });
 

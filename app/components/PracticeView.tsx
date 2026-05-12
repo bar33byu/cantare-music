@@ -8,7 +8,7 @@ import SegmentCard from "./SegmentCard";
 import KnowledgeBar from "./KnowledgeBar";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
+import { toPlayableAudioUrl } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
 import {
   DEFAULT_CONTOUR_SAME_DEAD_ZONE,
@@ -163,18 +163,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // Snapshot of the current playback state readable in effects without adding each
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
-  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(song.audioUrl)), [song.audioUrl]);
   const directPlaybackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
-  const canFallbackToProxy = proxyAudioUrl !== null && proxyAudioUrl !== directPlaybackAudioUrl;
-  const [useProxyFallback, setUseProxyFallback] = React.useState(false);
-  const pendingFallbackPlayRangeRef = React.useRef<{ startMs: number; endMs: number } | null>(null);
-  const playbackAudioUrl = useMemo(() => {
-    if (useProxyFallback && canFallbackToProxy && proxyAudioUrl) {
-      return proxyAudioUrl;
-    }
-    return directPlaybackAudioUrl;
-  }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
-  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(playbackAudioUrl);
+  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(directPlaybackAudioUrl);
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
     skipBackClicks: 0,
@@ -292,11 +282,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const hasAutoplayedSongRef = React.useRef<string | null>(null);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
   const requestPlay = React.useCallback((startMs: number, endMs: number) => {
-    pendingFallbackPlayRangeRef.current = !useProxyFallback && canFallbackToProxy
-      ? { startMs, endMs }
-      : null;
     play(startMs, endMs);
-  }, [canFallbackToProxy, play, useProxyFallback]);
+  }, [play]);
 
   const enqueueOfflineRatings = React.useCallback((snapshot: string) => {
     if (typeof window === "undefined") {
@@ -498,32 +485,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     accumulatedPlaybackMsRef.current = 0;
     playbackStartedAtRef.current = null;
   }, [song.id]);
-
-  useEffect(() => {
-    setUseProxyFallback(false);
-    pendingFallbackPlayRangeRef.current = null;
-  }, [song.id]);
-
-  useEffect(() => {
-    if (!playbackError || useProxyFallback || !canFallbackToProxy) {
-      return;
-    }
-    setUseProxyFallback(true);
-  }, [canFallbackToProxy, playbackError, useProxyFallback]);
-
-  useEffect(() => {
-    if (!useProxyFallback) {
-      return;
-    }
-
-    const pendingRange = pendingFallbackPlayRangeRef.current;
-    if (!pendingRange) {
-      return;
-    }
-
-    pendingFallbackPlayRangeRef.current = null;
-    play(pendingRange.startMs, pendingRange.endMs);
-  }, [play, useProxyFallback]);
 
   useEffect(() => {
     if (!isPlaying) {

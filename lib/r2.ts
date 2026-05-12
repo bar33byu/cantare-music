@@ -65,8 +65,9 @@ export function getPublicUrl(key: string): string {
   );
 
   if (!configuredPublicUrl) {
-    // Fallback to same-origin proxy to avoid broken "undefined/..." URLs in production.
-    return `/api/audio/${encodedKey}`;
+    throw new Error(
+      'R2_PUBLIC_URL or R2_PUBLIC_BASE_URL must be configured for audio playback'
+    );
   }
 
   return `${configuredPublicUrl.replace(/\/$/, '')}/${encodedKey}`;

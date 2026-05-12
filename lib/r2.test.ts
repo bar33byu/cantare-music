@@ -54,22 +54,14 @@ describe('r2 helpers', () => {
     );
   });
 
-  it('getPublicUrl falls back to same-origin audio proxy when R2_PUBLIC_URL is missing', async () => {
-    process.env.R2_PUBLIC_URL = '';
-    const { getPublicUrl } = await import('./r2');
-
-    expect(getPublicUrl('audio/song-1/my file.mp3')).toBe(
-      '/api/audio/audio/song-1/my%20file.mp3'
-    );
-  });
-
-  it('getPublicUrl does not use private R2_ENDPOINT for browser playback', async () => {
+  it('getPublicUrl throws when R2_PUBLIC_URL is missing', async () => {
     process.env.R2_PUBLIC_URL = '';
     process.env.R2_PUBLIC_BASE_URL = '';
-    process.env.R2_ENDPOINT = 'https://acct123.r2.cloudflarestorage.com';
     const { getPublicUrl } = await import('./r2');
 
-    expect(getPublicUrl('audio/song-1/file.mp3')).toBe('/api/audio/audio/song-1/file.mp3');
+    expect(() => getPublicUrl('audio/song-1/my file.mp3')).toThrow(
+      'R2_PUBLIC_URL or R2_PUBLIC_BASE_URL must be configured for audio playback'
+    );
   });
 
   it('uses account-based R2 endpoint when R2_ENDPOINT is blank', async () => {

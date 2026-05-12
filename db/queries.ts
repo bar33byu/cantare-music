@@ -2,6 +2,7 @@ import { eq, asc, desc, inArray, and, count, lte, sql } from "drizzle-orm";
 import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow } from "./schema";
+import { getPublicUrl } from "../lib/r2";
 
 const DEFAULT_QUERY_USER_ID = "default";
 let ensureTapPracticeTablesPromise: Promise<void> | null = null;
@@ -1463,7 +1464,7 @@ export async function getPlaylistById(
     id: songRow.songId,
     title: songRow.title,
     artist: songRow.artist ?? undefined,
-    audioUrl: songRow.audioKey ?? "",
+    audioUrl: songRow.audioKey ? getPublicUrl(songRow.audioKey) : "",
     pitchContourNotes: songRow.pitchContourNotes ?? [],
     ratingCount: ratingCounts[songRow.songId] ?? 0,
     segments: segmentsBySong[i],

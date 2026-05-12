@@ -55,12 +55,12 @@ R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 R2_BUCKET_NAME=        # Preferred bucket variable name
 R2_BUCKET=             # Legacy fallback bucket variable name
-R2_PUBLIC_URL=         # Optional public base URL for audio delivery
+R2_PUBLIC_URL=         # Required: public base URL for audio CDN delivery
 ```
 
 Notes:
 
-- If `R2_PUBLIC_URL` is omitted, browser playback falls back to the same-origin audio proxy route.
+- `R2_PUBLIC_URL` is required. Audio is served directly from R2's CDN to the browser (no server-side proxy).
 - If `R2_ENDPOINT` is blank and `R2_ACCOUNT_ID` is set, the app derives the standard Cloudflare R2 endpoint automatically.
 
 Run database migrations before first use:

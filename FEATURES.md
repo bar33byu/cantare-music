@@ -15,7 +15,7 @@
 - [ ] Extend song schema to include `alternateAudioUrl` field
 - [ ] Update song upload form to allow second audio file
 - [ ] Add audio version toggle in PracticeView (prominent/blend)
-- [ ] Ensure proxy audio URLs work for both versions
+- [ ] Ensure direct R2 audio URLs work for both versions
 - [ ] Test playback switching without interruption
 
 ### 2.2: Segment-Focused Playlist Practice

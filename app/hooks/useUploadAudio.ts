@@ -7,48 +7,10 @@ interface UseUploadAudioReturn {
   error: string | null;
 }
 
-function isLikelyDeploymentBodyLimit(message: string): boolean {
-  return /413|payload too large|entity too large|body exceeded|request body|function payload|size limit/i.test(message);
-}
-
 export function useUploadAudio(): UseUploadAudioReturn {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-
-  const uploadViaServer = async (songId: string, file: File, key?: string): Promise<string> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('songId', songId);
-
-    if (key) {
-      formData.append('key', key);
-    }
-
-    const response = await fetch('/api/songs/upload', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMsg = 'Failed to upload audio via server fallback';
-      try {
-        const errorData = JSON.parse(errorText);
-        errorMsg = errorData.error || errorMsg;
-      } catch {
-        errorMsg = errorText || errorMsg;
-      }
-      throw new Error(errorMsg);
-    }
-
-    const data = await response.json();
-    if (!data?.key || typeof data.key !== 'string') {
-      throw new Error('Server fallback upload returned an invalid storage key');
-    }
-
-    return data.key;
-  };
 
   const upload = async (songId: string, file: File): Promise<string> => {
     setError(null);
@@ -105,58 +67,37 @@ export function useUploadAudio(): UseUploadAudioReturn {
 
       // Upload file directly to R2 using the presigned URL.
       // Files are sent straight to R2, bypassing Vercel's 4.5 MB function payload limit.
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
 
-          xhr.upload.addEventListener('progress', (event) => {
-            if (event.lengthComputable) {
-              const percentComplete = Math.round((event.loaded / event.total) * 100);
-              setProgress(percentComplete);
-            }
-          });
-
-          xhr.addEventListener('load', () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve();
-            } else {
-              const errorMsg = `Upload failed with status ${xhr.status}: ${xhr.statusText}`;
-              reject(new Error(errorMsg));
-            }
-          });
-
-          xhr.addEventListener('error', () => {
-            reject(new Error('Direct upload to storage failed. This is usually a CORS or network issue.'));
-          });
-
-          xhr.addEventListener('abort', () => {
-            reject(new Error('Upload cancelled'));
-          });
-
-          xhr.open('PUT', uploadUrl);
-          xhr.setRequestHeader('Content-Type', file.type);
-          xhr.send(file);
-        });
-      } catch (directUploadError) {
-        const directUploadMessage = directUploadError instanceof Error ? directUploadError.message : 'Direct upload failed';
-
-        try {
-          const fallbackKey = await uploadViaServer(songId, file, key);
-          setProgress(100);
-          setUploading(false);
-          return fallbackKey;
-        } catch (fallbackError) {
-          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : 'Server fallback upload failed';
-
-          if (isLikelyDeploymentBodyLimit(fallbackMessage)) {
-            throw new Error(
-              `${directUploadMessage} Server fallback could not accept this file on the current deployment. This usually means a platform upload size limit.`
-            );
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = Math.round((event.loaded / event.total) * 100);
+            setProgress(percentComplete);
           }
+        });
 
-          throw new Error(`${directUploadMessage} Server fallback also failed: ${fallbackMessage}`);
-        }
-      }
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            const errorMsg = `Upload failed with status ${xhr.status}: ${xhr.statusText}`;
+            reject(new Error(errorMsg));
+          }
+        });
+
+        xhr.addEventListener('error', () => {
+          reject(new Error('Direct upload to storage failed. This is usually a CORS or network issue.'));
+        });
+
+        xhr.addEventListener('abort', () => {
+          reject(new Error('Upload cancelled'));
+        });
+
+        xhr.open('PUT', uploadUrl);
+        xhr.setRequestHeader('Content-Type', file.type);
+        xhr.send(file);
+      });
 
       setProgress(100);
       setUploading(false);

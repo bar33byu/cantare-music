@@ -5,7 +5,7 @@ import { Segment, SongPitchContourNote } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { PitchContourThumbnail } from './PitchContourThumbnail';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
-import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
+import { toPlayableAudioUrl } from '../lib/audioUrls';
 import { getDefaultNewSegmentPlacement, getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
 import { getSegmentPitchContourNotes } from '../lib/pitchContour';
 import { classifyContourDirection } from '../lib/contourPractice';
@@ -80,7 +80,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [audioUrl, setAudioUrl] = useState('');
-  const [useProxyFallback, setUseProxyFallback] = useState(false);
   const [songTitle, setSongTitle] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
   const [showReplaceAudio, setShowReplaceAudio] = useState(false);
@@ -107,18 +106,11 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const focusedContourCardRef = useRef<HTMLDivElement | null>(null);
   const contourTapBarRef = useRef<HTMLDivElement | null>(null);
   const activeContourCaptureRef = useRef<ActiveContourCapture | null>(null);
-  const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
   const contourLastSavedSnapshotRef = useRef<string>('[]');
   const contourAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contourAutoSaveGenerationRef = useRef(0);
 
-  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(audioUrl)), [audioUrl]);
-  const playbackAudioUrl = useMemo(() => {
-    if (useProxyFallback && proxyAudioUrl) {
-      return proxyAudioUrl;
-    }
-    return toPlayableAudioUrl(audioUrl);
-  }, [audioUrl, proxyAudioUrl, useProxyFallback]);
+  const playbackAudioUrl = useMemo(() => toPlayableAudioUrl(audioUrl), [audioUrl]);
 
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
   const {
@@ -127,7 +119,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     currentMs,
     durationMs,
     playbackRate = 1,
-    playbackError,
     play,
     pause,
     seek,
@@ -413,7 +404,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       return knownDuration;
     }
 
-    const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl, proxyAudioUrl]);
+    const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl]);
     if (probedDuration && probedDuration > 0) {
       setStableDurationMs((previous) => Math.max(previous, probedDuration));
       return probedDuration;
@@ -820,7 +811,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         return;
       }
 
-      const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl, proxyAudioUrl]);
+      const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl]);
       if (!cancelled && probedDuration && probedDuration > 0) {
         setStableDurationMs((previous) => Math.max(previous, probedDuration));
       }
@@ -831,36 +822,13 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     return () => {
       cancelled = true;
     };
-  }, [durationMs, playbackAudioUrl, proxyAudioUrl, stableDurationMs]);
+  }, [durationMs, playbackAudioUrl, stableDurationMs]);
 
   useEffect(() => {
-    setUseProxyFallback(false);
     setIsContourRecording(false);
     setContourDraftNotes([]);
     activeContourCaptureRef.current = null;
-    pendingFallbackPlayRangeRef.current = null;
   }, [songId]);
-
-  useEffect(() => {
-    if (!playbackError || useProxyFallback || !proxyAudioUrl) {
-      return;
-    }
-    setUseProxyFallback(true);
-  }, [playbackError, proxyAudioUrl, useProxyFallback]);
-
-  useEffect(() => {
-    if (!useProxyFallback) {
-      return;
-    }
-
-    const pendingRange = pendingFallbackPlayRangeRef.current;
-    if (!pendingRange) {
-      return;
-    }
-
-    pendingFallbackPlayRangeRef.current = null;
-    play(pendingRange.startMs, pendingRange.endMs);
-  }, [play, useProxyFallback]);
 
   // Clean up undo timer on unmount to avoid memory leaks
   useEffect(() => {
@@ -882,10 +850,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     const startMs = atOrPastEnd
       ? 0
       : Math.max(0, Math.min(currentMs, safeDuration));
-    pendingFallbackPlayRangeRef.current = {
-      startMs,
-      endMs: safeDuration,
-    };
     play(startMs, safeDuration);
   };
 

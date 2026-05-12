@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
-import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
+import { toPlayableAudioUrl } from '../lib/audioUrls';
 import { SongReadinessIcons } from './SongReadinessIcons';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 
@@ -64,19 +64,6 @@ interface PlaylistPracticeViewProps {
 }
 
 const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
-const AUDIO_CACHE_NAME = 'cantare-audio-v2';
-const AUDIO_CACHED_AT_HEADER = 'x-cantare-cached-at';
-
-function withAudioCachedAt(response: Response): Response {
-  const headers = new Headers(response.headers);
-  headers.set(AUDIO_CACHED_AT_HEADER, String(Date.now()));
-  headers.set('Cache-Control', 'public, max-age=1209600');
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
 
 export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
   const [livePlaylist, setLivePlaylist] = useState(playlist);
@@ -87,9 +74,7 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
   const [mode, setMode] = useState<'practice' | 'listen'>('practice');
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
   const [isListenPlaying, setIsListenPlaying] = useState(false);
-  const [useProxyFallback, setUseProxyFallback] = useState(false);
   const listenStartedSongIdRef = useRef<string | null>(null);
-  const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
 
   const userScopedHeaders = useMemo(() => {
     return userId ? { 'X-User-ID': userId } : undefined;
@@ -194,60 +179,19 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     }
     return -1;
   }, [listenQueue]);
-  const proxyAudioUrl = useMemo(
-    () => buildProxyAudioUrl(parseAudioKey(currentSong?.audioUrl ?? '')),
-    [currentSong?.audioUrl]
-  );
-  const directPlaybackAudioUrl = useMemo(
+  const playbackAudioUrl = useMemo(
     () => toPlayableAudioUrl(currentSong?.audioUrl ?? ''),
     [currentSong?.audioUrl]
   );
-  const canFallbackToProxy = proxyAudioUrl !== null && proxyAudioUrl !== directPlaybackAudioUrl;
-  const playbackAudioUrl = useMemo(() => {
-    if (useProxyFallback && canFallbackToProxy && proxyAudioUrl) {
-      return proxyAudioUrl;
-    }
-    return directPlaybackAudioUrl;
-  }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
   const {
     endedCount: playbackEndedCount = 0,
     pause: pauseAudio,
     play: playAudio,
-    playbackError,
   } = audioPlayer;
   const requestPlay = useCallback((startMs: number, endMs: number) => {
-    pendingFallbackPlayRangeRef.current = !useProxyFallback && canFallbackToProxy
-      ? { startMs, endMs }
-      : null;
     playAudio(startMs, endMs);
-  }, [canFallbackToProxy, playAudio, useProxyFallback]);
-
-  useEffect(() => {
-    setUseProxyFallback(false);
-    pendingFallbackPlayRangeRef.current = null;
-  }, [currentSongId]);
-
-  useEffect(() => {
-    if (!playbackError || useProxyFallback || !canFallbackToProxy) {
-      return;
-    }
-    setUseProxyFallback(true);
-  }, [canFallbackToProxy, playbackError, useProxyFallback]);
-
-  useEffect(() => {
-    if (!useProxyFallback) {
-      return;
-    }
-
-    const pendingRange = pendingFallbackPlayRangeRef.current;
-    if (!pendingRange) {
-      return;
-    }
-
-    pendingFallbackPlayRangeRef.current = null;
-    playAudio(pendingRange.startMs, pendingRange.endMs);
-  }, [playAudio, useProxyFallback]);
+  }, [playAudio]);
 
   useEffect(() => {
     if (mode !== 'listen') {
@@ -416,7 +360,6 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
 
       try {
         const playlistCache = await window.caches.open(PLAYLIST_PRACTICE_CACHE_NAME);
-        const audioCache = await window.caches.open(AUDIO_CACHE_NAME);
 
         await Promise.allSettled(
           livePlaylist.songs.map(async (song) => {
@@ -427,17 +370,6 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
             const songResponse = await fetch(songRequest, { cache: 'force-cache' });
             if (songResponse.ok) {
               await playlistCache.put(songRequest, songResponse.clone());
-            }
-
-            const proxyAudioUrl = buildProxyAudioUrl(parseAudioKey(song.audioUrl));
-            if (!proxyAudioUrl) {
-              return;
-            }
-
-            const audioRequest = new Request(proxyAudioUrl);
-            const audioResponse = await fetch(audioRequest, { cache: 'reload' });
-            if (audioResponse.ok && audioResponse.status === 200) {
-              await audioCache.put(audioRequest, withAudioCachedAt(audioResponse.clone()));
             }
           })
         );

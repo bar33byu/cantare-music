@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     if (!key) {
       const sampleKey = 'audio/sample.mp3';
       const encodedSampleKey = sampleKey.split('/').map((s) => encodeURIComponent(s)).join('/');
-      const samplePublicUrl = chosenPublic ? `${String(chosenPublic).replace(/\/$/, '')}/${encodedSampleKey}` : `/api/audio/${encodedSampleKey}`;
+      const samplePublicUrl = chosenPublic ? `${String(chosenPublic).replace(/\/$/, '')}/${encodedSampleKey}` : null;
 
       return NextResponse.json({
         ok: true,

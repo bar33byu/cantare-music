@@ -129,11 +129,11 @@ describe('SegmentEditor', () => {
     });
   });
 
-  it('uses a playable proxied audio URL for edit-page playback', async () => {
+  it('uses the direct song audio URL for edit-page playback', async () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(vi.mocked(useAudioPlayer)).toHaveBeenCalledWith('/api/audio/audio/song.mp3');
+      expect(vi.mocked(useAudioPlayer)).toHaveBeenCalledWith('/audio/song.mp3');
     });
   });
 
@@ -499,7 +499,7 @@ describe('SegmentEditor', () => {
     expect(segmentGetCalls).toHaveLength(1);
   });
 
-  it('probes proxy audio URL for duration before first play when direct probe fails', async () => {
+  it('probes the direct audio URL for duration before first play', async () => {
     vi.mocked(useAudioPlayer).mockReturnValue({
       isPlaying: false,
       isReady: false,
@@ -534,7 +534,7 @@ describe('SegmentEditor', () => {
         return {
           ok: true,
           json: async () => ({
-            audioUrl: '/audio/song-1/test.mp3',
+            audioUrl: 'https://pub-example.r2.dev/audio/song-1/test.mp3',
             title: 'My Song',
           }),
         } as Response;
@@ -566,7 +566,7 @@ describe('SegmentEditor', () => {
       }
 
       load() {
-        if (this.src.includes('/api/audio/')) {
+        if (this.src === 'https://pub-example.r2.dev/audio/song-1/test.mp3') {
           this.duration = 180;
           this.dispatchEvent(new Event('loadedmetadata'));
           return;
