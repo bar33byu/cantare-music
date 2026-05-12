@@ -80,6 +80,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [audioUrl, setAudioUrl] = useState('');
+  const [alternateAudioUrl, setAlternateAudioUrl] = useState('');
   const [songTitle, setSongTitle] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
   const [showReplaceAudio, setShowReplaceAudio] = useState(false);
@@ -1017,11 +1018,12 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         if (!response.ok) {
           return;
         }
-        const data = (await response.json()) as { audioUrl?: string; title?: string; pitchContourNotes?: SongPitchContourNote[] };
+        const data = (await response.json()) as { audioUrl?: string; alternateAudioUrl?: string; title?: string; pitchContourNotes?: SongPitchContourNote[] };
         if (!cancelled) {
           const loadedContourNotes = normalizeContourNotes(data.pitchContourNotes ?? []);
           contourLastSavedSnapshotRef.current = serializeContourNotes(loadedContourNotes);
           setAudioUrl(data.audioUrl ?? '');
+          setAlternateAudioUrl(data.alternateAudioUrl ?? '');
           setSongTitle(data.title ?? '');
           setTitleDraft(data.title ?? '');
           setContourDraftNotes(loadedContourNotes);
@@ -1030,6 +1032,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       } catch {
         if (!cancelled) {
           setAudioUrl('');
+          setAlternateAudioUrl('');
           setSongLoaded(true);
         }
       }
@@ -1114,7 +1117,13 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
             {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
           </div>
         </div>
-        <ReplaceAudioForm songId={songId} onReplaced={handleAudioUploaded} mode="upload" />
+        <ReplaceAudioForm
+          songId={songId}
+          audioUrl={audioUrl}
+          alternateAudioUrl={alternateAudioUrl}
+          onReplaced={handleAudioUploaded}
+          mode="upload"
+        />
       </div>
     );
   }
@@ -1168,7 +1177,12 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         </button>
         {showReplaceAudio && (
           <div className="mt-2">
-            <ReplaceAudioForm songId={songId} onReplaced={handleAudioUploaded} />
+            <ReplaceAudioForm
+              songId={songId}
+              audioUrl={audioUrl}
+              alternateAudioUrl={alternateAudioUrl}
+              onReplaced={handleAudioUploaded}
+            />
           </div>
         )}
       </div>

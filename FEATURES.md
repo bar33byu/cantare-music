@@ -17,6 +17,7 @@
 - [x] Add audio version toggle in PracticeView (prominent/blend)
 - [x] Ensure direct R2 audio URLs work for both versions
 - [x] Test playback switching without interruption
+- [x] Show separate Prominent and Blend upload/replace sections with populated/missing status
 
 ### 2.2: Segment-Focused Playlist Practice
 - [ ] Add "Focus Queue" mode to PlaylistPracticeView

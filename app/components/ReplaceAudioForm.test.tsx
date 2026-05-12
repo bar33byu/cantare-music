@@ -22,12 +22,21 @@ describe("ReplaceAudioForm", () => {
   it("shows validation error when submit is clicked with no file", async () => {
     render(<ReplaceAudioForm songId="song-1" />);
 
-    fireEvent.click(screen.getByTestId("replace-audio-submit"));
+    fireEvent.click(screen.getByTestId("replace-audio-submit-prominent"));
 
-    expect(await screen.findByTestId("replace-audio-error")).toHaveTextContent(
-      "Select an MP3 file first."
+    expect(await screen.findByTestId("replace-audio-error-prominent")).toHaveTextContent(
+      "Select an MP3 file for Prominent first."
     );
     expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("shows populated and missing status for each audio version", () => {
+    render(<ReplaceAudioForm songId="song-1" audioUrl="https://cdn.example.com/prominent.mp3" />);
+
+    expect(screen.getByTestId("replace-audio-status-prominent")).toHaveTextContent("Uploaded");
+    expect(screen.getByTestId("replace-audio-status-blend")).toHaveTextContent("Missing");
+    expect(screen.getByTestId("replace-audio-submit-prominent")).toHaveTextContent("Replace Prominent");
+    expect(screen.getByTestId("replace-audio-submit-blend")).toHaveTextContent("Upload Blend");
   });
 
   it("uploads file and patches song audio key", async () => {
@@ -35,13 +44,13 @@ describe("ReplaceAudioForm", () => {
     (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
 
     const onReplaced = vi.fn();
-    render(<ReplaceAudioForm songId="song-1" onReplaced={onReplaced} />);
+    render(<ReplaceAudioForm songId="song-1" audioUrl="https://cdn.example.com/prominent.mp3" onReplaced={onReplaced} />);
 
     const file = new File(["x"], "new.mp3", { type: "audio/mpeg" });
-    const input = screen.getByTestId("replace-audio-input") as HTMLInputElement;
+    const input = screen.getByTestId("replace-audio-input-prominent") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
 
-    fireEvent.click(screen.getByTestId("replace-audio-submit"));
+    fireEvent.click(screen.getByTestId("replace-audio-submit-prominent"));
 
     await waitFor(() => {
       expect(uploadMock).toHaveBeenCalledWith("song-1", file, "prominent");
@@ -53,7 +62,7 @@ describe("ReplaceAudioForm", () => {
       body: JSON.stringify({ audioKey: "audio/new.mp3" }),
     });
 
-    expect(await screen.findByTestId("replace-audio-success")).toHaveTextContent(
+    expect(await screen.findByTestId("replace-audio-success-prominent")).toHaveTextContent(
       "Prominent audio replaced successfully."
     );
     expect(onReplaced).toHaveBeenCalledTimes(1);
@@ -65,10 +74,9 @@ describe("ReplaceAudioForm", () => {
 
     render(<ReplaceAudioForm songId="song-1" />);
 
-    fireEvent.change(screen.getByTestId("replace-audio-version"), { target: { value: "blend" } });
     const file = new File(["x"], "blend.mp3", { type: "audio/mpeg" });
-    fireEvent.change(screen.getByTestId("replace-audio-input"), { target: { files: [file] } });
-    fireEvent.click(screen.getByTestId("replace-audio-submit"));
+    fireEvent.change(screen.getByTestId("replace-audio-input-blend"), { target: { files: [file] } });
+    fireEvent.click(screen.getByTestId("replace-audio-submit-blend"));
 
     await waitFor(() => {
       expect(uploadMock).toHaveBeenCalledWith("song-1", file, "blend");
@@ -91,9 +99,9 @@ describe("ReplaceAudioForm", () => {
     render(<ReplaceAudioForm songId="song-1" />);
 
     const file = new File(["x"], "new.mp3", { type: "audio/mpeg" });
-    fireEvent.change(screen.getByTestId("replace-audio-input"), { target: { files: [file] } });
-    fireEvent.click(screen.getByTestId("replace-audio-submit"));
+    fireEvent.change(screen.getByTestId("replace-audio-input-prominent"), { target: { files: [file] } });
+    fireEvent.click(screen.getByTestId("replace-audio-submit-prominent"));
 
-    expect(await screen.findByTestId("replace-audio-error")).toHaveTextContent("Update failed");
+    expect(await screen.findByTestId("replace-audio-error-prominent")).toHaveTextContent("Update failed");
   });
 });
