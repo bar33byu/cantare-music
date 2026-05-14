@@ -26,12 +26,12 @@
 - [x] Add auto-advance after segment rating, preserving enough transition context before the next segment starts
 - [x] Add segment-level sorting options (oldest reviewed, mastery, song order)
 
-### 2.3: Spaced Repetition Scheduling
-- [ ] Add `lastReviewedAt` and `reviewIntervalDays` to segment schema
-- [ ] Implement review interval calculation based on ratings (e.g., 1 day for low, 7 for high)
-- [ ] Surface "due segments" in playlist practice queue
-- [ ] Add "Review Due" filter to playlist sorting
-- [ ] Integrate with existing rating system for automatic updates
+### 2.3: Hands-Free Auto-Practice Modes
+- [ ] Add "Auto Drill" mode to playlist practice
+- [ ] Implement voice prompts for segment transitions
+- [ ] Reduce UI controls in auto mode (single play/pause)
+- [ ] Add auto-repeat for low-rated segments
+- [ ] Ensure accessibility with screen readers
 
 ### 2.4: Enhanced Tap Practice
 - [ ] Allow tap practice on blend/straight audio versions
@@ -40,12 +40,12 @@
 - [ ] Improve tap persistence for hands-free sessions
 - [ ] Add tap heat map for blend version practice
 
-### 2.5: Hands-Free Auto-Practice Modes
-- [ ] Add "Auto Drill" mode to playlist practice
-- [ ] Implement voice prompts for segment transitions
-- [ ] Reduce UI controls in auto mode (single play/pause)
-- [ ] Add auto-repeat for low-rated segments
-- [ ] Ensure accessibility with screen readers
+### 2.5: Spaced Repetition Scheduling
+- [ ] Add `lastReviewedAt` and `reviewIntervalDays` to segment schema
+- [ ] Implement review interval calculation based on ratings (e.g., 1 day for low, 7 for high)
+- [ ] Surface "due segments" in playlist practice queue
+- [ ] Add "Review Due" filter to playlist sorting
+- [ ] Integrate with existing rating system for automatic updates
 
 ## Version 3.0: Collaboration and Sharing
 - [ ] User invitations and playlist sharing
