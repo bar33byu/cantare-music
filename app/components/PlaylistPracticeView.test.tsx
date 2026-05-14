@@ -160,6 +160,455 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
+  it('shows weakest segments first in Focus mode with the normal practice surface and tap controls', async () => {
+    const play = vi.fn();
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 30000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+
+    const focusPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          segments: [
+            { ...playlist.songs[0].segments[0], id: 'seg-1', label: 'Opening', startMs: 4000, endMs: 7000 },
+          ],
+        },
+        {
+          ...playlist.songs[1],
+          pitchContourNotes: [
+            { id: 'note-1', absoluteMs: 12000, lane: 0.4, durationMs: 200 },
+            { id: 'note-2', absoluteMs: 12500, lane: 0.6, durationMs: 200 },
+          ],
+          segments: [
+            { ...playlist.songs[1].segments[0], id: 'seg-2', label: 'Second Chorus', startMs: 12000, endMs: 15000 },
+          ],
+        },
+      ],
+    };
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 67 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(focusPlaylist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/songs/song-1/ratings')) {
+        return { ok: true, json: async () => ({ ratings: [{ id: 'rating-1', segmentId: 'seg-1', rating: 5, ratedAt: '2026-01-02T00:00:00.000Z' }] }) } as Response;
+      }
+      if (url.includes('/api/songs/song-2/ratings')) {
+        return { ok: true, json: async () => ({ ratings: [] }) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={focusPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-focus'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Beta - B');
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Second Chorus');
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Song 2 of 2');
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Segment 1 of 1');
+    });
+
+    expect(screen.getByTestId('focus-practice-surface')).toBeInTheDocument();
+    expect(screen.getByTestId('song-title')).toHaveTextContent('Beta');
+    expect(screen.getByTestId('segment-counter')).toHaveTextContent('Segment 1 of 1');
+    expect(screen.getByTestId('practice-tap-mode-toggle')).toBeInTheDocument();
+    expect(screen.queryByTestId('focus-prev-segment')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('focus-next-segment')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('audio-play-pause'));
+
+    expect(play).toHaveBeenCalledWith(7000, 15000);
+  });
+
+  it('uses the practice segment arrows to move through the Focus queue', async () => {
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 30000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+
+    const focusPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          segments: [
+            { ...playlist.songs[0].segments[0], id: 'seg-1', label: 'Alpha Verse', order: 0, startMs: 4000, endMs: 7000 },
+          ],
+        },
+        {
+          ...playlist.songs[1],
+          segments: [
+            { ...playlist.songs[1].segments[0], id: 'seg-2', label: 'Beta Chorus', order: 0, startMs: 12000, endMs: 15000 },
+          ],
+        },
+      ],
+    };
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 67 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(focusPlaylist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/songs/song-1/ratings')) {
+        return { ok: true, json: async () => ({ ratings: [] }) } as Response;
+      }
+      if (url.includes('/api/songs/song-2/ratings')) {
+        return { ok: true, json: async () => ({ ratings: [{ id: 'rating-2', segmentId: 'seg-2', rating: 1, ratedAt: '2026-01-02T00:00:00.000Z' }] }) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={focusPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-focus'));
+    fireEvent.click(await screen.findByTestId('focus-sort-song-order'));
+
+    expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Alpha Verse');
+    expect(screen.getByTestId('practice-prev-segment')).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('practice-next-segment'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Beta Chorus');
+      expect(screen.getByTestId('song-title')).toHaveTextContent('Beta');
+    });
+
+    fireEvent.click(screen.getByTestId('practice-prev-segment'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Alpha Verse');
+      expect(screen.getByTestId('song-title')).toHaveTextContent('Alpha');
+    });
+  });
+
+  it('keeps Focus queue playback running when moving to the next segment', async () => {
+    const play = vi.fn();
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 5000,
+      durationMs: 30000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: true,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'playing',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 1,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+
+    const focusPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          segments: [
+            { ...playlist.songs[0].segments[0], id: 'seg-1', label: 'Alpha Verse', order: 0, startMs: 4000, endMs: 7000 },
+          ],
+        },
+        {
+          ...playlist.songs[1],
+          segments: [
+            { ...playlist.songs[1].segments[0], id: 'seg-2', label: 'Beta Chorus', order: 0, startMs: 12000, endMs: 15000 },
+          ],
+        },
+      ],
+    };
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 67 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(focusPlaylist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/songs/song-1/ratings') || url.includes('/api/songs/song-2/ratings')) {
+        return { ok: true, json: async () => ({ ratings: [] }) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={focusPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-focus'));
+    fireEvent.click(await screen.findByTestId('focus-sort-song-order'));
+
+    play.mockClear();
+
+    fireEvent.click(screen.getByTestId('practice-next-segment'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Beta Chorus');
+      expect(play).toHaveBeenCalledWith(7000, 15000);
+    });
+  });
+
+  it('groups weakest Focus Queue segments by song while preserving song segment order', async () => {
+    const groupedPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          segments: [
+            { ...playlist.songs[0].segments[0], id: 'a-verse', label: 'A Verse', order: 0, startMs: 1000, endMs: 2000 },
+            { ...playlist.songs[0].segments[0], id: 'a-chorus', label: 'A Chorus', order: 1, startMs: 3000, endMs: 4000 },
+          ],
+        },
+        {
+          ...playlist.songs[1],
+          segments: [
+            { ...playlist.songs[1].segments[0], id: 'b-intro', label: 'B Intro', order: 0, startMs: 500, endMs: 900 },
+            { ...playlist.songs[1].segments[0], id: 'b-verse', label: 'B Verse', order: 1, startMs: 1000, endMs: 2000 },
+            { ...playlist.songs[1].segments[0], id: 'b-chorus', label: 'B Chorus', order: 2, startMs: 3000, endMs: 4000 },
+          ],
+        },
+      ],
+    };
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 67 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(groupedPlaylist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/songs/song-1/ratings')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ratings: [
+              { id: 'a-verse-rating', segmentId: 'a-verse', rating: 5, ratedAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'a-chorus-rating', segmentId: 'a-chorus', rating: 5, ratedAt: '2026-01-01T00:00:00.000Z' },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes('/api/songs/song-2/ratings')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ratings: [
+              { id: 'b-intro-rating', segmentId: 'b-intro', rating: 5, ratedAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'b-verse-rating', segmentId: 'b-verse', rating: 2, ratedAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'b-chorus-rating', segmentId: 'b-chorus', rating: 1, ratedAt: '2026-01-01T00:00:00.000Z' },
+            ],
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={groupedPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-focus'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('B Verse');
+      expect(screen.getByTestId('focus-current-segment')).not.toHaveTextContent('B Intro');
+    });
+
+    fireEvent.click(screen.getByTestId('practice-next-segment'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('B Chorus');
+    });
+  });
+
+  it('does not include 5-rated segments in the Focus Queue', async () => {
+    const masteredPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          segments: [
+            { ...playlist.songs[0].segments[0], id: 'mastered-segment', label: 'Mastered Verse', order: 0 },
+          ],
+        },
+      ],
+    };
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 100 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(masteredPlaylist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/songs/song-1/ratings')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ratings: [
+              { id: 'mastered-rating', segmentId: 'mastered-segment', rating: 5, ratedAt: '2026-01-01T00:00:00.000Z' },
+            ],
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={masteredPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-focus'));
+
+    await waitFor(() => {
+      expect(screen.getByText('No segments currently need focused practice.')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Mastered Verse')).not.toBeInTheDocument();
+  });
+
+  it('saves Focus Queue ratings and advances in song order', async () => {
+    const focusPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          segments: [
+            { ...playlist.songs[0].segments[0], id: 'seg-1', label: 'Verse', order: 0 },
+            { ...playlist.songs[0].segments[0], id: 'seg-1b', label: 'Chorus', order: 1, startMs: 2000, endMs: 3000 },
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 0 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(focusPlaylist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/songs/song-1/ratings') && init?.method === 'POST') {
+        return { ok: true } as Response;
+      }
+      if (url.includes('/api/songs/song-1/ratings')) {
+        return { ok: true, json: async () => ({ ratings: [] }) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={focusPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-focus'));
+    fireEvent.click(await screen.findByTestId('focus-sort-song-order'));
+
+    expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Verse');
+
+    fireEvent.click(screen.getByTestId('rating-button-4'));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input, init]) => {
+          const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+          return (
+            url.includes('/api/songs/song-1/ratings') &&
+            init?.method === 'POST' &&
+            typeof init.body === 'string' &&
+            init.body.includes('"segmentId":"seg-1"')
+          );
+        })
+      ).toBe(true);
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Chorus');
+    }, { timeout: 2000 });
+  });
+
   it('plays from the listen transport without auto-starting on mode entry', async () => {
     const play = vi.fn();
     const pause = vi.fn();

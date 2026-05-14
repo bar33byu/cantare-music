@@ -712,6 +712,7 @@ export default function Home() {
           <PlaylistPracticeView
             playlist={selectedPlaylist}
             userId={activeUserId}
+            collapseLyricLineBreaks={userSettings.collapseLyricLineBreaks}
             onExit={() => setActiveView("playlists")}
             onManage={() => setActiveView("playlist_detail")}
             onSelectSong={(song) => {

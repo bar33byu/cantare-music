@@ -178,6 +178,31 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
   });
 
+  it("can default play to the current segment with preroll", async () => {
+    const song = makeSong();
+    const session = { ...makeSession(song), currentSegmentIndex: 1 };
+
+    render(
+      <PracticeView
+        song={song}
+        initialSession={session}
+        segmentPrerollMs={5000}
+        defaultLooping
+        playScope="segment"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("ratings-loading-skeleton")).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("mock-loop-toggle")).toHaveAttribute("data-looping", "true");
+
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+
+    expect(mockPlay).toHaveBeenCalledWith(0, 8000);
+  });
+
   it("renders knowledge bar in the top section", async () => {
     const song = makeSong();
     await renderAndWaitForRatings(song);
@@ -1616,6 +1641,63 @@ describe("PracticeView", () => {
     await waitFor(() =>
       expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 2")
     );
+  });
+
+  it("keeps segment-scoped playback anchored during preroll gaps", async () => {
+    const playbackState = {
+      isPlaying: true,
+      isReady: true,
+      currentMs: 4500,
+      durationMs: 14000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const gappedSong: Song = {
+      id: "gapped-song",
+      title: "Gapped",
+      audioUrl: "https://cdn.example.com/audio.mp3",
+      segments: [
+        { id: "g0", songId: "gapped-song", order: 0, label: "A", lyricText: "", startMs: 0, endMs: 4000 },
+        { id: "g1", songId: "gapped-song", order: 1, label: "B", lyricText: "", startMs: 6000, endMs: 10000 },
+      ],
+      createdAt: new Date().toISOString(),
+    };
+    const focusSession = { ...makeSession(gappedSong), currentSegmentIndex: 1 };
+
+    const view = render(
+      <PracticeView
+        song={gappedSong}
+        initialSession={focusSession}
+        segmentPrerollMs={5000}
+        defaultLooping
+        playScope="segment"
+      />
+    );
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${gappedSong.id}/ratings`);
+    });
+
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 2");
+
+    playbackState.currentMs = 5500;
+    view.rerender(
+      <PracticeView
+        song={gappedSong}
+        initialSession={focusSession}
+        segmentPrerollMs={5000}
+        defaultLooping
+        playScope="segment"
+      />
+    );
+
+    expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 2");
   });
 
   it("resets to the first segment when replay starts before an initial gap", async () => {

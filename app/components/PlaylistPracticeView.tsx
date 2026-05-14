@@ -6,11 +6,17 @@ import { getMasteryColor } from '../lib/masteryColors';
 import { toPlayableAudioUrl } from '../lib/audioUrls';
 import { SongReadinessIcons } from './SongReadinessIcons';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
+import PracticeView from './PracticeView';
+import type { Segment, SegmentRating } from '../types';
+import type { SessionState } from '../lib/sessionReducer';
 
 type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
+type FocusSortKey = 'mastery' | 'due-date' | 'song-order';
 interface SortState { key: SortKey; asc: boolean }
 const SORT_STORAGE_KEY = 'playlist-practice-sort';
 const DEFAULT_SORT: SortState = { key: 'date-practiced', asc: false };
+const DEFAULT_FOCUS_PREROLL_MS = 5000;
+const FOCUS_MASTERED_RATING = 5;
 
 const sortKeyLabel: Record<SortKey, string> = {
   alphabetical: 'Alphabetical',
@@ -27,6 +33,16 @@ const sortDirLabel: Record<SortKey, [string, string]> = {
 };
 
 const defaultAscForKey = (key: SortKey) => key === 'alphabetical';
+
+interface FocusQueueItem {
+  id: string;
+  song: Playlist["songs"][number];
+  segment: Segment;
+  songIndex: number;
+  segmentIndex: number;
+  latestRating?: SegmentRating;
+  masteryPercent: number;
+}
 
 function getLastPracticedLabel(value?: string | null): string {
   if (!value) return 'Not practiced yet';
@@ -58,6 +74,8 @@ function formatMs(ms: number): string {
 interface PlaylistPracticeViewProps {
   playlist: Playlist;
   userId?: string;
+  segmentPrerollMs?: number;
+  collapseLyricLineBreaks?: boolean;
   onExit: () => void;
   onManage?: () => void;
   onSelectSong: (song: Playlist["songs"][number]) => void;
@@ -65,15 +83,32 @@ interface PlaylistPracticeViewProps {
 
 const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
 
-export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
+export function PlaylistPracticeView({
+  playlist,
+  userId,
+  segmentPrerollMs = DEFAULT_FOCUS_PREROLL_MS,
+  collapseLyricLineBreaks = false,
+  onExit,
+  onManage,
+  onSelectSong,
+}: PlaylistPracticeViewProps) {
   const [livePlaylist, setLivePlaylist] = useState(playlist);
   const [playlistScore, setPlaylistScore] = useState(0);
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
-  const [mode, setMode] = useState<'practice' | 'listen'>('practice');
+  const [mode, setMode] = useState<'practice' | 'focus' | 'listen'>('practice');
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
+  const [currentFocusIndex, setCurrentFocusIndex] = useState(0);
+  const [focusAutoPlayItemId, setFocusAutoPlayItemId] = useState<string | null>(null);
   const [isListenPlaying, setIsListenPlaying] = useState(false);
+  const [focusSortKey, setFocusSortKey] = useState<FocusSortKey>('mastery');
+  const [focusPrerollMs, setFocusPrerollMs] = useState(segmentPrerollMs);
+  const [ratingsBySongId, setRatingsBySongId] = useState<Record<string, SegmentRating[]>>({});
+  const [focusRatingsLoading, setFocusRatingsLoading] = useState(false);
+  const [focusRatingsError, setFocusRatingsError] = useState<string | null>(null);
+  const lastObservedFocusItemIdRef = useRef<string | null>(null);
+  const lastObservedFocusRatingRef = useRef<string | null>(null);
   const listenStartedSongIdRef = useRef<string | null>(null);
 
   const userScopedHeaders = useMemo(() => {
@@ -167,10 +202,188 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     });
   }, [livePlaylist.songs, sort]);
 
+  useEffect(() => {
+    setFocusPrerollMs(segmentPrerollMs);
+  }, [segmentPrerollMs]);
+
+  useEffect(() => {
+    if (mode !== 'focus') {
+      return;
+    }
+
+    let cancelled = false;
+    const songsWithSegments = livePlaylist.songs.filter((song) => song.segments.length > 0);
+
+    if (songsWithSegments.length === 0) {
+      setRatingsBySongId({});
+      setFocusRatingsLoading(false);
+      setFocusRatingsError(null);
+      return;
+    }
+
+    const loadRatings = async () => {
+      setFocusRatingsLoading(true);
+      setFocusRatingsError(null);
+      try {
+        const entries = await Promise.all(
+          songsWithSegments.map(async (song) => {
+            const response = await fetch(`/api/songs/${song.id}/ratings`, {
+              headers: userScopedHeaders,
+              cache: 'no-store',
+            });
+            if (!response.ok) {
+              throw new Error(`Failed to load ratings for ${song.title}`);
+            }
+            const payload = (await response.json()) as { ratings?: SegmentRating[] };
+            return [song.id, Array.isArray(payload.ratings) ? payload.ratings : []] as const;
+          })
+        );
+
+        if (!cancelled) {
+          setRatingsBySongId(Object.fromEntries(entries));
+        }
+      } catch {
+        if (!cancelled) {
+          setFocusRatingsError('Could not load segment ratings. Focus Queue is still available.');
+        }
+      } finally {
+        if (!cancelled) {
+          setFocusRatingsLoading(false);
+        }
+      }
+    };
+
+    void loadRatings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [livePlaylist.songs, mode, refetchTrigger, userScopedHeaders]);
+
+  const focusQueue = useMemo<FocusQueueItem[]>(() => {
+    const items = livePlaylist.songs.flatMap((song, songIndex) => {
+      const ratings = ratingsBySongId[song.id] ?? [];
+      return [...song.segments]
+        .sort((a, b) => a.order - b.order || a.startMs - b.startMs)
+        .map((segment, segmentIndex) => {
+          const latestRating = ratings
+            .filter((rating) => rating.segmentId === segment.id)
+            .sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt))[0];
+          return {
+            id: `${song.id}:${segment.id}`,
+            song,
+            segment,
+            songIndex,
+            segmentIndex,
+            latestRating,
+            masteryPercent: latestRating ? latestRating.rating * 20 : 0,
+          };
+        })
+        .filter((item) => (item.latestRating?.rating ?? 0) < FOCUS_MASTERED_RATING);
+    });
+
+    if (focusSortKey === 'song-order') {
+      return items.sort((a, b) => a.songIndex - b.songIndex || a.segmentIndex - b.segmentIndex);
+    }
+
+    const groupedBySong = new Map<number, FocusQueueItem[]>();
+    for (const item of items) {
+      const group = groupedBySong.get(item.songIndex) ?? [];
+      group.push(item);
+      groupedBySong.set(item.songIndex, group);
+    }
+
+    return [...groupedBySong.values()]
+      .map((group) => [...group].sort((a, b) => a.segmentIndex - b.segmentIndex))
+      .sort((aGroup, bGroup) => {
+        const aFirst = aGroup[0];
+        const bFirst = bGroup[0];
+        if (!aFirst || !bFirst) {
+          return 0;
+        }
+
+        if (focusSortKey === 'due-date') {
+          const aOldest = Math.min(...aGroup.map((item) => item.latestRating ? Date.parse(item.latestRating.ratedAt) : 0));
+          const bOldest = Math.min(...bGroup.map((item) => item.latestRating ? Date.parse(item.latestRating.ratedAt) : 0));
+          const aWeakest = Math.min(...aGroup.map((item) => item.masteryPercent));
+          const bWeakest = Math.min(...bGroup.map((item) => item.masteryPercent));
+          return aOldest - bOldest || aWeakest - bWeakest || aFirst.songIndex - bFirst.songIndex;
+        }
+
+        const aWeakest = Math.min(...aGroup.map((item) => item.masteryPercent));
+        const bWeakest = Math.min(...bGroup.map((item) => item.masteryPercent));
+        return aWeakest - bWeakest || aFirst.songIndex - bFirst.songIndex;
+      })
+      .flat();
+  }, [focusSortKey, livePlaylist.songs, ratingsBySongId]);
+
+  useEffect(() => {
+    setCurrentFocusIndex((prev) => Math.min(prev, Math.max(focusQueue.length - 1, 0)));
+  }, [focusQueue.length]);
+
+  const currentFocusItem = focusQueue[currentFocusIndex];
+  const handlePrevFocusSegment = useCallback((options?: { wasPlaying: boolean }) => {
+    setCurrentFocusIndex((prev) => {
+      const nextIndex = Math.max(prev - 1, 0);
+      setFocusAutoPlayItemId(options?.wasPlaying ? focusQueue[nextIndex]?.id ?? null : null);
+      return nextIndex;
+    });
+  }, [focusQueue]);
+  const handleNextFocusSegment = useCallback((options?: { wasPlaying: boolean }) => {
+    setCurrentFocusIndex((prev) => {
+      const nextIndex = Math.min(prev + 1, Math.max(focusQueue.length - 1, 0));
+      setFocusAutoPlayItemId(options?.wasPlaying ? focusQueue[nextIndex]?.id ?? null : null);
+      return nextIndex;
+    });
+  }, [focusQueue]);
+
+  useEffect(() => {
+    if (!focusAutoPlayItemId || currentFocusItem?.id !== focusAutoPlayItemId) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setFocusAutoPlayItemId(null), 0);
+    return () => window.clearTimeout(timer);
+  }, [currentFocusItem?.id, focusAutoPlayItemId]);
+
+  const focusPracticeSession = useMemo<SessionState | null>(() => {
+    if (!currentFocusItem) {
+      return null;
+    }
+
+    return {
+      id: `playlist-focus-${playlist.id}-${currentFocusItem.segment.id}`,
+      songId: currentFocusItem.song.id,
+      currentSongId: currentFocusItem.song.id,
+      currentSegmentIndex: currentFocusItem.segmentIndex,
+      isLocked: false,
+      ratings: ratingsBySongId[currentFocusItem.song.id] ?? [],
+      startedAt: new Date().toISOString(),
+    };
+  }, [currentFocusItem, playlist.id, ratingsBySongId]);
+
+  useEffect(() => {
+    if (!currentFocusItem) {
+      lastObservedFocusItemIdRef.current = null;
+      lastObservedFocusRatingRef.current = null;
+      return;
+    }
+
+    if (lastObservedFocusItemIdRef.current === currentFocusItem.id) {
+      return;
+    }
+
+    lastObservedFocusItemIdRef.current = currentFocusItem.id;
+    lastObservedFocusRatingRef.current = currentFocusItem.latestRating
+      ? `${currentFocusItem.segment.id}:${currentFocusItem.latestRating.rating}:${currentFocusItem.latestRating.ratedAt}`
+      : null;
+  }, [currentFocusItem]);
+
   const listenQueue = displayedSongs;
   const currentSong = listenQueue[currentSongIndex];
-  const currentSongId = currentSong?.id;
-  const hasCurrentSongAudio = Boolean(currentSong?.audioUrl.trim());
+  const playbackSong = mode === 'focus' ? undefined : currentSong;
+  const currentSongId = playbackSong?.id;
+  const hasCurrentSongAudio = Boolean(playbackSong?.audioUrl.trim());
   const findNextPlayableIndex = useCallback((startIndex: number) => {
     for (let index = Math.max(0, startIndex); index < listenQueue.length; index += 1) {
       if (listenQueue[index]?.audioUrl.trim()) {
@@ -180,8 +393,8 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     return -1;
   }, [listenQueue]);
   const playbackAudioUrl = useMemo(
-    () => toPlayableAudioUrl(currentSong?.audioUrl ?? ''),
-    [currentSong?.audioUrl]
+    () => toPlayableAudioUrl(playbackSong?.audioUrl ?? ''),
+    [playbackSong?.audioUrl]
   );
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
   const {
@@ -245,12 +458,12 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     if (nextPlayableIndex === -1) {
       setIsListenPlaying(false);
       listenStartedSongIdRef.current = null;
+      pauseAudio();
       return;
     }
 
-    listenStartedSongIdRef.current = null;
     setCurrentSongIndex(nextPlayableIndex);
-  }, [currentSongIndex, findNextPlayableIndex, isListenPlaying, mode, playbackEndedCount]);
+  }, [currentSongIndex, findNextPlayableIndex, isListenPlaying, mode, pauseAudio, playbackEndedCount]);
 
   const handleListenPlayPause = () => {
     if (audioPlayer.isPlaying || isListenPlaying) {
@@ -260,20 +473,16 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
       return;
     }
 
+    const startIndex = hasCurrentSongAudio ? currentSongIndex : findNextPlayableIndex(currentSongIndex);
+    if (startIndex === -1) {
+      return;
+    }
+
+    if (startIndex !== currentSongIndex) {
+      setCurrentSongIndex(startIndex);
+    }
+    listenStartedSongIdRef.current = null;
     setIsListenPlaying(true);
-    if (currentSongId && hasCurrentSongAudio) {
-      listenStartedSongIdRef.current = currentSongId;
-      requestPlay(0, 0);
-      return;
-    }
-
-    const nextPlayableIndex = findNextPlayableIndex(currentSongIndex);
-    if (nextPlayableIndex === -1) {
-      setIsListenPlaying(false);
-      return;
-    }
-
-    setCurrentSongIndex(nextPlayableIndex);
   };
 
   const handleNextSong = () => {
@@ -287,6 +496,49 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
       setCurrentSongIndex(prev => prev - 1);
     }
   };
+
+  const handleFocusSessionChange = useCallback((session: SessionState) => {
+    if (!currentFocusItem) {
+      return;
+    }
+
+    const activeSegment = currentFocusItem.song.segments[session.currentSegmentIndex];
+    if (activeSegment) {
+      const nextFocusIndex = focusQueue.findIndex(
+        (item) => item.song.id === currentFocusItem.song.id && item.segment.id === activeSegment.id
+      );
+      if (nextFocusIndex !== -1 && nextFocusIndex !== currentFocusIndex) {
+        setCurrentFocusIndex(nextFocusIndex);
+      }
+    }
+  }, [currentFocusIndex, currentFocusItem, focusQueue]);
+
+  const handleFocusRatingsSaved = useCallback((ratings: SessionState["ratings"]) => {
+    if (!currentFocusItem) {
+      return;
+    }
+
+    setRatingsBySongId((prev) => ({ ...prev, [currentFocusItem.song.id]: ratings }));
+
+    const latestForQueuedSegment = ratings
+      .filter((rating) => rating.segmentId === currentFocusItem.segment.id)
+      .sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt))[0];
+
+    const nextObservedKey = latestForQueuedSegment
+      ? `${currentFocusItem.segment.id}:${latestForQueuedSegment.rating}:${latestForQueuedSegment.ratedAt}`
+      : null;
+
+    if (!nextObservedKey || nextObservedKey === lastObservedFocusRatingRef.current) {
+      return;
+    }
+
+    lastObservedFocusRatingRef.current = nextObservedKey;
+    setRefetchTrigger((prev) => prev + 1);
+    setCurrentFocusIndex((prev) => {
+      const lastIndex = Math.max(focusQueue.length - 1, 0);
+      return focusSortKey === 'song-order' ? Math.min(prev + 1, lastIndex) : Math.min(prev, lastIndex);
+    });
+  }, [currentFocusItem, focusQueue.length, focusSortKey]);
 
   useEffect(() => {
     try {
@@ -303,7 +555,9 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
           setSort(parsed as SortState);
         }
       }
-    } catch { /* ignore */ }
+    } catch {
+      // Ignore malformed persisted sorting preferences.
+    }
   }, []);
 
   const updateSort = (next: SortState) => {
@@ -444,13 +698,28 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setMode(mode === 'practice' ? 'listen' : 'practice')}
-            className="flex h-10 items-center gap-2 rounded border border-indigo-300 px-3 text-indigo-700 hover:bg-indigo-50"
-          >
-            {mode === 'practice' ? '🎧 Listen' : '🎼 Practice'}
-          </button>
+          <div className="inline-flex h-10 rounded border border-indigo-300 bg-white p-0.5">
+            {([
+              ['practice', 'Songs'],
+              ['focus', 'Focus'],
+              ['listen', 'Listen'],
+            ] as const).map(([nextMode, label]) => (
+              <button
+                key={nextMode}
+                type="button"
+                data-testid={`playlist-mode-${nextMode}`}
+                aria-pressed={mode === nextMode}
+                onClick={() => setMode(nextMode)}
+                className={`rounded px-3 text-sm font-semibold ${
+                  mode === nextMode
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {onManage ? (
             <button
               data-testid="playlist-practice-manage"
@@ -581,6 +850,139 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
             })}
           </div>
         </>
+      )}
+
+      {mode === 'focus' && (
+        <div className="space-y-4" data-testid="playlist-focus-queue">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="inline-flex rounded border border-gray-300 bg-white p-0.5">
+              {([
+                ['mastery', 'Weakest'],
+                ['due-date', 'Oldest'],
+                ['song-order', 'Song Order'],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  data-testid={`focus-sort-${key}`}
+                  aria-pressed={focusSortKey === key}
+                  onClick={() => {
+                    setFocusSortKey(key);
+                    setCurrentFocusIndex(0);
+                  }}
+                  className={`rounded px-3 py-1.5 text-sm font-semibold ${
+                    focusSortKey === key
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              Pre-roll
+              <select
+                data-testid="focus-preroll-select"
+                value={focusPrerollMs}
+                onChange={(event) => setFocusPrerollMs(Number(event.target.value))}
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-sm"
+              >
+                <option value={0}>0s</option>
+                <option value={1000}>1s</option>
+                <option value={2000}>2s</option>
+                <option value={5000}>5s</option>
+                <option value={10000}>10s</option>
+              </select>
+            </label>
+          </div>
+
+          {focusRatingsLoading ? (
+            <div className="rounded border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+              Loading segment ratings...
+            </div>
+          ) : null}
+
+          {focusRatingsError ? (
+            <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {focusRatingsError}
+            </div>
+          ) : null}
+
+          {!currentFocusItem ? (
+            <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              No segments currently need focused practice.
+            </div>
+          ) : (
+            <>
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3" data-testid="focus-current-segment">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-indigo-800">
+                      Focus: {currentFocusItem.song.title}
+                      {currentFocusItem.song.artist ? ` - ${currentFocusItem.song.artist}` : ''}
+                    </p>
+                    <p className="text-sm text-indigo-950">
+                      {currentFocusItem.segment.label} - Song {currentFocusItem.songIndex + 1} of {livePlaylist.songs.length} - Segment {currentFocusItem.segmentIndex + 1} of {currentFocusItem.song.segments.length} - {formatMs(currentFocusItem.segment.startMs)} to {formatMs(currentFocusItem.segment.endMs)}
+                    </p>
+                  </div>
+                  <span className="text-sm font-medium text-indigo-900">
+                    {currentFocusIndex + 1} of {focusQueue.length}
+                  </span>
+                </div>
+              </div>
+
+              {focusPracticeSession ? (
+                <div className="min-h-[720px] rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="focus-practice-surface">
+                  <PracticeView
+                    key={`${currentFocusItem.song.id}:${currentFocusItem.segment.id}`}
+                    song={currentFocusItem.song}
+                    initialSession={focusPracticeSession}
+                    onSessionChange={handleFocusSessionChange}
+                    onRatingsSaved={handleFocusRatingsSaved}
+                    breadcrumbRootLabel="Focus Queue"
+                    segmentPrerollMs={focusPrerollMs}
+                    collapseLyricLineBreaks={collapseLyricLineBreaks}
+                    defaultLooping
+                    playScope="segment"
+                    autoPlayOnMount={focusAutoPlayItemId === currentFocusItem.id}
+                    onPrevSegment={handlePrevFocusSegment}
+                    onNextSegment={handleNextFocusSegment}
+                    canUsePrevSegment={currentFocusIndex > 0}
+                    canUseNextSegment={currentFocusIndex < focusQueue.length - 1}
+                  />
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 md:grid-cols-2" data-testid="focus-queue-list">
+                {focusQueue.slice(0, 8).map((item, index) => {
+                  const isActive = index === currentFocusIndex;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      data-testid={`focus-queue-item-${item.segment.id}`}
+                      onClick={() => setCurrentFocusIndex(index)}
+                      className={`rounded-lg border p-3 text-left transition ${
+                        isActive
+                          ? 'border-indigo-500 bg-indigo-50'
+                          : 'border-gray-200 bg-white hover:border-indigo-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-gray-950">{item.segment.label}</span>
+                        <span className="text-xs font-semibold text-gray-500">{item.masteryPercent}%</span>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {item.song.title} - {formatMs(item.segment.startMs)}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {mode === 'listen' && currentSong && (

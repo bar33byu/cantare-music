@@ -19,12 +19,12 @@
 - [x] Test playback switching without interruption
 - [x] Show separate Prominent and Blend upload/replace sections with populated/missing status
 
-### 2.2: Segment-Focused Playlist Practice
-- [ ] Add "Focus Queue" mode to PlaylistPracticeView
-- [ ] Implement segment selection logic (weakest first across playlist)
-- [ ] Add auto-advance after segment rating
-- [ ] Update playlist knowledge score to include segment-level data
-- [ ] Add segment-level sorting options (due date, mastery)
+### 2.2: Context-Aware Segment Focus Queue
+- [x] Add "Focus Queue" mode to PlaylistPracticeView for drilling individual playlist segments
+- [x] Rank queue items weakest/unrated first across the playlist, while keeping song title, segment label, and local song position visible
+- [x] Start each queued segment with configurable pre-roll so similar repeats (e.g. multiple choruses) retain musical context
+- [x] Add auto-advance after segment rating, preserving enough transition context before the next segment starts
+- [x] Add segment-level sorting options (oldest reviewed, mastery, song order)
 
 ### 2.3: Spaced Repetition Scheduling
 - [ ] Add `lastReviewedAt` and `reviewIntervalDays` to segment schema
