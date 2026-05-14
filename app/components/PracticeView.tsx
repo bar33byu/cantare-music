@@ -359,23 +359,24 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [song.id]);
 
   const postRatingsSnapshot = React.useCallback(async (snapshot: string) => {
-    const ratings = (JSON.parse(snapshot) as SessionState["ratings"])
-      .map((r) => ({
-        segmentId: r.segmentId,
-        rating: r.rating,
-        ratedAt: r.ratedAt,
+    const sessionRatings = JSON.parse(snapshot) as SessionState["ratings"];
+    const ratingsPayload = sessionRatings
+      .map((rating) => ({
+        segmentId: rating.segmentId,
+        rating: rating.rating,
+        ratedAt: rating.ratedAt,
       }));
 
     const response = await fetch(`/api/songs/${song.id}/ratings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ratings }),
+      body: JSON.stringify({ ratings: ratingsPayload }),
     });
 
     if (!response.ok) {
       throw new Error(`Failed to save ratings (${response.status})`);
     }
-    onRatingsSaved?.(ratings);
+    onRatingsSaved?.(sessionRatings);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("ratingsUpdated"));
     }
