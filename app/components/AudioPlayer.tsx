@@ -38,6 +38,7 @@ interface AudioPlayerProps {
   onToggleLoop?: () => void;
   lyricModeLabel?: string;
   onToggleLyricMode?: () => void;
+  reducedControls?: boolean;
 }
 
 type ReachabilityState = {
@@ -101,6 +102,7 @@ export function AudioPlayer({
   onToggleLoop,
   lyricModeLabel,
   onToggleLyricMode,
+  reducedControls = false,
 }: AudioPlayerProps) {
   const [reachability, setReachability] = useState<ReachabilityState>({
     status: "idle",
@@ -254,22 +256,24 @@ export function AudioPlayer({
   return (
     <div data-testid="audio-player" className="space-y-2">
       <div className="flex items-center justify-center gap-2">
-        <button
-          type="button"
-          aria-label="Skip backward 5 seconds"
-          onClick={onSkipBack}
-          data-testid="audio-skip-back"
-          disabled={!isReady}
-          className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-        >
-          <span className="inline-flex items-center gap-1 text-sm font-semibold">
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 7L5 11l4 4" />
-              <path d="M6 12a8 8 0 1 0 3.2-6.4" />
-            </svg>
-            <span>-5</span>
-          </span>
-        </button>
+        {!reducedControls ? (
+          <button
+            type="button"
+            aria-label="Skip backward 5 seconds"
+            onClick={onSkipBack}
+            data-testid="audio-skip-back"
+            disabled={!isReady}
+            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+          >
+            <span className="inline-flex items-center gap-1 text-sm font-semibold">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 7L5 11l4 4" />
+                <path d="M6 12a8 8 0 1 0 3.2-6.4" />
+              </svg>
+              <span>-5</span>
+            </span>
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={handlePlayPauseClick}
@@ -288,42 +292,46 @@ export function AudioPlayer({
             </svg>
           )}
         </button>
-        <button
-          type="button"
-          aria-label="Skip forward 5 seconds"
-          onClick={onSkipForward}
-          data-testid="audio-skip-forward"
-          disabled={!isReady}
-          className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-        >
-          <span className="inline-flex items-center gap-1 text-sm font-semibold">
+        {!reducedControls ? (
+          <button
+            type="button"
+            aria-label="Skip forward 5 seconds"
+            onClick={onSkipForward}
+            data-testid="audio-skip-forward"
+            disabled={!isReady}
+            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+          >
+            <span className="inline-flex items-center gap-1 text-sm font-semibold">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 7l4 4-4 4" />
+                <path d="M18 12a8 8 0 1 1-3.2-6.4" />
+              </svg>
+              <span>+5</span>
+            </span>
+          </button>
+        ) : null}
+        {!reducedControls ? (
+          <button
+            type="button"
+            aria-label={isLooping ? "Stop looping" : "Loop segment"}
+            onClick={onToggleLoop}
+            data-testid="audio-loop-toggle"
+            title={isLooping ? "Loop: on (R to toggle)" : "Loop: off (R to toggle)"}
+            className={`flex h-9 w-[84px] items-center justify-center rounded-xl border text-sm transition ${
+              isLooping
+                ? "border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-700"
+                : "border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+            }`}
+          >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 7l4 4-4 4" />
-              <path d="M18 12a8 8 0 1 1-3.2-6.4" />
+              <path d="M17 2l4 4-4 4" />
+              <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+              <path d="M7 22l-4-4 4-4" />
+              <path d="M21 13v2a4 4 0 0 1-4 4H3" />
             </svg>
-            <span>+5</span>
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-label={isLooping ? "Stop looping" : "Loop segment"}
-          onClick={onToggleLoop}
-          data-testid="audio-loop-toggle"
-          title={isLooping ? "Loop: on (R to toggle)" : "Loop: off (R to toggle)"}
-          className={`flex h-9 w-[84px] items-center justify-center rounded-xl border text-sm transition ${
-            isLooping
-              ? "border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-700"
-              : "border-indigo-300 text-indigo-700 hover:bg-indigo-50"
-          }`}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 2l4 4-4 4" />
-            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-            <path d="M7 22l-4-4 4-4" />
-            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-          </svg>
-        </button>
-        {onToggleLyricMode ? (
+          </button>
+        ) : null}
+        {onToggleLyricMode && !reducedControls ? (
           <div className="ml-1 flex items-center border-l border-slate-300 pl-2">
             <button
               type="button"
@@ -338,6 +346,7 @@ export function AudioPlayer({
         ) : null}
       </div>
 
+      {!reducedControls ? (
       <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
         <div
           data-testid="audio-unified-timeline"
@@ -508,6 +517,7 @@ export function AudioPlayer({
           </details>
         ) : null}
       </div>
+      ) : null}
     </div>
   );
 }

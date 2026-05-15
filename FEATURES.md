@@ -27,11 +27,11 @@
 - [x] Add segment-level sorting options (oldest reviewed, mastery, song order)
 
 ### 2.3: Hands-Free Auto-Practice Modes
-- [ ] Add "Auto Drill" mode to playlist practice
-- [ ] Implement voice prompts for segment transitions
-- [ ] Reduce UI controls in auto mode (single play/pause)
-- [ ] Add auto-repeat for low-rated segments
-- [ ] Ensure accessibility with screen readers
+- [x] Add "Auto Drill" mode to playlist practice
+- [x] Implement voice prompts for segment transitions
+- [x] Reduce UI controls in auto mode (single play/pause)
+- [x] Add auto-repeat for low-rated segments
+- [x] Ensure accessibility with screen readers
 
 ### 2.4: Enhanced Tap Practice
 - [ ] Allow tap practice on blend/straight audio versions

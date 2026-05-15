@@ -43,6 +43,11 @@ interface PracticeViewProps {
   defaultLooping?: boolean;
   playScope?: "song" | "segment";
   autoPlayOnMount?: boolean;
+  autoPlayToken?: number;
+  reducedControls?: boolean;
+  ratingKeysEnabled?: boolean;
+  onSegmentPlaybackComplete?: () => void;
+  onRatingSubmitted?: (rating: MemoryRating) => void;
   onPrevSegment?: (options?: { wasPlaying: boolean }) => void;
   onNextSegment?: (options?: { wasPlaying: boolean }) => void;
   canUsePrevSegment?: boolean;
@@ -127,6 +132,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   defaultLooping = false,
   playScope = "song",
   autoPlayOnMount = false,
+  autoPlayToken = 0,
+  reducedControls = false,
+  ratingKeysEnabled = true,
+  onSegmentPlaybackComplete,
+  onRatingSubmitted,
   onPrevSegment,
   onNextSegment,
   canUsePrevSegment: canUsePrevSegmentOverride,
@@ -202,6 +212,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const tapCountInTimeoutRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
   const autoPlayHandledKeyRef = React.useRef<string | null>(null);
+  const autoPlayTokenHandledRef = React.useRef<number>(autoPlayToken);
+  const playbackCompleteNotifiedRef = React.useRef<string | null>(null);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
   const tapSessionIdRef = React.useRef<string | null>(null);
@@ -1123,6 +1135,26 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     startTapPracticePlayback,
   ]);
 
+  React.useEffect(() => {
+    if (autoPlayTokenHandledRef.current === autoPlayToken || playScope !== "segment" || !currentSegment) {
+      return;
+    }
+
+    autoPlayTokenHandledRef.current = autoPlayToken;
+    playbackCompleteNotifiedRef.current = null;
+    pausedByUserRef.current = false;
+    startTapPracticePlayback(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs, {
+      resetTapRun: isTapPracticeMode,
+    });
+  }, [
+    autoPlayToken,
+    currentSegment,
+    getSegmentStartWithPreroll,
+    isTapPracticeMode,
+    playScope,
+    startTapPracticePlayback,
+  ]);
+
   const getRollX = React.useCallback((noteOffsetMs: number) => {
     return 100 - ((currentSegmentOffsetMs - noteOffsetMs) / ROLL_WINDOW_MS) * 100;
   }, [currentSegmentOffsetMs]);
@@ -1143,10 +1175,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     if (rating === 1 && currentRating === 1) {
       dispatch({ type: "CLEAR_SEGMENT_RATING", segmentId: currentSegment.id });
+      onRatingSubmitted?.(rating);
       return;
     }
     dispatch({ type: "RATE_SEGMENT", segmentId: currentSegment.id, rating });
-  }, [currentSegment, currentRating]);
+    onRatingSubmitted?.(rating);
+  }, [currentSegment, currentRating, onRatingSubmitted]);
 
   const handleDebugPlayTest = () => {
     setTransportDebug((previous) => ({
@@ -1246,7 +1280,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
 
-      if (/^[1-5]$/.test(event.key)) {
+      if (ratingKeysEnabled && /^[1-5]$/.test(event.key)) {
         event.preventDefault();
         handleRateCurrentSegment(Number(event.key) as MemoryRating);
       }
@@ -1254,7 +1288,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay]);
+}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, ratingKeysEnabled]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
@@ -1312,6 +1346,23 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     showAccuracyToast,
     tapAttemptsBySegment,
   ]);
+
+  React.useEffect(() => {
+    if (!onSegmentPlaybackComplete || !currentSegment || isPlaying) {
+      return;
+    }
+    if (currentMs < currentSegment.endMs - 50) {
+      return;
+    }
+
+    const completionKey = `${currentSegment.id}:${autoPlayToken}:${Math.floor(currentMs)}`;
+    if (playbackCompleteNotifiedRef.current === completionKey) {
+      return;
+    }
+
+    playbackCompleteNotifiedRef.current = completionKey;
+    onSegmentPlaybackComplete();
+  }, [autoPlayToken, currentMs, currentSegment, isPlaying, onSegmentPlaybackComplete]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;
@@ -1594,6 +1645,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         </p>
       </header>
 
+      {!reducedControls ? (
       <div className="px-4 md:px-8" data-testid="practice-top-bar">
         {ratingsLoading ? (
           <div
@@ -1720,10 +1772,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           </div>
         ) : null}
       </div>
+      ) : null}
 
       <main data-testid="practice-main" className="flex flex-1 justify-center overflow-y-auto px-4 pb-44 pt-2 md:px-8 md:pb-48">
         <section data-testid="practice-focus" className={`flex h-full min-h-full w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
-          {!isTapPracticeMode ? (
+          {!isTapPracticeMode && !reducedControls ? (
             <button
               type="button"
               aria-label="Previous segment"
@@ -2017,7 +2070,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 )}
               </div>
             </div>
-          ) : (
+          ) : !reducedControls ? (
             <button
               type="button"
               aria-label="Next segment"
@@ -2031,7 +2084,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 <path d="M14 8l4 4-4 4" />
               </svg>
             </button>
-          )}
+          ) : null}
         </section>
       </main>
 
@@ -2062,6 +2115,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           onToggleLoop={handleToggleLoop}
           lyricModeLabel={LYRIC_MODE_LABELS[lyricVisibilityMode]}
           onToggleLyricMode={() => setLyricVisibilityMode((previous) => getNextLyricMode(previous))}
+          reducedControls={reducedControls}
         />
       </section>
     </div>

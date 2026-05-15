@@ -9,6 +9,13 @@ import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import PracticeView from './PracticeView';
 import type { Segment, SegmentRating } from '../types';
 import type { SessionState } from '../lib/sessionReducer';
+import {
+  DEFAULT_MAX_AUTO_REPEATS,
+  getNextAutoDrillStateAfterRating,
+  type AutoDrillState,
+  type PracticeMode,
+} from '../lib/autoDrill';
+import type { MemoryRating } from '../types';
 
 type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
 type FocusSortKey = 'mastery' | 'due-date' | 'song-order';
@@ -17,6 +24,7 @@ const SORT_STORAGE_KEY = 'playlist-practice-sort';
 const DEFAULT_SORT: SortState = { key: 'date-practiced', asc: false };
 const DEFAULT_FOCUS_PREROLL_MS = 5000;
 const FOCUS_MASTERED_RATING = 5;
+const AUTO_DRILL_PREROLL_MS = 500;
 
 const sortKeyLabel: Record<SortKey, string> = {
   alphabetical: 'Alphabetical',
@@ -42,6 +50,28 @@ interface FocusQueueItem {
   segmentIndex: number;
   latestRating?: SegmentRating;
   masteryPercent: number;
+}
+
+interface AutoDrillQueueItem {
+  id: string;
+  song: Playlist["songs"][number];
+  segment: Segment;
+  songIndex: number;
+  segmentIndex: number;
+}
+
+function speakPrompt(text: string, enabled = true): Promise<void> {
+  if (!enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  });
 }
 
 function getLastPracticedLabel(value?: string | null): string {
@@ -97,7 +127,14 @@ export function PlaylistPracticeView({
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
-  const [mode, setMode] = useState<'practice' | 'focus' | 'listen'>('practice');
+  const [mode, setMode] = useState<'practice' | 'focus' | 'listen' | 'auto'>('practice');
+  const [practiceMode, setPracticeMode] = useState<PracticeMode>('manual');
+  const [autoDrillState, setAutoDrillState] = useState<AutoDrillState>('idle');
+  const [autoDrillIndex, setAutoDrillIndex] = useState(0);
+  const [autoDrillPlayToken, setAutoDrillPlayToken] = useState(0);
+  const [autoDrillMessage, setAutoDrillMessage] = useState('Auto Drill idle');
+  const [autoDrillVoiceEnabled, setAutoDrillVoiceEnabled] = useState(true);
+  const [autoDrillRepeatCounts, setAutoDrillRepeatCounts] = useState<Record<string, number>>({});
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
   const [currentFocusIndex, setCurrentFocusIndex] = useState(0);
   const [focusAutoPlayItemId, setFocusAutoPlayItemId] = useState<string | null>(null);
@@ -110,6 +147,7 @@ export function PlaylistPracticeView({
   const lastObservedFocusItemIdRef = useRef<string | null>(null);
   const lastObservedFocusRatingRef = useRef<string | null>(null);
   const listenStartedSongIdRef = useRef<string | null>(null);
+  const autoDrillRunIdRef = useRef(0);
 
   const userScopedHeaders = useMemo(() => {
     return userId ? { 'X-User-ID': userId } : undefined;
@@ -207,7 +245,7 @@ export function PlaylistPracticeView({
   }, [segmentPrerollMs]);
 
   useEffect(() => {
-    if (mode !== 'focus') {
+    if (mode !== 'focus' && mode !== 'auto') {
       return;
     }
 
@@ -317,6 +355,30 @@ export function PlaylistPracticeView({
       .flat();
   }, [focusSortKey, livePlaylist.songs, ratingsBySongId]);
 
+  const autoDrillQueue = useMemo<AutoDrillQueueItem[]>(() => {
+    return livePlaylist.songs.flatMap((song, songIndex) => {
+      if (!song.audioUrl.trim()) {
+        return [];
+      }
+
+      return [...song.segments]
+        .sort((a, b) => a.order - b.order || a.startMs - b.startMs)
+        .map((segment, segmentIndex) => ({
+          id: `${song.id}:${segment.id}`,
+          song,
+          segment,
+          songIndex,
+          segmentIndex,
+        }));
+    });
+  }, [livePlaylist.songs]);
+
+  const currentAutoDrillItem = autoDrillQueue[autoDrillIndex];
+
+  useEffect(() => {
+    setAutoDrillIndex((prev) => Math.min(prev, Math.max(autoDrillQueue.length - 1, 0)));
+  }, [autoDrillQueue.length]);
+
   useEffect(() => {
     setCurrentFocusIndex((prev) => Math.min(prev, Math.max(focusQueue.length - 1, 0)));
   }, [focusQueue.length]);
@@ -362,6 +424,22 @@ export function PlaylistPracticeView({
     };
   }, [currentFocusItem, playlist.id, ratingsBySongId]);
 
+  const autoDrillPracticeSession = useMemo<SessionState | null>(() => {
+    if (!currentAutoDrillItem) {
+      return null;
+    }
+
+    return {
+      id: `playlist-auto-${playlist.id}-${currentAutoDrillItem.segment.id}`,
+      songId: currentAutoDrillItem.song.id,
+      currentSongId: currentAutoDrillItem.song.id,
+      currentSegmentIndex: currentAutoDrillItem.segmentIndex,
+      isLocked: false,
+      ratings: ratingsBySongId[currentAutoDrillItem.song.id] ?? [],
+      startedAt: new Date().toISOString(),
+    };
+  }, [currentAutoDrillItem, playlist.id, ratingsBySongId]);
+
   useEffect(() => {
     if (!currentFocusItem) {
       lastObservedFocusItemIdRef.current = null;
@@ -381,7 +459,7 @@ export function PlaylistPracticeView({
 
   const listenQueue = displayedSongs;
   const currentSong = listenQueue[currentSongIndex];
-  const playbackSong = mode === 'focus' ? undefined : currentSong;
+  const playbackSong = mode === 'focus' || mode === 'auto' ? undefined : currentSong;
   const currentSongId = playbackSong?.id;
   const hasCurrentSongAudio = Boolean(playbackSong?.audioUrl.trim());
   const findNextPlayableIndex = useCallback((startIndex: number) => {
@@ -539,6 +617,163 @@ export function PlaylistPracticeView({
       return focusSortKey === 'song-order' ? Math.min(prev + 1, lastIndex) : Math.min(prev, lastIndex);
     });
   }, [currentFocusItem, focusQueue.length, focusSortKey]);
+
+  const stopAutoDrill = useCallback(() => {
+    autoDrillRunIdRef.current += 1;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setPracticeMode('manual');
+    setAutoDrillState('idle');
+    setAutoDrillMessage('Auto Drill idle');
+    setMode('practice');
+  }, []);
+
+  const startAutoDrill = useCallback(() => {
+    autoDrillRunIdRef.current += 1;
+    setMode('auto');
+    setPracticeMode('auto-drill');
+    setAutoDrillIndex(0);
+    setAutoDrillRepeatCounts({});
+    setAutoDrillMessage('Auto Drill starting');
+    setAutoDrillState(autoDrillQueue.length > 0 ? 'announcing' : 'complete');
+  }, [autoDrillQueue.length]);
+
+  const handleAutoDrillRatingsSaved = useCallback((ratings: SessionState["ratings"]) => {
+    if (!currentAutoDrillItem) {
+      return;
+    }
+
+    setRatingsBySongId((prev) => ({ ...prev, [currentAutoDrillItem.song.id]: ratings }));
+    setRefetchTrigger((prev) => prev + 1);
+  }, [currentAutoDrillItem]);
+
+  const handleAutoDrillPlaybackComplete = useCallback(() => {
+    if (practiceMode !== 'auto-drill' || autoDrillState !== 'playing') {
+      return;
+    }
+
+    setAutoDrillState('awaiting-rating');
+    setAutoDrillMessage('Rate your recall from 1 to 5.');
+    void speakPrompt('Rate your recall from 1 to 5.', autoDrillVoiceEnabled);
+  }, [autoDrillState, autoDrillVoiceEnabled, practiceMode]);
+
+  const handleAutoDrillRatingSubmitted = useCallback((rating: MemoryRating) => {
+    if (!currentAutoDrillItem || practiceMode !== 'auto-drill' || autoDrillState !== 'awaiting-rating') {
+      return;
+    }
+
+    const repeatCount = autoDrillRepeatCounts[currentAutoDrillItem.id] ?? 0;
+    const nextState = getNextAutoDrillStateAfterRating({
+      rating,
+      repeatCount,
+      currentIndex: autoDrillIndex,
+      queueLength: autoDrillQueue.length,
+      maxRepeats: DEFAULT_MAX_AUTO_REPEATS,
+    });
+
+    if (nextState === 'repeating') {
+      setAutoDrillRepeatCounts((prev) => ({
+        ...prev,
+        [currentAutoDrillItem.id]: repeatCount + 1,
+      }));
+      setAutoDrillState('repeating');
+      setAutoDrillMessage('Again.');
+      return;
+    }
+
+    if (nextState === 'complete') {
+      setAutoDrillState('complete');
+      setAutoDrillMessage('Playlist complete.');
+      return;
+    }
+
+    setAutoDrillIndex((prev) => Math.min(prev + 1, Math.max(autoDrillQueue.length - 1, 0)));
+    setAutoDrillState('announcing');
+    setAutoDrillMessage('Next segment.');
+  }, [
+    autoDrillIndex,
+    autoDrillQueue.length,
+    autoDrillRepeatCounts,
+    autoDrillState,
+    currentAutoDrillItem,
+    practiceMode,
+  ]);
+
+  useEffect(() => {
+    if (practiceMode !== 'auto-drill') {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        stopAutoDrill();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [practiceMode, stopAutoDrill]);
+
+  useEffect(() => {
+    if (practiceMode !== 'auto-drill') {
+      return;
+    }
+
+    if (autoDrillState === 'complete') {
+      autoDrillRunIdRef.current += 1;
+      setAutoDrillMessage('Playlist complete.');
+      void speakPrompt('Playlist complete.', autoDrillVoiceEnabled);
+      return;
+    }
+
+    if (!currentAutoDrillItem) {
+      setAutoDrillState('complete');
+      return;
+    }
+
+    if (autoDrillState !== 'announcing' && autoDrillState !== 'repeating') {
+      return;
+    }
+
+    const runId = autoDrillRunIdRef.current + 1;
+    autoDrillRunIdRef.current = runId;
+    let cancelled = false;
+
+    const runPromptSequence = async () => {
+      if (autoDrillState === 'repeating') {
+        setAutoDrillMessage('Again.');
+        await speakPrompt('Again.', autoDrillVoiceEnabled);
+      } else {
+        const segmentMessage = `${autoDrillIndex > 0 ? 'Next segment. ' : ''}${currentAutoDrillItem.song.title}. ${currentAutoDrillItem.segment.label}.`;
+        setAutoDrillMessage(segmentMessage);
+        await speakPrompt(segmentMessage, autoDrillVoiceEnabled);
+      }
+
+      if (cancelled || autoDrillRunIdRef.current !== runId) {
+        return;
+      }
+
+      setAutoDrillState('counting-down');
+      setAutoDrillMessage('Starting in 3... 2... 1...');
+      await speakPrompt('Starting in 3. 2. 1.', autoDrillVoiceEnabled);
+
+      if (cancelled || autoDrillRunIdRef.current !== runId) {
+        return;
+      }
+
+      setAutoDrillState('playing');
+      setAutoDrillMessage('Playing.');
+      setAutoDrillPlayToken((prev) => prev + 1);
+    };
+
+    void runPromptSequence();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [autoDrillIndex, autoDrillState, autoDrillVoiceEnabled, currentAutoDrillItem, practiceMode]);
 
   useEffect(() => {
     try {
@@ -702,6 +937,7 @@ export function PlaylistPracticeView({
             {([
               ['practice', 'Songs'],
               ['focus', 'Focus'],
+              ['auto', 'Auto Drill'],
               ['listen', 'Listen'],
             ] as const).map(([nextMode, label]) => (
               <button
@@ -709,7 +945,21 @@ export function PlaylistPracticeView({
                 type="button"
                 data-testid={`playlist-mode-${nextMode}`}
                 aria-pressed={mode === nextMode}
-                onClick={() => setMode(nextMode)}
+                onClick={() => {
+                  if (nextMode === 'auto') {
+                    startAutoDrill();
+                    return;
+                  }
+                  if (practiceMode === 'auto-drill') {
+                    autoDrillRunIdRef.current += 1;
+                    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                      window.speechSynthesis.cancel();
+                    }
+                    setPracticeMode('manual');
+                    setAutoDrillState('idle');
+                  }
+                  setMode(nextMode);
+                }}
                 className={`rounded px-3 text-sm font-semibold ${
                   mode === nextMode
                     ? 'bg-indigo-600 text-white'
@@ -980,6 +1230,109 @@ export function PlaylistPracticeView({
                   );
                 })}
               </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {mode === 'auto' && (
+        <div className="space-y-4" data-testid="playlist-auto-drill">
+          <div
+            aria-live="polite"
+            data-testid="auto-drill-live"
+            className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-indigo-800">Auto Drill</p>
+                <p className="text-sm text-indigo-950">{autoDrillMessage}</p>
+              </div>
+              <span className="text-sm font-medium text-indigo-900">
+                {currentAutoDrillItem ? `${autoDrillIndex + 1} of ${autoDrillQueue.length}` : '0 of 0'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {practiceMode === 'auto-drill' && autoDrillState !== 'idle' ? (
+              <button
+                type="button"
+                data-testid="auto-drill-exit"
+                aria-label="Exit Auto Drill"
+                onClick={stopAutoDrill}
+                className="rounded border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                Exit Auto Drill
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-testid="auto-drill-start"
+                aria-label="Start Auto Drill"
+                onClick={startAutoDrill}
+                disabled={autoDrillQueue.length === 0}
+                className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+              >
+                Start Auto Drill
+              </button>
+            )}
+            <label className="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700">
+              <input
+                type="checkbox"
+                data-testid="auto-drill-voice-toggle"
+                checked={autoDrillVoiceEnabled}
+                onChange={(event) => setAutoDrillVoiceEnabled(event.target.checked)}
+              />
+              Voice prompts
+            </label>
+          </div>
+
+          {!currentAutoDrillItem ? (
+            <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              This playlist needs songs with audio and segments before Auto Drill can start.
+            </div>
+          ) : (
+            <>
+              <div className="rounded-lg border border-indigo-100 bg-white px-4 py-3" data-testid="auto-drill-current-segment">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-950">
+                      {currentAutoDrillItem.song.title}
+                      {currentAutoDrillItem.song.artist ? ` - ${currentAutoDrillItem.song.artist}` : ''}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {currentAutoDrillItem.segment.label} - Song {currentAutoDrillItem.songIndex + 1} of {livePlaylist.songs.length} - Segment {currentAutoDrillItem.segmentIndex + 1} of {currentAutoDrillItem.song.segments.length}
+                    </p>
+                  </div>
+                  {autoDrillState === 'awaiting-rating' ? (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+                      Press 1-5
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              {autoDrillPracticeSession ? (
+                <div className="min-h-[720px] rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="auto-drill-practice-surface">
+                  <PracticeView
+                    key={`${currentAutoDrillItem.song.id}:${currentAutoDrillItem.segment.id}`}
+                    song={currentAutoDrillItem.song}
+                    initialSession={autoDrillPracticeSession}
+                    onRatingsSaved={handleAutoDrillRatingsSaved}
+                    breadcrumbRootLabel="Auto Drill"
+                    segmentPrerollMs={AUTO_DRILL_PREROLL_MS}
+                    collapseLyricLineBreaks={collapseLyricLineBreaks}
+                    playScope="segment"
+                    autoPlayToken={autoDrillPlayToken}
+                    reducedControls={practiceMode === 'auto-drill'}
+                    ratingKeysEnabled={autoDrillState === 'awaiting-rating'}
+                    onSegmentPlaybackComplete={handleAutoDrillPlaybackComplete}
+                    onRatingSubmitted={handleAutoDrillRatingSubmitted}
+                    canUsePrevSegment={false}
+                    canUseNextSegment={false}
+                  />
+                </div>
+              ) : null}
             </>
           )}
         </div>
