@@ -124,6 +124,31 @@ describe('useAudioPlayer', () => {
     expect(result.current.debugInfo.lastEvent).toBe('ended');
   });
 
+  it('increments endedCount when a bounded segment range ends', async () => {
+    const onRangeEnd = vi.fn();
+    const { result } = renderHook(() => useAudioPlayer('test.mp3', factory, { onRangeEnd }));
+
+    await act(async () => {
+      result.current.play(0, 5000);
+    });
+
+    act(() => {
+      stub.emit('play');
+    });
+    expect(result.current.isPlaying).toBe(true);
+
+    act(() => {
+      stub.currentTime = 5;
+      stub.emit('timeupdate');
+    });
+
+    expect(stub.pause).toHaveBeenCalled();
+    expect(result.current.isPlaying).toBe(false);
+    expect(result.current.endedCount).toBe(1);
+    expect(result.current.debugInfo.lastEvent).toBe('range-ended');
+    expect(onRangeEnd).toHaveBeenCalledTimes(1);
+  });
+
   it('attempts playback immediately before audio is ready', async () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
 

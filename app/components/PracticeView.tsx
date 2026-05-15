@@ -191,7 +191,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     endMs: number;
     wasPlaying: boolean;
   } | null>(null);
-  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(directPlaybackAudioUrl);
+  const onSegmentPlaybackCompleteRef = React.useRef(onSegmentPlaybackComplete);
+  const playScopeRef = React.useRef(playScope);
+  const { isPlaying, isReady, currentMs, durationMs, endedCount = 0, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(directPlaybackAudioUrl, undefined, {
+    onRangeEnd: () => {
+      if (playScopeRef.current === "segment") {
+        onSegmentPlaybackCompleteRef.current?.();
+      }
+    },
+  });
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
     skipBackClicks: 0,
@@ -216,6 +224,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const autoPlayHandledKeyRef = React.useRef<string | null>(null);
   const autoPlayTokenHandledRef = React.useRef<number>(autoPlayToken);
   const playbackCompleteNotifiedRef = React.useRef<string | null>(null);
+  const lastHandledEndedCountRef = React.useRef(endedCount);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
   const tapSessionIdRef = React.useRef<string | null>(null);
@@ -236,6 +245,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     return `/debug-tap-practice?${params.toString()}`;
   }, [song.id, tapSessionId]);
+
+  React.useEffect(() => {
+    onSegmentPlaybackCompleteRef.current = onSegmentPlaybackComplete;
+  }, [onSegmentPlaybackComplete]);
+
+  React.useEffect(() => {
+    playScopeRef.current = playScope;
+  }, [playScope]);
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
@@ -1378,6 +1395,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     playbackCompleteNotifiedRef.current = completionKey;
     onSegmentPlaybackComplete();
   }, [autoPlayToken, currentMs, currentSegment, isPlaying, onSegmentPlaybackComplete]);
+
+  React.useEffect(() => {
+    if (endedCount === lastHandledEndedCountRef.current) {
+      return;
+    }
+
+    lastHandledEndedCountRef.current = endedCount;
+    if (!onSegmentPlaybackComplete || !currentSegment || playScope !== "segment") {
+      return;
+    }
+
+    const completionKey = `${currentSegment.id}:${autoPlayToken}:ended:${endedCount}`;
+    if (playbackCompleteNotifiedRef.current === completionKey) {
+      return;
+    }
+
+    playbackCompleteNotifiedRef.current = completionKey;
+    onSegmentPlaybackComplete();
+  }, [autoPlayToken, currentSegment, endedCount, onSegmentPlaybackComplete, playScope]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;
