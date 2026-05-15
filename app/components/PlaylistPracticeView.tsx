@@ -133,6 +133,7 @@ export function PlaylistPracticeView({
   const [autoDrillIndex, setAutoDrillIndex] = useState(0);
   const [autoDrillPlayToken, setAutoDrillPlayToken] = useState(0);
   const [autoDrillMessage, setAutoDrillMessage] = useState('Auto Drill idle');
+  const [autoDrillPlaybackWarning, setAutoDrillPlaybackWarning] = useState<string | null>(null);
   const [autoDrillVoiceEnabled, setAutoDrillVoiceEnabled] = useState(true);
   const [autoDrillRepeatCounts, setAutoDrillRepeatCounts] = useState<Record<string, number>>({});
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
@@ -635,6 +636,7 @@ export function PlaylistPracticeView({
     setPracticeMode('auto-drill');
     setAutoDrillIndex(0);
     setAutoDrillRepeatCounts({});
+    setAutoDrillPlaybackWarning(null);
     setAutoDrillMessage('Auto Drill starting');
     setAutoDrillState(autoDrillQueue.length > 0 ? 'announcing' : 'complete');
   }, [autoDrillQueue.length]);
@@ -654,6 +656,7 @@ export function PlaylistPracticeView({
     }
 
     setAutoDrillState('awaiting-rating');
+    setAutoDrillPlaybackWarning(null);
     setAutoDrillMessage('Rate your recall from 1 to 5.');
     void speakPrompt('Rate your recall from 1 to 5.', autoDrillVoiceEnabled);
   }, [autoDrillState, autoDrillVoiceEnabled, practiceMode]);
@@ -679,17 +682,20 @@ export function PlaylistPracticeView({
       }));
       setAutoDrillState('repeating');
       setAutoDrillMessage('Again.');
+      setAutoDrillPlaybackWarning(null);
       return;
     }
 
     if (nextState === 'complete') {
       setAutoDrillState('complete');
       setAutoDrillMessage('Playlist complete.');
+      setAutoDrillPlaybackWarning(null);
       return;
     }
 
     setAutoDrillIndex((prev) => Math.min(prev + 1, Math.max(autoDrillQueue.length - 1, 0)));
     setAutoDrillState('announcing');
+    setAutoDrillPlaybackWarning(null);
     setAutoDrillMessage('Next segment.');
   }, [
     autoDrillIndex,
@@ -765,6 +771,7 @@ export function PlaylistPracticeView({
 
       setAutoDrillState('playing');
       setAutoDrillMessage('Playing.');
+      setAutoDrillPlaybackWarning(null);
       setAutoDrillPlayToken((prev) => prev + 1);
     };
 
@@ -1103,7 +1110,11 @@ export function PlaylistPracticeView({
       )}
 
       {mode === 'focus' && (
-        <div className="space-y-4" data-testid="playlist-focus-queue">
+        <div
+          className="space-y-4"
+          data-testid="playlist-focus-queue"
+          style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
+        >
           <div className="flex flex-wrap items-center gap-3">
             <div className="inline-flex rounded border border-gray-300 bg-white p-0.5">
               {([
@@ -1220,8 +1231,8 @@ export function PlaylistPracticeView({
                       }`}
                     >
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-semibold text-gray-950">{item.segment.label}</span>
-                        <span className="text-xs font-semibold text-gray-500">{item.masteryPercent}%</span>
+                        <span className="text-sm font-semibold text-gray-950">Segment {item.segmentIndex + 1}</span>
+                        <span className="text-xs font-semibold text-gray-500">{item.masteryPercent}% memorized</span>
                       </div>
                       <p className="mt-1 text-xs text-gray-500">
                         {item.song.title} - {formatMs(item.segment.startMs)}
@@ -1246,6 +1257,11 @@ export function PlaylistPracticeView({
               <div>
                 <p className="text-sm font-semibold text-indigo-800">Auto Drill</p>
                 <p className="text-sm text-indigo-950">{autoDrillMessage}</p>
+                {autoDrillPlaybackWarning ? (
+                  <p data-testid="auto-drill-playback-warning" className="mt-1 text-sm font-medium text-amber-800">
+                    {autoDrillPlaybackWarning}
+                  </p>
+                ) : null}
               </div>
               <span className="text-sm font-medium text-indigo-900">
                 {currentAutoDrillItem ? `${autoDrillIndex + 1} of ${autoDrillQueue.length}` : '0 of 0'}
@@ -1308,6 +1324,10 @@ export function PlaylistPracticeView({
                     <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
                       Press 1-5
                     </span>
+                  ) : autoDrillState === 'playing' ? (
+                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">
+                      Listening
+                    </span>
                   ) : null}
                 </div>
               </div>
@@ -1328,6 +1348,7 @@ export function PlaylistPracticeView({
                     ratingKeysEnabled={autoDrillState === 'awaiting-rating'}
                     onSegmentPlaybackComplete={handleAutoDrillPlaybackComplete}
                     onRatingSubmitted={handleAutoDrillRatingSubmitted}
+                    onAutoPlayBlocked={setAutoDrillPlaybackWarning}
                     canUsePrevSegment={false}
                     canUseNextSegment={false}
                   />

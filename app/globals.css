@@ -3,6 +3,13 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --player-height: 11rem;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --player-height: 12rem;
+  }
 }
 
 @theme inline {

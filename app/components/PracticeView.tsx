@@ -48,6 +48,7 @@ interface PracticeViewProps {
   ratingKeysEnabled?: boolean;
   onSegmentPlaybackComplete?: () => void;
   onRatingSubmitted?: (rating: MemoryRating) => void;
+  onAutoPlayBlocked?: (message: string | null) => void;
   onPrevSegment?: (options?: { wasPlaying: boolean }) => void;
   onNextSegment?: (options?: { wasPlaying: boolean }) => void;
   canUsePrevSegment?: boolean;
@@ -137,6 +138,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   ratingKeysEnabled = true,
   onSegmentPlaybackComplete,
   onRatingSubmitted,
+  onAutoPlayBlocked,
   onPrevSegment,
   onNextSegment,
   canUsePrevSegment: canUsePrevSegmentOverride,
@@ -1146,11 +1148,24 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     startTapPracticePlayback(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs, {
       resetTapRun: isTapPracticeMode,
     });
+
+    const blockedCheckTimer = window.setTimeout(() => {
+      const state = playbackStateRef.current;
+      if (!state.isPlaying && state.currentSegment?.id === currentSegment.id) {
+        onAutoPlayBlocked?.(playbackError ?? "Your browser blocked automatic audio. Press Play once to continue Auto Drill.");
+      }
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(blockedCheckTimer);
+    };
   }, [
     autoPlayToken,
     currentSegment,
     getSegmentStartWithPreroll,
     isTapPracticeMode,
+    onAutoPlayBlocked,
+    playbackError,
     playScope,
     startTapPracticePlayback,
   ]);
@@ -1774,7 +1789,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       </div>
       ) : null}
 
-      <main data-testid="practice-main" className="flex flex-1 justify-center overflow-y-auto px-4 pb-44 pt-2 md:px-8 md:pb-48">
+      <main
+        data-testid="practice-main"
+        className="flex flex-1 justify-center overflow-y-auto px-4 pt-2 md:px-8"
+        style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
+      >
         <section data-testid="practice-focus" className={`flex h-full min-h-full w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
           {!isTapPracticeMode && !reducedControls ? (
             <button
@@ -2091,6 +2110,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       <section
         data-testid="practice-transport"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
+        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
       >
         <AudioPlayer
           audioUrl={activeAudioUrl}

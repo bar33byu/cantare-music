@@ -375,6 +375,95 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
+  it('keeps Focus queue cards scrollable above the fixed playbar and uses descriptive card labels', async () => {
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 30000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+
+    const focusPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          segments: [
+            { ...playlist.songs[0].segments[0], id: 'seg-1', label: 'Alpha Verse', order: 0, startMs: 4000, endMs: 7000 },
+            { ...playlist.songs[0].segments[0], id: 'seg-2', label: 'Alpha Bridge', order: 1, startMs: 8000, endMs: 11000 },
+            { ...playlist.songs[0].segments[0], id: 'seg-3', label: 'Alpha Tag', order: 2, startMs: 12000, endMs: 15000 },
+          ],
+        },
+      ],
+    };
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 67 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(focusPlaylist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/songs/song-1/ratings')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ratings: [
+              { id: 'rating-1', segmentId: 'seg-1', rating: 5, ratedAt: '2026-01-02T00:00:00.000Z' },
+              { id: 'rating-2', segmentId: 'seg-2', rating: 5, ratedAt: '2026-01-02T00:00:00.000Z' },
+              { id: 'rating-3', segmentId: 'seg-3', rating: 3, ratedAt: '2026-01-02T00:00:00.000Z' },
+            ],
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={focusPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-focus'));
+
+    const focusQueue = await screen.findByTestId('playlist-focus-queue');
+    const practiceMain = await screen.findByTestId('practice-main');
+    const segmentCard = await screen.findByTestId('focus-queue-item-seg-3');
+
+    expect(focusQueue).toHaveStyle({
+      paddingBottom: 'calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)',
+    });
+    expect(practiceMain).toHaveStyle({
+      paddingBottom: 'calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)',
+    });
+    expect(segmentCard).toHaveTextContent('Segment 3');
+    expect(segmentCard).toHaveTextContent('Alpha - 00:12');
+    expect(segmentCard).toHaveTextContent('60% memorized');
+  });
+
   it('keeps Focus queue playback running when moving to the next segment', async () => {
     const play = vi.fn();
     vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
