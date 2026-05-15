@@ -67,8 +67,19 @@ function speakPrompt(text: string, enabled = true): Promise<void> {
 
   return new Promise((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onend = () => resolve();
-    utterance.onerror = () => resolve();
+    let settled = false;
+    const fallbackMs = Math.min(8000, Math.max(1800, text.split(/\s+/).length * 650));
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(fallbackTimer);
+      resolve();
+    };
+    const fallbackTimer = window.setTimeout(finish, fallbackMs);
+    utterance.onend = finish;
+    utterance.onerror = finish;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   });
@@ -651,7 +662,12 @@ export function PlaylistPracticeView({
   }, [currentAutoDrillItem]);
 
   const handleAutoDrillPlaybackComplete = useCallback(() => {
-    if (practiceMode !== 'auto-drill' || autoDrillState !== 'playing') {
+    if (
+      practiceMode !== 'auto-drill' ||
+      autoDrillState === 'idle' ||
+      autoDrillState === 'awaiting-rating' ||
+      autoDrillState === 'complete'
+    ) {
       return;
     }
 
@@ -662,7 +678,12 @@ export function PlaylistPracticeView({
   }, [autoDrillState, autoDrillVoiceEnabled, practiceMode]);
 
   const handleAutoDrillRatingSubmitted = useCallback((rating: MemoryRating) => {
-    if (!currentAutoDrillItem || practiceMode !== 'auto-drill' || autoDrillState !== 'awaiting-rating') {
+    if (
+      !currentAutoDrillItem ||
+      practiceMode !== 'auto-drill' ||
+      autoDrillState === 'idle' ||
+      autoDrillState === 'complete'
+    ) {
       return;
     }
 
