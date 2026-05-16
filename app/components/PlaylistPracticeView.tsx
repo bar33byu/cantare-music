@@ -22,7 +22,7 @@ const FOCUS_MASTERED_RATING = 5;
 const AUTO_DRILL_PREROLL_MS = 500;
 const AUTO_DRILL_REQUIRED_PASSES = 2;
 const AUTO_DRILL_LOW_RATING_THRESHOLD = 3;
-const AUTO_DRILL_MAX_LOW_RATING_REPLAYS = 2;
+const AUTO_DRILL_MAX_PASSES = 5;
 
 const sortKeyLabel: Record<SortKey, string> = {
   alphabetical: 'Alphabetical',
@@ -144,7 +144,6 @@ export function PlaylistPracticeView({
   const [autoDrillMessage, setAutoDrillMessage] = useState('Auto Drill idle');
   const [autoDrillPlaybackWarning, setAutoDrillPlaybackWarning] = useState<string | null>(null);
   const [autoDrillVoiceEnabled, setAutoDrillVoiceEnabled] = useState(true);
-  const [autoDrillRepeatCounts, setAutoDrillRepeatCounts] = useState<Record<string, number>>({});
   const [autoDrillCompletedPasses, setAutoDrillCompletedPasses] = useState<Record<string, number>>({});
   const [autoDrillRatings, setAutoDrillRatings] = useState<Record<string, MemoryRating>>({});
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
@@ -161,6 +160,7 @@ export function PlaylistPracticeView({
   const listenStartedSongIdRef = useRef<string | null>(null);
   const autoDrillRunIdRef = useRef(0);
   const autoDrillTransitionRef = useRef<'full' | 'quick' | 'again'>('full');
+  const autoDrillHandledCompletionRef = useRef<string | null>(null);
 
   const userScopedHeaders = useMemo(() => {
     return userId ? { 'X-User-ID': userId } : undefined;
@@ -645,10 +645,10 @@ export function PlaylistPracticeView({
   const startAutoDrill = useCallback(() => {
     autoDrillRunIdRef.current += 1;
     autoDrillTransitionRef.current = 'full';
+    autoDrillHandledCompletionRef.current = null;
     setMode('auto');
     setPracticeMode('auto-drill');
     setAutoDrillIndex(0);
-    setAutoDrillRepeatCounts({});
     setAutoDrillCompletedPasses({});
     setAutoDrillRatings({});
     setAutoDrillPlaybackWarning(null);
@@ -680,14 +680,19 @@ export function PlaylistPracticeView({
       return;
     }
 
+    const completionKey = `${currentAutoDrillItem.id}:${autoDrillPlayToken}`;
+    if (autoDrillHandledCompletionRef.current === completionKey) {
+      return;
+    }
+    autoDrillHandledCompletionRef.current = completionKey;
+
     const completedPasses = (autoDrillCompletedPasses[currentAutoDrillItem.id] ?? 0) + 1;
     const latestRating = autoDrillRatings[currentAutoDrillItem.id];
-    const lowRatingReplayCount = autoDrillRepeatCounts[currentAutoDrillItem.id] ?? 0;
     const shouldReplayForDefaultPass = completedPasses < AUTO_DRILL_REQUIRED_PASSES;
     const shouldReplayForLowRating =
       latestRating !== undefined &&
       latestRating <= AUTO_DRILL_LOW_RATING_THRESHOLD &&
-      lowRatingReplayCount < AUTO_DRILL_MAX_LOW_RATING_REPLAYS;
+      completedPasses < AUTO_DRILL_MAX_PASSES;
 
     setAutoDrillCompletedPasses((prev) => ({
       ...prev,
@@ -696,12 +701,6 @@ export function PlaylistPracticeView({
     setAutoDrillPlaybackWarning(null);
 
     if (shouldReplayForDefaultPass || shouldReplayForLowRating) {
-      if (shouldReplayForLowRating && !shouldReplayForDefaultPass) {
-        setAutoDrillRepeatCounts((prev) => ({
-          ...prev,
-          [currentAutoDrillItem.id]: lowRatingReplayCount + 1,
-        }));
-      }
       autoDrillTransitionRef.current = 'again';
       setAutoDrillState('repeating');
       setAutoDrillMessage(
@@ -726,9 +725,9 @@ export function PlaylistPracticeView({
   }, [
     autoDrillCompletedPasses,
     autoDrillIndex,
+    autoDrillPlayToken,
     autoDrillQueue,
     autoDrillRatings,
-    autoDrillRepeatCounts,
     autoDrillState,
     currentAutoDrillItem,
     practiceMode,
@@ -832,6 +831,7 @@ export function PlaylistPracticeView({
           : 'Playing.'
       );
       setAutoDrillPlaybackWarning(null);
+      autoDrillHandledCompletionRef.current = null;
       setAutoDrillPlayToken((prev) => prev + 1);
     };
 

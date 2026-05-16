@@ -1119,11 +1119,13 @@ describe('PlaylistPracticeView', () => {
 
     act(() => {
       latestAudioOptions?.onRangeEnd?.();
+      latestAudioOptions?.onRangeEnd?.();
     });
 
     await waitFor(() => {
       expect(play).toHaveBeenCalledTimes(2);
     });
+    expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Alpha');
     expect(screen.getByTestId('auto-drill-live')).not.toHaveTextContent('Rate your recall from 1 to 5.');
 
     fireEvent.keyDown(window, { key: '1' });
