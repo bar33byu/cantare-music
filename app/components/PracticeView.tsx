@@ -222,7 +222,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const tapCountInTimeoutRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
   const autoPlayHandledKeyRef = React.useRef<string | null>(null);
-  const autoPlayTokenHandledRef = React.useRef<number>(autoPlayToken);
+  const autoPlayTokenHandledRef = React.useRef<number>(0);
   const playbackCompleteNotifiedRef = React.useRef<string | null>(null);
   const lastHandledEndedCountRef = React.useRef(endedCount);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
@@ -1155,7 +1155,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   ]);
 
   React.useEffect(() => {
-    if (autoPlayTokenHandledRef.current === autoPlayToken || playScope !== "segment" || !currentSegment) {
+    if (autoPlayToken <= 0 || autoPlayTokenHandledRef.current === autoPlayToken || playScope !== "segment" || !currentSegment) {
       return;
     }
 

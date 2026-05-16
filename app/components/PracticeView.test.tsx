@@ -203,6 +203,26 @@ describe("PracticeView", () => {
     expect(mockPlay).toHaveBeenCalledWith(0, 8000);
   });
 
+  it("honors an auto-play token even when mounted with that token already set", async () => {
+    const song = makeSong();
+    const session = { ...makeSession(song), currentSegmentIndex: 0 };
+
+    render(
+      <PracticeView
+        song={song}
+        initialSession={session}
+        playScope="segment"
+        autoPlayToken={3}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("ratings-loading-skeleton")).not.toBeInTheDocument();
+    });
+
+    expect(mockPlay).toHaveBeenCalledWith(0, 4000);
+  });
+
   it("renders knowledge bar in the top section", async () => {
     const song = makeSong();
     await renderAndWaitForRatings(song);
