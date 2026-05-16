@@ -9,12 +9,7 @@ import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import PracticeView from './PracticeView';
 import type { Segment, SegmentRating } from '../types';
 import type { SessionState } from '../lib/sessionReducer';
-import {
-  DEFAULT_MAX_AUTO_REPEATS,
-  getNextAutoDrillStateAfterRating,
-  type AutoDrillState,
-  type PracticeMode,
-} from '../lib/autoDrill';
+import type { AutoDrillState, PracticeMode } from '../lib/autoDrill';
 import type { MemoryRating } from '../types';
 
 type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
@@ -25,6 +20,9 @@ const DEFAULT_SORT: SortState = { key: 'date-practiced', asc: false };
 const DEFAULT_FOCUS_PREROLL_MS = 5000;
 const FOCUS_MASTERED_RATING = 5;
 const AUTO_DRILL_PREROLL_MS = 500;
+const AUTO_DRILL_REQUIRED_PASSES = 2;
+const AUTO_DRILL_LOW_RATING_THRESHOLD = 3;
+const AUTO_DRILL_MAX_LOW_RATING_REPLAYS = 2;
 
 const sortKeyLabel: Record<SortKey, string> = {
   alphabetical: 'Alphabetical',
@@ -147,6 +145,8 @@ export function PlaylistPracticeView({
   const [autoDrillPlaybackWarning, setAutoDrillPlaybackWarning] = useState<string | null>(null);
   const [autoDrillVoiceEnabled, setAutoDrillVoiceEnabled] = useState(true);
   const [autoDrillRepeatCounts, setAutoDrillRepeatCounts] = useState<Record<string, number>>({});
+  const [autoDrillCompletedPasses, setAutoDrillCompletedPasses] = useState<Record<string, number>>({});
+  const [autoDrillRatings, setAutoDrillRatings] = useState<Record<string, MemoryRating>>({});
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
   const [currentFocusIndex, setCurrentFocusIndex] = useState(0);
   const [focusAutoPlayItemId, setFocusAutoPlayItemId] = useState<string | null>(null);
@@ -160,6 +160,7 @@ export function PlaylistPracticeView({
   const lastObservedFocusRatingRef = useRef<string | null>(null);
   const listenStartedSongIdRef = useRef<string | null>(null);
   const autoDrillRunIdRef = useRef(0);
+  const autoDrillTransitionRef = useRef<'full' | 'quick' | 'again'>('full');
 
   const userScopedHeaders = useMemo(() => {
     return userId ? { 'X-User-ID': userId } : undefined;
@@ -643,10 +644,13 @@ export function PlaylistPracticeView({
 
   const startAutoDrill = useCallback(() => {
     autoDrillRunIdRef.current += 1;
+    autoDrillTransitionRef.current = 'full';
     setMode('auto');
     setPracticeMode('auto-drill');
     setAutoDrillIndex(0);
     setAutoDrillRepeatCounts({});
+    setAutoDrillCompletedPasses({});
+    setAutoDrillRatings({});
     setAutoDrillPlaybackWarning(null);
     setAutoDrillMessage('Auto Drill starting');
     setAutoDrillState(autoDrillQueue.length > 0 ? 'announcing' : 'complete');
@@ -665,17 +669,70 @@ export function PlaylistPracticeView({
     if (
       practiceMode !== 'auto-drill' ||
       autoDrillState === 'idle' ||
-      autoDrillState === 'awaiting-rating' ||
       autoDrillState === 'complete'
     ) {
       return;
     }
 
-    setAutoDrillState('awaiting-rating');
+    if (!currentAutoDrillItem) {
+      setAutoDrillState('complete');
+      setAutoDrillMessage('Playlist complete.');
+      return;
+    }
+
+    const completedPasses = (autoDrillCompletedPasses[currentAutoDrillItem.id] ?? 0) + 1;
+    const latestRating = autoDrillRatings[currentAutoDrillItem.id];
+    const lowRatingReplayCount = autoDrillRepeatCounts[currentAutoDrillItem.id] ?? 0;
+    const shouldReplayForDefaultPass = completedPasses < AUTO_DRILL_REQUIRED_PASSES;
+    const shouldReplayForLowRating =
+      latestRating !== undefined &&
+      latestRating <= AUTO_DRILL_LOW_RATING_THRESHOLD &&
+      lowRatingReplayCount < AUTO_DRILL_MAX_LOW_RATING_REPLAYS;
+
+    setAutoDrillCompletedPasses((prev) => ({
+      ...prev,
+      [currentAutoDrillItem.id]: completedPasses,
+    }));
     setAutoDrillPlaybackWarning(null);
-    setAutoDrillMessage('Rate your recall from 1 to 5.');
-    void speakPrompt('Rate your recall from 1 to 5.', autoDrillVoiceEnabled);
-  }, [autoDrillState, autoDrillVoiceEnabled, practiceMode]);
+
+    if (shouldReplayForDefaultPass || shouldReplayForLowRating) {
+      if (shouldReplayForLowRating && !shouldReplayForDefaultPass) {
+        setAutoDrillRepeatCounts((prev) => ({
+          ...prev,
+          [currentAutoDrillItem.id]: lowRatingReplayCount + 1,
+        }));
+      }
+      autoDrillTransitionRef.current = 'again';
+      setAutoDrillState('repeating');
+      setAutoDrillMessage(
+        latestRating !== undefined && latestRating <= AUTO_DRILL_LOW_RATING_THRESHOLD
+          ? 'Again for reinforcement.'
+          : 'Again.'
+      );
+      return;
+    }
+
+    if (autoDrillIndex >= autoDrillQueue.length - 1) {
+      setAutoDrillState('complete');
+      setAutoDrillMessage('Playlist complete.');
+      return;
+    }
+
+    const nextItem = autoDrillQueue[autoDrillIndex + 1];
+    autoDrillTransitionRef.current = nextItem?.song.id === currentAutoDrillItem.song.id ? 'quick' : 'full';
+    setAutoDrillIndex((prev) => Math.min(prev + 1, Math.max(autoDrillQueue.length - 1, 0)));
+    setAutoDrillState('announcing');
+    setAutoDrillMessage(nextItem?.song.id === currentAutoDrillItem.song.id ? 'Next segment.' : 'Next song.');
+  }, [
+    autoDrillCompletedPasses,
+    autoDrillIndex,
+    autoDrillQueue,
+    autoDrillRatings,
+    autoDrillRepeatCounts,
+    autoDrillState,
+    currentAutoDrillItem,
+    practiceMode,
+  ]);
 
   const handleAutoDrillRatingSubmitted = useCallback((rating: MemoryRating) => {
     if (
@@ -687,45 +744,17 @@ export function PlaylistPracticeView({
       return;
     }
 
-    const repeatCount = autoDrillRepeatCounts[currentAutoDrillItem.id] ?? 0;
-    const nextState = getNextAutoDrillStateAfterRating({
-      rating,
-      repeatCount,
-      currentIndex: autoDrillIndex,
-      queueLength: autoDrillQueue.length,
-      maxRepeats: DEFAULT_MAX_AUTO_REPEATS,
-    });
-
-    if (nextState === 'repeating') {
-      setAutoDrillRepeatCounts((prev) => ({
-        ...prev,
-        [currentAutoDrillItem.id]: repeatCount + 1,
-      }));
-      setAutoDrillState('repeating');
-      setAutoDrillMessage('Again.');
-      setAutoDrillPlaybackWarning(null);
-      return;
-    }
-
-    if (nextState === 'complete') {
-      setAutoDrillState('complete');
-      setAutoDrillMessage('Playlist complete.');
-      setAutoDrillPlaybackWarning(null);
-      return;
-    }
-
-    setAutoDrillIndex((prev) => Math.min(prev + 1, Math.max(autoDrillQueue.length - 1, 0)));
-    setAutoDrillState('announcing');
+    setAutoDrillRatings((prev) => ({
+      ...prev,
+      [currentAutoDrillItem.id]: rating,
+    }));
     setAutoDrillPlaybackWarning(null);
-    setAutoDrillMessage('Next segment.');
-  }, [
-    autoDrillIndex,
-    autoDrillQueue.length,
-    autoDrillRepeatCounts,
-    autoDrillState,
-    currentAutoDrillItem,
-    practiceMode,
-  ]);
+    setAutoDrillMessage(
+      rating <= AUTO_DRILL_LOW_RATING_THRESHOLD
+        ? `Rated ${rating}. This segment will stay in rotation.`
+        : `Rated ${rating}.`
+    );
+  }, [autoDrillState, currentAutoDrillItem, practiceMode]);
 
   useEffect(() => {
     if (practiceMode !== 'auto-drill') {
@@ -769,9 +798,13 @@ export function PlaylistPracticeView({
     let cancelled = false;
 
     const runPromptSequence = async () => {
-      if (autoDrillState === 'repeating') {
+      const transition = autoDrillTransitionRef.current;
+
+      if (autoDrillState === 'repeating' || transition === 'again') {
         setAutoDrillMessage('Again.');
         await speakPrompt('Again.', autoDrillVoiceEnabled);
+      } else if (transition === 'quick') {
+        setAutoDrillMessage(`Next segment: ${currentAutoDrillItem.segment.label}.`);
       } else {
         const segmentMessage = `${autoDrillIndex > 0 ? 'Next segment. ' : ''}${currentAutoDrillItem.song.title}. ${currentAutoDrillItem.segment.label}.`;
         setAutoDrillMessage(segmentMessage);
@@ -782,16 +815,22 @@ export function PlaylistPracticeView({
         return;
       }
 
-      setAutoDrillState('counting-down');
-      setAutoDrillMessage('Starting in 3... 2... 1...');
-      await speakPrompt('Starting in 3. 2. 1.', autoDrillVoiceEnabled);
+      if (transition === 'full') {
+        setAutoDrillState('counting-down');
+        setAutoDrillMessage('Starting in 3... 2... 1...');
+        await speakPrompt('Starting in 3. 2. 1.', autoDrillVoiceEnabled);
+      }
 
       if (cancelled || autoDrillRunIdRef.current !== runId) {
         return;
       }
 
       setAutoDrillState('playing');
-      setAutoDrillMessage('Playing.');
+      setAutoDrillMessage(
+        transition === 'quick'
+          ? `Playing ${currentAutoDrillItem.segment.label}.`
+          : 'Playing.'
+      );
       setAutoDrillPlaybackWarning(null);
       setAutoDrillPlayToken((prev) => prev + 1);
     };
@@ -1341,13 +1380,13 @@ export function PlaylistPracticeView({
                       {currentAutoDrillItem.segment.label} - Song {currentAutoDrillItem.songIndex + 1} of {livePlaylist.songs.length} - Segment {currentAutoDrillItem.segmentIndex + 1} of {currentAutoDrillItem.song.segments.length}
                     </p>
                   </div>
-                  {autoDrillState === 'awaiting-rating' ? (
-                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
-                      Press 1-5
-                    </span>
-                  ) : autoDrillState === 'playing' ? (
+                  {autoDrillState === 'playing' ? (
                     <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">
                       Listening
+                    </span>
+                  ) : practiceMode === 'auto-drill' && autoDrillState !== 'complete' ? (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+                      Rating optional
                     </span>
                   ) : null}
                 </div>
@@ -1366,7 +1405,7 @@ export function PlaylistPracticeView({
                     playScope="segment"
                     autoPlayToken={autoDrillPlayToken}
                     reducedControls={practiceMode === 'auto-drill'}
-                    ratingKeysEnabled={autoDrillState === 'awaiting-rating'}
+                    ratingKeysEnabled={practiceMode === 'auto-drill'}
                     onSegmentPlaybackComplete={handleAutoDrillPlaybackComplete}
                     onRatingSubmitted={handleAutoDrillRatingSubmitted}
                     onAutoPlayBlocked={setAutoDrillPlaybackWarning}

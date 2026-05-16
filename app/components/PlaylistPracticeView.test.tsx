@@ -1048,9 +1048,10 @@ describe('PlaylistPracticeView', () => {
     expect(outsideLabel.className).toContain('text-gray-700');
   });
 
-  it('starts Auto Drill, hides nonessential controls, and repeats after a low keyboard rating', async () => {
+  it('starts Auto Drill, hides nonessential controls, and keeps ratings optional during automatic repeats', async () => {
     installImmediateSpeechSynthesis();
     const play = vi.fn();
+    let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
     const audioState = {
       isPlaying: false,
       isReady: true,
@@ -1079,7 +1080,10 @@ describe('PlaylistPracticeView', () => {
       setPlaybackEndMs: vi.fn(),
       setPlaybackRate: vi.fn(),
     };
-    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation(() => audioState);
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation(((_audioUrl: string, _factory?: unknown, options?: { onRangeEnd?: () => void }) => {
+      latestAudioOptions = options;
+      return audioState;
+    }) as typeof audioPlayerHook.useAudioPlayer);
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -1102,7 +1106,7 @@ describe('PlaylistPracticeView', () => {
     });
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const view = render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
     fireEvent.click(screen.getByTestId('playlist-mode-auto'));
 
@@ -1113,17 +1117,23 @@ describe('PlaylistPracticeView', () => {
     expect(screen.queryByTestId('practice-next-segment')).not.toBeInTheDocument();
     expect(screen.queryByTestId('audio-skip-back')).not.toBeInTheDocument();
 
-    audioState.currentMs = 1000;
-    view.rerender(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('auto-drill-live')).toHaveTextContent('Rate your recall from 1 to 5.');
+    act(() => {
+      latestAudioOptions?.onRangeEnd?.();
     });
-
-    fireEvent.keyDown(window, { key: '1' });
 
     await waitFor(() => {
       expect(play).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByTestId('auto-drill-live')).not.toHaveTextContent('Rate your recall from 1 to 5.');
+
+    fireEvent.keyDown(window, { key: '1' });
+
+    act(() => {
+      latestAudioOptions?.onRangeEnd?.();
+    });
+
+    await waitFor(() => {
+      expect(play).toHaveBeenCalledTimes(3);
     });
     await waitFor(() => {
       expect(fetchMock.mock.calls.some((call) => {
