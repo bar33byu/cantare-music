@@ -22,7 +22,7 @@ const FOCUS_MASTERED_RATING = 5;
 const AUTO_DRILL_PREROLL_MS = 500;
 const AUTO_DRILL_REQUIRED_PASSES = 2;
 const AUTO_DRILL_LOW_RATING_THRESHOLD = 3;
-const AUTO_DRILL_MAX_PASSES = 5;
+const AUTO_DRILL_LOW_RATING_MAX_PASSES = 5;
 
 const sortKeyLabel: Record<SortKey, string> = {
   alphabetical: 'Alphabetical',
@@ -145,7 +145,7 @@ export function PlaylistPracticeView({
   const [autoDrillPlaybackWarning, setAutoDrillPlaybackWarning] = useState<string | null>(null);
   const [autoDrillVoiceEnabled, setAutoDrillVoiceEnabled] = useState(true);
   const [autoDrillCompletedPasses, setAutoDrillCompletedPasses] = useState<Record<string, number>>({});
-  const [autoDrillRatings, setAutoDrillRatings] = useState<Record<string, MemoryRating>>({});
+  const [autoDrillRunRatings, setAutoDrillRunRatings] = useState<Record<string, MemoryRating>>({});
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
   const [currentFocusIndex, setCurrentFocusIndex] = useState(0);
   const [focusAutoPlayItemId, setFocusAutoPlayItemId] = useState<string | null>(null);
@@ -650,7 +650,7 @@ export function PlaylistPracticeView({
     setPracticeMode('auto-drill');
     setAutoDrillIndex(0);
     setAutoDrillCompletedPasses({});
-    setAutoDrillRatings({});
+    setAutoDrillRunRatings({});
     setAutoDrillPlaybackWarning(null);
     setAutoDrillMessage('Auto Drill starting');
     setAutoDrillState(autoDrillQueue.length > 0 ? 'announcing' : 'complete');
@@ -664,6 +664,22 @@ export function PlaylistPracticeView({
     setRatingsBySongId((prev) => ({ ...prev, [currentAutoDrillItem.song.id]: ratings }));
     setRefetchTrigger((prev) => prev + 1);
   }, [currentAutoDrillItem]);
+
+  const advanceAutoDrillSegment = useCallback((fromItem: AutoDrillQueueItem) => {
+    if (autoDrillIndex >= autoDrillQueue.length - 1) {
+      setAutoDrillState('complete');
+      setAutoDrillMessage('Playlist complete.');
+      setAutoDrillPlaybackWarning(null);
+      return;
+    }
+
+    const nextItem = autoDrillQueue[autoDrillIndex + 1];
+    autoDrillTransitionRef.current = nextItem?.song.id === fromItem.song.id ? 'quick' : 'full';
+    setAutoDrillIndex((prev) => Math.min(prev + 1, Math.max(autoDrillQueue.length - 1, 0)));
+    setAutoDrillState('announcing');
+    setAutoDrillPlaybackWarning(null);
+    setAutoDrillMessage(nextItem?.song.id === fromItem.song.id ? 'Next segment.' : `Next song: ${nextItem?.song.title ?? ''}.`);
+  }, [autoDrillIndex, autoDrillQueue]);
 
   const handleAutoDrillPlaybackComplete = useCallback(() => {
     if (
@@ -687,12 +703,14 @@ export function PlaylistPracticeView({
     autoDrillHandledCompletionRef.current = completionKey;
 
     const completedPasses = (autoDrillCompletedPasses[currentAutoDrillItem.id] ?? 0) + 1;
-    const latestRating = autoDrillRatings[currentAutoDrillItem.id];
-    const shouldReplayForDefaultPass = completedPasses < AUTO_DRILL_REQUIRED_PASSES;
-    const shouldReplayForLowRating =
-      latestRating !== undefined &&
-      latestRating <= AUTO_DRILL_LOW_RATING_THRESHOLD &&
-      completedPasses < AUTO_DRILL_MAX_PASSES;
+    const runRating = autoDrillRunRatings[currentAutoDrillItem.id];
+    const hasLowRunRating =
+      runRating !== undefined &&
+      runRating <= AUTO_DRILL_LOW_RATING_THRESHOLD;
+    const targetPasses = hasLowRunRating
+      ? AUTO_DRILL_LOW_RATING_MAX_PASSES
+      : AUTO_DRILL_REQUIRED_PASSES;
+    const shouldReplaySegment = completedPasses < targetPasses;
 
     setAutoDrillCompletedPasses((prev) => ({
       ...prev,
@@ -700,34 +718,19 @@ export function PlaylistPracticeView({
     }));
     setAutoDrillPlaybackWarning(null);
 
-    if (shouldReplayForDefaultPass || shouldReplayForLowRating) {
+    if (shouldReplaySegment) {
       autoDrillTransitionRef.current = 'again';
       setAutoDrillState('repeating');
-      setAutoDrillMessage(
-        latestRating !== undefined && latestRating <= AUTO_DRILL_LOW_RATING_THRESHOLD
-          ? 'Again for reinforcement.'
-          : 'Again.'
-      );
+      setAutoDrillMessage('Again.');
       return;
     }
 
-    if (autoDrillIndex >= autoDrillQueue.length - 1) {
-      setAutoDrillState('complete');
-      setAutoDrillMessage('Playlist complete.');
-      return;
-    }
-
-    const nextItem = autoDrillQueue[autoDrillIndex + 1];
-    autoDrillTransitionRef.current = nextItem?.song.id === currentAutoDrillItem.song.id ? 'quick' : 'full';
-    setAutoDrillIndex((prev) => Math.min(prev + 1, Math.max(autoDrillQueue.length - 1, 0)));
-    setAutoDrillState('announcing');
-    setAutoDrillMessage(nextItem?.song.id === currentAutoDrillItem.song.id ? 'Next segment.' : 'Next song.');
+    advanceAutoDrillSegment(currentAutoDrillItem);
   }, [
+    advanceAutoDrillSegment,
     autoDrillCompletedPasses,
-    autoDrillIndex,
     autoDrillPlayToken,
-    autoDrillQueue,
-    autoDrillRatings,
+    autoDrillRunRatings,
     autoDrillState,
     currentAutoDrillItem,
     practiceMode,
@@ -743,17 +746,25 @@ export function PlaylistPracticeView({
       return;
     }
 
-    setAutoDrillRatings((prev) => ({
+    const completedPasses = autoDrillCompletedPasses[currentAutoDrillItem.id] ?? 0;
+    setAutoDrillRunRatings((prev) => ({
       ...prev,
       [currentAutoDrillItem.id]: rating,
     }));
     setAutoDrillPlaybackWarning(null);
-    setAutoDrillMessage(
-      rating <= AUTO_DRILL_LOW_RATING_THRESHOLD
-        ? `Rated ${rating}. This segment will stay in rotation.`
-        : `Rated ${rating}.`
-    );
-  }, [autoDrillState, currentAutoDrillItem, practiceMode]);
+    setAutoDrillMessage(`Rated ${rating}.`);
+
+    if (rating > AUTO_DRILL_LOW_RATING_THRESHOLD || completedPasses >= AUTO_DRILL_LOW_RATING_MAX_PASSES) {
+      advanceAutoDrillSegment(currentAutoDrillItem);
+      return;
+    }
+
+    if (autoDrillState !== 'playing') {
+      autoDrillTransitionRef.current = 'again';
+      setAutoDrillState('repeating');
+      setAutoDrillMessage('Again.');
+    }
+  }, [advanceAutoDrillSegment, autoDrillCompletedPasses, autoDrillState, currentAutoDrillItem, practiceMode]);
 
   useEffect(() => {
     if (practiceMode !== 'auto-drill') {
