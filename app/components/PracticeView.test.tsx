@@ -223,6 +223,57 @@ describe("PracticeView", () => {
     expect(mockPlay).toHaveBeenCalledWith(0, 4000);
   });
 
+  it("does not report segment completion from stale end-position time during token replays", async () => {
+    const song = makeSong();
+    const session = { ...makeSession(song), currentSegmentIndex: 0 };
+    const onSegmentPlaybackComplete = vi.fn();
+    const playbackState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 4000,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const { rerender } = render(
+      <PracticeView
+        song={song}
+        initialSession={session}
+        playScope="segment"
+        autoPlayToken={1}
+        onSegmentPlaybackComplete={onSegmentPlaybackComplete}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("ratings-loading-skeleton")).not.toBeInTheDocument();
+    });
+
+    expect(mockPlay).toHaveBeenCalledWith(0, 4000);
+    expect(onSegmentPlaybackComplete).not.toHaveBeenCalled();
+
+    rerender(
+      <PracticeView
+        song={song}
+        initialSession={session}
+        playScope="segment"
+        autoPlayToken={2}
+        onSegmentPlaybackComplete={onSegmentPlaybackComplete}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockPlay).toHaveBeenCalledTimes(2);
+    });
+    expect(onSegmentPlaybackComplete).not.toHaveBeenCalled();
+  });
+
   it("renders knowledge bar in the top section", async () => {
     const song = makeSong();
     await renderAndWaitForRatings(song);

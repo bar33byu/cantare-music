@@ -1380,7 +1380,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   ]);
 
   React.useEffect(() => {
-    if (!onSegmentPlaybackComplete || !currentSegment || isPlaying) {
+    if (!onSegmentPlaybackComplete || !currentSegment || isPlaying || playScope === "segment") {
       return;
     }
     if (currentMs < currentSegment.endMs - 50) {
@@ -1394,7 +1394,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     playbackCompleteNotifiedRef.current = completionKey;
     onSegmentPlaybackComplete();
-  }, [autoPlayToken, currentMs, currentSegment, isPlaying, onSegmentPlaybackComplete]);
+  }, [autoPlayToken, currentMs, currentSegment, isPlaying, onSegmentPlaybackComplete, playScope]);
 
   React.useEffect(() => {
     if (endedCount === lastHandledEndedCountRef.current) {
