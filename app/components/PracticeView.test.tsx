@@ -21,6 +21,17 @@ function makeFetchResponse(payload: unknown, ok = true, status = ok ? 200 : 500)
   };
 }
 
+function expectTapSessionStarted(songId: string) {
+  const call = mockFetch.mock.calls.find(([url, init]) => {
+    if (url !== `/api/songs/${songId}/tap-sessions` || init?.method !== "POST") {
+      return false;
+    }
+    const body = JSON.parse(String(init.body ?? "{}"));
+    return body.audioVersion === "straight" && body.mode === "practice";
+  });
+  expect(call).toBeTruthy();
+}
+
 global.fetch = mockFetch;
 
 vi.mock("./SegmentCard", () => ({
@@ -518,10 +529,52 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+      expectTapSessionStarted(song.id);
     });
 
     expect(screen.queryByTestId("practice-open-tap-debug")).not.toBeInTheDocument();
+  });
+
+  it("stores the selected audio version on tap practice attempts", async () => {
+    const song: Song = {
+      ...makeSong(1),
+      alternateAudioUrl: "https://cdn.example.com/audio/song-1/blend.mp3",
+    };
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-audio-version-blend"));
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    await waitFor(() => {
+      const startCall = mockFetch.mock.calls.find(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions` && init?.method === "POST"
+      );
+      expect(startCall).toBeTruthy();
+      const payload = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+      expect(payload).toEqual(expect.objectContaining({
+        audioVersion: "blend",
+        mode: "practice",
+        segmentId: "seg-0",
+      }));
+    });
+  });
+
+  it("stores manual self-rating when no derived answer key exists", async () => {
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    await waitFor(() => expectTapSessionStarted(song.id));
+    fireEvent.click(screen.getByText("Solid"));
+
+    await waitFor(() => {
+      const finalizeCall = mockFetch.mock.calls.find(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions/tap-session-1` && init?.method === "PATCH"
+      );
+      expect(finalizeCall).toBeTruthy();
+      const payload = JSON.parse(String((finalizeCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+      expect(payload.selfRating).toBe(4);
+    });
   });
 
   it("toggles static contour map on section card independently", async () => {
@@ -579,7 +632,7 @@ describe("PracticeView", () => {
     await renderAndWaitForRatings(song);
 
     expect(screen.queryByTestId("practice-card-contour-toggle")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("practice-tap-mode-toggle")).not.toBeInTheDocument();
+    expect(screen.getByTestId("practice-tap-mode-toggle")).toBeInTheDocument();
     expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
   });
 
@@ -655,7 +708,7 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+      expectTapSessionStarted(song.id);
     });
 
     const tapBar = screen.getByTestId("practice-tap-bar");
@@ -718,7 +771,7 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+      expectTapSessionStarted(song.id);
     });
 
     const tapBar = screen.getByTestId("practice-tap-bar");
@@ -983,7 +1036,7 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+      expectTapSessionStarted(song.id);
     });
 
     const tapBar = screen.getByTestId("practice-tap-bar");
@@ -1032,7 +1085,7 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+      expectTapSessionStarted(song.id);
     });
 
     fireEvent.click(screen.getByTestId("mock-play-toggle"));
@@ -1077,7 +1130,7 @@ describe("PracticeView", () => {
     await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/tap-sessions`, { method: "POST" });
+      expectTapSessionStarted(song.id);
     });
 
     const tapBar = screen.getByTestId("practice-tap-bar");

@@ -124,11 +124,20 @@ export const tapPracticeSessions = pgTable(
     songId: text("song_id")
       .notNull()
       .references(() => songs.id, { onDelete: "cascade" }),
+    segmentId: text("segment_id").references(() => segments.id, { onDelete: "cascade" }),
+    audioVersion: text("audio_version").notNull().default("straight"),
+    mode: text("mode").notNull().default("practice"),
     startedAt: timestamp("started_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+    finalizedAt: timestamp("finalized_at"),
+    autoScorePercent: integer("auto_score_percent"),
+    selfRating: integer("self_rating"),
+    scoreDetails: jsonb("score_details").$type<unknown>().notNull().default(sql`'{}'::jsonb`),
   },
   (table) => ({
     userIdStartedAtIdx: index("idx_tap_practice_sessions_user_started_at").on(table.userId, table.startedAt),
     userSongStartedAtIdx: index("idx_tap_practice_sessions_user_song_started_at").on(table.userId, table.songId, table.startedAt),
+    userSongSegmentModeIdx: index("idx_tap_practice_sessions_user_song_segment_mode").on(table.userId, table.songId, table.segmentId, table.mode),
   })
 );
 
@@ -146,6 +155,7 @@ export const tapPracticeTaps = pgTable(
     timeOffsetMs: integer("time_offset_ms").notNull(),
     durationMs: integer("duration_ms").notNull(),
     laneMilli: integer("lane_milli").notNull(),
+    direction: text("direction"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => ({

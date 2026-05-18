@@ -747,11 +747,13 @@ describe("tap practice persistence", () => {
     const { createTapPracticeSession } = await getQueries();
     const result = await createTapPracticeSession("song-1", "default", startedAt);
 
-    expect(executeSpy).toHaveBeenCalledTimes(5);
+    expect(executeSpy).toHaveBeenCalledTimes(15);
     expect(insertSpy).toHaveBeenCalledTimes(2);
     expect(result).toEqual({
       id: "session-9",
       songId: "song-1",
+      audioVersion: "straight",
+      mode: "practice",
       startedAt: startedAt.toISOString(),
       tapCount: 0,
     });
@@ -776,6 +778,8 @@ describe("tap practice persistence", () => {
     expect(result).toEqual({
       id: "session-1",
       songId: "song-1",
+      audioVersion: "straight",
+      mode: "practice",
       startedAt: startedAt.toISOString(),
       tapCount: 0,
     });
@@ -841,6 +845,8 @@ describe("tap practice persistence", () => {
       {
         id: "session-2",
         songId: "song-1",
+        audioVersion: "straight",
+        mode: "practice",
         startedAt: "2026-04-11T12:00:00.000Z",
         tapCount: 2,
       },
@@ -877,6 +883,8 @@ describe("tap practice persistence", () => {
     expect(result).toEqual({
       id: "session-7",
       songId: "song-1",
+      audioVersion: "straight",
+      mode: "practice",
       startedAt: "2026-04-11T12:00:00.000Z",
       taps: [
         {

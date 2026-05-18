@@ -13,9 +13,24 @@ import { getMasteryPercent } from "../lib/masteryColors";
 import {
   DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   buildContourDirectionEvents,
+  classifyContourDirection,
   compareContourAttemptDetailed,
 } from "../lib/contourPractice";
 import type { AttemptNoteStatus } from "../lib/contourPractice";
+import {
+  buildBlendTapHeatMap,
+  deriveAnswerKeyFromTakes,
+  getAnswerKeyStatus,
+  scoreTapAttempt,
+  summarizeAccuracyByAudioVersion,
+  type AnswerKeyTake,
+  type BlendTapHeatMapMarker,
+  type DirectionTap,
+  type TapAudioVersion,
+  type TapDirection,
+  type TapPracticeMode,
+  type TapScoreResult,
+} from "../lib/enhancedTapPractice";
 import { getSegmentPitchContourNotes } from "../lib/pitchContour";
 
 interface TransportDebugState {
@@ -56,7 +71,7 @@ interface PracticeViewProps {
 }
 
 type LyricVisibilityMode = "full" | "hint" | "hidden";
-type AudioVersion = "prominent" | "blend";
+type AudioVersion = TapAudioVersion;
 
 const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
   full: "Full",
@@ -104,6 +119,32 @@ interface PersistedTapPayload {
   timeOffsetMs: number;
   durationMs: number;
   lane: number;
+  direction: TapDirection;
+}
+
+interface TapSessionSummaryPayload {
+  id: string;
+  songId: string;
+  segmentId?: string;
+  audioVersion: TapAudioVersion;
+  mode: TapPracticeMode;
+  startedAt: string;
+  completedAt?: string;
+  finalizedAt?: string;
+  autoScorePercent?: number;
+  selfRating?: number;
+  scoreDetails?: TapScoreResult;
+  tapCount: number;
+}
+
+interface TapSessionDetailPayload extends TapSessionSummaryPayload {
+  taps: Array<{
+    id: string;
+    timeOffsetMs: number;
+    durationMs: number;
+    lane: number;
+    direction?: TapDirection;
+  }>;
 }
 
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
@@ -118,6 +159,33 @@ function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
 
 function buildOfflineRatingsQueueKey(songId: string): string {
   return `${OFFLINE_RATING_QUEUE_PREFIX}${songId}`;
+}
+
+function toDirectionTaps(notes: PitchContourNote[]): DirectionTap[] {
+  const sorted = [...notes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+  return sorted.map((note, index) => ({
+    id: note.id,
+    timeOffsetMs: note.timeOffsetMs,
+    direction: index === 0 ? "same" : classifyContourDirection(note.lane - sorted[index - 1].lane, TAP_MATCH_OPTIONS.sameDeadZone),
+  }));
+}
+
+function toAnswerKeyTake(detail: TapSessionDetailPayload): AnswerKeyTake | null {
+  if (detail.mode !== "answer_key" || !detail.segmentId) {
+    return null;
+  }
+  const sorted = [...detail.taps].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+  return {
+    id: detail.id,
+    segmentId: detail.segmentId,
+    audioVersion: detail.audioVersion,
+    recordedAt: detail.completedAt ?? detail.startedAt,
+    taps: sorted.map((tap, index) => ({
+      id: tap.id,
+      timeOffsetMs: tap.timeOffsetMs,
+      direction: tap.direction ?? (index === 0 ? "same" : classifyContourDirection(tap.lane - sorted[index - 1].lane, TAP_MATCH_OPTIONS.sameDeadZone)),
+    })),
+  };
 }
 
 const PracticeView: React.FC<PracticeViewProps> = ({
@@ -161,6 +229,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [showCardContourMap, setShowCardContourMap] = React.useState(false);
   const [showTapOverlay, setShowTapOverlay] = React.useState(true);
   const [showSameLaneGuides, setShowSameLaneGuides] = React.useState(false);
+  const [tapMode, setTapMode] = React.useState<TapPracticeMode>("practice");
+  const [tapSelfRating, setTapSelfRating] = React.useState<number | null>(null);
+  const [tapAnswerKeyTakes, setTapAnswerKeyTakes] = React.useState<AnswerKeyTake[]>([]);
+  const [tapSessionSummaries, setTapSessionSummaries] = React.useState<TapSessionSummaryPayload[]>([]);
+  const [tapDataRefreshToken, setTapDataRefreshToken] = React.useState(0);
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
   const [tapHeatMapBySegment, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
   const [tapHeatMapRefreshToken, setTapHeatMapRefreshToken] = React.useState(0);
@@ -181,9 +254,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // Snapshot of the current playback state readable in effects without adding each
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
-  const [audioVersion, setAudioVersion] = React.useState<AudioVersion>("prominent");
+  const [audioVersion, setAudioVersion] = React.useState<AudioVersion>("straight");
   const hasAlternateAudio = Boolean(song.alternateAudioUrl?.trim());
-  const activeAudioVersion: AudioVersion = hasAlternateAudio ? audioVersion : "prominent";
+  const activeAudioVersion: AudioVersion = hasAlternateAudio ? audioVersion : "straight";
   const activeAudioUrl = activeAudioVersion === "blend" ? (song.alternateAudioUrl ?? "") : song.audioUrl;
   const directPlaybackAudioUrl = useMemo(() => toPlayableAudioUrl(activeAudioUrl), [activeAudioUrl]);
   const pendingAudioVersionSwitchRef = React.useRef<{
@@ -225,6 +298,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const autoPlayTokenHandledRef = React.useRef<number>(0);
   const playbackCompleteNotifiedRef = React.useRef<string | null>(null);
   const lastHandledEndedCountRef = React.useRef(endedCount);
+  const lastFinalizedEndedCountRef = React.useRef(endedCount);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
   const tapSessionIdRef = React.useRef<string | null>(null);
@@ -272,6 +346,45 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       TAP_MATCH_OPTIONS
     );
   }, [currentAttemptNotes, currentSegment, currentSegmentPitchContourNotes]);
+  const currentDerivedAnswerKey = useMemo(
+    () => currentSegment ? deriveAnswerKeyFromTakes(tapAnswerKeyTakes, currentSegment.id, activeAudioVersion) : null,
+    [activeAudioVersion, currentSegment, tapAnswerKeyTakes]
+  );
+  const currentAnswerKeyStatus = useMemo(
+    () => currentSegment
+      ? getAnswerKeyStatus(tapAnswerKeyTakes, currentSegment.id, activeAudioVersion)
+      : null,
+    [activeAudioVersion, currentSegment, tapAnswerKeyTakes]
+  );
+  const enhancedTapScore = useMemo(
+    () => currentDerivedAnswerKey ? scoreTapAttempt(currentDerivedAnswerKey, toDirectionTaps(currentAttemptNotes), TAP_MATCH_OPTIONS.timeToleranceMs) : null,
+    [currentAttemptNotes, currentDerivedAnswerKey]
+  );
+  const currentSegmentAccuracySummary = useMemo(
+    () => summarizeAccuracyByAudioVersion(
+      tapSessionSummaries
+        .filter((summary) => summary.segmentId === currentSegment?.id && summary.mode === "practice" && summary.completedAt)
+        .map((summary) => ({
+          id: summary.id,
+          segmentId: summary.segmentId ?? "",
+          audioVersion: summary.audioVersion,
+          completedAt: summary.completedAt ?? summary.startedAt,
+          autoScorePercent: typeof summary.autoScorePercent === "number" ? summary.autoScorePercent : null,
+        }))
+    ),
+    [currentSegment?.id, tapSessionSummaries]
+  );
+  const currentBlendHeatMap = useMemo<BlendTapHeatMapMarker[]>(() => {
+    if (!currentSegment) {
+      return [];
+    }
+    const blendKey = deriveAnswerKeyFromTakes(tapAnswerKeyTakes, currentSegment.id, "blend");
+    const scores = tapSessionSummaries
+      .filter((summary) => summary.segmentId === currentSegment.id && summary.audioVersion === "blend" && summary.mode === "practice")
+      .map((summary) => summary.scoreDetails)
+      .filter((score): score is TapScoreResult => Boolean(score && Array.isArray(score.details)));
+    return buildBlendTapHeatMap(blendKey, scores);
+  }, [currentSegment, tapAnswerKeyTakes, tapSessionSummaries]);
   const answerDirectionLetters = useMemo(() => {
     if (!currentSegment) {
       return new Map<string, "U" | "D" | "S">();
@@ -327,7 +440,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     const stored = window.localStorage.getItem(AUDIO_VERSION_STORAGE_KEY);
-    setAudioVersion(hasAlternateAudio && stored === "blend" ? "blend" : "prominent");
+    setAudioVersion(hasAlternateAudio && stored === "blend" ? "blend" : "straight");
   }, [hasAlternateAudio, song.id]);
 
   useEffect(() => {
@@ -346,11 +459,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [directPlaybackAudioUrl, play, seek, setPlaybackEndMs]);
 
   useEffect(() => {
-    if (!hasTapAnswers && isTapPracticeMode) {
+    if (!hasSegments && isTapPracticeMode) {
       setIsTapPracticeMode(false);
       activeTapCaptureRef.current = null;
     }
-  }, [hasTapAnswers, isTapPracticeMode]);
+  }, [hasSegments, isTapPracticeMode]);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
   const requestPlay = React.useCallback((startMs: number, endMs: number) => {
     play(startMs, endMs);
@@ -1013,6 +1126,37 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }, 1600);
   }, []);
 
+  const finalizeActiveTapSession = React.useCallback((selfRating?: number | null) => {
+    const activeSessionId = tapSessionIdRef.current;
+    if (!activeSessionId) {
+      return;
+    }
+    flushPersistedTaps(activeSessionId);
+    void persistTapChainRef.current.then(async () => {
+      const response = await fetch(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selfRating: selfRating ?? tapSelfRating }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to finalize tap session (${response.status})`);
+      }
+      setTapDataRefreshToken((previous) => previous + 1);
+      setTapHeatMapRefreshToken((previous) => previous + 1);
+    }).catch((error) => {
+      console.error("Failed to finalize tap practice session:", error);
+      showTapPersistenceWarning("Your taps are saved as a draft. Finish could not be confirmed yet.");
+    });
+  }, [flushPersistedTaps, showTapPersistenceWarning, song.id, tapSelfRating]);
+
+  React.useEffect(() => {
+    if (!isTapPracticeMode || !currentSegment || endedCount === lastFinalizedEndedCountRef.current) {
+      return;
+    }
+    lastFinalizedEndedCountRef.current = endedCount;
+    finalizeActiveTapSession();
+  }, [currentSegment, endedCount, finalizeActiveTapSession, isTapPracticeMode]);
+
   const finalizeTapCapture = React.useCallback((endLane?: number) => {
     const capture = activeTapCaptureRef.current;
     if (!capture || !currentSegment) {
@@ -1039,12 +1183,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const segmentId = currentSegment.id;
     const latestForSegment = tapAttemptsRef.current[segmentId] ?? [];
     const nextSegmentNotes = [...latestForSegment, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-      const immediateMatch = compareContourAttemptDetailed(
-      currentSegmentPitchContourNotes,
-      nextSegmentNotes,
-      TAP_MATCH_OPTIONS
-    );
-    const missedTap = immediateMatch.attemptNoteStatuses[note.id] === "mismatched";
+    const directionTaps = toDirectionTaps(nextSegmentNotes);
+    const noteDirection = directionTaps.find((tap) => tap.id === note.id)?.direction ?? "same";
+    const immediateScore = currentDerivedAnswerKey
+      ? scoreTapAttempt(currentDerivedAnswerKey, directionTaps, TAP_MATCH_OPTIONS.timeToleranceMs)
+      : null;
+    const contourFallbackMatch = currentDerivedAnswerKey
+      ? null
+      : compareContourAttemptDetailed(currentSegmentPitchContourNotes, nextSegmentNotes, TAP_MATCH_OPTIONS);
+    const missedTap = immediateScore
+      ? immediateScore.details.some((detail) => detail.actual?.id === note.id && detail.status !== "matched")
+      : contourFallbackMatch?.attemptNoteStatuses[note.id] === "mismatched";
 
     setTapAttemptsBySegment((previous) => ({
       ...previous,
@@ -1064,10 +1213,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       timeOffsetMs: note.timeOffsetMs,
       durationMs: note.durationMs,
       lane: note.lane,
+      direction: noteDirection,
     });
 
     activeTapCaptureRef.current = null;
-  }, [currentMs, currentSegment, queuePersistedTap, showAccuracyToast]);
+  }, [currentDerivedAnswerKey, currentMs, currentSegment, currentSegmentPitchContourNotes, queuePersistedTap, showAccuracyToast]);
 
   const clearCurrentSegmentTaps = React.useCallback(() => {
     if (!currentSegment) {
@@ -1445,7 +1595,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     const generation = tapSessionGenerationRef.current;
 
-    void fetch(`/api/songs/${song.id}/tap-sessions`, { method: "POST" })
+    void fetch(`/api/songs/${song.id}/tap-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        segmentId: currentSegment?.id,
+        audioVersion: activeAudioVersion,
+        mode: tapMode,
+      }),
+    })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`Failed to create tap session (${response.status})`);
@@ -1469,7 +1627,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         console.error("Failed to create tap practice session:", error);
         showTapPersistenceWarning("Could not start tap persistence session. Check your connection and try again.");
       });
-  }, [clearTapPersistenceWarning, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id, tapSessionResetToken]);
+  }, [activeAudioVersion, clearTapPersistenceWarning, currentSegment?.id, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id, tapMode, tapSessionResetToken]);
 
   useEffect(() => {
     activeTapCaptureRef.current = null;
@@ -1488,6 +1646,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setIsTapPracticeMode(false);
     setShowCardContourMap(false);
     setShowTapOverlay(true);
+    setTapMode("practice");
+    setTapSelfRating(null);
+    setTapAnswerKeyTakes([]);
+    setTapSessionSummaries([]);
     setAccuracyToast(null);
     activeTapCaptureRef.current = null;
     loopHandledRef.current = null;
@@ -1560,6 +1722,55 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   useEffect(() => {
     onSessionChange?.(session);
   }, [session, onSessionChange]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadEnhancedTapData = async () => {
+      try {
+        const response = await fetch(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Failed to load tap sessions (${response.status})`);
+        }
+        const payload = await response.json() as { sessions?: TapSessionSummaryPayload[] };
+        const sessions = payload.sessions ?? [];
+        const answerKeySessions = sessions.filter((session) => session.mode === "answer_key");
+        const details = await Promise.all(
+          answerKeySessions.map(async (session) => {
+            const detailResponse = await fetch(`/api/songs/${song.id}/tap-sessions/${session.id}`, { cache: "no-store" });
+            if (!detailResponse.ok) {
+              return null;
+            }
+            const detailPayload = await detailResponse.json() as { session?: TapSessionDetailPayload };
+            return detailPayload.session ?? null;
+          })
+        );
+
+        if (cancelled) {
+          return;
+        }
+        setTapSessionSummaries(sessions);
+        setTapAnswerKeyTakes(details.flatMap((detail) => {
+          if (!detail) {
+            return [];
+          }
+          const take = toAnswerKeyTake(detail);
+          return take ? [take] : [];
+        }));
+      } catch {
+        if (!cancelled) {
+          setTapSessionSummaries([]);
+          setTapAnswerKeyTakes([]);
+        }
+      }
+    };
+
+    void loadEnhancedTapData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [song.id, tapDataRefreshToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1712,7 +1923,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               className="inline-flex rounded-full border border-indigo-300 bg-white p-0.5"
               data-testid="practice-audio-version-toggle"
             >
-              {(["prominent", "blend"] as const).map((version) => (
+              {(["straight", "blend"] as const).map((version) => (
                 <button
                   key={version}
                   type="button"
@@ -1725,7 +1936,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                       : "text-indigo-700 hover:bg-indigo-50"
                   }`}
                 >
-                  {version === "prominent" ? "Prominent" : "Blend"}
+                  {version === "straight" ? "Straight" : "Blend"}
                 </button>
               ))}
             </div>
@@ -1745,7 +1956,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               Card contour: {showCardContourMap ? "On" : "Off"}
             </button>
           ) : null}
-          {hasTapAnswers ? (
+          {hasSegments ? (
             <button
               type="button"
               data-testid="practice-tap-mode-toggle"
@@ -1761,6 +1972,32 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             >
               Tap practice: {isTapPracticeMode ? "On" : "Off"}
             </button>
+          ) : null}
+          {isTapPracticeMode ? (
+            <div
+              className="inline-flex rounded-full border border-indigo-300 bg-white p-0.5"
+              data-testid="practice-tap-mode-segments"
+            >
+              {(["practice", "answer_key"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  data-testid={`practice-tap-mode-${mode}`}
+                  aria-pressed={tapMode === mode}
+                  onClick={() => {
+                    setTapMode(mode);
+                    resetTapPracticeRun();
+                  }}
+                  className={`rounded-full px-3 py-1 text-sm font-semibold transition ${
+                    tapMode === mode
+                      ? "bg-indigo-600 text-white"
+                      : "text-indigo-700 hover:bg-indigo-50"
+                  }`}
+                >
+                  {mode === "practice" ? "Practice" : "Record Answer Key"}
+                </button>
+              ))}
+            </div>
           ) : null}
           {isTapPracticeMode && hasSegments && currentSegment ? (
             <button
@@ -1820,6 +2057,93 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             >
               Dismiss
             </button>
+          </div>
+        ) : null}
+        {isTapPracticeMode && currentSegment && currentAnswerKeyStatus ? (
+          <div
+            data-testid="practice-answer-key-status"
+            className="mt-2 rounded-2xl border border-indigo-100 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-slate-900">
+                {currentAnswerKeyStatus.code === "ready" ? "Derived key ready" : currentAnswerKeyStatus.label}
+              </span>
+              <button
+                type="button"
+                data-testid="practice-finish-tap-session"
+                onClick={() => finalizeActiveTapSession()}
+                className="rounded-full border border-indigo-300 bg-white px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
+              >
+                Finish
+              </button>
+            </div>
+            {tapMode === "practice" && !currentDerivedAnswerKey ? (
+              <div className="mt-2 flex flex-wrap items-center gap-1" data-testid="practice-self-score">
+                <span className="mr-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Self-Score</span>
+                {[
+                  [1, "Lost"],
+                  [2, "Rough"],
+                  [3, "Mostly there"],
+                  [4, "Solid"],
+                  [5, "Ready"],
+                ].map(([rating, label]) => (
+                  <button
+                    key={rating}
+                    type="button"
+                    onClick={() => {
+                      setTapSelfRating(Number(rating));
+                      finalizeActiveTapSession(Number(rating));
+                    }}
+                    className={`rounded-full border px-2 py-1 text-xs font-semibold ${
+                      tapSelfRating === rating
+                        ? "border-indigo-600 bg-indigo-600 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {tapMode === "practice" && currentDerivedAnswerKey && enhancedTapScore ? (
+              <p className="mt-1 text-xs text-slate-500" data-testid="practice-auto-score">
+                Auto score: {enhancedTapScore.scorePercent}%
+              </p>
+            ) : null}
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs" data-testid="practice-version-accuracy-summary">
+              {(["blend", "straight"] as const).map((version) => {
+                const summary = currentSegmentAccuracySummary[version];
+                return (
+                  <div key={version} className="rounded-xl bg-slate-50 px-2 py-1">
+                    <span className="font-semibold">{version === "blend" ? "Blend" : "Straight"}</span>
+                    <span className="ml-1 text-slate-500">
+                      {summary.attemptCount > 0
+                        ? `avg ${summary.averageScore}%, latest ${summary.latestScore}%`
+                        : "no automatic scores yet"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {currentBlendHeatMap.length > 0 ? (
+              <div className="mt-2 flex items-end gap-1" data-testid="practice-blend-heat-map">
+                {currentBlendHeatMap.map((marker) => (
+                  <span
+                    key={marker.index}
+                    title={`Tap ${marker.index + 1}: ${Math.round(marker.missRate * 100)}% trouble`}
+                    className={`h-5 flex-1 rounded-full border ${
+                      marker.troubleLevel === "high"
+                        ? "border-rose-300 bg-rose-100"
+                        : marker.troubleLevel === "medium"
+                          ? "border-amber-300 bg-amber-100"
+                          : marker.troubleLevel === "low"
+                            ? "border-indigo-200 bg-indigo-100"
+                            : "border-slate-200 bg-slate-100"
+                    }`}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

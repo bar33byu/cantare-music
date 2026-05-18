@@ -71,7 +71,11 @@ describe('POST /api/songs/[id]/tap-sessions', () => {
 
     expect(response.status).toBe(201);
     expect(deleteExpiredTapPracticeData).toHaveBeenCalledWith('default');
-    expect(createTapPracticeSession).toHaveBeenCalledWith('song-1', 'default', expect.any(Date));
+    expect(createTapPracticeSession).toHaveBeenCalledWith('song-1', 'default', expect.any(Date), {
+      audioVersion: 'straight',
+      mode: 'practice',
+      segmentId: undefined,
+    });
     expect(data.session.id).toBe('session-1');
   });
 });

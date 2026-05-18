@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   addTapPracticeTap,
+  finalizeTapPracticeSession,
   getSegmentsBySongId,
   getSongById,
   getTapPracticeSessionDetail,
+  listTapPracticeSessionsForSong,
 } from '../../../../../../db/queries';
+import {
+  DEFAULT_CONTOUR_SAME_DEAD_ZONE,
+  classifyContourDirection,
+} from '../../../../../lib/contourPractice';
+import {
+  deriveAnswerKeyFromTakes,
+  scoreTapAttempt,
+  type AnswerKeyTake,
+  type DirectionTap,
+  type SelfRating,
+  type TapDirection,
+} from '../../../../../lib/enhancedTapPractice';
 import { resolveRequestUserId } from '../../../../_user';
 
 function formatError(error: unknown) {
@@ -18,6 +32,41 @@ function formatError(error: unknown) {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function normalizeTapDirection(value: unknown): TapDirection | undefined {
+  return value === 'up' || value === 'down' || value === 'same' ? value : undefined;
+}
+
+function directionTapsFromSession(session: Awaited<ReturnType<typeof getTapPracticeSessionDetail>>): DirectionTap[] {
+  if (!session) {
+    return [];
+  }
+
+  const sorted = [...session.taps].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+  return sorted.map((tap, index) => ({
+    id: tap.id,
+    timeOffsetMs: tap.timeOffsetMs,
+    direction: tap.direction ?? (index === 0 ? 'same' : classifyContourDirection(tap.lane - sorted[index - 1].lane, DEFAULT_CONTOUR_SAME_DEAD_ZONE)),
+  }));
+}
+
+async function loadAnswerKeyTakes(songId: string, userId: string): Promise<AnswerKeyTake[]> {
+  const sessions = await listTapPracticeSessionsForSong(songId, userId, 100);
+  const answerKeySessions = sessions.filter((session) => session.mode === 'answer_key' && session.segmentId);
+  const details = await Promise.all(answerKeySessions.map((session) => getTapPracticeSessionDetail(session.id, userId)));
+  return details.flatMap((detail) => {
+    if (!detail || detail.mode !== 'answer_key' || !detail.segmentId) {
+      return [];
+    }
+    return [{
+      id: detail.id,
+      segmentId: detail.segmentId,
+      audioVersion: detail.audioVersion,
+      recordedAt: detail.completedAt ?? detail.startedAt,
+      taps: directionTapsFromSession(detail),
+    }];
+  });
 }
 
 export async function GET(
@@ -74,6 +123,7 @@ export async function POST(
     const timeOffsetMs = body.timeOffsetMs;
     const durationMs = body.durationMs;
     const lane = body.lane;
+    const direction = normalizeTapDirection(body.direction);
 
     if (typeof segmentId !== 'string' || segmentId.length === 0) {
       return NextResponse.json({ error: 'segmentId is required' }, { status: 400 });
@@ -107,11 +157,63 @@ export async function POST(
       timeOffsetMs,
       durationMs,
       lane,
+      direction,
     });
 
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error appending tap practice data:', error);
+    return NextResponse.json(formatError(error), { status: 500 });
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string; sessionId: string }> }
+) {
+  try {
+    const userId = resolveRequestUserId(request);
+    const { id, sessionId } = await params;
+
+    const song = await getSongById(id, userId);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
+
+    const session = await getTapPracticeSessionDetail(sessionId, userId);
+    if (!session || session.songId !== id) {
+      return NextResponse.json({ error: 'Tap session not found' }, { status: 404 });
+    }
+
+    const body = await request.json().catch(() => null) as { selfRating?: unknown } | null;
+    const selfRating: SelfRating | null =
+      body?.selfRating === 1 || body?.selfRating === 2 || body?.selfRating === 3 || body?.selfRating === 4 || body?.selfRating === 5
+        ? body.selfRating
+        : null;
+
+    let autoScorePercent: number | null = null;
+    let scoreDetails = null;
+
+    if (session.mode === 'practice' && session.segmentId) {
+      const answerKeyTakes = await loadAnswerKeyTakes(id, userId);
+      const derivedKey = deriveAnswerKeyFromTakes(answerKeyTakes, session.segmentId, session.audioVersion);
+      if (derivedKey) {
+        const score = scoreTapAttempt(derivedKey, directionTapsFromSession(session), 400);
+        autoScorePercent = score.scorePercent;
+        scoreDetails = score;
+      }
+    }
+
+    const finalized = await finalizeTapPracticeSession(sessionId, userId, {
+      completedAt: new Date(),
+      autoScorePercent,
+      selfRating,
+      scoreDetails,
+    });
+
+    return NextResponse.json({ session: finalized });
+  } catch (error) {
+    console.error('Error finalizing tap practice session:', error);
     return NextResponse.json(formatError(error), { status: 500 });
   }
 }

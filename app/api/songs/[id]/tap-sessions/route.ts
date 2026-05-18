@@ -5,6 +5,7 @@ import {
   getSongById,
   listTapPracticeSessionsForSong,
 } from '../../../../../db/queries';
+import type { TapAudioVersion, TapPracticeMode } from '../../../../lib/enhancedTapPractice';
 import { resolveRequestUserId } from '../../../_user';
 
 function formatError(error: unknown) {
@@ -50,8 +51,21 @@ export async function POST(
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
+    const body = await request.json().catch(() => null) as {
+      segmentId?: unknown;
+      audioVersion?: unknown;
+      mode?: unknown;
+    } | null;
+    const segmentId = typeof body?.segmentId === 'string' && body.segmentId.length > 0 ? body.segmentId : undefined;
+    const audioVersion: TapAudioVersion = body?.audioVersion === 'blend' ? 'blend' : 'straight';
+    const mode: TapPracticeMode = body?.mode === 'answer_key' ? 'answer_key' : 'practice';
+
     await deleteExpiredTapPracticeData(userId);
-    const session = await createTapPracticeSession(id, userId, new Date());
+    const session = await createTapPracticeSession(id, userId, new Date(), {
+      segmentId,
+      audioVersion,
+      mode,
+    });
 
     return NextResponse.json({ session }, { status: 201 });
   } catch (error) {

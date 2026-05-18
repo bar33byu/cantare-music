@@ -3,6 +3,7 @@ import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow } from "./schema";
 import { getPublicUrl } from "../lib/r2";
+import type { SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
 
 const DEFAULT_QUERY_USER_ID = "default";
 let ensureTapPracticeTablesPromise: Promise<void> | null = null;
@@ -23,20 +24,37 @@ export interface PersistedTapPracticeTap {
   timeOffsetMs: number;
   durationMs: number;
   lane: number;
+  direction?: TapDirection;
   createdAt: string;
 }
 
 export interface PersistedTapPracticeSessionSummary {
   id: string;
   songId: string;
+  segmentId?: string;
+  audioVersion: TapAudioVersion;
+  mode: TapPracticeMode;
   startedAt: string;
+  completedAt?: string;
+  finalizedAt?: string;
+  autoScorePercent?: number;
+  selfRating?: SelfRating;
+  scoreDetails?: unknown;
   tapCount: number;
 }
 
 export interface PersistedTapPracticeSessionDetail {
   id: string;
   songId: string;
+  segmentId?: string;
+  audioVersion: TapAudioVersion;
+  mode: TapPracticeMode;
   startedAt: string;
+  completedAt?: string;
+  finalizedAt?: string;
+  autoScorePercent?: number;
+  selfRating?: SelfRating;
+  scoreDetails?: unknown;
   taps: PersistedTapPracticeTap[];
 }
 
@@ -241,6 +259,43 @@ function isMissingTapPracticeTableError(error: unknown): boolean {
   return false;
 }
 
+function isMissingEnhancedTapPracticeColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const columnNames = [
+    "segment_id",
+    "audio_version",
+    "mode",
+    "completed_at",
+    "finalized_at",
+    "auto_score_percent",
+    "self_rating",
+    "score_details",
+    "direction",
+  ];
+  if (columnNames.some((column) => message.includes(column)) && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (columnNames.some((column) => causeMessage.includes(column)) && causeMessage.includes("does not exist")) {
+      return true;
+    }
+    if (causeCode === "42703" && columnNames.some((column) => message.includes(column))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function ensureTapPracticeTables(): Promise<void> {
   if (!ensureTapPracticeTablesPromise) {
     ensureTapPracticeTablesPromise = (async () => {
@@ -279,6 +334,38 @@ async function ensureTapPracticeTables(): Promise<void> {
       await db().execute(sql.raw(`
         CREATE INDEX IF NOT EXISTS "idx_tap_practice_taps_session_created_at"
           ON "tap_practice_taps" ("session_id", "created_at")
+      `));
+
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "segment_id" text REFERENCES "segments"("id") ON DELETE cascade
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "audio_version" text NOT NULL DEFAULT 'straight'
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "mode" text NOT NULL DEFAULT 'practice'
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "completed_at" timestamp
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "finalized_at" timestamp
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "auto_score_percent" integer
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "self_rating" integer
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "score_details" jsonb NOT NULL DEFAULT '{}'::jsonb
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_taps" ADD COLUMN IF NOT EXISTS "direction" text
+      `));
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_song_segment_mode"
+          ON "tap_practice_sessions" ("user_id", "song_id", "segment_id", "mode")
       `));
     })().catch((error) => {
       ensureTapPracticeTablesPromise = null;
@@ -1086,11 +1173,35 @@ export async function deleteRatingsForSong(
 
 // ── Tap Practice ─────────────────────────────────────────────────────────
 
-function mapTapPracticeSession(row: Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">): PersistedTapPracticeSessionSummary {
+function normalizeTapAudioVersion(value: string | null | undefined): TapAudioVersion {
+  return value === "blend" ? "blend" : "straight";
+}
+
+function normalizeTapPracticeMode(value: string | null | undefined): TapPracticeMode {
+  return value === "answer_key" ? "answer_key" : "practice";
+}
+
+function normalizeTapDirection(value: string | null | undefined): TapDirection | undefined {
+  return value === "up" || value === "down" || value === "same" ? value : undefined;
+}
+
+type TapPracticeSessionProjection = Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt"> &
+  Partial<Pick<TapPracticeSessionRow, "segmentId" | "audioVersion" | "mode" | "completedAt" | "finalizedAt" | "autoScorePercent" | "selfRating" | "scoreDetails">>;
+
+function mapTapPracticeSession(row: TapPracticeSessionProjection): PersistedTapPracticeSessionSummary {
+  const selfRating = row.selfRating === 1 || row.selfRating === 2 || row.selfRating === 3 || row.selfRating === 4 || row.selfRating === 5 ? row.selfRating : undefined;
   return {
     id: row.id,
     songId: row.songId,
+    audioVersion: normalizeTapAudioVersion(row.audioVersion),
+    mode: normalizeTapPracticeMode(row.mode),
     startedAt: row.startedAt.toISOString(),
+    ...(row.segmentId ? { segmentId: row.segmentId } : {}),
+    ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
+    ...(row.finalizedAt ? { finalizedAt: row.finalizedAt.toISOString() } : {}),
+    ...(row.autoScorePercent !== null && row.autoScorePercent !== undefined ? { autoScorePercent: row.autoScorePercent } : {}),
+    ...(selfRating ? { selfRating } : {}),
+    ...(row.scoreDetails ? { scoreDetails: row.scoreDetails } : {}),
     tapCount: 0,
   };
 }
@@ -1126,7 +1237,12 @@ export async function deleteExpiredTapPracticeData(
 export async function createTapPracticeSession(
   songId: string,
   userId: string = DEFAULT_QUERY_USER_ID,
-  startedAt: Date = new Date()
+  startedAt: Date = new Date(),
+  options: {
+    segmentId?: string;
+    audioVersion?: TapAudioVersion;
+    mode?: TapPracticeMode;
+  } = {}
 ): Promise<PersistedTapPracticeSessionSummary> {
   try {
     const rows = await db()
@@ -1135,13 +1251,16 @@ export async function createTapPracticeSession(
         id: crypto.randomUUID(),
         userId,
         songId,
+        segmentId: options.segmentId ?? null,
+        audioVersion: options.audioVersion ?? "straight",
+        mode: options.mode ?? "practice",
         startedAt,
       })
       .returning();
 
     return mapTapPracticeSession(rows[0]);
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       const rows = await db()
         .insert(tapPracticeSessions)
@@ -1149,6 +1268,9 @@ export async function createTapPracticeSession(
           id: crypto.randomUUID(),
           userId,
           songId,
+          segmentId: options.segmentId ?? null,
+          audioVersion: options.audioVersion ?? "straight",
+          mode: options.mode ?? "practice",
           startedAt,
         })
         .returning();
@@ -1167,6 +1289,7 @@ export async function addTapPracticeTap(
     timeOffsetMs: number;
     durationMs: number;
     lane: number;
+    direction?: TapDirection;
   }
 ): Promise<void> {
   try {
@@ -1180,10 +1303,11 @@ export async function addTapPracticeTap(
         timeOffsetMs: data.timeOffsetMs,
         durationMs: data.durationMs,
         laneMilli: laneToMilli(data.lane),
+        direction: data.direction ?? null,
         createdAt: new Date(),
       });
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       await db()
         .insert(tapPracticeTaps)
@@ -1195,6 +1319,7 @@ export async function addTapPracticeTap(
           timeOffsetMs: data.timeOffsetMs,
           durationMs: data.durationMs,
           laneMilli: laneToMilli(data.lane),
+          direction: data.direction ?? null,
           createdAt: new Date(),
         });
       return;
@@ -1228,26 +1353,42 @@ export async function listTapPracticeSessionsForSong(
   userId: string = DEFAULT_QUERY_USER_ID,
   limit: number = 20
 ): Promise<PersistedTapPracticeSessionSummary[]> {
-  let sessions: Array<Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">> = [];
+  let sessions: TapPracticeSessionProjection[] = [];
   try {
     sessions = await db()
       .select({
         id: tapPracticeSessions.id,
         songId: tapPracticeSessions.songId,
+        segmentId: tapPracticeSessions.segmentId,
+        audioVersion: tapPracticeSessions.audioVersion,
+        mode: tapPracticeSessions.mode,
         startedAt: tapPracticeSessions.startedAt,
+        completedAt: tapPracticeSessions.completedAt,
+        finalizedAt: tapPracticeSessions.finalizedAt,
+        autoScorePercent: tapPracticeSessions.autoScorePercent,
+        selfRating: tapPracticeSessions.selfRating,
+        scoreDetails: tapPracticeSessions.scoreDetails,
       })
       .from(tapPracticeSessions)
       .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
       .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
       .orderBy(desc(tapPracticeSessions.startedAt));
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       sessions = await db()
         .select({
           id: tapPracticeSessions.id,
           songId: tapPracticeSessions.songId,
+          segmentId: tapPracticeSessions.segmentId,
+          audioVersion: tapPracticeSessions.audioVersion,
+          mode: tapPracticeSessions.mode,
           startedAt: tapPracticeSessions.startedAt,
+          completedAt: tapPracticeSessions.completedAt,
+          finalizedAt: tapPracticeSessions.finalizedAt,
+          autoScorePercent: tapPracticeSessions.autoScorePercent,
+          selfRating: tapPracticeSessions.selfRating,
+          scoreDetails: tapPracticeSessions.scoreDetails,
         })
         .from(tapPracticeSessions)
         .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
@@ -1297,26 +1438,42 @@ export async function getTapPracticeSessionDetail(
   sessionId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedTapPracticeSessionDetail | null> {
-  let sessionRows: Array<Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">> = [];
+  let sessionRows: TapPracticeSessionProjection[] = [];
   try {
     sessionRows = await db()
       .select({
         id: tapPracticeSessions.id,
         songId: tapPracticeSessions.songId,
+        segmentId: tapPracticeSessions.segmentId,
+        audioVersion: tapPracticeSessions.audioVersion,
+        mode: tapPracticeSessions.mode,
         startedAt: tapPracticeSessions.startedAt,
+        completedAt: tapPracticeSessions.completedAt,
+        finalizedAt: tapPracticeSessions.finalizedAt,
+        autoScorePercent: tapPracticeSessions.autoScorePercent,
+        selfRating: tapPracticeSessions.selfRating,
+        scoreDetails: tapPracticeSessions.scoreDetails,
       })
       .from(tapPracticeSessions)
       .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
       .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
       .limit(1);
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       sessionRows = await db()
         .select({
           id: tapPracticeSessions.id,
           songId: tapPracticeSessions.songId,
+          segmentId: tapPracticeSessions.segmentId,
+          audioVersion: tapPracticeSessions.audioVersion,
+          mode: tapPracticeSessions.mode,
           startedAt: tapPracticeSessions.startedAt,
+          completedAt: tapPracticeSessions.completedAt,
+          finalizedAt: tapPracticeSessions.finalizedAt,
+          autoScorePercent: tapPracticeSessions.autoScorePercent,
+          selfRating: tapPracticeSessions.selfRating,
+          scoreDetails: tapPracticeSessions.scoreDetails,
         })
         .from(tapPracticeSessions)
         .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
@@ -1339,6 +1496,7 @@ export async function getTapPracticeSessionDetail(
     timeOffsetMs: number;
     durationMs: number;
     laneMilli: number;
+    direction: string | null;
     createdAt: Date;
   }> = [];
   try {
@@ -1348,7 +1506,7 @@ export async function getTapPracticeSessionDetail(
       .where(eq(tapPracticeTaps.sessionId, sessionId))
       .orderBy(asc(tapPracticeTaps.createdAt));
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       taps = await db()
         .select()
@@ -1360,20 +1518,85 @@ export async function getTapPracticeSessionDetail(
     }
   }
 
+  const selfRating = sessionRow.selfRating === 1 || sessionRow.selfRating === 2 || sessionRow.selfRating === 3 || sessionRow.selfRating === 4 || sessionRow.selfRating === 5 ? sessionRow.selfRating : undefined;
   return {
     id: sessionRow.id,
     songId: sessionRow.songId,
+    audioVersion: normalizeTapAudioVersion(sessionRow.audioVersion),
+    mode: normalizeTapPracticeMode(sessionRow.mode),
     startedAt: sessionRow.startedAt.toISOString(),
-    taps: taps.map((tap) => ({
-      id: tap.id,
-      noteId: tap.noteId,
-      segmentId: tap.segmentId,
-      timeOffsetMs: tap.timeOffsetMs,
-      durationMs: tap.durationMs,
-      lane: laneFromMilli(tap.laneMilli),
-      createdAt: tap.createdAt.toISOString(),
-    })),
+    ...(sessionRow.segmentId ? { segmentId: sessionRow.segmentId } : {}),
+    ...(sessionRow.completedAt ? { completedAt: sessionRow.completedAt.toISOString() } : {}),
+    ...(sessionRow.finalizedAt ? { finalizedAt: sessionRow.finalizedAt.toISOString() } : {}),
+    ...(sessionRow.autoScorePercent !== null && sessionRow.autoScorePercent !== undefined ? { autoScorePercent: sessionRow.autoScorePercent } : {}),
+    ...(selfRating ? { selfRating } : {}),
+    ...(sessionRow.scoreDetails ? { scoreDetails: sessionRow.scoreDetails } : {}),
+    taps: taps.map((tap) => {
+      const direction = normalizeTapDirection(tap.direction);
+      return {
+        id: tap.id,
+        noteId: tap.noteId,
+        segmentId: tap.segmentId,
+        timeOffsetMs: tap.timeOffsetMs,
+        durationMs: tap.durationMs,
+        lane: laneFromMilli(tap.laneMilli),
+        ...(direction ? { direction } : {}),
+        createdAt: tap.createdAt.toISOString(),
+      };
+    }),
   };
+}
+
+export async function finalizeTapPracticeSession(
+  sessionId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  data: {
+    completedAt?: Date;
+    autoScorePercent?: number | null;
+    selfRating?: SelfRating | null;
+    scoreDetails?: TapScoreResult | null;
+  } = {}
+): Promise<PersistedTapPracticeSessionDetail | null> {
+  const existing = await getTapPracticeSessionDetail(sessionId, userId);
+  if (!existing) {
+    return null;
+  }
+
+  if (existing.finalizedAt) {
+    return existing;
+  }
+
+  const completedAt = data.completedAt ?? new Date();
+  try {
+    await db()
+      .update(tapPracticeSessions)
+      .set({
+        completedAt,
+        finalizedAt: new Date(),
+        autoScorePercent: data.autoScorePercent ?? null,
+        selfRating: data.selfRating ?? null,
+        scoreDetails: data.scoreDetails ?? {},
+      })
+      .where(eq(tapPracticeSessions.id, sessionId));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .update(tapPracticeSessions)
+        .set({
+          completedAt,
+          finalizedAt: new Date(),
+          autoScorePercent: data.autoScorePercent ?? null,
+          selfRating: data.selfRating ?? null,
+          scoreDetails: data.scoreDetails ?? {},
+        })
+        .where(eq(tapPracticeSessions.id, sessionId));
+    } else {
+      throw error;
+    }
+  }
+
+  return getTapPracticeSessionDetail(sessionId, userId);
 }
 
 // ── Playlists ─────────────────────────────────────────────────────────────
