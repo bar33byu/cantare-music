@@ -227,7 +227,10 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
     setMessage("MIDI cleanup updated.");
   };
 
-  const postAlignmentAction = async (body: Record<string, unknown>): Promise<MidiStatusAlignment> => {
+  const postAlignmentAction = async (
+    body: Record<string, unknown>,
+    options: { applyResponse?: boolean } = {}
+  ): Promise<MidiStatusAlignment> => {
     const response = await request(`/api/songs/${songId}/midi/alignment`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -241,8 +244,10 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
     if (!payload.alignment) {
       throw new Error("Alignment response was missing progress.");
     }
-    setStatus((previous) => previous ? updateStatusAlignment(previous, payload.alignment!) : previous);
-    setResumeIndexDraft(String(payload.alignment.tappedStartTimesSeconds.length));
+    if (options.applyResponse ?? true) {
+      setStatus((previous) => previous ? updateStatusAlignment(previous, payload.alignment!) : previous);
+      setResumeIndexDraft(String(payload.alignment.tappedStartTimesSeconds.length));
+    }
     return payload.alignment;
   };
 
@@ -269,7 +274,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
     setResumeIndexDraft(String(alignedCount + 1));
     setConfirmingRestart(false);
     tapSaveChainRef.current = tapSaveChainRef.current
-      .then(() => postAlignmentAction({ action: "tap", timeSeconds }))
+      .then(() => postAlignmentAction({ action: "tap", timeSeconds }, { applyResponse: false }))
       .then(() => undefined)
       .catch((error) => {
         setMessage(error instanceof Error ? error.message : "Could not save tap.");
