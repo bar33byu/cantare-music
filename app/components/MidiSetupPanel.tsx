@@ -55,6 +55,10 @@ interface MidiSetupPanelProps {
   request: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
+type WebAudioWindow = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 function formatDate(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "None yet";
 }
@@ -64,6 +68,10 @@ function movementLabel(value: "start" | "up" | "down" | "same"): string {
   if (value === "down") return "Down";
   if (value === "same") return "Same";
   return "Start";
+}
+
+function midiPitchToFrequency(pitch: number): number {
+  return 440 * (2 ** ((pitch - 69) / 12));
 }
 
 function emptySummary(): MidiStatusPayload["summary"] {
@@ -142,6 +150,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   const [resumeIndexDraft, setResumeIndexDraft] = useState("0");
   const tapSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const audioContextRef = useRef<AudioContext | null>(null);
   const { isPlaying, isReady, currentMs, durationMs, play, pause, seek } = audioPlayer;
 
   const loadStatus = useCallback(async (options: { showLoading?: boolean } = {}) => {
@@ -251,11 +260,46 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
     return payload.alignment;
   };
 
+  const playMidiTapPreview = (note: MidiStatusSource["cleanedNotes"][number]) => {
+    if (typeof window === "undefined") return;
+    const AudioContextClass = window.AudioContext ?? (window as WebAudioWindow).webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    try {
+      const context = audioContextRef.current ?? new AudioContextClass();
+      audioContextRef.current = context;
+      if (context.state === "suspended") {
+        void context.resume().catch(() => undefined);
+      }
+
+      const now = context.currentTime;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+
+      oscillator.type = "triangle";
+      oscillator.frequency.setValueAtTime(midiPitchToFrequency(note.midiPitch), now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.09, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.24);
+    } catch {
+      // The audible preview is helpful, but alignment should still work if Web Audio is unavailable.
+    }
+  };
+
   const tapAlignedNote = () => {
     if (!status?.source || !status.alignment || alignedCount >= retainedCount) {
       return;
     }
+    const tappedNote = status.source.cleanedNotes[alignedCount];
     const timeSeconds = currentMs / 1000;
+    if (tappedNote) {
+      playMidiTapPreview(tappedNote);
+    }
     setMessage(null);
     setStatus((previous) => {
       if (!previous?.alignment) return previous;

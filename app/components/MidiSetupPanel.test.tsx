@@ -1,9 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MidiSetupPanel } from "./MidiSetupPanel";
 
 describe("MidiSetupPanel", () => {
   const request = vi.fn();
+  const originalAudioContext = window.AudioContext;
   const audioPlayer = {
     isPlaying: false,
     isReady: true,
@@ -53,6 +54,13 @@ describe("MidiSetupPanel", () => {
           latestAlignmentDate: "2026-05-18T00:01:00.000Z",
         },
       }),
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "AudioContext", {
+      configurable: true,
+      value: originalAudioContext,
     });
   });
 
@@ -168,5 +176,54 @@ describe("MidiSetupPanel", () => {
       }));
     });
     expect(screen.getAllByText("2 / 2 notes").length).toBeGreaterThan(0);
+  });
+
+  it("plays the MIDI pitch for the note being aligned on tap", async () => {
+    const setFrequency = vi.fn();
+    const oscillator = {
+      type: "sine",
+      frequency: { setValueAtTime: setFrequency },
+      connect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    const gain = {
+      gain: {
+        setValueAtTime: vi.fn(),
+        exponentialRampToValueAtTime: vi.fn(),
+      },
+      connect: vi.fn(),
+    };
+    class MockAudioContext {
+      currentTime = 12;
+      destination = {};
+      state = "running";
+
+      createOscillator() {
+        return oscillator;
+      }
+
+      createGain() {
+        return gain;
+      }
+
+      resume = vi.fn();
+    }
+    Object.defineProperty(window, "AudioContext", {
+      configurable: true,
+      value: MockAudioContext,
+    });
+
+    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
+
+    expect(await screen.findByText("part.mid")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Resume alignment"));
+    fireEvent.pointerDown(await screen.findByTestId("midi-alignment-tap"));
+
+    expect(setFrequency).toHaveBeenCalled();
+    expect(setFrequency.mock.calls[0][0]).toBeCloseTo(293.66, 2);
+    expect(setFrequency.mock.calls[0][1]).toBe(12);
+    expect(oscillator.start).toHaveBeenCalledWith(12);
+    expect(oscillator.stop).toHaveBeenCalledWith(12.24);
   });
 });
