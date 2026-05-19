@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Segment, SongPitchContourNote } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
+import { MidiSetupPanel } from './MidiSetupPanel';
 import { PitchContourThumbnail } from './PitchContourThumbnail';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { toPlayableAudioUrl } from '../lib/audioUrls';
@@ -1186,6 +1187,10 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
           </div>
         )}
       </div>
+      ) : null}
+
+      {!isContourRecording ? (
+        <MidiSetupPanel songId={songId} audioUrl={audioUrl} request={request} />
       ) : null}
 
       {deleteError && (

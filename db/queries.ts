@@ -1,12 +1,14 @@
 import { eq, asc, desc, inArray, and, count, lte, sql } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData } from "./schema";
 import { getPublicUrl } from "../lib/r2";
 import type { SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
+import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
 
 const DEFAULT_QUERY_USER_ID = "default";
 let ensureTapPracticeTablesPromise: Promise<void> | null = null;
+let ensureMidiTablesPromise: Promise<void> | null = null;
 
 export type PersistedMemoryRating = 1 | 2 | 3 | 4 | 5;
 
@@ -56,6 +58,24 @@ export interface PersistedTapPracticeSessionDetail {
   selfRating?: SelfRating;
   scoreDetails?: unknown;
   taps: PersistedTapPracticeTap[];
+}
+
+export interface PersistedMidiSource {
+  id: string;
+  songId: string;
+  originalFilename: string;
+  storageKey: string;
+  uploadedAt: string;
+  contentType?: string | null;
+  fileSize: number;
+  parseStatus: string;
+  cleanupSettings: MidiCleanupSettingsData;
+  rawNotes: RawMidiNoteData[];
+  cleanedNotes: CleanedMidiNoteData[];
+  rawNoteCount: number;
+  cleanedNoteCount: number;
+  ignoredShortNoteCount: number;
+  parseError?: string | null;
 }
 
 export interface PlaylistSongItem {
@@ -252,6 +272,38 @@ function isMissingTapPracticeTableError(error: unknown): boolean {
     }
 
     if (causeMentionsTapTables && causeMessage.includes("does not exist")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isMissingMidiTableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const mentionsMidiTables =
+    message.includes("midi_sources") ||
+    message.includes("midi_alignments") ||
+    (message.includes("midi_") && message.includes("does not exist"));
+
+  if (mentionsMidiTables && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    const causeMentionsMidiTables = causeMessage.includes("midi_sources") || causeMessage.includes("midi_alignments") || causeMessage.includes("midi_");
+    if (causeCode === "42P01" && causeMentionsMidiTables) {
+      return true;
+    }
+    if (causeMentionsMidiTables && causeMessage.includes("does not exist")) {
       return true;
     }
   }
@@ -1177,6 +1229,63 @@ function normalizeTapAudioVersion(value: string | null | undefined): TapAudioVer
   return value === "blend" ? "blend" : "straight";
 }
 
+async function ensureMidiTables(): Promise<void> {
+  if (!ensureMidiTablesPromise) {
+    ensureMidiTablesPromise = (async () => {
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "midi_sources" (
+          "id" text PRIMARY KEY NOT NULL,
+          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
+          "original_filename" text NOT NULL,
+          "storage_key" text NOT NULL,
+          "uploaded_at" timestamp NOT NULL DEFAULT now(),
+          "content_type" text,
+          "file_size" integer NOT NULL DEFAULT 0,
+          "parse_status" text NOT NULL DEFAULT 'parsed',
+          "cleanup_settings" jsonb NOT NULL DEFAULT '{"shortNoteThresholdMs":100,"simultaneousThresholdMs":30}'::jsonb,
+          "raw_notes" jsonb NOT NULL DEFAULT '[]'::jsonb,
+          "cleaned_notes" jsonb NOT NULL DEFAULT '[]'::jsonb,
+          "raw_note_count" integer NOT NULL DEFAULT 0,
+          "cleaned_note_count" integer NOT NULL DEFAULT 0,
+          "ignored_short_note_count" integer NOT NULL DEFAULT 0,
+          "parse_error" text
+        )
+      `));
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_midi_sources_song_uploaded_at"
+          ON "midi_sources" ("song_id", "uploaded_at")
+      `));
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "midi_alignments" (
+          "id" text PRIMARY KEY NOT NULL,
+          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
+          "midi_source_id" text NOT NULL REFERENCES "midi_sources"("id") ON DELETE cascade,
+          "tapped_start_times_seconds" jsonb NOT NULL DEFAULT '[]'::jsonb,
+          "retained_midi_note_count" integer NOT NULL DEFAULT 0,
+          "is_complete" boolean NOT NULL DEFAULT false,
+          "status" text NOT NULL DEFAULT 'partial',
+          "notes" text,
+          "created_at" timestamp NOT NULL DEFAULT now(),
+          "updated_at" timestamp NOT NULL DEFAULT now()
+        )
+      `));
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_midi_alignments_song_updated_at"
+          ON "midi_alignments" ("song_id", "updated_at")
+      `));
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_midi_alignments_source_updated_at"
+          ON "midi_alignments" ("midi_source_id", "updated_at")
+      `));
+    })().catch((error) => {
+      ensureMidiTablesPromise = null;
+      throw error;
+    });
+  }
+
+  await ensureMidiTablesPromise;
+}
+
 function normalizeTapPracticeMode(value: string | null | undefined): TapPracticeMode {
   return value === "answer_key" ? "answer_key" : "practice";
 }
@@ -1600,6 +1709,221 @@ export async function finalizeTapPracticeSession(
 }
 
 // ── Playlists ─────────────────────────────────────────────────────────────
+
+// MIDI-guided Tap Practice
+
+function mapMidiSource(row: MidiSourceRow): PersistedMidiSource {
+  return {
+    id: row.id,
+    songId: row.songId,
+    originalFilename: row.originalFilename,
+    storageKey: row.storageKey,
+    uploadedAt: row.uploadedAt.toISOString(),
+    contentType: row.contentType,
+    fileSize: row.fileSize,
+    parseStatus: row.parseStatus,
+    cleanupSettings: row.cleanupSettings,
+    rawNotes: row.rawNotes,
+    cleanedNotes: row.cleanedNotes,
+    rawNoteCount: row.rawNoteCount,
+    cleanedNoteCount: row.cleanedNoteCount,
+    ignoredShortNoteCount: row.ignoredShortNoteCount,
+    parseError: row.parseError,
+  };
+}
+
+function mapMidiAlignment(row: MidiAlignmentRow): MidiAlignment {
+  const tappedStartTimesSeconds = Array.isArray(row.tappedStartTimesSeconds)
+    ? row.tappedStartTimesSeconds.filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    : [];
+  return {
+    id: row.id,
+    songId: row.songId,
+    midiSourceId: row.midiSourceId,
+    tappedStartTimesSeconds,
+    retainedMidiNoteCount: row.retainedMidiNoteCount,
+    isComplete: row.isComplete,
+    status: row.status === "complete" ? "complete" : "partial",
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    ...(row.notes ? { notes: row.notes } : {}),
+  };
+}
+
+export async function createMidiSource(data: Omit<PersistedMidiSource, "uploadedAt">): Promise<PersistedMidiSource> {
+  try {
+    const rows = await db()
+      .insert(midiSources)
+      .values({
+        ...data,
+        uploadedAt: new Date(),
+        contentType: data.contentType ?? null,
+        parseError: data.parseError ?? null,
+      })
+      .returning();
+    return mapMidiSource(rows[0]);
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      const rows = await db()
+        .insert(midiSources)
+        .values({
+          ...data,
+          uploadedAt: new Date(),
+          contentType: data.contentType ?? null,
+          parseError: data.parseError ?? null,
+        })
+        .returning();
+      return mapMidiSource(rows[0]);
+    }
+    throw error;
+  }
+}
+
+export async function getLatestMidiSourceForSong(songId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedMidiSource | null> {
+  try {
+    const rows = await db()
+      .select({ source: midiSources })
+      .from(midiSources)
+      .innerJoin(songs, eq(midiSources.songId, songs.id))
+      .where(and(eq(midiSources.songId, songId), eq(songs.userId, userId)))
+      .orderBy(desc(midiSources.uploadedAt))
+      .limit(1);
+    return rows[0] ? mapMidiSource(rows[0].source) : null;
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function getMidiSourceById(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedMidiSource | null> {
+  try {
+    const rows = await db()
+      .select({ source: midiSources })
+      .from(midiSources)
+      .innerJoin(songs, eq(midiSources.songId, songs.id))
+      .where(and(eq(midiSources.id, midiSourceId), eq(songs.userId, userId)))
+      .limit(1);
+    return rows[0] ? mapMidiSource(rows[0].source) : null;
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function updateMidiSourceCleanup(
+  midiSourceId: string,
+  userId: string,
+  data: {
+    cleanupSettings: MidiCleanupSettingsData;
+    cleanedNotes: CleanedMidiNoteData[];
+    cleanedNoteCount: number;
+    ignoredShortNoteCount: number;
+  }
+): Promise<PersistedMidiSource | null> {
+  await ensureMidiTables();
+  const source = await getMidiSourceById(midiSourceId, userId);
+  if (!source) {
+    return null;
+  }
+  const rows = await db()
+    .update(midiSources)
+    .set({
+      cleanupSettings: data.cleanupSettings,
+      cleanedNotes: data.cleanedNotes,
+      cleanedNoteCount: data.cleanedNoteCount,
+      ignoredShortNoteCount: data.ignoredShortNoteCount,
+    })
+    .where(eq(midiSources.id, midiSourceId))
+    .returning();
+  return rows[0] ? mapMidiSource(rows[0]) : null;
+}
+
+export async function getLatestMidiAlignmentForSource(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<MidiAlignment | null> {
+  try {
+    const rows = await db()
+      .select({ alignment: midiAlignments })
+      .from(midiAlignments)
+      .innerJoin(songs, eq(midiAlignments.songId, songs.id))
+      .where(and(eq(midiAlignments.midiSourceId, midiSourceId), eq(songs.userId, userId)))
+      .orderBy(desc(midiAlignments.updatedAt))
+      .limit(1);
+    return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function getLatestCompleteMidiAlignmentForSource(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<MidiAlignment | null> {
+  try {
+    const rows = await db()
+      .select({ alignment: midiAlignments })
+      .from(midiAlignments)
+      .innerJoin(songs, eq(midiAlignments.songId, songs.id))
+      .where(and(eq(midiAlignments.midiSourceId, midiSourceId), eq(midiAlignments.isComplete, true), eq(songs.userId, userId)))
+      .orderBy(desc(midiAlignments.updatedAt))
+      .limit(1);
+    return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function upsertMidiAlignment(
+  data: {
+    id?: string;
+    songId: string;
+    midiSourceId: string;
+    tappedStartTimesSeconds: number[];
+    retainedMidiNoteCount: number;
+    notes?: string | null;
+  },
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<MidiAlignment> {
+  await ensureMidiTables();
+  const song = await getSongById(data.songId, userId);
+  if (!song) {
+    throw new Error("Song not found");
+  }
+  const now = new Date();
+  const tapped = data.tappedStartTimesSeconds.slice(0, data.retainedMidiNoteCount);
+  const isComplete = tapped.length >= data.retainedMidiNoteCount;
+  const id = data.id ?? crypto.randomUUID();
+  const values = {
+    id,
+    songId: data.songId,
+    midiSourceId: data.midiSourceId,
+    tappedStartTimesSeconds: tapped,
+    retainedMidiNoteCount: data.retainedMidiNoteCount,
+    isComplete,
+    status: isComplete ? "complete" : "partial",
+    notes: data.notes ?? null,
+    updatedAt: now,
+  };
+  const rows = await db()
+    .insert(midiAlignments)
+    .values({ ...values, createdAt: now })
+    .onConflictDoUpdate({
+      target: midiAlignments.id,
+      set: values,
+    })
+    .returning();
+  return mapMidiAlignment(rows[0]);
+}
 
 function toIso(value: Date | null): string {
   return value ? value.toISOString() : new Date(0).toISOString();

@@ -24,6 +24,35 @@ export interface SongPitchContourPoint {
   durationMs: number;
 }
 
+export interface RawMidiNoteData {
+  index: number;
+  trackIndex: number;
+  midiPitch: number;
+  pitchName: string;
+  velocity: number;
+  midiStartTick: number;
+  midiDurationTicks: number;
+  midiStartSeconds: number;
+  midiDurationSeconds: number;
+}
+
+export interface CleanedMidiNoteData {
+  index: number;
+  sourceRawIndex: number;
+  midiPitch: number;
+  pitchName: string;
+  midiStartSeconds: number;
+  midiDurationSeconds: number;
+  midiStartTick: number;
+  midiDurationTicks: number;
+  movementFromPrevious: "start" | "up" | "down" | "same";
+}
+
+export interface MidiCleanupSettingsData {
+  shortNoteThresholdMs: number;
+  simultaneousThresholdMs: number;
+}
+
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -163,6 +192,62 @@ export const tapPracticeTaps = pgTable(
   })
 );
 
+export const midiSources = pgTable(
+  "midi_sources",
+  {
+    id: text("id").primaryKey(),
+    songId: text("song_id")
+      .notNull()
+      .references(() => songs.id, { onDelete: "cascade" }),
+    originalFilename: text("original_filename").notNull(),
+    storageKey: text("storage_key").notNull(),
+    uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
+    contentType: text("content_type"),
+    fileSize: integer("file_size").notNull().default(0),
+    parseStatus: text("parse_status").notNull().default("parsed"),
+    cleanupSettings: jsonb("cleanup_settings")
+      .$type<MidiCleanupSettingsData>()
+      .notNull()
+      .default(sql`'{"shortNoteThresholdMs":100,"simultaneousThresholdMs":30}'::jsonb`),
+    rawNotes: jsonb("raw_notes").$type<RawMidiNoteData[]>().notNull().default(sql`'[]'::jsonb`),
+    cleanedNotes: jsonb("cleaned_notes").$type<CleanedMidiNoteData[]>().notNull().default(sql`'[]'::jsonb`),
+    rawNoteCount: integer("raw_note_count").notNull().default(0),
+    cleanedNoteCount: integer("cleaned_note_count").notNull().default(0),
+    ignoredShortNoteCount: integer("ignored_short_note_count").notNull().default(0),
+    parseError: text("parse_error"),
+  },
+  (table) => ({
+    songUploadedAtIdx: index("idx_midi_sources_song_uploaded_at").on(table.songId, table.uploadedAt),
+  })
+);
+
+export const midiAlignments = pgTable(
+  "midi_alignments",
+  {
+    id: text("id").primaryKey(),
+    songId: text("song_id")
+      .notNull()
+      .references(() => songs.id, { onDelete: "cascade" }),
+    midiSourceId: text("midi_source_id")
+      .notNull()
+      .references(() => midiSources.id, { onDelete: "cascade" }),
+    tappedStartTimesSeconds: jsonb("tapped_start_times_seconds")
+      .$type<number[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    retainedMidiNoteCount: integer("retained_midi_note_count").notNull().default(0),
+    isComplete: boolean("is_complete").notNull().default(false),
+    status: text("status").notNull().default("partial"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    songUpdatedAtIdx: index("idx_midi_alignments_song_updated_at").on(table.songId, table.updatedAt),
+    sourceUpdatedAtIdx: index("idx_midi_alignments_source_updated_at").on(table.midiSourceId, table.updatedAt),
+  })
+);
+
 export type UserRow = InferSelectModel<typeof users>;
 export type SongRow = InferSelectModel<typeof songs>;
 export type SegmentRow = InferSelectModel<typeof segments>;
@@ -172,3 +257,5 @@ export type PlaylistSongRow = InferSelectModel<typeof playlistSongs>;
 export type OrphanedAudioKeyRow = InferSelectModel<typeof orphanedAudioKeys>;
 export type TapPracticeSessionRow = InferSelectModel<typeof tapPracticeSessions>;
 export type TapPracticeTapRow = InferSelectModel<typeof tapPracticeTaps>;
+export type MidiSourceRow = InferSelectModel<typeof midiSources>;
+export type MidiAlignmentRow = InferSelectModel<typeof midiAlignments>;

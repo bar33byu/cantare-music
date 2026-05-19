@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   addTapPracticeTap,
   finalizeTapPracticeSession,
+  getLatestCompleteMidiAlignmentForSource,
+  getLatestMidiSourceForSong,
   getSegmentsBySongId,
   getSongById,
   getTapPracticeSessionDetail,
@@ -18,6 +20,11 @@ import {
   type DirectionTap,
   type TapDirection,
 } from '../../../../../lib/enhancedTapPractice';
+import {
+  deriveSegmentAnswerKey,
+  deriveWholeSongAnswerKey,
+  scoreTapAttemptAgainstMidiKey,
+} from '../../../../../lib/midiGuidedTapPractice';
 import { resolveRequestUserId } from '../../../../_user';
 
 function formatError(error: unknown) {
@@ -190,12 +197,25 @@ export async function PATCH(
     let scoreDetails = null;
 
     if (session.mode === 'practice' && session.segmentId) {
-      const answerKeyTakes = await loadAnswerKeyTakes(id, userId);
-      const derivedKey = deriveAnswerKeyFromTakes(answerKeyTakes, session.segmentId, session.audioVersion);
-      if (derivedKey) {
-        const score = scoreTapAttempt(derivedKey, directionTapsFromSession(session), 400);
+      const midiSource = await getLatestMidiSourceForSong(id, userId);
+      const completeMidiAlignment = midiSource ? await getLatestCompleteMidiAlignmentForSource(midiSource.id, userId) : null;
+      const midiWholeSongKey = midiSource && completeMidiAlignment
+        ? deriveWholeSongAnswerKey(id, midiSource.id, midiSource.cleanedNotes, completeMidiAlignment)
+        : null;
+      const segment = session.segmentId ? (await getSegmentsBySongId(id)).find((item) => item.id === session.segmentId) : null;
+      const midiSegmentKey = midiWholeSongKey && segment ? deriveSegmentAnswerKey(midiWholeSongKey, segment) : null;
+      if (midiSegmentKey && midiSegmentKey.taps.length > 0) {
+        const score = scoreTapAttemptAgainstMidiKey(midiSegmentKey, directionTapsFromSession(session), 400);
         autoScorePercent = score.scorePercent;
         scoreDetails = score;
+      } else {
+        const answerKeyTakes = await loadAnswerKeyTakes(id, userId);
+        const derivedKey = deriveAnswerKeyFromTakes(answerKeyTakes, session.segmentId, session.audioVersion);
+        if (derivedKey) {
+          const score = scoreTapAttempt(derivedKey, directionTapsFromSession(session), 400);
+          autoScorePercent = score.scorePercent;
+          scoreDetails = score;
+        }
       }
     }
 

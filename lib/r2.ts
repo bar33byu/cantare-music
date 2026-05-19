@@ -83,6 +83,10 @@ export function generateUploadKey(
   return `audio/${songId}/${version}/${Date.now()}-${filename}`;
 }
 
+export function generateMidiUploadKey(songId: string, filename: string): string {
+  return `midi/${songId}/${Date.now()}-${filename}`;
+}
+
 export async function deleteObject(key: string): Promise<void> {
   await r2Client.send(
     new DeleteObjectCommand({

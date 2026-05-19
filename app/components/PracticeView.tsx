@@ -31,6 +31,11 @@ import {
   type TapPracticeMode,
   type TapScoreResult,
 } from "../lib/enhancedTapPractice";
+import {
+  buildMidiBlendTapHeatMap,
+  scoreTapAttemptAgainstMidiKey,
+  type MidiSegmentAnswerKey,
+} from "../lib/midiGuidedTapPractice";
 import { getSegmentPitchContourNotes } from "../lib/pitchContour";
 
 interface TransportDebugState {
@@ -231,6 +236,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [tapMode, setTapMode] = React.useState<TapPracticeMode>("practice");
   const [tapAnswerKeyTakes, setTapAnswerKeyTakes] = React.useState<AnswerKeyTake[]>([]);
   const [tapSessionSummaries, setTapSessionSummaries] = React.useState<TapSessionSummaryPayload[]>([]);
+  const [midiSegmentAnswerKeys, setMidiSegmentAnswerKeys] = React.useState<Record<string, MidiSegmentAnswerKey>>({});
   const [tapDataRefreshToken, setTapDataRefreshToken] = React.useState(0);
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
   const [tapHeatMapBySegment, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
@@ -344,19 +350,52 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       TAP_MATCH_OPTIONS
     );
   }, [currentAttemptNotes, currentSegment, currentSegmentPitchContourNotes]);
+  const currentMidiSegmentAnswerKey = useMemo(
+    () => currentSegment ? (midiSegmentAnswerKeys[currentSegment.id] ?? null) : null,
+    [currentSegment, midiSegmentAnswerKeys]
+  );
   const currentDerivedAnswerKey = useMemo(
-    () => currentSegment ? deriveAnswerKeyFromTakes(tapAnswerKeyTakes, currentSegment.id, activeAudioVersion) : null,
-    [activeAudioVersion, currentSegment, tapAnswerKeyTakes]
+    () => {
+      if (!currentSegment) {
+        return null;
+      }
+      if (currentMidiSegmentAnswerKey && currentMidiSegmentAnswerKey.taps.length > 0) {
+        return {
+          segmentId: currentSegment.id,
+          audioVersion: activeAudioVersion,
+          sourceTakeIds: [currentMidiSegmentAnswerKey.alignmentId],
+          taps: currentMidiSegmentAnswerKey.taps,
+        };
+      }
+      return deriveAnswerKeyFromTakes(tapAnswerKeyTakes, currentSegment.id, activeAudioVersion);
+    },
+    [activeAudioVersion, currentMidiSegmentAnswerKey, currentSegment, tapAnswerKeyTakes]
   );
   const currentAnswerKeyStatus = useMemo(
-    () => currentSegment
-      ? getAnswerKeyStatus(tapAnswerKeyTakes, currentSegment.id, activeAudioVersion)
-      : null,
-    [activeAudioVersion, currentSegment, tapAnswerKeyTakes]
+    () => {
+      if (!currentSegment) {
+        return null;
+      }
+      if (currentMidiSegmentAnswerKey && currentMidiSegmentAnswerKey.taps.length > 0) {
+        return {
+          code: "ready" as const,
+          label: "MIDI key ready",
+          takeCount: 1,
+          derivedKey: currentDerivedAnswerKey,
+        };
+      }
+      return getAnswerKeyStatus(tapAnswerKeyTakes, currentSegment.id, activeAudioVersion);
+    },
+    [activeAudioVersion, currentDerivedAnswerKey, currentMidiSegmentAnswerKey, currentSegment, tapAnswerKeyTakes]
   );
   const enhancedTapScore = useMemo(
-    () => currentDerivedAnswerKey ? scoreTapAttempt(currentDerivedAnswerKey, toDirectionTaps(currentAttemptNotes), TAP_MATCH_OPTIONS.timeToleranceMs) : null,
-    [currentAttemptNotes, currentDerivedAnswerKey]
+    () => {
+      if (currentMidiSegmentAnswerKey && currentMidiSegmentAnswerKey.taps.length > 0) {
+        return scoreTapAttemptAgainstMidiKey(currentMidiSegmentAnswerKey, toDirectionTaps(currentAttemptNotes), TAP_MATCH_OPTIONS.timeToleranceMs);
+      }
+      return currentDerivedAnswerKey ? scoreTapAttempt(currentDerivedAnswerKey, toDirectionTaps(currentAttemptNotes), TAP_MATCH_OPTIONS.timeToleranceMs) : null;
+    },
+    [currentAttemptNotes, currentDerivedAnswerKey, currentMidiSegmentAnswerKey]
   );
   const currentSegmentAccuracySummary = useMemo(
     () => summarizeAccuracyByAudioVersion(
@@ -376,13 +415,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (!currentSegment) {
       return [];
     }
-    const blendKey = deriveAnswerKeyFromTakes(tapAnswerKeyTakes, currentSegment.id, "blend");
     const scores = tapSessionSummaries
       .filter((summary) => summary.segmentId === currentSegment.id && summary.audioVersion === "blend" && summary.mode === "practice")
       .map((summary) => summary.scoreDetails)
       .filter((score): score is TapScoreResult => Boolean(score && Array.isArray(score.details)));
+    const midiKey = midiSegmentAnswerKeys[currentSegment.id] ?? null;
+    if (midiKey) {
+      return buildMidiBlendTapHeatMap(midiKey, scores);
+    }
+    const blendKey = deriveAnswerKeyFromTakes(tapAnswerKeyTakes, currentSegment.id, "blend");
     return buildBlendTapHeatMap(blendKey, scores);
-  }, [currentSegment, tapAnswerKeyTakes, tapSessionSummaries]);
+  }, [currentSegment, midiSegmentAnswerKeys, tapAnswerKeyTakes, tapSessionSummaries]);
   const answerDirectionLetters = useMemo(() => {
     if (!currentSegment) {
       return new Map<string, "U" | "D" | "S">();
@@ -1647,6 +1690,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setTapMode("practice");
     setTapAnswerKeyTakes([]);
     setTapSessionSummaries([]);
+    setMidiSegmentAnswerKeys({});
     setAccuracyToast(null);
     activeTapCaptureRef.current = null;
     loopHandledRef.current = null;
@@ -1725,11 +1769,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     const loadEnhancedTapData = async () => {
       try {
-        const response = await fetch(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" });
+        const [response, midiResponse] = await Promise.all([
+          fetch(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }),
+          fetch(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
+        ]);
         if (!response.ok) {
           throw new Error(`Failed to load tap sessions (${response.status})`);
         }
         const payload = await response.json() as { sessions?: TapSessionSummaryPayload[] };
+        const midiPayload = midiResponse.ok
+          ? await midiResponse.json() as { segmentAnswerKeys?: Record<string, MidiSegmentAnswerKey> }
+          : { segmentAnswerKeys: {} };
         const sessions = payload.sessions ?? [];
         const answerKeySessions = sessions.filter((session) => session.mode === "answer_key");
         const details = await Promise.all(
@@ -1747,6 +1797,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           return;
         }
         setTapSessionSummaries(sessions);
+        setMidiSegmentAnswerKeys(midiPayload.segmentAnswerKeys ?? {});
         setTapAnswerKeyTakes(details.flatMap((detail) => {
           if (!detail) {
             return [];
@@ -1758,6 +1809,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         if (!cancelled) {
           setTapSessionSummaries([]);
           setTapAnswerKeyTakes([]);
+          setMidiSegmentAnswerKeys({});
         }
       }
     };
@@ -2063,7 +2115,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           >
             <div className="flex items-center justify-between gap-2">
               <span className="min-w-0 truncate font-semibold text-slate-900">
-                {currentAnswerKeyStatus.code === "ready" ? "Derived key ready" : currentAnswerKeyStatus.label}
+                {currentMidiSegmentAnswerKey ? "MIDI key ready" : currentAnswerKeyStatus.code === "ready" ? "Derived key ready" : currentAnswerKeyStatus.label}
               </span>
               <button
                 type="button"
