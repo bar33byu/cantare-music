@@ -120,6 +120,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
   const [uploading, setUploading] = useState(false);
   const [thresholdDraft, setThresholdDraft] = useState(100);
   const [isAligning, setIsAligning] = useState(false);
+  const [confirmingRestart, setConfirmingRestart] = useState(false);
   const [resumeIndexDraft, setResumeIndexDraft] = useState("0");
   const tapSaveChainRef = useRef<Promise<void>>(Promise.resolve());
   const { isPlaying, isReady, currentMs, durationMs, play, pause, seek } = audioPlayer;
@@ -233,6 +234,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
       });
     });
     setResumeIndexDraft(String(alignedCount + 1));
+    setConfirmingRestart(false);
     tapSaveChainRef.current = tapSaveChainRef.current
       .then(() => postAlignmentAction({ action: "tap", timeSeconds }))
       .then(() => undefined)
@@ -255,6 +257,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
         seek(Math.max(0, previousTime * 1000 - 1500));
       }
       await postAlignmentAction({ action: "resumeFrom", noteIndex });
+      setConfirmingRestart(false);
       setIsAligning(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not resume alignment.");
@@ -357,16 +360,37 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (window.confirm("Restart MIDI alignment for this song?")) {
-                  void postAlignmentAction({ action: "restart" });
-                }
-              }}
+              data-testid="midi-restart-alignment"
+              onClick={() => setConfirmingRestart(true)}
               className="rounded-full border border-rose-300 bg-white px-3 py-1.5 text-sm font-semibold text-rose-700"
             >
               Restart
             </button>
           </div>
+
+          {confirmingRestart ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+              <span className="font-semibold">Restart MIDI alignment?</span>
+              <button
+                type="button"
+                data-testid="midi-confirm-restart"
+                onClick={() => {
+                  setConfirmingRestart(false);
+                  void postAlignmentAction({ action: "restart" });
+                }}
+                className="rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white"
+              >
+                Yes, restart
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingRestart(false)}
+                className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : null}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <input

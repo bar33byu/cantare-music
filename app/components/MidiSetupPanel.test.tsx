@@ -72,4 +72,26 @@ describe("MidiSetupPanel", () => {
       }));
     });
   });
+
+  it("confirms restart inline without using a blocking browser dialog", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
+
+    expect(await screen.findByText("part.mid")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("midi-restart-alignment"));
+    expect(screen.getByText("Restart MIDI alignment?")).toBeInTheDocument();
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("midi-confirm-restart"));
+
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith("/api/songs/song-1/midi/alignment", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "restart" }),
+      }));
+    });
+
+    confirmSpy.mockRestore();
+  });
 });
