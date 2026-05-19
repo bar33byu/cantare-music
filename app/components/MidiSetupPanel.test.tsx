@@ -29,8 +29,8 @@ describe("MidiSetupPanel", () => {
           ignoredShortNoteCount: 1,
           cleanupSettings: { shortNoteThresholdMs: 100, simultaneousThresholdMs: 30 },
           cleanedNotes: [
-            { index: 0, midiPitch: 60, pitchName: "C4", movementFromPrevious: "start" },
-            { index: 1, midiPitch: 62, pitchName: "D4", movementFromPrevious: "up" },
+            { index: 0, midiPitch: 60, pitchName: "C4", midiStartSeconds: 0, movementFromPrevious: "start" },
+            { index: 1, midiPitch: 62, pitchName: "D4", midiStartSeconds: 1.5, movementFromPrevious: "up" },
           ],
         },
         alignment: {
@@ -93,5 +93,25 @@ describe("MidiSetupPanel", () => {
     });
 
     confirmSpy.mockRestore();
+  });
+
+  it("positions the piano roll from audio time instead of note slots", async () => {
+    const { rerender } = render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
+
+    expect(await screen.findByText("part.mid")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Resume alignment"));
+
+    const currentNote = await screen.findByTitle("2: D4 Up");
+    expect(currentNote).toHaveStyle({ left: "28%" });
+
+    rerender(
+      <MidiSetupPanel
+        songId="song-1"
+        audioPlayer={{ ...audioPlayer, currentMs: 3000 }}
+        request={request}
+      />
+    );
+
+    expect(await screen.findByTitle("2: D4 Up")).toHaveStyle({ left: "22%" });
   });
 });

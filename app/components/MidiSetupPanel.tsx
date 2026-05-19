@@ -19,6 +19,7 @@ interface MidiStatusSource {
     index: number;
     midiPitch: number;
     pitchName: string;
+    midiStartSeconds: number;
     movementFromPrevious: "start" | "up" | "down" | "same";
   }>;
 }
@@ -97,6 +98,24 @@ function normalizePitchPosition(notes: MidiStatusSource["cleanedNotes"], pitch: 
   return 88 - ((pitch - minPitch) / (maxPitch - minPitch)) * 76;
 }
 
+function estimateMidiNowSeconds(
+  notes: MidiStatusSource["cleanedNotes"],
+  tappedStartTimesSeconds: number[],
+  currentAudioSeconds: number
+): number {
+  if (notes.length === 0) return 0;
+  const lastAlignedIndex = Math.min(tappedStartTimesSeconds.length - 1, notes.length - 1);
+  if (lastAlignedIndex < 0) {
+    return notes[0].midiStartSeconds;
+  }
+  const lastAlignedNote = notes[lastAlignedIndex];
+  const lastTappedAudioSeconds = tappedStartTimesSeconds[lastAlignedIndex];
+  return Math.max(
+    notes[0].midiStartSeconds,
+    lastAlignedNote.midiStartSeconds + (currentAudioSeconds - lastTappedAudioSeconds)
+  );
+}
+
 function updateStatusAlignment(status: MidiStatusPayload, alignment: MidiStatusAlignment): MidiStatusPayload {
   const alignedCount = alignment.tappedStartTimesSeconds.length;
   return {
@@ -155,7 +174,21 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
   const retainedCount = status?.source?.cleanedNoteCount ?? 0;
   const summary = status?.summary ?? emptySummary();
   const nextNote = status?.source?.cleanedNotes[alignedCount] ?? null;
-  const pianoRollNotes = status?.source?.cleanedNotes.slice(Math.max(0, alignedCount - 8), alignedCount + 24) ?? [];
+  const midiNowSeconds = useMemo(
+    () => estimateMidiNowSeconds(
+      status?.source?.cleanedNotes ?? [],
+      status?.alignment?.tappedStartTimesSeconds ?? [],
+      currentMs / 1000
+    ),
+    [currentMs, status?.alignment?.tappedStartTimesSeconds, status?.source?.cleanedNotes]
+  );
+  const pianoRollNotes = useMemo(
+    () => (status?.source?.cleanedNotes ?? []).filter((note) => {
+      const deltaSeconds = note.midiStartSeconds - midiNowSeconds;
+      return deltaSeconds >= -2.5 && deltaSeconds <= 8;
+    }),
+    [midiNowSeconds, status?.source?.cleanedNotes]
+  );
 
   const uploadMidi = async (file: File | null) => {
     if (!file) return;
@@ -447,8 +480,8 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
                   <div className="absolute bottom-3 top-3 left-[28%] border-l-2 border-indigo-600" />
                   <div className="absolute inset-x-0 top-1/2 border-t border-slate-200" />
                   {pianoRollNotes.map((note) => {
-                    const relativeIndex = note.index - alignedCount;
-                    const leftPercent = 28 + relativeIndex * 6;
+                    const deltaSeconds = note.midiStartSeconds - midiNowSeconds;
+                    const leftPercent = 28 + deltaSeconds * 12;
                     const topPercent = normalizePitchPosition(status.source?.cleanedNotes ?? [], note.midiPitch);
                     return (
                       <div
