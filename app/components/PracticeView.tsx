@@ -2288,6 +2288,30 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 event.preventDefault();
                 event.stopPropagation();
               }}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onSelect={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onTouchStart={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onTouchMove={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onTouchEnd={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onTouchCancel={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
               onPointerDown={(event) => {
                 if (!currentSegment) {
                   return;

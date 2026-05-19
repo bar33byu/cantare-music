@@ -518,6 +518,7 @@ describe("PracticeView", () => {
     expect(tapBar).toHaveClass("w-28");
     expect(fireEvent.contextMenu(tapBar)).toBe(false);
     expect(fireEvent.doubleClick(tapBar)).toBe(false);
+    expect(fireEvent.mouseDown(tapBar)).toBe(false);
     expect(screen.queryByTestId("practice-tap-graduation")).not.toBeInTheDocument();
     expect(screen.queryByTestId("practice-overlay-toggle")).not.toBeInTheDocument();
     expect(screen.queryByTestId("practice-self-score")).not.toBeInTheDocument();
