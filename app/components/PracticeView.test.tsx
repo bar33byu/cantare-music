@@ -519,7 +519,8 @@ describe("PracticeView", () => {
     expect(fireEvent.contextMenu(tapBar)).toBe(false);
     expect(fireEvent.doubleClick(tapBar)).toBe(false);
     expect(screen.queryByTestId("practice-tap-graduation")).not.toBeInTheDocument();
-    expect(screen.getByTestId("practice-overlay-toggle")).toBeInTheDocument();
+    expect(screen.queryByTestId("practice-overlay-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("practice-self-score")).not.toBeInTheDocument();
   });
 
   it("creates a tap session when tap practice is enabled", async () => {
@@ -556,24 +557,6 @@ describe("PracticeView", () => {
         mode: "practice",
         segmentId: "seg-0",
       }));
-    });
-  });
-
-  it("stores manual self-rating when no derived answer key exists", async () => {
-    const song = makeSong(1);
-    await renderAndWaitForRatings(song);
-
-    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
-    await waitFor(() => expectTapSessionStarted(song.id));
-    fireEvent.click(screen.getByText("Solid"));
-
-    await waitFor(() => {
-      const finalizeCall = mockFetch.mock.calls.find(
-        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions/tap-session-1` && init?.method === "PATCH"
-      );
-      expect(finalizeCall).toBeTruthy();
-      const payload = JSON.parse(String((finalizeCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
-      expect(payload.selfRating).toBe(4);
     });
   });
 
@@ -622,7 +605,6 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
     expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
 
-    fireEvent.click(screen.getByTestId("practice-overlay-toggle"));
     expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
   });
 
@@ -974,15 +956,13 @@ describe("PracticeView", () => {
     expect(screen.queryByTestId("practice-tap-persist-warning")).not.toBeInTheDocument();
   });
 
-  it("can hide translucent contour overlay in tap mode", async () => {
+  it("keeps the contour overlay visible without adding tap-mode toolbar chrome", async () => {
     const song = makeSong(1);
     await renderAndWaitForRatings(song);
 
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
     expect(screen.getByTestId("practice-piano-roll-overlay")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("practice-overlay-toggle"));
-    expect(screen.queryByTestId("practice-piano-roll-overlay")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("practice-overlay-toggle")).not.toBeInTheDocument();
   });
 
   it("hides auxiliary tap debugging controls from the simplified toolbar", async () => {

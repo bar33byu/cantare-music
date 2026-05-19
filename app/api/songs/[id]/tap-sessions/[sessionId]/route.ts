@@ -16,7 +16,6 @@ import {
   scoreTapAttempt,
   type AnswerKeyTake,
   type DirectionTap,
-  type SelfRating,
   type TapDirection,
 } from '../../../../../lib/enhancedTapPractice';
 import { resolveRequestUserId } from '../../../../_user';
@@ -185,11 +184,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Tap session not found' }, { status: 404 });
     }
 
-    const body = await request.json().catch(() => null) as { selfRating?: unknown } | null;
-    const selfRating: SelfRating | null =
-      body?.selfRating === 1 || body?.selfRating === 2 || body?.selfRating === 3 || body?.selfRating === 4 || body?.selfRating === 5
-        ? body.selfRating
-        : null;
+    await request.json().catch(() => null);
 
     let autoScorePercent: number | null = null;
     let scoreDetails = null;
@@ -207,7 +202,7 @@ export async function PATCH(
     const finalized = await finalizeTapPracticeSession(sessionId, userId, {
       completedAt: new Date(),
       autoScorePercent,
-      selfRating,
+      selfRating: null,
       scoreDetails,
     });
 

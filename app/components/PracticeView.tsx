@@ -132,7 +132,6 @@ interface TapSessionSummaryPayload {
   completedAt?: string;
   finalizedAt?: string;
   autoScorePercent?: number;
-  selfRating?: number;
   scoreDetails?: TapScoreResult;
   tapCount: number;
 }
@@ -230,7 +229,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [showTapOverlay, setShowTapOverlay] = React.useState(true);
   const [showSameLaneGuides, setShowSameLaneGuides] = React.useState(false);
   const [tapMode, setTapMode] = React.useState<TapPracticeMode>("practice");
-  const [tapSelfRating, setTapSelfRating] = React.useState<number | null>(null);
   const [tapAnswerKeyTakes, setTapAnswerKeyTakes] = React.useState<AnswerKeyTake[]>([]);
   const [tapSessionSummaries, setTapSessionSummaries] = React.useState<TapSessionSummaryPayload[]>([]);
   const [tapDataRefreshToken, setTapDataRefreshToken] = React.useState(0);
@@ -1126,7 +1124,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }, 1600);
   }, []);
 
-  const finalizeActiveTapSession = React.useCallback((selfRating?: number | null) => {
+  const finalizeActiveTapSession = React.useCallback(() => {
     const activeSessionId = tapSessionIdRef.current;
     if (!activeSessionId) {
       return;
@@ -1136,7 +1134,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       const response = await fetch(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ selfRating: selfRating ?? tapSelfRating }),
+        body: JSON.stringify({}),
       });
       if (!response.ok) {
         throw new Error(`Failed to finalize tap session (${response.status})`);
@@ -1147,7 +1145,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       console.error("Failed to finalize tap practice session:", error);
       showTapPersistenceWarning("Your taps are saved as a draft. Finish could not be confirmed yet.");
     });
-  }, [flushPersistedTaps, showTapPersistenceWarning, song.id, tapSelfRating]);
+  }, [flushPersistedTaps, showTapPersistenceWarning, song.id]);
 
   React.useEffect(() => {
     if (!isTapPracticeMode || !currentSegment || endedCount === lastFinalizedEndedCountRef.current) {
@@ -1647,7 +1645,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setShowCardContourMap(false);
     setShowTapOverlay(true);
     setTapMode("practice");
-    setTapSelfRating(null);
     setTapAnswerKeyTakes([]);
     setTapSessionSummaries([]);
     setAccuracyToast(null);
@@ -1823,7 +1820,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           {accuracyToast.text}
         </div>
       ) : null}
-      <header data-testid="practice-header" className="px-4 pb-2 pt-4 md:px-8">
+      <header data-testid="practice-header" className={isTapPracticeMode ? "sr-only" : "px-4 pb-2 pt-4 md:px-8"}>
         <div className="flex items-start justify-between gap-3">
           {breadcrumbRootLabel ? (
             <nav aria-label="Breadcrumb" className="min-w-0" data-testid="practice-breadcrumb">
@@ -1908,16 +1905,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       </header>
 
       {!reducedControls ? (
-      <div className="px-4 md:px-8" data-testid="practice-top-bar">
-        {ratingsLoading ? (
+      <div className={isTapPracticeMode ? "px-3 pb-1 pt-2 md:px-6" : "px-4 md:px-8"} data-testid="practice-top-bar">
+        {!isTapPracticeMode && ratingsLoading ? (
           <div
             data-testid="ratings-loading-skeleton"
             className="h-8 w-full animate-pulse rounded-full bg-gray-200"
           />
-        ) : (
+        ) : !isTapPracticeMode ? (
           <KnowledgeBar percent={knowledgeScore.overall} />
-        )}
-        <div className="mt-2 flex items-center gap-2">
+        ) : null}
+        <div className={isTapPracticeMode ? "flex flex-wrap items-center gap-1.5" : "mt-2 flex items-center gap-2"}>
           {hasAlternateAudio ? (
             <div
               className="inline-flex rounded-full border border-indigo-300 bg-white p-0.5"
@@ -1930,7 +1927,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   data-testid={`practice-audio-version-${version}`}
                   aria-pressed={activeAudioVersion === version}
                   onClick={() => handleAudioVersionChange(version)}
-                  className={`rounded-full px-3 py-1 text-sm font-semibold transition ${
+                  className={`${isTapPracticeMode ? "rounded-full px-2.5 py-1 text-xs" : "rounded-full px-3 py-1 text-sm"} font-semibold transition ${
                     activeAudioVersion === version
                       ? "bg-indigo-600 text-white"
                       : "text-indigo-700 hover:bg-indigo-50"
@@ -1964,13 +1961,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 setIsTapPracticeMode((previous) => !previous);
                 activeTapCaptureRef.current = null;
               }}
-              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+              className={`${isTapPracticeMode ? "rounded-full border px-2.5 py-1 text-xs" : "rounded-full border px-3 py-1.5 text-sm"} font-semibold transition ${
                 isTapPracticeMode
                   ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
                   : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
               }`}
             >
-              Tap practice: {isTapPracticeMode ? "On" : "Off"}
+              {isTapPracticeMode ? "Tap On" : "Tap practice: Off"}
             </button>
           ) : null}
           {isTapPracticeMode ? (
@@ -1988,18 +1985,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     setTapMode(mode);
                     resetTapPracticeRun();
                   }}
-                  className={`rounded-full px-3 py-1 text-sm font-semibold transition ${
+                  className={`${isTapPracticeMode ? "rounded-full px-2.5 py-1 text-xs" : "rounded-full px-3 py-1 text-sm"} font-semibold transition ${
                     tapMode === mode
                       ? "bg-indigo-600 text-white"
                       : "text-indigo-700 hover:bg-indigo-50"
                   }`}
                 >
-                  {mode === "practice" ? "Practice" : "Record Answer Key"}
+                  {mode === "practice" ? "Practice" : "Record Key"}
                 </button>
               ))}
             </div>
           ) : null}
-          {isTapPracticeMode && hasSegments && currentSegment ? (
+          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
             <button
               type="button"
               data-testid="practice-overlay-toggle"
@@ -2062,87 +2059,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         {isTapPracticeMode && currentSegment && currentAnswerKeyStatus ? (
           <div
             data-testid="practice-answer-key-status"
-            className="mt-2 rounded-2xl border border-indigo-100 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm"
+            className="mt-1.5 rounded-xl border border-indigo-100 bg-white px-2.5 py-1.5 text-xs text-slate-700 shadow-sm"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-semibold text-slate-900">
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate font-semibold text-slate-900">
                 {currentAnswerKeyStatus.code === "ready" ? "Derived key ready" : currentAnswerKeyStatus.label}
               </span>
               <button
                 type="button"
                 data-testid="practice-finish-tap-session"
                 onClick={() => finalizeActiveTapSession()}
-                className="rounded-full border border-indigo-300 bg-white px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
+                className="shrink-0 rounded-full border border-indigo-300 bg-white px-2.5 py-0.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
               >
                 Finish
               </button>
             </div>
-            {tapMode === "practice" && !currentDerivedAnswerKey ? (
-              <div className="mt-2 flex flex-wrap items-center gap-1" data-testid="practice-self-score">
-                <span className="mr-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Self-Score</span>
-                {[
-                  [1, "Lost"],
-                  [2, "Rough"],
-                  [3, "Mostly there"],
-                  [4, "Solid"],
-                  [5, "Ready"],
-                ].map(([rating, label]) => (
-                  <button
-                    key={rating}
-                    type="button"
-                    onClick={() => {
-                      setTapSelfRating(Number(rating));
-                      finalizeActiveTapSession(Number(rating));
-                    }}
-                    className={`rounded-full border px-2 py-1 text-xs font-semibold ${
-                      tapSelfRating === rating
-                        ? "border-indigo-600 bg-indigo-600 text-white"
-                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
             {tapMode === "practice" && currentDerivedAnswerKey && enhancedTapScore ? (
               <p className="mt-1 text-xs text-slate-500" data-testid="practice-auto-score">
                 Auto score: {enhancedTapScore.scorePercent}%
               </p>
-            ) : null}
-            <div className="mt-2 grid grid-cols-2 gap-2 text-xs" data-testid="practice-version-accuracy-summary">
-              {(["blend", "straight"] as const).map((version) => {
-                const summary = currentSegmentAccuracySummary[version];
-                return (
-                  <div key={version} className="rounded-xl bg-slate-50 px-2 py-1">
-                    <span className="font-semibold">{version === "blend" ? "Blend" : "Straight"}</span>
-                    <span className="ml-1 text-slate-500">
-                      {summary.attemptCount > 0
-                        ? `avg ${summary.averageScore}%, latest ${summary.latestScore}%`
-                        : "no automatic scores yet"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            {currentBlendHeatMap.length > 0 ? (
-              <div className="mt-2 flex items-end gap-1" data-testid="practice-blend-heat-map">
-                {currentBlendHeatMap.map((marker) => (
-                  <span
-                    key={marker.index}
-                    title={`Tap ${marker.index + 1}: ${Math.round(marker.missRate * 100)}% trouble`}
-                    className={`h-5 flex-1 rounded-full border ${
-                      marker.troubleLevel === "high"
-                        ? "border-rose-300 bg-rose-100"
-                        : marker.troubleLevel === "medium"
-                          ? "border-amber-300 bg-amber-100"
-                          : marker.troubleLevel === "low"
-                            ? "border-indigo-200 bg-indigo-100"
-                            : "border-slate-200 bg-slate-100"
-                    }`}
-                  />
-                ))}
-              </div>
             ) : null}
           </div>
         ) : null}
@@ -2151,10 +2086,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       <main
         data-testid="practice-main"
-        className="flex flex-1 justify-center overflow-y-auto px-4 pt-2 md:px-8"
+        className={`flex flex-1 justify-center px-4 pt-2 md:px-8 ${isTapPracticeMode ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
         style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
       >
-        <section data-testid="practice-focus" className={`flex h-full min-h-full w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
+        <section data-testid="practice-focus" className={`flex h-full min-h-0 w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
           {!isTapPracticeMode && !reducedControls ? (
             <button
               type="button"
@@ -2340,7 +2275,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               ref={tapBarRef}
               data-testid="practice-tap-bar"
               aria-label="Tap contour bar"
-              className="tap-input-surface relative h-full min-h-[28rem] w-28 shrink-0 overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm sm:w-32"
+              className="tap-input-surface relative h-full min-h-0 w-28 shrink-0 overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm sm:w-32"
               onContextMenu={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -2449,7 +2384,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 )}
               </div>
             </div>
-          ) : !reducedControls ? (
+          ) : !isTapPracticeMode && !reducedControls ? (
             <button
               type="button"
               aria-label="Next segment"
