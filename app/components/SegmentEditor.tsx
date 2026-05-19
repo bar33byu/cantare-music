@@ -1190,7 +1190,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       ) : null}
 
       {!isContourRecording ? (
-        <MidiSetupPanel songId={songId} audioUrl={audioUrl} request={request} />
+        <MidiSetupPanel songId={songId} audioPlayer={audioPlayer} request={request} />
       ) : null}
 
       {deleteError && (

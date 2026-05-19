@@ -1,29 +1,21 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MidiSetupPanel } from "./MidiSetupPanel";
-import { useAudioPlayer } from "../hooks/useAudioPlayer";
-
-vi.mock("../hooks/useAudioPlayer", () => ({
-  useAudioPlayer: vi.fn(),
-}));
 
 describe("MidiSetupPanel", () => {
   const request = vi.fn();
+  const audioPlayer = {
+    isPlaying: false,
+    isReady: true,
+    currentMs: 2500,
+    durationMs: 60000,
+    play: vi.fn(),
+    pause: vi.fn(),
+    seek: vi.fn(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useAudioPlayer).mockReturnValue({
-      isPlaying: false,
-      isReady: true,
-      currentMs: 2500,
-      durationMs: 60000,
-      playbackError: null,
-      debugInfo: {} as any,
-      play: vi.fn(),
-      pause: vi.fn(),
-      seek: vi.fn(),
-      setPlaybackEndMs: vi.fn(),
-    });
     request.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -65,13 +57,13 @@ describe("MidiSetupPanel", () => {
   });
 
   it("shows MIDI status and records alignment taps", async () => {
-    render(<MidiSetupPanel songId="song-1" audioUrl="/song.mp3" request={request} />);
+    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
 
     expect(await screen.findByText("part.mid")).toBeInTheDocument();
     expect(screen.getByText(/3 raw, 2 retained, 1 ignored/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Resume alignment"));
-    fireEvent.click(await screen.findByTestId("midi-alignment-tap"));
+    fireEvent.pointerDown(await screen.findByTestId("midi-alignment-tap"));
 
     await waitFor(() => {
       expect(request).toHaveBeenCalledWith("/api/songs/song-1/midi/alignment", expect.objectContaining({

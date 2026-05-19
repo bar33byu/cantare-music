@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { toPlayableAudioUrl } from "../lib/audioUrls";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AudioPlayerControls } from "../hooks/useAudioPlayer";
 
 interface MidiStatusSource {
   id: string;
@@ -51,15 +50,12 @@ interface MidiStatusPayload {
 
 interface MidiSetupPanelProps {
   songId: string;
-  audioUrl: string;
+  audioPlayer: Pick<AudioPlayerControls, "isPlaying" | "isReady" | "currentMs" | "durationMs" | "play" | "pause" | "seek">;
   request: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 function formatDate(value: string | null | undefined): string {
-  if (!value) {
-    return "None yet";
-  }
-  return new Date(value).toLocaleString();
+  return value ? new Date(value).toLocaleString() : "None yet";
 }
 
 function movementLabel(value: "start" | "up" | "down" | "same"): string {
@@ -92,7 +88,32 @@ function normalizeStatus(payload: Partial<MidiStatusPayload>): MidiStatusPayload
   };
 }
 
-export function MidiSetupPanel({ songId, audioUrl, request }: MidiSetupPanelProps) {
+function normalizePitchPosition(notes: MidiStatusSource["cleanedNotes"], pitch: number): number {
+  if (notes.length === 0) return 50;
+  const pitches = notes.map((note) => note.midiPitch);
+  const minPitch = Math.min(...pitches);
+  const maxPitch = Math.max(...pitches);
+  if (minPitch === maxPitch) return 50;
+  return 88 - ((pitch - minPitch) / (maxPitch - minPitch)) * 76;
+}
+
+function updateStatusAlignment(status: MidiStatusPayload, alignment: MidiStatusAlignment): MidiStatusPayload {
+  const alignedCount = alignment.tappedStartTimesSeconds.length;
+  return {
+    ...status,
+    alignment,
+    summary: {
+      ...status.summary,
+      alignedCount,
+      retainedMidiNoteCount: alignment.retainedMidiNoteCount,
+      hasCompleteAlignment: alignment.isComplete || status.summary.hasCompleteAlignment,
+      hasDerivedAnswerKey: alignment.isComplete || status.summary.hasDerivedAnswerKey,
+      latestAlignmentDate: alignment.updatedAt,
+    },
+  };
+}
+
+export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelProps) {
   const [status, setStatus] = useState<MidiStatusPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -100,11 +121,13 @@ export function MidiSetupPanel({ songId, audioUrl, request }: MidiSetupPanelProp
   const [thresholdDraft, setThresholdDraft] = useState(100);
   const [isAligning, setIsAligning] = useState(false);
   const [resumeIndexDraft, setResumeIndexDraft] = useState("0");
-  const playbackUrl = useMemo(() => toPlayableAudioUrl(audioUrl), [audioUrl]);
-  const { isPlaying, isReady, currentMs, durationMs, play, pause, seek } = useAudioPlayer(playbackUrl);
+  const tapSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const { isPlaying, isReady, currentMs, durationMs, play, pause, seek } = audioPlayer;
 
-  const loadStatus = useCallback(async () => {
-    setLoading(true);
+  const loadStatus = useCallback(async (options: { showLoading?: boolean } = {}) => {
+    if (options.showLoading ?? true) {
+      setLoading(true);
+    }
     try {
       const response = await request(`/api/songs/${songId}/midi`, { cache: "no-store" });
       if (!response.ok) {
@@ -117,7 +140,9 @@ export function MidiSetupPanel({ songId, audioUrl, request }: MidiSetupPanelProp
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load MIDI status.");
     } finally {
-      setLoading(false);
+      if (options.showLoading ?? true) {
+        setLoading(false);
+      }
     }
   }, [request, songId]);
 
@@ -129,22 +154,17 @@ export function MidiSetupPanel({ songId, audioUrl, request }: MidiSetupPanelProp
   const retainedCount = status?.source?.cleanedNoteCount ?? 0;
   const summary = status?.summary ?? emptySummary();
   const nextNote = status?.source?.cleanedNotes[alignedCount] ?? null;
-  const upcomingNotes = status?.source?.cleanedNotes.slice(Math.max(0, alignedCount - 3), alignedCount + 9) ?? [];
+  const pianoRollNotes = status?.source?.cleanedNotes.slice(Math.max(0, alignedCount - 8), alignedCount + 24) ?? [];
 
   const uploadMidi = async (file: File | null) => {
-    if (!file) {
-      return;
-    }
+    if (!file) return;
     setUploading(true);
     setMessage(null);
     try {
       const formData = new FormData();
       formData.set("file", file);
       formData.set("shortNoteThresholdMs", String(thresholdDraft));
-      const response = await request(`/api/songs/${songId}/midi`, {
-        method: "POST",
-        body: formData,
-      });
+      const response = await request(`/api/songs/${songId}/midi`, { method: "POST", body: formData });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({})) as { error?: string };
         throw new Error(payload.error ?? `MIDI upload failed (${response.status})`);
@@ -173,7 +193,7 @@ export function MidiSetupPanel({ songId, audioUrl, request }: MidiSetupPanelProp
     setMessage("MIDI cleanup updated.");
   };
 
-  const postAlignmentAction = async (body: Record<string, unknown>) => {
+  const postAlignmentAction = async (body: Record<string, unknown>): Promise<MidiStatusAlignment> => {
     const response = await request(`/api/songs/${songId}/midi/alignment`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -183,18 +203,43 @@ export function MidiSetupPanel({ songId, audioUrl, request }: MidiSetupPanelProp
       const payload = await response.json().catch(() => ({})) as { error?: string };
       throw new Error(payload.error ?? `Alignment update failed (${response.status})`);
     }
-    await loadStatus();
+    const payload = await response.json() as { alignment?: MidiStatusAlignment };
+    if (!payload.alignment) {
+      throw new Error("Alignment response was missing progress.");
+    }
+    setStatus((previous) => previous ? updateStatusAlignment(previous, payload.alignment!) : previous);
+    setResumeIndexDraft(String(payload.alignment.tappedStartTimesSeconds.length));
+    return payload.alignment;
   };
 
-  const tapAlignedNote = async () => {
-    if (!status?.source || alignedCount >= retainedCount) {
+  const tapAlignedNote = () => {
+    if (!status?.source || !status.alignment || alignedCount >= retainedCount) {
       return;
     }
-    try {
-      await postAlignmentAction({ action: "tap", timeSeconds: currentMs / 1000 });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save tap.");
-    }
+    const timeSeconds = currentMs / 1000;
+    setMessage(null);
+    setStatus((previous) => {
+      if (!previous?.alignment) return previous;
+      const tappedStartTimesSeconds = [
+        ...previous.alignment.tappedStartTimesSeconds,
+        timeSeconds,
+      ].slice(0, previous.alignment.retainedMidiNoteCount);
+      const isComplete = tappedStartTimesSeconds.length >= previous.alignment.retainedMidiNoteCount;
+      return updateStatusAlignment(previous, {
+        ...previous.alignment,
+        tappedStartTimesSeconds,
+        isComplete,
+        updatedAt: new Date().toISOString(),
+      });
+    });
+    setResumeIndexDraft(String(alignedCount + 1));
+    tapSaveChainRef.current = tapSaveChainRef.current
+      .then(() => postAlignmentAction({ action: "tap", timeSeconds }))
+      .then(() => undefined)
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Could not save tap.");
+        void loadStatus({ showLoading: false });
+      });
   };
 
   const startPlayback = () => {
@@ -344,34 +389,65 @@ export function MidiSetupPanel({ songId, audioUrl, request }: MidiSetupPanelProp
 
           {isAligning ? (
             <div className="mt-3">
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 data-testid="midi-alignment-tap"
-                disabled={!isReady || alignedCount >= retainedCount}
-                onClick={() => { void tapAlignedNote(); }}
-                className="tap-input-surface flex h-32 w-full touch-none select-none flex-col items-center justify-center rounded-2xl border-2 border-indigo-500 bg-white text-center shadow-sm disabled:opacity-50"
+                aria-disabled={!isReady || alignedCount >= retainedCount}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (isReady && alignedCount < retainedCount) {
+                    tapAlignedNote();
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if ((event.key === " " || event.key === "Enter") && isReady && alignedCount < retainedCount) {
+                    event.preventDefault();
+                    tapAlignedNote();
+                  }
+                }}
+                className={`tap-input-surface flex h-44 w-full touch-none select-none flex-col items-center justify-center rounded-2xl border-2 border-indigo-500 bg-white text-center shadow-sm md:h-52 ${
+                  !isReady || alignedCount >= retainedCount ? "opacity-50" : "cursor-pointer active:bg-indigo-50"
+                }`}
               >
-                <span className="text-lg font-bold text-indigo-700">{alignedCount} / {retainedCount} notes</span>
-                <span className="mt-1 text-sm text-slate-600">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-500">Tap here with the audio</span>
+                <span className="mt-2 text-2xl font-bold text-indigo-700">{alignedCount} / {retainedCount} notes</span>
+                <span className="mt-1 text-base text-slate-700">
                   {nextNote ? `${nextNote.pitchName} - ${movementLabel(nextNote.movementFromPrevious)}` : "Alignment complete"}
                 </span>
-              </button>
-              <div className="mt-3 flex items-center gap-1 overflow-hidden" data-testid="midi-alignment-visual">
-                {upcomingNotes.map((note) => (
-                  <span
-                    key={note.index}
-                    title={`${note.index + 1}: ${note.pitchName}`}
-                    className={`h-5 min-w-5 rounded-full border text-[10px] leading-5 text-center ${
-                      note.index === alignedCount
-                        ? "border-indigo-600 bg-indigo-600 text-white"
-                        : note.index < alignedCount
-                          ? "border-emerald-300 bg-emerald-100 text-emerald-800"
-                          : "border-slate-300 bg-white text-slate-600"
-                    }`}
-                  >
-                    {note.movementFromPrevious === "up" ? "U" : note.movementFromPrevious === "down" ? "D" : note.movementFromPrevious === "same" ? "S" : "•"}
-                  </span>
-                ))}
+              </div>
+
+              <div className="mt-3 h-36 overflow-hidden rounded-xl border border-indigo-100 bg-white" data-testid="midi-alignment-visual">
+                <div className="relative h-full min-w-full">
+                  <div className="absolute bottom-3 top-3 left-[28%] border-l-2 border-indigo-600" />
+                  <div className="absolute inset-x-0 top-1/2 border-t border-slate-200" />
+                  {pianoRollNotes.map((note) => {
+                    const relativeIndex = note.index - alignedCount;
+                    const leftPercent = 28 + relativeIndex * 6;
+                    const topPercent = normalizePitchPosition(status.source?.cleanedNotes ?? [], note.midiPitch);
+                    return (
+                      <div
+                        key={note.index}
+                        title={`${note.index + 1}: ${note.pitchName} ${movementLabel(note.movementFromPrevious)}`}
+                        className={`absolute h-3 rounded-full border transition-colors ${
+                          note.index === alignedCount
+                            ? "border-indigo-700 bg-indigo-600"
+                            : note.index < alignedCount
+                              ? "border-emerald-300 bg-emerald-200"
+                              : "border-slate-300 bg-slate-100"
+                        }`}
+                        style={{
+                          left: `${leftPercent}%`,
+                          top: `${topPercent}%`,
+                          width: note.index === alignedCount ? "2rem" : "1.4rem",
+                        }}
+                      >
+                        <span className="sr-only">{movementLabel(note.movementFromPrevious)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           ) : null}
