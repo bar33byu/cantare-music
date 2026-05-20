@@ -7,16 +7,13 @@ import {
   getSegmentsBySongId,
   getSongById,
   getTapPracticeSessionDetail,
-  listTapPracticeSessionsForSong,
+  updateTapPracticeSessionProgress,
 } from '../../../../../../db/queries';
 import {
   DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   classifyContourDirection,
 } from '../../../../../lib/contourPractice';
 import {
-  deriveAnswerKeyFromTakes,
-  scoreTapAttempt,
-  type AnswerKeyTake,
   type DirectionTap,
   type TapDirection,
 } from '../../../../../lib/enhancedTapPractice';
@@ -57,22 +54,25 @@ function directionTapsFromSession(session: Awaited<ReturnType<typeof getTapPract
   }));
 }
 
-async function loadAnswerKeyTakes(songId: string, userId: string): Promise<AnswerKeyTake[]> {
-  const sessions = await listTapPracticeSessionsForSong(songId, userId, 100);
-  const answerKeySessions = sessions.filter((session) => session.mode === 'answer_key' && session.segmentId);
-  const details = await Promise.all(answerKeySessions.map((session) => getTapPracticeSessionDetail(session.id, userId)));
-  return details.flatMap((detail) => {
-    if (!detail || detail.mode !== 'answer_key' || !detail.segmentId) {
-      return [];
-    }
-    return [{
-      id: detail.id,
-      segmentId: detail.segmentId,
-      audioVersion: detail.audioVersion,
-      recordedAt: detail.completedAt ?? detail.startedAt,
-      taps: directionTapsFromSession(detail),
-    }];
-  });
+async function scoreTapPracticeSession(songId: string, userId: string, sessionId: string) {
+  const session = await getTapPracticeSessionDetail(sessionId, userId);
+  if (!session || session.songId !== songId || session.mode !== 'practice' || !session.segmentId) {
+    return { autoScorePercent: null, scoreDetails: null };
+  }
+
+  const midiSource = await getLatestMidiSourceForSong(songId, userId);
+  const completeMidiAlignment = midiSource ? await getLatestCompleteMidiAlignmentForSource(midiSource.id, userId) : null;
+  const midiWholeSongKey = midiSource && completeMidiAlignment
+    ? deriveWholeSongAnswerKey(songId, midiSource.id, midiSource.cleanedNotes, completeMidiAlignment)
+    : null;
+  const segment = (await getSegmentsBySongId(songId)).find((item) => item.id === session.segmentId) ?? null;
+  const midiSegmentKey = midiWholeSongKey && segment ? deriveSegmentAnswerKey(midiWholeSongKey, segment) : null;
+  if (!midiSegmentKey || midiSegmentKey.taps.length === 0) {
+    return { autoScorePercent: null, scoreDetails: null };
+  }
+
+  const score = scoreTapAttemptAgainstMidiKey(midiSegmentKey, directionTapsFromSession(session), 400);
+  return { autoScorePercent: score.scorePercent, scoreDetails: score };
 }
 
 export async function GET(
@@ -166,6 +166,13 @@ export async function POST(
       direction,
     });
 
+    const score = await scoreTapPracticeSession(id, userId, sessionId);
+    await updateTapPracticeSessionProgress(sessionId, userId, {
+      completedAt: new Date(),
+      autoScorePercent: score.autoScorePercent,
+      scoreDetails: score.scoreDetails,
+    });
+
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error appending tap practice data:', error);
@@ -193,37 +200,13 @@ export async function PATCH(
 
     await request.json().catch(() => null);
 
-    let autoScorePercent: number | null = null;
-    let scoreDetails = null;
-
-    if (session.mode === 'practice' && session.segmentId) {
-      const midiSource = await getLatestMidiSourceForSong(id, userId);
-      const completeMidiAlignment = midiSource ? await getLatestCompleteMidiAlignmentForSource(midiSource.id, userId) : null;
-      const midiWholeSongKey = midiSource && completeMidiAlignment
-        ? deriveWholeSongAnswerKey(id, midiSource.id, midiSource.cleanedNotes, completeMidiAlignment)
-        : null;
-      const segment = session.segmentId ? (await getSegmentsBySongId(id)).find((item) => item.id === session.segmentId) : null;
-      const midiSegmentKey = midiWholeSongKey && segment ? deriveSegmentAnswerKey(midiWholeSongKey, segment) : null;
-      if (midiSegmentKey && midiSegmentKey.taps.length > 0) {
-        const score = scoreTapAttemptAgainstMidiKey(midiSegmentKey, directionTapsFromSession(session), 400);
-        autoScorePercent = score.scorePercent;
-        scoreDetails = score;
-      } else {
-        const answerKeyTakes = await loadAnswerKeyTakes(id, userId);
-        const derivedKey = deriveAnswerKeyFromTakes(answerKeyTakes, session.segmentId, session.audioVersion);
-        if (derivedKey) {
-          const score = scoreTapAttempt(derivedKey, directionTapsFromSession(session), 400);
-          autoScorePercent = score.scorePercent;
-          scoreDetails = score;
-        }
-      }
-    }
+    const score = await scoreTapPracticeSession(id, userId, sessionId);
 
     const finalized = await finalizeTapPracticeSession(sessionId, userId, {
       completedAt: new Date(),
-      autoScorePercent,
+      autoScorePercent: score.autoScorePercent,
       selfRating: null,
-      scoreDetails,
+      scoreDetails: score.scoreDetails,
     });
 
     return NextResponse.json({ session: finalized });

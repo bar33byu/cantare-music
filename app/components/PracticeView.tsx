@@ -18,12 +18,8 @@ import {
 } from "../lib/contourPractice";
 import type { AttemptNoteStatus } from "../lib/contourPractice";
 import {
-  buildBlendTapHeatMap,
-  deriveAnswerKeyFromTakes,
-  getAnswerKeyStatus,
   scoreTapAttempt,
   summarizeAccuracyByAudioVersion,
-  type AnswerKeyTake,
   type BlendTapHeatMapMarker,
   type DirectionTap,
   type TapAudioVersion,
@@ -141,16 +137,6 @@ interface TapSessionSummaryPayload {
   tapCount: number;
 }
 
-interface TapSessionDetailPayload extends TapSessionSummaryPayload {
-  taps: Array<{
-    id: string;
-    timeOffsetMs: number;
-    durationMs: number;
-    lane: number;
-    direction?: TapDirection;
-  }>;
-}
-
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
   if (mode === "full") {
     return "hint";
@@ -172,24 +158,6 @@ function toDirectionTaps(notes: PitchContourNote[]): DirectionTap[] {
     timeOffsetMs: note.timeOffsetMs,
     direction: index === 0 ? "same" : classifyContourDirection(note.lane - sorted[index - 1].lane, TAP_MATCH_OPTIONS.sameDeadZone),
   }));
-}
-
-function toAnswerKeyTake(detail: TapSessionDetailPayload): AnswerKeyTake | null {
-  if (detail.mode !== "answer_key" || !detail.segmentId) {
-    return null;
-  }
-  const sorted = [...detail.taps].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-  return {
-    id: detail.id,
-    segmentId: detail.segmentId,
-    audioVersion: detail.audioVersion,
-    recordedAt: detail.completedAt ?? detail.startedAt,
-    taps: sorted.map((tap, index) => ({
-      id: tap.id,
-      timeOffsetMs: tap.timeOffsetMs,
-      direction: tap.direction ?? (index === 0 ? "same" : classifyContourDirection(tap.lane - sorted[index - 1].lane, TAP_MATCH_OPTIONS.sameDeadZone)),
-    })),
-  };
 }
 
 const PracticeView: React.FC<PracticeViewProps> = ({
@@ -233,11 +201,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [showCardContourMap, setShowCardContourMap] = React.useState(false);
   const [showTapOverlay, setShowTapOverlay] = React.useState(true);
   const [showSameLaneGuides, setShowSameLaneGuides] = React.useState(false);
-  const [tapMode, setTapMode] = React.useState<TapPracticeMode>("practice");
-  const [tapAnswerKeyTakes, setTapAnswerKeyTakes] = React.useState<AnswerKeyTake[]>([]);
   const [tapSessionSummaries, setTapSessionSummaries] = React.useState<TapSessionSummaryPayload[]>([]);
   const [midiSegmentAnswerKeys, setMidiSegmentAnswerKeys] = React.useState<Record<string, MidiSegmentAnswerKey>>({});
-  const [tapDataRefreshToken, setTapDataRefreshToken] = React.useState(0);
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
   const [tapHeatMapBySegment, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
   const [tapHeatMapRefreshToken, setTapHeatMapRefreshToken] = React.useState(0);
@@ -302,7 +267,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const autoPlayTokenHandledRef = React.useRef<number>(0);
   const playbackCompleteNotifiedRef = React.useRef<string | null>(null);
   const lastHandledEndedCountRef = React.useRef(endedCount);
-  const lastFinalizedEndedCountRef = React.useRef(endedCount);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
   const tapSessionIdRef = React.useRef<string | null>(null);
@@ -339,6 +303,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     () => (currentSegment ? getSegmentPitchContourNotes(song.pitchContourNotes, currentSegment) : []),
     [currentSegment, song.pitchContourNotes]
   );
+  const hasCardContourData = currentSegmentPitchContourNotes.length > 0;
   const currentSegmentMatch = useMemo(() => {
     if (!currentSegment) {
       return null;
@@ -367,26 +332,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           taps: currentMidiSegmentAnswerKey.taps,
         };
       }
-      return deriveAnswerKeyFromTakes(tapAnswerKeyTakes, currentSegment.id, activeAudioVersion);
+      return null;
     },
-    [activeAudioVersion, currentMidiSegmentAnswerKey, currentSegment, tapAnswerKeyTakes]
-  );
-  const currentAnswerKeyStatus = useMemo(
-    () => {
-      if (!currentSegment) {
-        return null;
-      }
-      if (currentMidiSegmentAnswerKey && currentMidiSegmentAnswerKey.taps.length > 0) {
-        return {
-          code: "ready" as const,
-          label: "MIDI key ready",
-          takeCount: 1,
-          derivedKey: currentDerivedAnswerKey,
-        };
-      }
-      return getAnswerKeyStatus(tapAnswerKeyTakes, currentSegment.id, activeAudioVersion);
-    },
-    [activeAudioVersion, currentDerivedAnswerKey, currentMidiSegmentAnswerKey, currentSegment, tapAnswerKeyTakes]
+    [activeAudioVersion, currentMidiSegmentAnswerKey, currentSegment]
   );
   const enhancedTapScore = useMemo(
     () => {
@@ -423,9 +371,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (midiKey) {
       return buildMidiBlendTapHeatMap(midiKey, scores);
     }
-    const blendKey = deriveAnswerKeyFromTakes(tapAnswerKeyTakes, currentSegment.id, "blend");
-    return buildBlendTapHeatMap(blendKey, scores);
-  }, [currentSegment, midiSegmentAnswerKeys, tapAnswerKeyTakes, tapSessionSummaries]);
+    return [];
+  }, [currentSegment, midiSegmentAnswerKeys, tapSessionSummaries]);
   const answerDirectionLetters = useMemo(() => {
     if (!currentSegment) {
       return new Map<string, "U" | "D" | "S">();
@@ -467,14 +414,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       heightPercent: Math.max(4, bottomPercent - topPercent),
     };
   }, [previousTapLane]);
-  const hasTapHeatMapData = useMemo(
-    () =>
-      Object.values(tapHeatMapBySegment).some((segmentHeatMap) =>
-        Object.values(segmentHeatMap).some((stat) => stat.sessionCount > 0)
-      ),
-    [tapHeatMapBySegment]
-  );
-
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -1167,37 +1106,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }, 1600);
   }, []);
 
-  const finalizeActiveTapSession = React.useCallback(() => {
-    const activeSessionId = tapSessionIdRef.current;
-    if (!activeSessionId) {
-      return;
-    }
-    flushPersistedTaps(activeSessionId);
-    void persistTapChainRef.current.then(async () => {
-      const response = await fetch(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to finalize tap session (${response.status})`);
-      }
-      setTapDataRefreshToken((previous) => previous + 1);
-      setTapHeatMapRefreshToken((previous) => previous + 1);
-    }).catch((error) => {
-      console.error("Failed to finalize tap practice session:", error);
-      showTapPersistenceWarning("Your taps are saved as a draft. Finish could not be confirmed yet.");
-    });
-  }, [flushPersistedTaps, showTapPersistenceWarning, song.id]);
-
-  React.useEffect(() => {
-    if (!isTapPracticeMode || !currentSegment || endedCount === lastFinalizedEndedCountRef.current) {
-      return;
-    }
-    lastFinalizedEndedCountRef.current = endedCount;
-    finalizeActiveTapSession();
-  }, [currentSegment, endedCount, finalizeActiveTapSession, isTapPracticeMode]);
-
   const finalizeTapCapture = React.useCallback((endLane?: number) => {
     const capture = activeTapCaptureRef.current;
     if (!capture || !currentSegment) {
@@ -1642,7 +1550,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       body: JSON.stringify({
         segmentId: currentSegment?.id,
         audioVersion: activeAudioVersion,
-        mode: tapMode,
+        mode: "practice",
       }),
     })
       .then(async (response) => {
@@ -1668,7 +1576,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         console.error("Failed to create tap practice session:", error);
         showTapPersistenceWarning("Could not start tap persistence session. Check your connection and try again.");
       });
-  }, [activeAudioVersion, clearTapPersistenceWarning, currentSegment?.id, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id, tapMode, tapSessionResetToken]);
+  }, [activeAudioVersion, clearTapPersistenceWarning, currentSegment?.id, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id, tapSessionResetToken]);
 
   useEffect(() => {
     activeTapCaptureRef.current = null;
@@ -1687,8 +1595,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setIsTapPracticeMode(false);
     setShowCardContourMap(false);
     setShowTapOverlay(true);
-    setTapMode("practice");
-    setTapAnswerKeyTakes([]);
     setTapSessionSummaries([]);
     setMidiSegmentAnswerKeys({});
     setAccuracyToast(null);
@@ -1781,34 +1687,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           ? await midiResponse.json() as { segmentAnswerKeys?: Record<string, MidiSegmentAnswerKey> }
           : { segmentAnswerKeys: {} };
         const sessions = payload.sessions ?? [];
-        const answerKeySessions = sessions.filter((session) => session.mode === "answer_key");
-        const details = await Promise.all(
-          answerKeySessions.map(async (session) => {
-            const detailResponse = await fetch(`/api/songs/${song.id}/tap-sessions/${session.id}`, { cache: "no-store" });
-            if (!detailResponse.ok) {
-              return null;
-            }
-            const detailPayload = await detailResponse.json() as { session?: TapSessionDetailPayload };
-            return detailPayload.session ?? null;
-          })
-        );
 
         if (cancelled) {
           return;
         }
         setTapSessionSummaries(sessions);
         setMidiSegmentAnswerKeys(midiPayload.segmentAnswerKeys ?? {});
-        setTapAnswerKeyTakes(details.flatMap((detail) => {
-          if (!detail) {
-            return [];
-          }
-          const take = toAnswerKeyTake(detail);
-          return take ? [take] : [];
-        }));
       } catch {
         if (!cancelled) {
           setTapSessionSummaries([]);
-          setTapAnswerKeyTakes([]);
           setMidiSegmentAnswerKeys({});
         }
       }
@@ -1819,7 +1706,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [song.id, tapDataRefreshToken]);
+  }, [song.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1985,12 +1872,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                       : "text-indigo-700 hover:bg-indigo-50"
                   }`}
                 >
-                  {version === "straight" ? "Straight" : "Blend"}
+                  {version === "straight" ? "Part Focus" : "Blend"}
                 </button>
               ))}
             </div>
           ) : null}
-          {hasSegments && currentSegment && hasTapHeatMapData ? (
+          {hasSegments && currentSegment && hasCardContourData ? (
             <button
               type="button"
               data-testid="practice-card-contour-toggle"
@@ -2021,32 +1908,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             >
               {isTapPracticeMode ? "Tap On" : "Tap practice: Off"}
             </button>
-          ) : null}
-          {isTapPracticeMode ? (
-            <div
-              className="inline-flex rounded-full border border-indigo-300 bg-white p-0.5"
-              data-testid="practice-tap-mode-segments"
-            >
-              {(["practice", "answer_key"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  data-testid={`practice-tap-mode-${mode}`}
-                  aria-pressed={tapMode === mode}
-                  onClick={() => {
-                    setTapMode(mode);
-                    resetTapPracticeRun();
-                  }}
-                  className={`${isTapPracticeMode ? "rounded-full px-2.5 py-1 text-xs" : "rounded-full px-3 py-1 text-sm"} font-semibold transition ${
-                    tapMode === mode
-                      ? "bg-indigo-600 text-white"
-                      : "text-indigo-700 hover:bg-indigo-50"
-                  }`}
-                >
-                  {mode === "practice" ? "Practice" : "Record Key"}
-                </button>
-              ))}
-            </div>
           ) : null}
           {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
             <button
@@ -2108,29 +1969,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             </button>
           </div>
         ) : null}
-        {isTapPracticeMode && currentSegment && currentAnswerKeyStatus ? (
+        {isTapPracticeMode && currentSegment && currentDerivedAnswerKey && enhancedTapScore ? (
           <div
-            data-testid="practice-answer-key-status"
+            data-testid="practice-auto-score"
             className="mt-1.5 rounded-xl border border-indigo-100 bg-white px-2.5 py-1.5 text-xs text-slate-700 shadow-sm"
           >
             <div className="flex items-center justify-between gap-2">
               <span className="min-w-0 truncate font-semibold text-slate-900">
-                {currentMidiSegmentAnswerKey ? "MIDI key ready" : currentAnswerKeyStatus.code === "ready" ? "Derived key ready" : currentAnswerKeyStatus.label}
-              </span>
-              <button
-                type="button"
-                data-testid="practice-finish-tap-session"
-                onClick={() => finalizeActiveTapSession()}
-                className="shrink-0 rounded-full border border-indigo-300 bg-white px-2.5 py-0.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
-              >
-                Finish
-              </button>
-            </div>
-            {tapMode === "practice" && currentDerivedAnswerKey && enhancedTapScore ? (
-              <p className="mt-1 text-xs text-slate-500" data-testid="practice-auto-score">
                 Auto score: {enhancedTapScore.scorePercent}%
-              </p>
-            ) : null}
+              </span>
+            </div>
           </div>
         ) : null}
       </div>
@@ -2202,7 +2050,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     masteryPercent={masteryPercentForSegment(currentSegment.id)}
                     lyricVisibilityMode={lyricVisibilityMode}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
-                    showContourMap={showCardContourMap && hasTapHeatMapData}
+                    showContourMap={showCardContourMap && hasCardContourData}
                     contourHeatMap={tapHeatMapBySegment[currentSegment.id]}
                   />
                 </div>

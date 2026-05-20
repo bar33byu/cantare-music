@@ -1437,6 +1437,49 @@ export async function addTapPracticeTap(
   }
 }
 
+export async function updateTapPracticeSessionProgress(
+  sessionId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  data: {
+    completedAt?: Date;
+    autoScorePercent?: number | null;
+    scoreDetails?: TapScoreResult | null;
+  } = {}
+): Promise<PersistedTapPracticeSessionDetail | null> {
+  const existing = await getTapPracticeSessionDetail(sessionId, userId);
+  if (!existing) {
+    return null;
+  }
+
+  const completedAt = data.completedAt ?? new Date();
+  try {
+    await db()
+      .update(tapPracticeSessions)
+      .set({
+        completedAt,
+        autoScorePercent: data.autoScorePercent ?? null,
+        scoreDetails: data.scoreDetails ?? {},
+      })
+      .where(eq(tapPracticeSessions.id, sessionId));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .update(tapPracticeSessions)
+        .set({
+          completedAt,
+          autoScorePercent: data.autoScorePercent ?? null,
+          scoreDetails: data.scoreDetails ?? {},
+        })
+        .where(eq(tapPracticeSessions.id, sessionId));
+    } else {
+      throw error;
+    }
+  }
+
+  return getTapPracticeSessionDetail(sessionId, userId);
+}
+
 export async function deleteTapPracticeSessionsForSong(
   songId: string,
   userId: string = DEFAULT_QUERY_USER_ID

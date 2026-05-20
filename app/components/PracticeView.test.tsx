@@ -522,6 +522,8 @@ describe("PracticeView", () => {
     expect(screen.queryByTestId("practice-tap-graduation")).not.toBeInTheDocument();
     expect(screen.queryByTestId("practice-overlay-toggle")).not.toBeInTheDocument();
     expect(screen.queryByTestId("practice-self-score")).not.toBeInTheDocument();
+    expect(screen.queryByText("Record Key")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("practice-finish-tap-session")).not.toBeInTheDocument();
   });
 
   it("creates a tap session when tap practice is enabled", async () => {
@@ -561,36 +563,7 @@ describe("PracticeView", () => {
     });
   });
 
-  it("toggles static contour map on section card independently", async () => {
-    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
-        return makeFetchResponse({ ratings: [] });
-      }
-      if (url.endsWith("/tap-heatmap") && (!init || init.method === undefined)) {
-        return makeFetchResponse({
-          heatMapBySegment: {
-            "seg-0": {
-              "note-1": { sessionCount: 1, missCount: 0, missRate: 0 },
-            },
-          },
-        });
-      }
-      if (url.endsWith("/tap-sessions") && init?.method === "POST") {
-        return makeFetchResponse({ session: { id: "tap-session-1" } });
-      }
-      if (url.includes("/tap-sessions/") && init?.method === "POST") {
-        return makeFetchResponse({});
-      }
-      if (url.endsWith("/practice") && init?.method === "POST") {
-        return makeFetchResponse({});
-      }
-      if (url.endsWith("/ratings") && init?.method === "POST") {
-        return makeFetchResponse({});
-      }
-      return makeFetchResponse({});
-    });
-
+  it("toggles static contour map on section card before heat map history exists", async () => {
     const song = makeSong(2);
     await renderAndWaitForRatings(song);
     await waitFor(() => {
@@ -1251,44 +1224,43 @@ describe("PracticeView", () => {
   });
 
   it("buffers immediate taps until the tap session has been created", async () => {
-    let resolveSessionStart: ((value: any) => void) | null = null;
+    const sessionStartDeferred: { resolve?: (value: ReturnType<typeof makeFetchResponse>) => void } = {};
     mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = (init?.method ?? "GET").toUpperCase();
 
       if (url.endsWith("/ratings") && method === "GET") {
-        return Promise.resolve({ ok: true, json: async () => ({ ratings: [] }) } as any);
+        return Promise.resolve(makeFetchResponse({ ratings: [] }));
       }
 
       if (url.endsWith("/tap-sessions") && method === "POST") {
-        return new Promise((resolve) => {
-          resolveSessionStart = resolve;
+        return new Promise<ReturnType<typeof makeFetchResponse>>((resolve) => {
+          sessionStartDeferred.resolve = resolve;
         });
       }
 
       if (url.includes("/tap-sessions/tap-session-1") && method === "POST") {
-        return Promise.resolve({ ok: true } as any);
+        return Promise.resolve(makeFetchResponse({}));
       }
 
       if (url.endsWith("/tap-sessions") && method === "GET") {
-        return Promise.resolve({ ok: true, json: async () => ({ sessions: [] }) } as any);
+        return Promise.resolve(makeFetchResponse({ sessions: [] }));
       }
 
       if (url.includes("/tap-sessions/") && method === "GET") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
+        return Promise.resolve(
+          makeFetchResponse({
             session: {
               id: "tap-session-1",
               songId: "song-1",
               startedAt: "2026-04-11T12:00:00.000Z",
               taps: [],
             },
-          }),
-        } as any);
+          })
+        );
       }
 
-      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+      return Promise.resolve(makeFetchResponse({}));
     });
 
     mockUseAudioPlayer.mockReturnValue({
@@ -1331,17 +1303,16 @@ describe("PracticeView", () => {
     ));
     expect(persistedBeforeSession).toBeFalsy();
 
-    resolveSessionStart?.({
-      ok: true,
-      json: async () => ({
+    sessionStartDeferred.resolve?.(
+      makeFetchResponse({
         session: {
           id: "tap-session-1",
           songId: "song-1",
           startedAt: "2026-04-11T12:00:00.000Z",
           tapCount: 0,
         },
-      }),
-    });
+      })
+    );
 
     await waitFor(() => {
       const tapPersistCall = mockFetch.mock.calls.find(([calledUrl, calledInit]) => (
