@@ -30,8 +30,8 @@ describe("MidiSetupPanel", () => {
           ignoredShortNoteCount: 1,
           cleanupSettings: { shortNoteThresholdMs: 100, simultaneousThresholdMs: 30 },
           cleanedNotes: [
-            { index: 0, midiPitch: 60, pitchName: "C4", midiStartSeconds: 0, movementFromPrevious: "start" },
-            { index: 1, midiPitch: 62, pitchName: "D4", midiStartSeconds: 1.5, movementFromPrevious: "up" },
+            { index: 0, midiPitch: 60, pitchName: "C4", midiStartSeconds: 0, midiDurationSeconds: 0.75, movementFromPrevious: "start" },
+            { index: 1, midiPitch: 62, pitchName: "D4", midiStartSeconds: 1.5, midiDurationSeconds: 0.5, movementFromPrevious: "up" },
           ],
         },
         alignment: {
@@ -121,6 +121,73 @@ describe("MidiSetupPanel", () => {
     );
 
     expect(await screen.findByTitle("2: D4 Up")).toHaveStyle({ left: "22%" });
+  });
+
+  it("scales piano roll note duration from aligned audio gaps", async () => {
+    const midiStatus = {
+      source: {
+        id: "midi-1",
+        originalFilename: "part.mid",
+        uploadedAt: "2026-05-18T00:00:00.000Z",
+        parseStatus: "parsed",
+        rawNoteCount: 3,
+        cleanedNoteCount: 3,
+        ignoredShortNoteCount: 0,
+        cleanupSettings: { shortNoteThresholdMs: 20, simultaneousThresholdMs: 30 },
+        cleanedNotes: [
+          { index: 0, midiPitch: 60, pitchName: "C4", midiStartSeconds: 0, midiDurationSeconds: 0.5, movementFromPrevious: "start" },
+          { index: 1, midiPitch: 62, pitchName: "D4", midiStartSeconds: 1, midiDurationSeconds: 0.9, movementFromPrevious: "up" },
+          { index: 2, midiPitch: 64, pitchName: "E4", midiStartSeconds: 2, midiDurationSeconds: 0.5, movementFromPrevious: "up" },
+        ],
+      },
+      alignment: {
+        id: "align-1",
+        tappedStartTimesSeconds: [1, 3],
+        retainedMidiNoteCount: 3,
+        isComplete: false,
+        updatedAt: "2026-05-18T00:01:00.000Z",
+      },
+      summary: {
+        hasMidi: true,
+        rawNoteCount: 3,
+        cleanedNoteCount: 3,
+        ignoredShortNoteCount: 0,
+        shortNoteThresholdMs: 20,
+        alignedCount: 2,
+        retainedMidiNoteCount: 3,
+        hasCompleteAlignment: false,
+        hasDerivedAnswerKey: false,
+        latestAlignmentDate: "2026-05-18T00:01:00.000Z",
+      },
+    };
+    const customRequest = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/midi/alignment") && init?.method === "POST") {
+        return {
+          ok: true,
+          json: async () => ({ alignment: midiStatus.alignment }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => midiStatus,
+      } as Response;
+    });
+
+    render(
+      <MidiSetupPanel
+        songId="song-1"
+        audioPlayer={{ ...audioPlayer, currentMs: 1000 }}
+        request={customRequest}
+      />
+    );
+
+    expect(await screen.findByText("part.mid")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Resume alignment"));
+
+    const firstNote = await screen.findByTitle("1: C4 Start");
+    const secondNote = await screen.findByTitle("2: D4 Up");
+    expect(firstNote).toHaveStyle({ left: "28%", minWidth: "1.4rem", width: "12%" });
+    expect(secondNote).toHaveStyle({ left: "52%", minWidth: "1.4rem", width: "10.8%" });
   });
 
   it("does not let delayed tap-save responses move the visible alignment backward", async () => {
@@ -224,6 +291,6 @@ describe("MidiSetupPanel", () => {
     expect(setFrequency.mock.calls[0][0]).toBeCloseTo(293.66, 2);
     expect(setFrequency.mock.calls[0][1]).toBe(12);
     expect(oscillator.start).toHaveBeenCalledWith(12);
-    expect(oscillator.stop).toHaveBeenCalledWith(12.24);
+    expect(oscillator.stop).toHaveBeenCalledWith(12.52);
   });
 });

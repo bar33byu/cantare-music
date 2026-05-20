@@ -20,6 +20,7 @@ interface MidiStatusSource {
     midiPitch: number;
     pitchName: string;
     midiStartSeconds: number;
+    midiDurationSeconds: number;
     movementFromPrevious: "start" | "up" | "down" | "same";
   }>;
 }
@@ -59,6 +60,13 @@ type WebAudioWindow = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
 };
 
+const PIANO_ROLL_NOW_PERCENT = 28;
+const PIANO_ROLL_PERCENT_PER_SECOND = 12;
+const MIN_NOTE_WIDTH_PERCENT = 2.5;
+const MAX_NOTE_WIDTH_PERCENT = 36;
+const MIN_PREVIEW_SECONDS = 0.16;
+const MAX_PREVIEW_SECONDS = 0.9;
+
 function formatDate(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "None yet";
 }
@@ -72,6 +80,10 @@ function movementLabel(value: "start" | "up" | "down" | "same"): string {
 
 function midiPitchToFrequency(pitch: number): number {
   return 440 * (2 ** ((pitch - 69) / 12));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function emptySummary(): MidiStatusPayload["summary"] {
@@ -106,22 +118,48 @@ function normalizePitchPosition(notes: MidiStatusSource["cleanedNotes"], pitch: 
   return 88 - ((pitch - minPitch) / (maxPitch - minPitch)) * 76;
 }
 
-function estimateMidiNowSeconds(
+function estimateNoteAudioStartSeconds(
+  note: MidiStatusSource["cleanedNotes"][number],
   notes: MidiStatusSource["cleanedNotes"],
-  tappedStartTimesSeconds: number[],
-  currentAudioSeconds: number
+  tappedStartTimesSeconds: number[]
 ): number {
-  if (notes.length === 0) return 0;
+  if (typeof tappedStartTimesSeconds[note.index] === "number") {
+    return tappedStartTimesSeconds[note.index];
+  }
+
   const lastAlignedIndex = Math.min(tappedStartTimesSeconds.length - 1, notes.length - 1);
   if (lastAlignedIndex < 0) {
-    return notes[0].midiStartSeconds;
+    return note.midiStartSeconds;
   }
+
   const lastAlignedNote = notes[lastAlignedIndex];
-  const lastTappedAudioSeconds = tappedStartTimesSeconds[lastAlignedIndex];
-  return Math.max(
-    notes[0].midiStartSeconds,
-    lastAlignedNote.midiStartSeconds + (currentAudioSeconds - lastTappedAudioSeconds)
-  );
+  return tappedStartTimesSeconds[lastAlignedIndex] + (note.midiStartSeconds - lastAlignedNote.midiStartSeconds);
+}
+
+function estimateEffectiveNoteDurationSeconds(
+  note: MidiStatusSource["cleanedNotes"][number],
+  notes: MidiStatusSource["cleanedNotes"],
+  tappedStartTimesSeconds: number[]
+): number {
+  const nextNote = notes[note.index + 1];
+  const midiGapSeconds = nextNote ? nextNote.midiStartSeconds - note.midiStartSeconds : 0;
+  const midiDurationSeconds = Math.max(MIN_PREVIEW_SECONDS, note.midiDurationSeconds || MIN_PREVIEW_SECONDS);
+  const midiHeldRatio = midiGapSeconds > 0
+    ? clamp(midiDurationSeconds / midiGapSeconds, 0.15, 1)
+    : 1;
+  const tappedStartSeconds = tappedStartTimesSeconds[note.index];
+  const nextTappedStartSeconds = tappedStartTimesSeconds[note.index + 1];
+
+  if (
+    typeof tappedStartSeconds === "number" &&
+    typeof nextTappedStartSeconds === "number" &&
+    nextTappedStartSeconds > tappedStartSeconds
+  ) {
+    const realGapSeconds = nextTappedStartSeconds - tappedStartSeconds;
+    return clamp(realGapSeconds * midiHeldRatio, MIN_PREVIEW_SECONDS, realGapSeconds);
+  }
+
+  return clamp(midiDurationSeconds, MIN_PREVIEW_SECONDS, MAX_PREVIEW_SECONDS);
 }
 
 function updateStatusAlignment(status: MidiStatusPayload, alignment: MidiStatusAlignment): MidiStatusPayload {
@@ -183,20 +221,17 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
   const retainedCount = status?.source?.cleanedNoteCount ?? 0;
   const summary = status?.summary ?? emptySummary();
   const nextNote = status?.source?.cleanedNotes[alignedCount] ?? null;
-  const midiNowSeconds = useMemo(
-    () => estimateMidiNowSeconds(
-      status?.source?.cleanedNotes ?? [],
-      status?.alignment?.tappedStartTimesSeconds ?? [],
-      currentMs / 1000
-    ),
-    [currentMs, status?.alignment?.tappedStartTimesSeconds, status?.source?.cleanedNotes]
-  );
   const pianoRollNotes = useMemo(
     () => (status?.source?.cleanedNotes ?? []).filter((note) => {
-      const deltaSeconds = note.midiStartSeconds - midiNowSeconds;
+      const audioStartSeconds = estimateNoteAudioStartSeconds(
+        note,
+        status?.source?.cleanedNotes ?? [],
+        status?.alignment?.tappedStartTimesSeconds ?? []
+      );
+      const deltaSeconds = audioStartSeconds - (currentMs / 1000);
       return deltaSeconds >= -2.5 && deltaSeconds <= 8;
     }),
-    [midiNowSeconds, status?.source?.cleanedNotes]
+    [currentMs, status?.alignment?.tappedStartTimesSeconds, status?.source?.cleanedNotes]
   );
 
   const uploadMidi = async (file: File | null) => {
@@ -273,19 +308,24 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
       }
 
       const now = context.currentTime;
+      const previewDurationSeconds = estimateEffectiveNoteDurationSeconds(
+        note,
+        status?.source?.cleanedNotes ?? [],
+        status?.alignment?.tappedStartTimesSeconds ?? []
+      );
       const oscillator = context.createOscillator();
       const gain = context.createGain();
 
       oscillator.type = "triangle";
       oscillator.frequency.setValueAtTime(midiPitchToFrequency(note.midiPitch), now);
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.09, now + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+      gain.gain.exponentialRampToValueAtTime(0.22, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + previewDurationSeconds);
 
       oscillator.connect(gain);
       gain.connect(context.destination);
       oscillator.start(now);
-      oscillator.stop(now + 0.24);
+      oscillator.stop(now + previewDurationSeconds + 0.02);
     } catch {
       // The audible preview is helpful, but alignment should still work if Web Audio is unavailable.
     }
@@ -529,9 +569,24 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
                   <div className="absolute bottom-3 top-3 left-[28%] border-l-2 border-indigo-600" />
                   <div className="absolute inset-x-0 top-1/2 border-t border-slate-200" />
                   {pianoRollNotes.map((note) => {
-                    const deltaSeconds = note.midiStartSeconds - midiNowSeconds;
-                    const leftPercent = 28 + deltaSeconds * 12;
+                    const audioStartSeconds = estimateNoteAudioStartSeconds(
+                      note,
+                      status.source?.cleanedNotes ?? [],
+                      status.alignment?.tappedStartTimesSeconds ?? []
+                    );
+                    const effectiveDurationSeconds = estimateEffectiveNoteDurationSeconds(
+                      note,
+                      status.source?.cleanedNotes ?? [],
+                      status.alignment?.tappedStartTimesSeconds ?? []
+                    );
+                    const deltaSeconds = audioStartSeconds - (currentMs / 1000);
+                    const leftPercent = PIANO_ROLL_NOW_PERCENT + deltaSeconds * PIANO_ROLL_PERCENT_PER_SECOND;
                     const topPercent = normalizePitchPosition(status.source?.cleanedNotes ?? [], note.midiPitch);
+                    const widthPercent = clamp(
+                      effectiveDurationSeconds * PIANO_ROLL_PERCENT_PER_SECOND,
+                      MIN_NOTE_WIDTH_PERCENT,
+                      MAX_NOTE_WIDTH_PERCENT
+                    );
                     return (
                       <div
                         key={note.index}
@@ -546,7 +601,8 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
                         style={{
                           left: `${leftPercent}%`,
                           top: `${topPercent}%`,
-                          width: note.index === alignedCount ? "2rem" : "1.4rem",
+                          minWidth: note.index === alignedCount ? "2rem" : "1.4rem",
+                          width: `${widthPercent}%`,
                         }}
                       >
                         <span className="sr-only">{movementLabel(note.movementFromPrevious)}</span>
