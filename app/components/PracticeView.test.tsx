@@ -582,6 +582,78 @@ describe("PracticeView", () => {
     expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
   });
 
+  it("shows the contour map toggle when only a MIDI answer key exists", async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
+        return makeFetchResponse({ ratings: [] });
+      }
+      if (url.endsWith("/midi") && (!init || init.method === undefined)) {
+        return makeFetchResponse({
+          segmentAnswerKeys: {
+            "seg-0": {
+              segmentId: "seg-0",
+              midiSourceId: "midi-source-1",
+              alignmentId: "alignment-1",
+              taps: [
+                { id: "midi-seg-0-1", timeOffsetMs: 0, direction: "same" },
+                { id: "midi-seg-0-2", timeOffsetMs: 500, direction: "up" },
+              ],
+              notes: [
+                {
+                  sourceWholeSongNoteIndex: 1,
+                  segmentId: "seg-0",
+                  segmentLocalStartTimeSeconds: 0,
+                  midiPitch: 60,
+                  pitchName: "C4",
+                  movementFromPrevious: "start",
+                  midiDurationSeconds: 0.4,
+                  effectiveDurationSeconds: 0.4,
+                },
+                {
+                  sourceWholeSongNoteIndex: 2,
+                  segmentId: "seg-0",
+                  segmentLocalStartTimeSeconds: 0.5,
+                  midiPitch: 64,
+                  pitchName: "E4",
+                  movementFromPrevious: "up",
+                  midiDurationSeconds: 0.4,
+                  effectiveDurationSeconds: 0.4,
+                },
+              ],
+            },
+          },
+        });
+      }
+      if (url.endsWith("/tap-sessions") && init?.method === "POST") {
+        return makeFetchResponse({ session: { id: "tap-session-1" } });
+      }
+      if (url.includes("/tap-sessions/") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/practice") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      if (url.endsWith("/ratings") && init?.method === "POST") {
+        return makeFetchResponse({});
+      }
+      return makeFetchResponse({});
+    });
+
+    const song = { ...makeSong(1), pitchContourNotes: [] };
+    await renderAndWaitForRatings(song);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+    });
+
+    const segmentCard = screen.getByTestId("mock-segment-card");
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "false");
+
+    fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
+    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
+  });
+
   it("hides the card contour toggle when the song has no tap data", async () => {
     const song = makeSong(2);
     song.pitchContourNotes = [];

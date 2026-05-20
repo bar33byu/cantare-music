@@ -303,22 +303,42 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     () => (currentSegment ? getSegmentPitchContourNotes(song.pitchContourNotes, currentSegment) : []),
     [currentSegment, song.pitchContourNotes]
   );
-  const hasCardContourData = currentSegmentPitchContourNotes.length > 0;
+  const currentMidiSegmentAnswerKey = useMemo(
+    () => currentSegment ? (midiSegmentAnswerKeys[currentSegment.id] ?? null) : null,
+    [currentSegment, midiSegmentAnswerKeys]
+  );
+  const currentMidiPitchContourNotes = useMemo<PitchContourNote[]>(() => {
+    if (!currentMidiSegmentAnswerKey || currentMidiSegmentAnswerKey.notes.length === 0) {
+      return [];
+    }
+
+    const pitches = currentMidiSegmentAnswerKey.notes.map((note) => note.midiPitch);
+    const minPitch = Math.min(...pitches);
+    const maxPitch = Math.max(...pitches);
+    const pitchRange = Math.max(1, maxPitch - minPitch);
+
+    return currentMidiSegmentAnswerKey.notes.map((note) => ({
+      id: `midi-contour-${currentMidiSegmentAnswerKey.segmentId}-${note.sourceWholeSongNoteIndex}`,
+      timeOffsetMs: Math.max(0, Math.round(note.segmentLocalStartTimeSeconds * 1000)),
+      durationMs: Math.max(MIN_TAP_DURATION_MS, Math.round(note.effectiveDurationSeconds * 1000)),
+      lane: Math.min(1, Math.max(0, (note.midiPitch - minPitch) / pitchRange)),
+    }));
+  }, [currentMidiSegmentAnswerKey]);
+  const currentCardContourNotes = currentSegmentPitchContourNotes.length > 0
+    ? currentSegmentPitchContourNotes
+    : currentMidiPitchContourNotes;
+  const hasCardContourData = currentCardContourNotes.length > 0;
   const currentSegmentMatch = useMemo(() => {
     if (!currentSegment) {
       return null;
     }
 
     return compareContourAttemptDetailed(
-      currentSegmentPitchContourNotes,
+      currentCardContourNotes,
       currentAttemptNotes,
       TAP_MATCH_OPTIONS
     );
-  }, [currentAttemptNotes, currentSegment, currentSegmentPitchContourNotes]);
-  const currentMidiSegmentAnswerKey = useMemo(
-    () => currentSegment ? (midiSegmentAnswerKeys[currentSegment.id] ?? null) : null,
-    [currentSegment, midiSegmentAnswerKeys]
-  );
+  }, [currentAttemptNotes, currentCardContourNotes, currentSegment]);
   const currentDerivedAnswerKey = useMemo(
     () => {
       if (!currentSegment) {
@@ -377,10 +397,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (!currentSegment) {
       return new Map<string, "U" | "D" | "S">();
     }
-    const sortedNotes = [...currentSegmentPitchContourNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+    const sortedNotes = [...currentCardContourNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
     const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
     return new Map(events.map((event, index) => [sortedNotes[index + 1]?.id, toDirectionLetter(event.direction)]).filter((entry): entry is [string, "U" | "D" | "S"] => Boolean(entry[0])));
-  }, [currentSegment, currentSegmentPitchContourNotes]);
+  }, [currentCardContourNotes, currentSegment]);
   const attemptDirectionLetters = useMemo(() => {
     const sortedNotes = [...currentAttemptNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
     const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
@@ -1139,7 +1159,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       : null;
     const contourFallbackMatch = currentDerivedAnswerKey
       ? null
-      : compareContourAttemptDetailed(currentSegmentPitchContourNotes, nextSegmentNotes, TAP_MATCH_OPTIONS);
+      : compareContourAttemptDetailed(currentCardContourNotes, nextSegmentNotes, TAP_MATCH_OPTIONS);
     const missedTap = immediateScore
       ? immediateScore.details.some((detail) => detail.actual?.id === note.id && detail.status !== "matched")
       : contourFallbackMatch?.attemptNoteStatuses[note.id] === "mismatched";
@@ -1166,7 +1186,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     });
 
     activeTapCaptureRef.current = null;
-  }, [currentDerivedAnswerKey, currentMs, currentSegment, currentSegmentPitchContourNotes, queuePersistedTap, showAccuracyToast]);
+  }, [currentCardContourNotes, currentDerivedAnswerKey, currentMs, currentSegment, queuePersistedTap, showAccuracyToast]);
 
   const clearCurrentSegmentTaps = React.useCallback(() => {
     if (!currentSegment) {
@@ -1455,7 +1475,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       }
       loopHandledRef.current = loopKey;
       const loopMatch = compareContourAttemptDetailed(
-        currentSegmentPitchContourNotes,
+        currentCardContourNotes,
         tapAttemptsBySegment[currentSegment.id] ?? [],
         TAP_MATCH_OPTIONS
       );
@@ -1468,6 +1488,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       requestPlay(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
   }, [
+    currentCardContourNotes,
     currentMs,
     currentSegment,
     getSegmentStartWithPreroll,
@@ -2042,7 +2063,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   className={`relative z-10 h-full min-h-0 ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}
                 >
                   <SegmentCard
-                    segment={{ ...currentSegment, pitchContourNotes: currentSegmentPitchContourNotes }}
+                    segment={{ ...currentSegment, pitchContourNotes: currentCardContourNotes }}
                     currentRating={currentRating}
                     onRate={handleRateCurrentSegment}
                     playbackMs={currentMs}
@@ -2058,7 +2079,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden rounded-2xl border border-indigo-200/30 bg-indigo-50/10" data-testid="practice-piano-roll-overlay">
                     <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
                       <line x1="0" y1="50" x2="100" y2="50" stroke="rgb(199 210 254)" strokeWidth="0.5" opacity="0.45" />
-                      {showSameLaneGuides ? currentSegmentPitchContourNotes.map((note) => {
+                      {showSameLaneGuides ? currentCardContourNotes.map((note) => {
                         const x = getRollX(note.timeOffsetMs);
                         if (x < -5 || x > 105) {
                           return null;
@@ -2084,7 +2105,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                           </g>
                         );
                       }) : null}
-                      {currentSegmentPitchContourNotes.map((note) => {
+                      {currentCardContourNotes.map((note) => {
                         const x = getRollX(note.timeOffsetMs);
                         if (x < -5 || x > 105) {
                           return null;
