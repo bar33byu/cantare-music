@@ -190,6 +190,20 @@ describe("MidiSetupPanel", () => {
     expect(secondNote).toHaveStyle({ left: "52%", minWidth: "1.4rem", width: "10.8%" });
   });
 
+  it("updates the resume index when a piano roll note is selected", async () => {
+    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
+
+    expect(await screen.findByText("part.mid")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Resume alignment"));
+
+    const resumeInput = screen.getByTestId("midi-resume-index");
+    expect(resumeInput).toHaveValue(1);
+
+    fireEvent.click(await screen.findByTestId("midi-note-1"));
+
+    expect(resumeInput).toHaveValue(0);
+  });
+
   it("does not let delayed tap-save responses move the visible alignment backward", async () => {
     let resolveTapSave: ((value: Response) => void) | null = null;
     const delayedRequest = vi.fn(async (url: string, init?: RequestInit) => {

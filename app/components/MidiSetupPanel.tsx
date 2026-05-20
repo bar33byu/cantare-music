@@ -588,10 +588,18 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
                       MAX_NOTE_WIDTH_PERCENT
                     );
                     return (
-                      <div
+                      <button
+                        type="button"
                         key={note.index}
                         title={`${note.index + 1}: ${note.pitchName} ${movementLabel(note.movementFromPrevious)}`}
-                        className={`absolute h-3 rounded-full border transition-colors ${
+                        aria-label={`Select note ${note.index + 1}`}
+                        data-testid={`midi-note-${note.index + 1}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setResumeIndexDraft(String(note.index));
+                        }}
+                        className={`absolute h-3 cursor-pointer rounded-full border p-0 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${
                           note.index === alignedCount
                             ? "border-indigo-700 bg-indigo-600"
                             : note.index < alignedCount
@@ -606,7 +614,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
                         }}
                       >
                         <span className="sr-only">{movementLabel(note.movementFromPrevious)}</span>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
