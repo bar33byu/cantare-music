@@ -3,16 +3,29 @@ import { useUploadAudio } from '../hooks/useUploadAudio';
 
 interface SongFormProps {
   onSuccess: (songId: string) => void;
+  userId?: string;
 }
 
-export function SongForm({ onSuccess }: SongFormProps) {
+function getResponseErrorMessage(value: unknown, fallback: string): string {
+  if (value && typeof value === 'object' && 'error' in value && typeof value.error === 'string') {
+    return value.error;
+  }
+  return fallback;
+}
+
+export function SongForm({ onSuccess, userId }: SongFormProps) {
   const [title, setTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedAlternateFile, setSelectedAlternateFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [debugMode, setDebugMode] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
-  const { upload, uploading, progress, error: uploadError } = useUploadAudio();
+  const { upload, uploading, progress, error: uploadError } = useUploadAudio(userId);
+
+  const withUserHeader = (headers: Record<string, string>) => ({
+    ...headers,
+    ...(userId ? { 'X-User-ID': userId } : {}),
+  });
 
   const appendDebug = (message: string) => {
     setDebugLog((prev) => [...prev, `${new Date().toISOString()} - ${message}`]);
@@ -32,7 +45,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
       // Create song record
       const createResponse = await fetch('/api/songs', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: withUserHeader({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ title: title.trim() }),
       });
 
@@ -54,7 +67,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
         const updateResponse = await fetch(`/api/songs/${newSongId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withUserHeader({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ audioKey }),
         });
 
@@ -62,8 +75,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
         if (!updateResponse.ok) {
           const updateError = await updateResponse.json().catch(() => null);
-          const msg = (updateError && (updateError as any).error) || 'Failed to update song with audio key';
-          throw new Error(msg);
+          throw new Error(getResponseErrorMessage(updateError, 'Failed to update song with audio key'));
         }
       }
 
@@ -74,7 +86,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
         const updateResponse = await fetch(`/api/songs/${newSongId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withUserHeader({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ alternateAudioKey }),
         });
 
@@ -82,8 +94,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
         if (!updateResponse.ok) {
           const updateError = await updateResponse.json().catch(() => null);
-          const msg = (updateError && (updateError as any).error) || 'Failed to update song with blend audio key';
-          throw new Error(msg);
+          throw new Error(getResponseErrorMessage(updateError, 'Failed to update song with blend audio key'));
         }
       }
 

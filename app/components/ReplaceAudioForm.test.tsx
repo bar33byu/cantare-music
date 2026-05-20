@@ -89,6 +89,25 @@ describe("ReplaceAudioForm", () => {
     });
   });
 
+  it("patches song audio for the selected user", async () => {
+    uploadMock.mockResolvedValue("audio/new.mp3");
+    (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+
+    render(<ReplaceAudioForm songId="song-1" userId="test-user" />);
+
+    const file = new File(["x"], "new.mp3", { type: "audio/mpeg" });
+    fireEvent.change(screen.getByTestId("replace-audio-input-prominent"), { target: { files: [file] } });
+    fireEvent.click(screen.getByTestId("replace-audio-submit-prominent"));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/songs/song-1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "X-User-ID": "test-user" },
+        body: JSON.stringify({ audioKey: "audio/new.mp3" }),
+      });
+    });
+  });
+
   it("shows API error message when patch fails", async () => {
     uploadMock.mockResolvedValue("audio/new.mp3");
     (global.fetch as any).mockResolvedValue({

@@ -1270,6 +1270,7 @@ export function PlaylistPracticeView({
                   <PracticeView
                     key={`${currentFocusItem.song.id}:${currentFocusItem.segment.id}`}
                     song={currentFocusItem.song}
+                    userId={userId}
                     initialSession={focusPracticeSession}
                     onSessionChange={handleFocusSessionChange}
                     onRatingsSaved={handleFocusRatingsSaved}
@@ -1425,6 +1426,7 @@ export function PlaylistPracticeView({
                   <PracticeView
                     key={`${currentAutoDrillItem.song.id}:${currentAutoDrillItem.segment.id}`}
                     song={currentAutoDrillItem.song}
+                    userId={userId}
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel="Auto Drill"

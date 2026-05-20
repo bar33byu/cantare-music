@@ -9,7 +9,7 @@ interface UseUploadAudioReturn {
 
 export type AudioUploadVersion = 'prominent' | 'blend';
 
-export function useUploadAudio(): UseUploadAudioReturn {
+export function useUploadAudio(userId?: string): UseUploadAudioReturn {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +47,10 @@ export function useUploadAudio(): UseUploadAudioReturn {
       // Get presigned URL from the API
       const response = await fetch('/api/songs/upload-url', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(userId ? { 'X-User-ID': userId } : {}),
+        },
         body: JSON.stringify({
           songId,
           filename: file.name,

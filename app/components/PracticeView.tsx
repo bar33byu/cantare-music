@@ -48,6 +48,7 @@ interface TransportDebugState {
 
 interface PracticeViewProps {
   song: Song;
+  userId?: string;
   initialSession: SessionState;
   onSessionChange?: (session: SessionState) => void;
   onRatingsSaved?: (ratings: SessionState["ratings"]) => void;
@@ -162,6 +163,7 @@ function toDirectionTaps(notes: PitchContourNote[]): DirectionTap[] {
 
 const PracticeView: React.FC<PracticeViewProps> = ({
   song,
+  userId,
   initialSession,
   onSessionChange,
   onRatingsSaved,
@@ -184,6 +186,24 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   canUsePrevSegment: canUsePrevSegmentOverride,
   canUseNextSegment: canUseNextSegmentOverride,
 }) => {
+  const withUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
+    if (!userId) {
+      return init;
+    }
+
+    const headers = new Headers(init?.headers);
+    headers.set("X-User-ID", userId);
+    return {
+      ...init,
+      headers,
+    };
+  }, [userId]);
+
+  const request = React.useCallback((url: string, init?: RequestInit) => {
+    const scopedInit = withUserHeader(init);
+    return scopedInit ? fetch(url, scopedInit) : fetch(url);
+  }, [withUserHeader]);
+
   const effectiveSegmentPrerollMs = Math.max(0, segmentPrerollMs);
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const initialSegmentId = song.segments[initialSession.currentSegmentIndex]?.id ?? null;
@@ -511,7 +531,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         ratedAt: rating.ratedAt,
       }));
 
-    const response = await fetch(`/api/songs/${song.id}/ratings`, {
+    const response = await request(`/api/songs/${song.id}/ratings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ratings: ratingsPayload }),
@@ -524,7 +544,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("ratingsUpdated"));
     }
-  }, [onRatingsSaved, song.id]);
+  }, [onRatingsSaved, request, song.id]);
 
   const flushOfflineRatingsIfPossible = React.useCallback(async () => {
     if (typeof navigator !== "undefined" && !navigator.onLine) {
@@ -579,7 +599,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       for (const payload of payloads) {
         try {
-          const response = await fetch(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
+          const response = await request(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -612,7 +632,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         setTapHeatMapRefreshToken((previous) => previous + 1);
       }
     });
-  }, [clearTapPersistenceWarning, showTapPersistenceWarning, song.id]);
+  }, [clearTapPersistenceWarning, request, showTapPersistenceWarning, song.id]);
 
   const queuePersistedTap = React.useCallback((payload: PersistedTapPayload) => {
     pendingPersistedTapsRef.current.push(payload);
@@ -664,10 +684,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     practicedRecordedRef.current = true;
-    void fetch(`/api/songs/${song.id}/practice`, { method: "POST" }).catch(() => {
+    void request(`/api/songs/${song.id}/practice`, { method: "POST" }).catch(() => {
       practicedRecordedRef.current = false;
     });
-  }, [song.id]);
+  }, [request, song.id]);
 
   useEffect(() => {
     practicedRecordedRef.current = false;
@@ -832,7 +852,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       setRatingsLoading(true);
       setRatingsError(null);
       try {
-        const response = await fetch(`/api/songs/${song.id}/ratings`);
+        const response = await request(`/api/songs/${song.id}/ratings`);
         if (!response.ok) {
           throw new Error(`Failed to load ratings (${response.status})`);
         }
@@ -873,7 +893,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [dequeueOfflineRatings, song.id]);
+  }, [dequeueOfflineRatings, request, song.id]);
 
   const currentRating: MemoryRating | undefined = (() => {
     if (!currentSegment) {
@@ -1565,7 +1585,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     const generation = tapSessionGenerationRef.current;
 
-    void fetch(`/api/songs/${song.id}/tap-sessions`, {
+    void request(`/api/songs/${song.id}/tap-sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1597,7 +1617,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         console.error("Failed to create tap practice session:", error);
         showTapPersistenceWarning("Could not start tap persistence session. Check your connection and try again.");
       });
-  }, [activeAudioVersion, clearTapPersistenceWarning, currentSegment?.id, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id, tapSessionResetToken]);
+  }, [activeAudioVersion, clearTapPersistenceWarning, currentSegment?.id, flushPersistedTaps, isTapPracticeMode, request, showTapPersistenceWarning, song.id, tapSessionResetToken]);
 
   useEffect(() => {
     activeTapCaptureRef.current = null;
@@ -1697,8 +1717,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const loadEnhancedTapData = async () => {
       try {
         const [response, midiResponse] = await Promise.all([
-          fetch(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }),
-          fetch(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
+          request(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }),
+          request(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
         ]);
         if (!response.ok) {
           throw new Error(`Failed to load tap sessions (${response.status})`);
@@ -1727,7 +1747,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [song.id]);
+  }, [request, song.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1741,7 +1761,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     const loadTapHeatMap = async () => {
       try {
-        const response = await fetch(`/api/songs/${song.id}/tap-heatmap`, { cache: "no-store" });
+        const response = await request(`/api/songs/${song.id}/tap-heatmap`, { cache: "no-store" });
         if (!response.ok) {
           throw new Error(`Failed to load tap heat map (${response.status})`);
         }
@@ -1765,7 +1785,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [hasTapAnswers, song.id, tapHeatMapRefreshToken]);
+  }, [hasTapAnswers, request, song.id, tapHeatMapRefreshToken]);
 
   return (
     <div

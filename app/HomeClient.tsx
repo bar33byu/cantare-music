@@ -608,6 +608,7 @@ export default function Home() {
         <div className="max-w-4xl mx-auto">
           <PracticeView
             song={selectedSong}
+            userId={activeUserId}
             initialSession={session}
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
@@ -676,7 +677,7 @@ export default function Home() {
             title="Add New Song"
           />
           <div className="bg-white p-6 rounded-lg shadow">
-            <SongForm onSuccess={handleSongCreated} />
+            <SongForm userId={activeUserId} onSuccess={handleSongCreated} />
           </div>
         </div>
       </div>

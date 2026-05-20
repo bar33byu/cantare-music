@@ -1120,6 +1120,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         </div>
         <ReplaceAudioForm
           songId={songId}
+          userId={userId}
           audioUrl={audioUrl}
           alternateAudioUrl={alternateAudioUrl}
           onReplaced={handleAudioUploaded}
@@ -1180,6 +1181,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
           <div className="mt-2">
             <ReplaceAudioForm
               songId={songId}
+              userId={userId}
               audioUrl={audioUrl}
               alternateAudioUrl={alternateAudioUrl}
               onReplaced={handleAudioUploaded}

@@ -148,6 +148,27 @@ describe('useUploadAudio', () => {
     });
   });
 
+  it('includes the selected user header when provided', async () => {
+    const { result } = renderHook(() => useUploadAudio('test-user'));
+    const file = new File(['test'], 'test.mp3', { type: 'audio/mpeg' });
+
+    await act(async () => {
+      await result.current.upload('song-123', file, 'blend');
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith('/api/songs/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-ID': 'test-user' },
+      body: JSON.stringify({
+        songId: 'song-123',
+        filename: 'test.mp3',
+        contentType: 'audio/mpeg',
+        size: file.size,
+        audioVersion: 'blend',
+      }),
+    });
+  });
+
   it('API error sets error string', async () => {
     mockFetch.mockResolvedValue({
       ok: false,

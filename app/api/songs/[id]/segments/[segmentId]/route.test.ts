@@ -10,6 +10,7 @@ vi.mock('../../../../../../db/index', () => ({
 }));
 
 vi.mock('../../../../../../db/queries', () => ({
+  getSongById: vi.fn(),
   getSegmentsBySongId: vi.fn(),
   updateSegment: vi.fn(),
   deleteSegment: vi.fn(),
@@ -17,7 +18,13 @@ vi.mock('../../../../../../db/queries', () => ({
 }));
 
 import { GET, PATCH, DELETE } from './route';
-import { getSegmentsBySongId, updateSegment, deleteSegment, reorderSegments } from '../../../../../../db/queries';
+import { getSongById, getSegmentsBySongId, updateSegment, deleteSegment, reorderSegments } from '../../../../../../db/queries';
+import { USER_ID_HEADER } from '../../../../../lib/userContext';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(getSongById).mockResolvedValue({ id: 'song-1', title: 'Song', userId: 'default' } as any);
+});
 
 describe('GET /api/songs/[id]/segments/[segmentId]', () => {
   it('returns segment when found', async () => {
@@ -33,7 +40,35 @@ describe('GET /api/songs/[id]/segments/[segmentId]', () => {
 
     expect(response.status).toBe(200);
     expect(data).toEqual(mockSegments[0]);
+    expect(getSongById).toHaveBeenCalledWith('song-1', 'default');
     expect(getSegmentsBySongId).toHaveBeenCalledWith('song-1');
+  });
+
+  it('checks segment ownership with the request user', async () => {
+    const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 1 }];
+    vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
+
+    const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
+      headers: { [USER_ID_HEADER]: 'Test User' },
+    });
+    const response = await GET(request as any, { params: Promise.resolve({ id: 'song-1', segmentId: 'seg-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(getSongById).toHaveBeenCalledWith('song-1', 'test-user');
+  });
+
+  it('returns 404 when song does not belong to request user', async () => {
+    vi.mocked(getSongById).mockResolvedValue(undefined);
+
+    const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
+      headers: { [USER_ID_HEADER]: 'Test User' },
+    });
+    const response = await GET(request as any, { params: Promise.resolve({ id: 'song-1', segmentId: 'seg-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data.error).toBe('Song not found');
+    expect(getSegmentsBySongId).not.toHaveBeenCalled();
   });
 
   it('returns 404 when segment not found', async () => {
@@ -52,6 +87,7 @@ describe('GET /api/songs/[id]/segments/[segmentId]', () => {
 describe('PATCH /api/songs/[id]/segments/[segmentId]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getSongById).mockResolvedValue({ id: 'song-1', title: 'Song', userId: 'default' } as any);
   });
 
   it('updates segment successfully', async () => {

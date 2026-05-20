@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSegmentsBySongId, updateSegment, deleteSegment, reorderSegments } from '../../../../../../db/queries';
+import { getSongById, getSegmentsBySongId, updateSegment, deleteSegment, reorderSegments } from '../../../../../../db/queries';
+import type { SegmentRow } from '../../../../../../db/schema';
 import { inferTimelineOrder } from '../../../../../lib/segmentTiming';
 import { validatePitchContourNotes } from '../../../../../lib/pitchContour';
+import { resolveRequestUserId } from '../../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -17,7 +19,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string; segmentId: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id: songId, segmentId } = await params;
+    const song = await getSongById(songId, userId);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
 
     // Get all segments for the song and find the specific one
     const segments = await getSegmentsBySongId(songId);
@@ -39,7 +46,13 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; segmentId: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id: songId, segmentId } = await params;
+    const song = await getSongById(songId, userId);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
+
     const body = await request.json();
     const { label, startMs, endMs, lyricText, pitchContourNotes } = body;
 
@@ -70,7 +83,7 @@ export async function PATCH(
     }
 
     // Prepare updates object
-    const updates: Record<string, any> = {};
+    const updates: Partial<Pick<SegmentRow, 'label' | 'startMs' | 'endMs' | 'lyricText' | 'pitchContourNotes'>> = {};
     if (label !== undefined) updates.label = label;
     if (startMs !== undefined) updates.startMs = startMs;
     if (endMs !== undefined) updates.endMs = endMs;
@@ -119,7 +132,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; segmentId: string }> }
 ) {
   try {
+    const userId = resolveRequestUserId(request);
     const { id: songId, segmentId } = await params;
+    const song = await getSongById(songId, userId);
+    if (!song) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    }
 
     // Check if segment exists
     const segments = await getSegmentsBySongId(songId);

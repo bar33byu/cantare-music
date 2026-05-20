@@ -5,6 +5,7 @@ import { useUploadAudio } from "../hooks/useUploadAudio";
 
 interface ReplaceAudioFormProps {
   songId: string;
+  userId?: string;
   onReplaced?: () => void;
   mode?: 'upload' | 'replace';
   audioUrl?: string;
@@ -34,12 +35,13 @@ const VERSION_DETAILS: Record<AudioVersion, { label: string; description: string
 
 export function ReplaceAudioForm({
   songId,
+  userId,
   onReplaced,
   mode = 'replace',
   audioUrl = '',
   alternateAudioUrl = '',
 }: ReplaceAudioFormProps) {
-  const { upload, uploading, progress, error: uploadError } = useUploadAudio();
+  const { upload, uploading, progress, error: uploadError } = useUploadAudio(userId);
   const [versionState, setVersionState] = useState<Record<AudioVersion, VersionState>>({
     prominent: { file: null, error: null, success: null },
     blend: { file: null, error: null, success: null },
@@ -72,7 +74,10 @@ export function ReplaceAudioForm({
       const details = VERSION_DETAILS[audioVersion];
       const response = await fetch(`/api/songs/${songId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(userId ? { "X-User-ID": userId } : {}),
+        },
         body: JSON.stringify({ [details.patchKey]: uploadedKey }),
       });
 

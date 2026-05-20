@@ -189,6 +189,17 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
   });
 
+  it("loads practice data for the selected user", async () => {
+    const song = makeSong();
+    render(<PracticeView song={song} userId="test-user" initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      const ratingsCall = mockFetch.mock.calls.find(([url]) => url === `/api/songs/${song.id}/ratings`);
+      expect(ratingsCall).toBeTruthy();
+      expect(new Headers(ratingsCall?.[1]?.headers).get("X-User-ID")).toBe("test-user");
+    });
+  });
+
   it("can default play to the current segment with preroll", async () => {
     const song = makeSong();
     const session = { ...makeSession(song), currentSegmentIndex: 1 };
