@@ -387,7 +387,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
             <p className="absolute right-2 top-1 text-[11px] font-semibold text-gray-700" data-testid={`song-mastery-percent-${song.id}`}>
               {masteryPercent}%
             </p>
-            <h3 className="text-xl font-semibold mb-2" data-testid={`song-title-${song.id}`}>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2" data-testid={`song-title-${song.id}`}>
               {song.title}
             </h3>
             {song.artist && (

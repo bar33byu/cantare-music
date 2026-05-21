@@ -1019,7 +1019,7 @@ export function PlaylistPracticeView({
             <span>/</span>
             <span className="text-gray-900">{livePlaylist.name}</span>
           </div>
-          <h2 className="text-2xl font-bold">{livePlaylist.name}</h2>
+          <h2 className="text-2xl font-bold text-gray-900">{livePlaylist.name}</h2>
           <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
             Playlist Knowledge: {playlistScore}%
           </p>
@@ -1176,7 +1176,7 @@ export function PlaylistPracticeView({
                     ) : null}
                   </div>
 
-                  <h3 className="text-xl font-semibold mb-2">{song.title}</h3>
+                  <h3 className="text-xl font-semibold text-gray-900 mb-2">{song.title}</h3>
                   {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
                   <div className="absolute bottom-3 right-3">
                     <SongReadinessIcons
@@ -1465,7 +1465,7 @@ export function PlaylistPracticeView({
       {mode === 'listen' && currentSong && (
         <div className="space-y-4">
           <div className="text-center">
-            <h3 className="text-2xl font-semibold">{currentSong.title}</h3>
+            <h3 className="text-2xl font-semibold text-gray-900">{currentSong.title}</h3>
             {currentSong.artist && <p className="text-gray-600">{currentSong.artist}</p>}
             <p className="text-sm text-gray-500">{currentSongIndex + 1} of {listenQueue.length}</p>
           </div>
