@@ -312,6 +312,19 @@ describe("PracticeView", () => {
     expect(screen.queryByTestId("practice-audio-version-toggle")).not.toBeInTheDocument();
   });
 
+  it("plays blend audio without showing the switcher when only blend exists", async () => {
+    const song: Song = {
+      ...makeSong(),
+      audioUrl: "",
+      alternateAudioUrl: "https://cdn.example.com/audio/song-1/blend.mp3",
+    };
+
+    await renderAndWaitForRatings(song);
+
+    expect(screen.queryByTestId("practice-audio-version-toggle")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.alternateAudioUrl);
+  });
+
   it("switches to blend audio and resumes the current playback range", async () => {
     const song: Song = {
       ...makeSong(),

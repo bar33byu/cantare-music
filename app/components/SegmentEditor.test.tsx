@@ -137,6 +137,39 @@ describe('SegmentEditor', () => {
     });
   });
 
+  it('uses blend audio for edit-page playback when prominent audio is missing', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '', alternateAudioUrl: '/audio/blend.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => sampleSegments,
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({ error: 'Unexpected request' }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(vi.mocked(useAudioPlayer)).toHaveBeenCalledWith('/audio/blend.mp3');
+      expect(screen.getByTestId('segment-editor-board')).toBeInTheDocument();
+    });
+  });
+
   it('creates new section using timeline-aware defaults', async () => {
     render(<SegmentEditor songId="song-1" />);
 

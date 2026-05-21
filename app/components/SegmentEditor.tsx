@@ -112,7 +112,11 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const contourAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contourAutoSaveGenerationRef = useRef(0);
 
-  const playbackAudioUrl = useMemo(() => toPlayableAudioUrl(audioUrl), [audioUrl]);
+  const hasAnyAudio = Boolean(audioUrl.trim() || alternateAudioUrl.trim());
+  const playbackAudioUrl = useMemo(
+    () => toPlayableAudioUrl(audioUrl.trim() || alternateAudioUrl.trim()),
+    [audioUrl, alternateAudioUrl]
+  );
 
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
   const {
@@ -1097,7 +1101,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     }
   };
 
-  if (songLoaded && !audioUrl) {
+  if (songLoaded && !hasAnyAudio) {
     return (
       <div className="mx-auto w-full max-w-6xl">
         <div className="mb-4">

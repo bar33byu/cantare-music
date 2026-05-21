@@ -119,6 +119,10 @@ interface PlaylistPracticeViewProps {
   onSelectSong: (song: Playlist["songs"][number]) => void;
 }
 
+function getPlayableAudioUrl(song?: Pick<Playlist["songs"][number], 'audioUrl' | 'alternateAudioUrl'> | null): string {
+  return song?.audioUrl?.trim() || song?.alternateAudioUrl?.trim() || '';
+}
+
 const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
 
 export function PlaylistPracticeView({
@@ -369,7 +373,7 @@ export function PlaylistPracticeView({
 
   const autoDrillQueue = useMemo<AutoDrillQueueItem[]>(() => {
     return livePlaylist.songs.flatMap((song, songIndex) => {
-      if (!song.audioUrl.trim()) {
+      if (!getPlayableAudioUrl(song)) {
         return [];
       }
 
@@ -480,18 +484,18 @@ export function PlaylistPracticeView({
   const currentSong = listenQueue[currentSongIndex];
   const playbackSong = mode === 'focus' || mode === 'auto' ? undefined : currentSong;
   const currentSongId = playbackSong?.id;
-  const hasCurrentSongAudio = Boolean(playbackSong?.audioUrl.trim());
+  const hasCurrentSongAudio = Boolean(getPlayableAudioUrl(playbackSong));
   const findNextPlayableIndex = useCallback((startIndex: number) => {
     for (let index = Math.max(0, startIndex); index < listenQueue.length; index += 1) {
-      if (listenQueue[index]?.audioUrl.trim()) {
+      if (getPlayableAudioUrl(listenQueue[index])) {
         return index;
       }
     }
     return -1;
   }, [listenQueue]);
   const playbackAudioUrl = useMemo(
-    () => toPlayableAudioUrl(playbackSong?.audioUrl ?? ''),
-    [playbackSong?.audioUrl]
+    () => toPlayableAudioUrl(getPlayableAudioUrl(playbackSong)),
+    [playbackSong]
   );
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
   const {
@@ -1128,7 +1132,7 @@ export function PlaylistPracticeView({
               const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
               const masteryColor = getMasteryColor(mastery);
               const shouldRenderLabelInsideBar = mastery >= 10;
-              const hasAudio = Boolean(song.audioUrl?.trim());
+              const hasAudio = Boolean(getPlayableAudioUrl(song));
               const hasSegments = song.segments.length > 0;
               const hasTapKeys = (song.pitchContourNotes?.length ?? 0) > 0;
               return (

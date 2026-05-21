@@ -102,6 +102,30 @@ describe('GET /api/songs', () => {
     ]);
   });
 
+  it('treats alternate audio as audio readiness', async () => {
+    const mockSongs = [{
+      id: 'blend-only',
+      title: 'Blend Only',
+      artist: null,
+      audioKey: null,
+      alternateAudioKey: 'audio/blend.mp3',
+      pitchContourNotes: [],
+      createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      lastPracticedAt: null,
+      userId: 'default',
+    }];
+    vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
+    vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
+    vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
+    vi.mocked(getSegmentsBySongId).mockResolvedValue([]);
+
+    const response = await GET(new Request('http://localhost/api/songs') as any);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data[0].hasAudio).toBe(true);
+  });
+
   it('returns empty list when database is not configured', async () => {
     vi.mocked(getAllSongs).mockRejectedValue(new Error('DATABASE_URL environment variable is not set'));
 

@@ -105,7 +105,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
             const detail = (await detailResponse.json()) as Playlist;
             const songs = Array.isArray(detail.songs) ? detail.songs : [];
 
-            const songsWithAudio = songs.filter((song) => !!song.audioUrl).length;
+            const songsWithAudio = songs.filter((song) => Boolean(song.audioUrl?.trim() || song.alternateAudioUrl?.trim())).length;
             const songsWithSegments = songs.filter((song) => (song.segments?.length ?? 0) > 0).length;
             const songsWithTapKeys = songs.filter((song) =>
               (song.pitchContourNotes?.length ?? 0) > 0

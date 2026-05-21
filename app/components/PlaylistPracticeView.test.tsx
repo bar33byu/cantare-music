@@ -169,6 +169,22 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-3-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
+  it('treats blend-only audio as playable for readiness', async () => {
+    const blendOnlyPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        { ...playlist.songs[0], audioUrl: '', alternateAudioUrl: 'https://example.com/blend.mp3' },
+      ],
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={blendOnlyPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file present');
+    });
+  });
+
   it('shows both readiness tags when both audio and segments are missing', async () => {
     const notReadyPlaylist: Playlist = {
       ...playlist,

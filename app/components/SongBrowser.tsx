@@ -9,6 +9,7 @@ interface SongListItem {
   title: string;
   artist?: string;
   audioKey?: string;
+  alternateAudioKey?: string | null;
   createdAt: string;
   lastPracticedAt?: string | null;
   masteryPercent?: number;
@@ -363,7 +364,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
         {displayedSongs.map((song) => {
           const masteryPercent = clampPercent(song.masteryPercent);
           const masteryColor = getMasteryColor(masteryPercent);
-          const hasAudio = song.hasAudio ?? Boolean(song.audioKey?.trim());
+          const hasAudio = song.hasAudio ?? Boolean(song.audioKey?.trim() || song.alternateAudioKey?.trim());
           const hasSegments = song.hasSegments ?? false;
           const hasTapKeys = song.hasTapKeys ?? false;
 

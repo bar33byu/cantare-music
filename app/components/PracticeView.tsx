@@ -244,8 +244,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
   const [audioVersion, setAudioVersion] = React.useState<AudioVersion>("straight");
-  const hasAlternateAudio = Boolean(song.alternateAudioUrl?.trim());
-  const activeAudioVersion: AudioVersion = hasAlternateAudio ? audioVersion : "straight";
+  const hasStraightAudio = Boolean(song.audioUrl?.trim());
+  const hasBlendAudio = Boolean(song.alternateAudioUrl?.trim());
+  const hasBothAudioVersions = hasStraightAudio && hasBlendAudio;
+  const activeAudioVersion: AudioVersion = hasBothAudioVersions ? audioVersion : hasBlendAudio ? "blend" : "straight";
   const activeAudioUrl = activeAudioVersion === "blend" ? (song.alternateAudioUrl ?? "") : song.audioUrl;
   const directPlaybackAudioUrl = useMemo(() => toPlayableAudioUrl(activeAudioUrl), [activeAudioUrl]);
   const pendingAudioVersionSwitchRef = React.useRef<{
@@ -460,8 +462,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     const stored = window.localStorage.getItem(AUDIO_VERSION_STORAGE_KEY);
-    setAudioVersion(hasAlternateAudio && stored === "blend" ? "blend" : "straight");
-  }, [hasAlternateAudio, song.id]);
+    setAudioVersion(hasBothAudioVersions && stored === "blend" ? "blend" : "straight");
+  }, [hasBothAudioVersions, song.id]);
 
   useEffect(() => {
     const pending = pendingAudioVersionSwitchRef.current;
@@ -1104,7 +1106,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [currentMs, getSegmentIndexAtMs, isLooping, session.currentSegmentIndex]);
 
   const handleAudioVersionChange = React.useCallback((nextVersion: AudioVersion) => {
-    if (nextVersion === activeAudioVersion || (nextVersion === "blend" && !hasAlternateAudio)) {
+    if (nextVersion === activeAudioVersion || !hasBothAudioVersions) {
       return;
     }
 
@@ -1123,7 +1125,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     setAudioVersion(nextVersion);
-  }, [activeAudioVersion, currentMs, currentSegment, durationMs, hasAlternateAudio, isLooping, isPlaying]);
+  }, [activeAudioVersion, currentMs, currentSegment, durationMs, hasBothAudioVersions, isLooping, isPlaying]);
 
   const getTapLane = React.useCallback((clientY: number) => {
     const rect = tapBarRef.current?.getBoundingClientRect();
@@ -1895,7 +1897,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           <KnowledgeBar percent={knowledgeScore.overall} />
         ) : null}
         <div className={isTapPracticeMode ? "flex flex-wrap items-center gap-1.5" : "mt-2 flex items-center gap-2"}>
-          {hasAlternateAudio ? (
+          {hasBothAudioVersions ? (
             <div
               className="inline-flex rounded-full border border-indigo-300 bg-white p-0.5"
               data-testid="practice-audio-version-toggle"
