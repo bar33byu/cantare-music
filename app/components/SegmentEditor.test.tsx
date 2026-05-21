@@ -62,6 +62,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -326,6 +327,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -414,6 +416,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -557,6 +560,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -654,6 +658,7 @@ describe('SegmentEditor', () => {
       play,
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -695,6 +700,7 @@ describe('SegmentEditor', () => {
       play,
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -733,6 +739,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek,
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -777,6 +784,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek,
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -816,6 +824,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek,
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -864,6 +873,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek,
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -982,6 +992,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1111,6 +1122,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1150,6 +1162,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1193,6 +1206,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1300,6 +1314,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" userId="test-user-vwzm4k" />);
@@ -1352,6 +1367,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1475,6 +1491,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

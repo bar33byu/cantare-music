@@ -230,8 +230,8 @@ describe('PlaylistBrowser', () => {
   });
 
   it('keeps the newest user switch result when earlier requests finish later', async () => {
-    let resolveDefaultList: ((value: Response) => void) | null = null;
-    let resolveTestUserList: ((value: Response) => void) | null = null;
+    let resolveDefaultList: (value: Response) => void = () => undefined;
+    let resolveTestUserList: (value: Response) => void = () => undefined;
 
     mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -269,7 +269,7 @@ describe('PlaylistBrowser', () => {
       />
     );
 
-    resolveTestUserList?.({
+    resolveTestUserList({
       ok: true,
       json: async () => ({
         playlists: [{ ...basePlaylist, id: 'pl-2', name: 'Test User Set' }],
@@ -280,7 +280,7 @@ describe('PlaylistBrowser', () => {
       expect(screen.getByTestId('playlist-name-pl-2')).toHaveTextContent('Test User Set');
     });
 
-    resolveDefaultList?.({
+    resolveDefaultList({
       ok: true,
       json: async () => ({
         playlists: [{ ...basePlaylist, id: 'pl-1', name: 'April Set' }],

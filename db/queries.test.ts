@@ -938,7 +938,7 @@ describe("createPlaylist", () => {
     insertSpy.mockReturnValue(insertChain);
 
     const { createPlaylist } = await getQueries();
-    const result = await createPlaylist({ name: "Sunday Set", eventDate: "2026-04-04" });
+    const result = await createPlaylist({ userId: "user-1", name: "Sunday Set", eventDate: "2026-04-04" });
 
     expect(insertSpy).toHaveBeenCalledWith(playlists);
     expect(result.id).toBe("pl-1");

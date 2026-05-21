@@ -205,7 +205,7 @@ describe("MidiSetupPanel", () => {
   });
 
   it("does not let delayed tap-save responses move the visible alignment backward", async () => {
-    let resolveTapSave: ((value: Response) => void) | null = null;
+    let resolveTapSave: (value: Response) => void = () => undefined;
     const delayedRequest = vi.fn(async (url: string, init?: RequestInit) => {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as { action?: string } : {};
       if (url.endsWith("/midi/alignment") && init?.method === "POST" && body.action === "tap") {
@@ -238,7 +238,7 @@ describe("MidiSetupPanel", () => {
 
     expect(screen.getAllByText("2 / 2 notes").length).toBeGreaterThan(0);
 
-    resolveTapSave?.({
+    resolveTapSave({
       ok: true,
       json: async () => ({
         alignment: {

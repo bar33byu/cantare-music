@@ -286,6 +286,8 @@ export function useAudioPlayer(
       audioUrlChangeCountRef.current += 1;
       previousAudioUrlRef.current = audioUrl;
     }
+    // Reset the hook snapshot while replacing the underlying audio element.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsReady(false);
     setIsPlaying(false);
     setCurrentMs(0);

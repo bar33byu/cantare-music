@@ -63,6 +63,7 @@ describe('SegmentEditor integration', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     let segmentsState = [...initialSegments];
