@@ -1487,6 +1487,86 @@ describe('PlaylistPracticeView', () => {
     }
   });
 
+  it('continues Auto Drill when speech synthesis is denied by the browser', async () => {
+    class MockSpeechSynthesisUtterance {
+      text: string;
+      onend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+
+    Object.defineProperty(window, 'SpeechSynthesisUtterance', {
+      configurable: true,
+      value: MockSpeechSynthesisUtterance,
+    });
+    vi.stubGlobal('SpeechSynthesisUtterance', MockSpeechSynthesisUtterance);
+    Object.defineProperty(window, 'speechSynthesis', {
+      configurable: true,
+      value: {
+        cancel: vi.fn(),
+        speak: vi.fn(() => {
+          throw new Error('The request is not allowed by the user agent or the platform in the current context, possibly because the user denied permission.');
+        }),
+      },
+    });
+
+    const play = vi.fn();
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 30000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/songs/') && url.includes('/ratings')) {
+        return { ok: true, json: async () => ({ ratings: [] }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(playlist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return { ok: true, json: async () => ({ score: 67 }) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-auto'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auto-drill-live')).toHaveTextContent('Playing Section 1.');
+      expect(play).toHaveBeenCalledWith(0, 1000);
+    });
+    expect(screen.getByTestId('auto-drill-live')).not.toHaveTextContent('request is not allowed');
+  });
+
   it('exits Auto Drill with Escape', async () => {
     installImmediateSpeechSynthesis();
     vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation(() => ({

@@ -58,7 +58,12 @@ interface AutoDrillQueueItem {
 }
 
 function speakPrompt(text: string, enabled = true): Promise<void> {
-  if (!enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+  if (
+    !enabled ||
+    typeof window === 'undefined' ||
+    !('speechSynthesis' in window) ||
+    typeof SpeechSynthesisUtterance === 'undefined'
+  ) {
     return Promise.resolve();
   }
 
@@ -77,8 +82,12 @@ function speakPrompt(text: string, enabled = true): Promise<void> {
     const fallbackTimer = window.setTimeout(finish, fallbackMs);
     utterance.onend = finish;
     utterance.onerror = finish;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      finish();
+    }
   });
 }
 
