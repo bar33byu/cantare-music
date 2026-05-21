@@ -208,6 +208,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const initialSegmentId = song.segments[initialSession.currentSegmentIndex]?.id ?? null;
   const segmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
+  const syncedInitialSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
   const lastSyncedSegmentIdRef = React.useRef<string | null>(initialSegmentId);
   const previousSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
   const lastSavedRatingsRef = React.useRef<string>("unloaded");
@@ -673,6 +674,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
 
+    if (initialSession.currentSegmentIndex === syncedInitialSegmentIndexRef.current) {
+      return;
+    }
+
+    syncedInitialSegmentIndexRef.current = initialSession.currentSegmentIndex;
     const targetIndex = Math.max(0, Math.min(song.segments.length - 1, initialSession.currentSegmentIndex));
     if (targetIndex === session.currentSegmentIndex) {
       return;
@@ -994,17 +1000,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
 
-    // When looping, play the current segment from the current position (or start if past the end).
-    if (isLooping && currentSegment) {
-      pausedByUserRef.current = false;
-      const segmentStartWithPreroll = getSegmentStartWithPreroll(currentSegment.startMs);
-      const resumeMs = currentMs >= currentSegment.endMs
-        ? segmentStartWithPreroll
-        : Math.max(currentMs, segmentStartWithPreroll);
-      startTapPracticePlayback(resumeMs, currentSegment.endMs);
-      return;
-    }
-    const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
+    const effectiveDurationMs = isLooping && currentSegment
+      ? currentSegment.endMs
+      : durationMs > 0
+        ? durationMs
+        : Number.POSITIVE_INFINITY;
     const fullPieceResumeMs = durationMs > 0 && currentMs >= durationMs ? 0 : currentMs;
     startTapPracticePlayback(fullPieceResumeMs, effectiveDurationMs, {
       resetTapRun: isTapPracticeMode && fullPieceResumeMs === 0,
@@ -1086,7 +1086,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastAction: "next-segment",
       lastActionAt: new Date().toISOString(),
     }));
-    jumpToSegment(activeIndex + 1, { preventBackwardWhilePlaying: true });
+    jumpToSegment(activeIndex + 1, { preventBackwardWhilePlaying: !isLooping });
   };
 
   const handleSeekSong = (ms: number) => {

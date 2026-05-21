@@ -2070,6 +2070,65 @@ describe("PracticeView", () => {
     expect(mockPlay.mock.calls.length).toBe(playCallsBeforePause);
   });
 
+  it("starts regular loop playback from the current playhead before the first segment", async () => {
+    const playbackState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 16000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const song: Song = {
+      id: "delayed-song",
+      title: "Delayed",
+      audioUrl: "https://cdn.example.com/audio.mp3",
+      segments: [
+        { id: "d0", songId: "delayed-song", order: 0, label: "A", lyricText: "", startMs: 4000, endMs: 8000 },
+        { id: "d1", songId: "delayed-song", order: 1, label: "B", lyricText: "", startMs: 10000, endMs: 14000 },
+      ],
+      createdAt: new Date().toISOString(),
+    };
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+    fireEvent.click(screen.getByTestId("mock-play-toggle"));
+
+    expect(mockPlay).toHaveBeenCalledWith(0, 8000);
+    expect(mockSeek).not.toHaveBeenCalledWith(4000);
+  });
+
+  it("next segment jumps to preroll while looping even when preroll is behind the playhead", async () => {
+    const playbackState = {
+      isPlaying: true,
+      isReady: true,
+      currentMs: 7900,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+    mockPlay.mockClear();
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+
+    expect(mockPlay).toHaveBeenCalledWith(7500, 12000);
+  });
+
   it("toggling loop while playing keeps the playhead in place", async () => {
     const playbackState = {
       isPlaying: true,
