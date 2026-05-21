@@ -1437,7 +1437,7 @@ export function PlaylistPracticeView({
               {autoDrillPracticeSession ? (
                 <div className="min-h-[720px] rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="auto-drill-practice-surface">
                   <PracticeView
-                    key={`${currentAutoDrillItem.song.id}:${currentAutoDrillItem.segment.id}`}
+                    key={currentAutoDrillItem.song.id}
                     song={currentAutoDrillItem.song}
                     userId={userId}
                     initialSession={autoDrillPracticeSession}

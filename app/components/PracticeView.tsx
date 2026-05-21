@@ -668,6 +668,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     segmentIndexRef.current = session.currentSegmentIndex;
   }, [session.currentSegmentIndex]);
 
+  useEffect(() => {
+    if (!hasSegments) {
+      return;
+    }
+
+    const targetIndex = Math.max(0, Math.min(song.segments.length - 1, initialSession.currentSegmentIndex));
+    if (targetIndex === session.currentSegmentIndex) {
+      return;
+    }
+
+    segmentIndexRef.current = targetIndex;
+    dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
+
+    const targetSegment = song.segments[targetIndex];
+    if (targetSegment && !isPlaying) {
+      seek(targetSegment.startMs);
+    }
+  }, [hasSegments, initialSession.currentSegmentIndex, isPlaying, seek, session.currentSegmentIndex, song.segments]);
+
   const flushPlayedTime = React.useCallback(() => {
     if (playbackStartedAtRef.current === null) {
       return;
@@ -1271,7 +1290,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [cancelTapPracticeCountIn, isTapPracticeMode, requestPlay, resetTapPracticeRun]);
 
   React.useEffect(() => {
-    if (!autoPlayOnMount || playScope !== "segment" || !currentSegment) {
+    const targetIndex = hasSegments
+      ? Math.max(0, Math.min(song.segments.length - 1, initialSession.currentSegmentIndex))
+      : session.currentSegmentIndex;
+
+    if (!autoPlayOnMount || playScope !== "segment" || !currentSegment || targetIndex !== session.currentSegmentIndex) {
       return;
     }
 
@@ -1290,13 +1313,27 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     autoPlayOnMount,
     currentSegment,
     getSegmentStartWithPreroll,
+    hasSegments,
+    initialSession.currentSegmentIndex,
     isTapPracticeMode,
     playScope,
+    session.currentSegmentIndex,
+    song.segments.length,
     startTapPracticePlayback,
   ]);
 
   React.useEffect(() => {
-    if (autoPlayToken <= 0 || autoPlayTokenHandledRef.current === autoPlayToken || playScope !== "segment" || !currentSegment) {
+    const targetIndex = hasSegments
+      ? Math.max(0, Math.min(song.segments.length - 1, initialSession.currentSegmentIndex))
+      : session.currentSegmentIndex;
+
+    if (
+      autoPlayToken <= 0 ||
+      autoPlayTokenHandledRef.current === autoPlayToken ||
+      playScope !== "segment" ||
+      !currentSegment ||
+      targetIndex !== session.currentSegmentIndex
+    ) {
       return;
     }
 
@@ -1321,10 +1358,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     autoPlayToken,
     currentSegment,
     getSegmentStartWithPreroll,
+    hasSegments,
+    initialSession.currentSegmentIndex,
     isTapPracticeMode,
     onAutoPlayBlocked,
     playbackError,
     playScope,
+    session.currentSegmentIndex,
+    song.segments.length,
     startTapPracticePlayback,
   ]);
 

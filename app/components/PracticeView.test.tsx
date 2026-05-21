@@ -245,6 +245,38 @@ describe("PracticeView", () => {
     expect(mockPlay).toHaveBeenCalledWith(0, 4000);
   });
 
+  it("auto-plays the updated segment when the initial session index changes", async () => {
+    const song = makeSong();
+    const session = { ...makeSession(song), currentSegmentIndex: 0 };
+    const { rerender } = render(
+      <PracticeView
+        song={song}
+        initialSession={session}
+        playScope="segment"
+        autoPlayToken={1}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("ratings-loading-skeleton")).not.toBeInTheDocument();
+    });
+    expect(mockPlay).toHaveBeenCalledWith(0, 4000);
+
+    rerender(
+      <PracticeView
+        song={song}
+        initialSession={{ ...session, currentSegmentIndex: 1 }}
+        playScope="segment"
+        autoPlayToken={2}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("segment-counter")).toHaveTextContent("Segment 2 of 3");
+      expect(mockPlay).toHaveBeenLastCalledWith(3500, 8000);
+    });
+  });
+
   it("does not report segment completion from stale end-position time during token replays", async () => {
     const song = makeSong();
     const session = { ...makeSession(song), currentSegmentIndex: 0 };
