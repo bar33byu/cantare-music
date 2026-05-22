@@ -1956,7 +1956,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                       : "text-indigo-700 hover:bg-indigo-50"
                   }`}
                 >
-                  {version === "straight" ? "Part Focus" : "Blend"}
+                  {version === "straight" ? "Part" : "Blend"}
                 </button>
               ))}
             </div>
@@ -1971,9 +1971,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   setTapHeatMapRefreshToken((previous) => previous + 1);
                 }
               }}
-              className="rounded-full border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+              aria-pressed={showCardContourMap}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                showCardContourMap
+                  ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
+                  : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+              }`}
             >
-              Card contour: {showCardContourMap ? "On" : "Off"}
+              Contour
             </button>
           ) : null}
           {hasSegments ? (
@@ -1990,7 +1995,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
               }`}
             >
-              {isTapPracticeMode ? "Tap On" : "Tap practice: Off"}
+              Tap
             </button>
           ) : null}
           {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
@@ -2081,7 +2086,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               data-testid="practice-prev-segment"
               onClick={handlePrevSegment}
               disabled={!canUsePrevSegment}
-              className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+              className="inline-flex h-24 w-10 shrink-0 self-center items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 12H6" />
@@ -2399,7 +2404,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               data-testid="practice-next-segment"
               onClick={handleNextSegment}
               disabled={!canUseNextSegment}
-              className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+              className="inline-flex h-24 w-10 shrink-0 self-center items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M6 12h12" />

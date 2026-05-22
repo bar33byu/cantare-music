@@ -1287,7 +1287,6 @@ export function PlaylistPracticeView({
                     initialSession={focusPracticeSession}
                     onSessionChange={handleFocusSessionChange}
                     onRatingsSaved={handleFocusRatingsSaved}
-                    breadcrumbRootLabel="Focus Queue"
                     segmentPrerollMs={focusPrerollMs}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
                     defaultLooping
