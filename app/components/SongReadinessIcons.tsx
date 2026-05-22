@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
 
 interface SongReadinessIconsProps {
-  hasAudio: boolean;
+  hasPartAudio: boolean;
+  hasBlendAudio: boolean;
   hasSegments: boolean;
-  hasTapKeys: boolean;
+  hasMidiContour: boolean;
   testIdPrefix?: string;
 }
 
@@ -35,20 +36,33 @@ function ReadinessDot({
   );
 }
 
-export function SongReadinessIcons({ hasAudio, hasSegments, hasTapKeys, testIdPrefix }: SongReadinessIconsProps) {
+export function SongReadinessIcons({ hasPartAudio, hasBlendAudio, hasSegments, hasMidiContour, testIdPrefix }: SongReadinessIconsProps) {
   return (
     <div
       className="inline-flex items-center gap-1"
       data-testid={testIdPrefix ? `${testIdPrefix}-readiness` : undefined}
     >
       <ReadinessDot
-        enabled={hasAudio}
-        title={hasAudio ? 'Audio file present' : 'Audio file missing'}
-        testId={testIdPrefix ? `${testIdPrefix}-readiness-audio` : undefined}
+        enabled={hasPartAudio}
+        title={hasPartAudio ? 'Part audio present' : 'Part audio missing'}
+        testId={testIdPrefix ? `${testIdPrefix}-readiness-part-audio` : undefined}
       >
         <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
           <path d="M15 9a5 5 0 0 1 0 6" />
+        </svg>
+      </ReadinessDot>
+
+      <ReadinessDot
+        enabled={hasBlendAudio}
+        title={hasBlendAudio ? 'Blend audio present' : 'Blend audio missing'}
+        testId={testIdPrefix ? `${testIdPrefix}-readiness-blend-audio` : undefined}
+      >
+        <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 8h5l5 8h6" />
+          <path d="M4 16h5l5-8h6" />
+          <path d="M18 5l3 3-3 3" />
+          <path d="M18 13l3 3-3 3" />
         </svg>
       </ReadinessDot>
 
@@ -65,9 +79,9 @@ export function SongReadinessIcons({ hasAudio, hasSegments, hasTapKeys, testIdPr
       </ReadinessDot>
 
       <ReadinessDot
-        enabled={hasTapKeys}
-        title={hasTapKeys ? 'Tap keys present' : 'Tap keys missing'}
-        testId={testIdPrefix ? `${testIdPrefix}-readiness-tapkeys` : undefined}
+        enabled={hasMidiContour}
+        title={hasMidiContour ? 'MIDI contour present' : 'MIDI contour missing'}
+        testId={testIdPrefix ? `${testIdPrefix}-readiness-midi-contour` : undefined}
       >
         <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M4 14c1.5 0 1.5-4 3-4s1.5 8 3 8 1.5-12 3-12 1.5 8 3 8 1.5-4 3-4" />

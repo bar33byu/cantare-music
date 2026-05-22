@@ -5,7 +5,7 @@ import { getMasteryColor } from "../lib/masteryColors";
 
 describe("AudioPlayer", () => {
   const defaultProps = {
-    audioUrl: "/audio/song.mp3",
+    audioUrl: "https://pub-example.r2.dev/audio/song.mp3",
     currentMs: 2500,
     durationMs: 12000,
     segmentStartMs: 1000,
@@ -153,7 +153,7 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-debug-panel")).toBeInTheDocument();
     expect(screen.getByTestId("audio-debug-last-event")).toHaveTextContent("init");
     expect(screen.getByTestId("audio-native-probe-direct")).toBeInTheDocument();
-    expect(screen.getByTestId("audio-native-probe-proxy")).toBeInTheDocument();
+    expect(screen.queryByTestId("audio-native-probe-proxy")).not.toBeInTheDocument();
     delete process.env.NEXT_PUBLIC_SHOW_AUDIO_DEBUG;
   });
 

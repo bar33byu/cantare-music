@@ -34,7 +34,9 @@ export async function GET(
 
     const sessions = await listTapPracticeSessionsForSong(id, userId);
     const sessionDetails = await Promise.all(
-      sessions.map(async (session) => getTapPracticeSessionDetail(session.id, userId))
+      sessions
+        .filter((session) => session.mode === 'practice')
+        .map(async (session) => getTapPracticeSessionDetail(session.id, userId))
     );
 
     const heatMapBySegment = Object.fromEntries(

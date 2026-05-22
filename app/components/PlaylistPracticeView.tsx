@@ -3,14 +3,24 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
-import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
+import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
 import { SongReadinessIcons } from './SongReadinessIcons';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
+import PracticeView from './PracticeView';
+import type { Segment, SegmentRating } from '../types';
+import type { SessionState } from '../lib/sessionReducer';
+import type { AutoDrillState, PracticeMode } from '../lib/autoDrill';
+import { getAutoDrillTargetPasses } from '../lib/autoDrill';
+import type { MemoryRating } from '../types';
 
 type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
+type FocusSortKey = 'mastery' | 'due-date' | 'song-order';
 interface SortState { key: SortKey; asc: boolean }
 const SORT_STORAGE_KEY = 'playlist-practice-sort';
 const DEFAULT_SORT: SortState = { key: 'date-practiced', asc: false };
+const DEFAULT_FOCUS_PREROLL_MS = 5000;
+const FOCUS_MASTERED_RATING = 5;
+const AUTO_DRILL_PREROLL_MS = 500;
 
 const sortKeyLabel: Record<SortKey, string> = {
   alphabetical: 'Alphabetical',
@@ -27,6 +37,59 @@ const sortDirLabel: Record<SortKey, [string, string]> = {
 };
 
 const defaultAscForKey = (key: SortKey) => key === 'alphabetical';
+
+interface FocusQueueItem {
+  id: string;
+  song: Playlist["songs"][number];
+  segment: Segment;
+  songIndex: number;
+  segmentIndex: number;
+  latestRating?: SegmentRating;
+  masteryPercent: number;
+}
+
+interface AutoDrillQueueItem {
+  id: string;
+  song: Playlist["songs"][number];
+  segment: Segment;
+  songIndex: number;
+  segmentIndex: number;
+  latestRating?: SegmentRating;
+}
+
+function speakPrompt(text: string, enabled = true): Promise<void> {
+  if (
+    !enabled ||
+    typeof window === 'undefined' ||
+    !('speechSynthesis' in window) ||
+    typeof SpeechSynthesisUtterance === 'undefined'
+  ) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    let settled = false;
+    const fallbackMs = Math.min(8000, Math.max(1800, text.split(/\s+/).length * 650));
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(fallbackTimer);
+      resolve();
+    };
+    const fallbackTimer = window.setTimeout(finish, fallbackMs);
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      finish();
+    }
+  });
+}
 
 function getLastPracticedLabel(value?: string | null): string {
   if (!value) return 'Not practiced yet';
@@ -58,39 +121,58 @@ function formatMs(ms: number): string {
 interface PlaylistPracticeViewProps {
   playlist: Playlist;
   userId?: string;
+  segmentPrerollMs?: number;
+  preferredAudioVersion?: PreferredAudioVersion;
+  onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
+  collapseLyricLineBreaks?: boolean;
   onExit: () => void;
   onManage?: () => void;
   onSelectSong: (song: Playlist["songs"][number]) => void;
 }
 
-const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v2';
-const OLD_PLAYLIST_PRACTICE_CACHE_NAMES = ['cantare-playlist-practice-v1'];
-const AUDIO_CACHE_NAME = 'cantare-audio-v2';
-const AUDIO_CACHED_AT_HEADER = 'x-cantare-cached-at';
+const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
 
-function withAudioCachedAt(response: Response): Response {
-  const headers = new Headers(response.headers);
-  headers.set(AUDIO_CACHED_AT_HEADER, String(Date.now()));
-  headers.set('Cache-Control', 'public, max-age=1209600');
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
-
-export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSelectSong }: PlaylistPracticeViewProps) {
+export function PlaylistPracticeView({
+  playlist,
+  userId,
+  segmentPrerollMs = DEFAULT_FOCUS_PREROLL_MS,
+  preferredAudioVersion = 'part',
+  onPreferredAudioVersionChange,
+  collapseLyricLineBreaks = false,
+  onExit,
+  onManage,
+  onSelectSong,
+}: PlaylistPracticeViewProps) {
   const [livePlaylist, setLivePlaylist] = useState(playlist);
   const [playlistScore, setPlaylistScore] = useState(0);
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
-  const [mode, setMode] = useState<'practice' | 'listen'>('practice');
+  const [mode, setMode] = useState<'practice' | 'focus' | 'listen' | 'auto'>('practice');
+  const [practiceMode, setPracticeMode] = useState<PracticeMode>('manual');
+  const [autoDrillState, setAutoDrillState] = useState<AutoDrillState>('idle');
+  const [autoDrillIndex, setAutoDrillIndex] = useState(0);
+  const [autoDrillPlayToken, setAutoDrillPlayToken] = useState(0);
+  const [autoDrillMessage, setAutoDrillMessage] = useState('Auto Drill idle');
+  const [autoDrillPlaybackWarning, setAutoDrillPlaybackWarning] = useState<string | null>(null);
+  const [autoDrillVoiceEnabled, setAutoDrillVoiceEnabled] = useState(true);
+  const [autoDrillCompletedPasses, setAutoDrillCompletedPasses] = useState<Record<string, number>>({});
+  const [autoDrillRunRatings, setAutoDrillRunRatings] = useState<Record<string, MemoryRating>>({});
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
+  const [currentFocusIndex, setCurrentFocusIndex] = useState(0);
+  const [focusAutoPlayItemId, setFocusAutoPlayItemId] = useState<string | null>(null);
   const [isListenPlaying, setIsListenPlaying] = useState(false);
-  const [useProxyFallback, setUseProxyFallback] = useState(false);
+  const [focusSortKey, setFocusSortKey] = useState<FocusSortKey>('mastery');
+  const [focusPrerollMs, setFocusPrerollMs] = useState(segmentPrerollMs);
+  const [ratingsBySongId, setRatingsBySongId] = useState<Record<string, SegmentRating[]>>({});
+  const [focusRatingsLoading, setFocusRatingsLoading] = useState(false);
+  const [focusRatingsError, setFocusRatingsError] = useState<string | null>(null);
+  const lastObservedFocusItemIdRef = useRef<string | null>(null);
+  const lastObservedFocusRatingRef = useRef<string | null>(null);
   const listenStartedSongIdRef = useRef<string | null>(null);
-  const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
+  const autoDrillRunIdRef = useRef(0);
+  const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again'>('full');
+  const autoDrillHandledCompletionRef = useRef<string | null>(null);
 
   const userScopedHeaders = useMemo(() => {
     return userId ? { 'X-User-ID': userId } : undefined;
@@ -106,20 +188,6 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
   useEffect(() => {
     setLivePlaylist(playlist);
   }, [playlist]);
-
-  useEffect(() => {
-    const deleteOldPlaylistCaches = async () => {
-      if (typeof window === 'undefined' || !('caches' in window) || typeof window.caches.delete !== 'function') {
-        return;
-      }
-
-      await Promise.allSettled(
-        OLD_PLAYLIST_PRACTICE_CACHE_NAMES.map((cacheName) => window.caches.delete(cacheName))
-      );
-    };
-
-    void deleteOldPlaylistCaches();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,72 +265,256 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     });
   }, [livePlaylist.songs, sort]);
 
+  useEffect(() => {
+    setFocusPrerollMs(segmentPrerollMs);
+  }, [segmentPrerollMs]);
+
+  useEffect(() => {
+    if (mode !== 'focus' && mode !== 'auto') {
+      return;
+    }
+
+    let cancelled = false;
+    const songsWithSegments = livePlaylist.songs.filter((song) => song.segments.length > 0);
+
+    if (songsWithSegments.length === 0) {
+      setRatingsBySongId({});
+      setFocusRatingsLoading(false);
+      setFocusRatingsError(null);
+      return;
+    }
+
+    const loadRatings = async () => {
+      setFocusRatingsLoading(true);
+      setFocusRatingsError(null);
+      try {
+        const entries = await Promise.all(
+          songsWithSegments.map(async (song) => {
+            const response = await fetch(`/api/songs/${song.id}/ratings`, {
+              headers: userScopedHeaders,
+              cache: 'no-store',
+            });
+            if (!response.ok) {
+              throw new Error(`Failed to load ratings for ${song.title}`);
+            }
+            const payload = (await response.json()) as { ratings?: SegmentRating[] };
+            return [song.id, Array.isArray(payload.ratings) ? payload.ratings : []] as const;
+          })
+        );
+
+        if (!cancelled) {
+          setRatingsBySongId(Object.fromEntries(entries));
+        }
+      } catch {
+        if (!cancelled) {
+          setFocusRatingsError('Could not load segment ratings. Focus Queue is still available.');
+        }
+      } finally {
+        if (!cancelled) {
+          setFocusRatingsLoading(false);
+        }
+      }
+    };
+
+    void loadRatings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [livePlaylist.songs, mode, refetchTrigger, userScopedHeaders]);
+
+  const focusQueue = useMemo<FocusQueueItem[]>(() => {
+    const items = livePlaylist.songs.flatMap((song, songIndex) => {
+      const ratings = ratingsBySongId[song.id] ?? [];
+      return [...song.segments]
+        .sort((a, b) => a.order - b.order || a.startMs - b.startMs)
+        .map((segment, segmentIndex) => {
+          const latestRating = ratings
+            .filter((rating) => rating.segmentId === segment.id)
+            .sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt))[0];
+          return {
+            id: `${song.id}:${segment.id}`,
+            song,
+            segment,
+            songIndex,
+            segmentIndex,
+            latestRating,
+            masteryPercent: latestRating ? latestRating.rating * 20 : 0,
+          };
+        })
+        .filter((item) => (item.latestRating?.rating ?? 0) < FOCUS_MASTERED_RATING);
+    });
+
+    if (focusSortKey === 'song-order') {
+      return items.sort((a, b) => a.songIndex - b.songIndex || a.segmentIndex - b.segmentIndex);
+    }
+
+    const groupedBySong = new Map<number, FocusQueueItem[]>();
+    for (const item of items) {
+      const group = groupedBySong.get(item.songIndex) ?? [];
+      group.push(item);
+      groupedBySong.set(item.songIndex, group);
+    }
+
+    return [...groupedBySong.values()]
+      .map((group) => [...group].sort((a, b) => a.segmentIndex - b.segmentIndex))
+      .sort((aGroup, bGroup) => {
+        const aFirst = aGroup[0];
+        const bFirst = bGroup[0];
+        if (!aFirst || !bFirst) {
+          return 0;
+        }
+
+        if (focusSortKey === 'due-date') {
+          const aOldest = Math.min(...aGroup.map((item) => item.latestRating ? Date.parse(item.latestRating.ratedAt) : 0));
+          const bOldest = Math.min(...bGroup.map((item) => item.latestRating ? Date.parse(item.latestRating.ratedAt) : 0));
+          const aWeakest = Math.min(...aGroup.map((item) => item.masteryPercent));
+          const bWeakest = Math.min(...bGroup.map((item) => item.masteryPercent));
+          return aOldest - bOldest || aWeakest - bWeakest || aFirst.songIndex - bFirst.songIndex;
+        }
+
+        const aWeakest = Math.min(...aGroup.map((item) => item.masteryPercent));
+        const bWeakest = Math.min(...bGroup.map((item) => item.masteryPercent));
+        return aWeakest - bWeakest || aFirst.songIndex - bFirst.songIndex;
+      })
+      .flat();
+  }, [focusSortKey, livePlaylist.songs, ratingsBySongId]);
+
+  const autoDrillQueue = useMemo<AutoDrillQueueItem[]>(() => {
+    return livePlaylist.songs.flatMap((song, songIndex) => {
+      if (!resolvePreferredAudioUrl(song, preferredAudioVersion)) {
+        return [];
+      }
+
+      const ratings = ratingsBySongId[song.id] ?? [];
+      return [...song.segments]
+        .sort((a, b) => a.order - b.order || a.startMs - b.startMs)
+        .map((segment, segmentIndex) => {
+          const latestRating = ratings
+            .filter((rating) => rating.segmentId === segment.id)
+            .sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt))[0];
+          return {
+            id: `${song.id}:${segment.id}`,
+            song,
+            segment,
+            songIndex,
+            segmentIndex,
+            latestRating,
+          };
+        });
+    });
+  }, [livePlaylist.songs, preferredAudioVersion, ratingsBySongId]);
+
+  const currentAutoDrillItem = autoDrillQueue[autoDrillIndex];
+
+  useEffect(() => {
+    setAutoDrillIndex((prev) => Math.min(prev, Math.max(autoDrillQueue.length - 1, 0)));
+  }, [autoDrillQueue.length]);
+
+  useEffect(() => {
+    setCurrentFocusIndex((prev) => Math.min(prev, Math.max(focusQueue.length - 1, 0)));
+  }, [focusQueue.length]);
+
+  const currentFocusItem = focusQueue[currentFocusIndex];
+  const handlePrevFocusSegment = useCallback((options?: { wasPlaying: boolean }) => {
+    setCurrentFocusIndex((prev) => {
+      const nextIndex = Math.max(prev - 1, 0);
+      setFocusAutoPlayItemId(options?.wasPlaying ? focusQueue[nextIndex]?.id ?? null : null);
+      return nextIndex;
+    });
+  }, [focusQueue]);
+  const handleNextFocusSegment = useCallback((options?: { wasPlaying: boolean }) => {
+    setCurrentFocusIndex((prev) => {
+      const nextIndex = Math.min(prev + 1, Math.max(focusQueue.length - 1, 0));
+      setFocusAutoPlayItemId(options?.wasPlaying ? focusQueue[nextIndex]?.id ?? null : null);
+      return nextIndex;
+    });
+  }, [focusQueue]);
+
+  useEffect(() => {
+    if (!focusAutoPlayItemId || currentFocusItem?.id !== focusAutoPlayItemId) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setFocusAutoPlayItemId(null), 0);
+    return () => window.clearTimeout(timer);
+  }, [currentFocusItem?.id, focusAutoPlayItemId]);
+
+  const focusPracticeSession = useMemo<SessionState | null>(() => {
+    if (!currentFocusItem) {
+      return null;
+    }
+
+    return {
+      id: `playlist-focus-${playlist.id}-${currentFocusItem.segment.id}`,
+      songId: currentFocusItem.song.id,
+      currentSongId: currentFocusItem.song.id,
+      currentSegmentIndex: currentFocusItem.segmentIndex,
+      isLocked: false,
+      ratings: ratingsBySongId[currentFocusItem.song.id] ?? [],
+      startedAt: new Date().toISOString(),
+    };
+  }, [currentFocusItem, playlist.id, ratingsBySongId]);
+
+  const autoDrillPracticeSession = useMemo<SessionState | null>(() => {
+    if (!currentAutoDrillItem) {
+      return null;
+    }
+
+    return {
+      id: `playlist-auto-${playlist.id}-${currentAutoDrillItem.segment.id}`,
+      songId: currentAutoDrillItem.song.id,
+      currentSongId: currentAutoDrillItem.song.id,
+      currentSegmentIndex: currentAutoDrillItem.segmentIndex,
+      isLocked: false,
+      ratings: ratingsBySongId[currentAutoDrillItem.song.id] ?? [],
+      startedAt: new Date().toISOString(),
+    };
+  }, [currentAutoDrillItem, playlist.id, ratingsBySongId]);
+
+  useEffect(() => {
+    if (!currentFocusItem) {
+      lastObservedFocusItemIdRef.current = null;
+      lastObservedFocusRatingRef.current = null;
+      return;
+    }
+
+    if (lastObservedFocusItemIdRef.current === currentFocusItem.id) {
+      return;
+    }
+
+    lastObservedFocusItemIdRef.current = currentFocusItem.id;
+    lastObservedFocusRatingRef.current = currentFocusItem.latestRating
+      ? `${currentFocusItem.segment.id}:${currentFocusItem.latestRating.rating}:${currentFocusItem.latestRating.ratedAt}`
+      : null;
+  }, [currentFocusItem]);
+
   const listenQueue = displayedSongs;
   const currentSong = listenQueue[currentSongIndex];
-  const currentSongId = currentSong?.id;
-  const hasCurrentSongAudio = Boolean(currentSong?.audioUrl.trim());
+  const playbackSong = mode === 'focus' || mode === 'auto' ? undefined : currentSong;
+  const currentSongId = playbackSong?.id;
+  const hasCurrentSongAudio = Boolean(resolvePreferredAudioUrl(playbackSong, preferredAudioVersion));
   const findNextPlayableIndex = useCallback((startIndex: number) => {
     for (let index = Math.max(0, startIndex); index < listenQueue.length; index += 1) {
-      if (listenQueue[index]?.audioUrl.trim()) {
+      if (resolvePreferredAudioUrl(listenQueue[index], preferredAudioVersion)) {
         return index;
       }
     }
     return -1;
-  }, [listenQueue]);
-  const proxyAudioUrl = useMemo(
-    () => buildProxyAudioUrl(parseAudioKey(currentSong?.audioUrl ?? '')),
-    [currentSong?.audioUrl]
+  }, [listenQueue, preferredAudioVersion]);
+  const playbackAudioUrl = useMemo(
+    () => toPlayableAudioUrl(resolvePreferredAudioUrl(playbackSong, preferredAudioVersion)),
+    [playbackSong, preferredAudioVersion]
   );
-  const directPlaybackAudioUrl = useMemo(
-    () => toPlayableAudioUrl(currentSong?.audioUrl ?? ''),
-    [currentSong?.audioUrl]
-  );
-  const canFallbackToProxy = proxyAudioUrl !== null && proxyAudioUrl !== directPlaybackAudioUrl;
-  const playbackAudioUrl = useMemo(() => {
-    if (useProxyFallback && canFallbackToProxy && proxyAudioUrl) {
-      return proxyAudioUrl;
-    }
-    return directPlaybackAudioUrl;
-  }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
   const {
     endedCount: playbackEndedCount = 0,
     pause: pauseAudio,
     play: playAudio,
-    playbackError,
   } = audioPlayer;
   const requestPlay = useCallback((startMs: number, endMs: number) => {
-    pendingFallbackPlayRangeRef.current = !useProxyFallback && canFallbackToProxy
-      ? { startMs, endMs }
-      : null;
     playAudio(startMs, endMs);
-  }, [canFallbackToProxy, playAudio, useProxyFallback]);
-
-  useEffect(() => {
-    setUseProxyFallback(false);
-    pendingFallbackPlayRangeRef.current = null;
-  }, [currentSongId]);
-
-  useEffect(() => {
-    if (!playbackError || useProxyFallback || !canFallbackToProxy) {
-      return;
-    }
-    setUseProxyFallback(true);
-  }, [canFallbackToProxy, playbackError, useProxyFallback]);
-
-  useEffect(() => {
-    if (!useProxyFallback) {
-      return;
-    }
-
-    const pendingRange = pendingFallbackPlayRangeRef.current;
-    if (!pendingRange) {
-      return;
-    }
-
-    pendingFallbackPlayRangeRef.current = null;
-    playAudio(pendingRange.startMs, pendingRange.endMs);
-  }, [playAudio, useProxyFallback]);
+  }, [playAudio]);
 
   useEffect(() => {
     if (mode !== 'listen') {
@@ -316,12 +568,12 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
     if (nextPlayableIndex === -1) {
       setIsListenPlaying(false);
       listenStartedSongIdRef.current = null;
+      pauseAudio();
       return;
     }
 
-    listenStartedSongIdRef.current = null;
     setCurrentSongIndex(nextPlayableIndex);
-  }, [currentSongIndex, findNextPlayableIndex, isListenPlaying, mode, playbackEndedCount]);
+  }, [currentSongIndex, findNextPlayableIndex, isListenPlaying, mode, pauseAudio, playbackEndedCount]);
 
   const handleListenPlayPause = () => {
     if (audioPlayer.isPlaying || isListenPlaying) {
@@ -331,20 +583,16 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
       return;
     }
 
+    const startIndex = hasCurrentSongAudio ? currentSongIndex : findNextPlayableIndex(currentSongIndex);
+    if (startIndex === -1) {
+      return;
+    }
+
+    if (startIndex !== currentSongIndex) {
+      setCurrentSongIndex(startIndex);
+    }
+    listenStartedSongIdRef.current = null;
     setIsListenPlaying(true);
-    if (currentSongId && hasCurrentSongAudio) {
-      listenStartedSongIdRef.current = currentSongId;
-      requestPlay(0, 0);
-      return;
-    }
-
-    const nextPlayableIndex = findNextPlayableIndex(currentSongIndex);
-    if (nextPlayableIndex === -1) {
-      setIsListenPlaying(false);
-      return;
-    }
-
-    setCurrentSongIndex(nextPlayableIndex);
   };
 
   const handleNextSong = () => {
@@ -358,6 +606,297 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
       setCurrentSongIndex(prev => prev - 1);
     }
   };
+
+  const handleFocusSessionChange = useCallback((session: SessionState) => {
+    if (!currentFocusItem) {
+      return;
+    }
+
+    const activeSegment = currentFocusItem.song.segments[session.currentSegmentIndex];
+    if (activeSegment) {
+      const nextFocusIndex = focusQueue.findIndex(
+        (item) => item.song.id === currentFocusItem.song.id && item.segment.id === activeSegment.id
+      );
+      if (nextFocusIndex !== -1 && nextFocusIndex !== currentFocusIndex) {
+        setCurrentFocusIndex(nextFocusIndex);
+      }
+    }
+  }, [currentFocusIndex, currentFocusItem, focusQueue]);
+
+  const handleFocusRatingsSaved = useCallback((ratings: SessionState["ratings"]) => {
+    if (!currentFocusItem) {
+      return;
+    }
+
+    setRatingsBySongId((prev) => ({ ...prev, [currentFocusItem.song.id]: ratings }));
+
+    const latestForQueuedSegment = ratings
+      .filter((rating) => rating.segmentId === currentFocusItem.segment.id)
+      .sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt))[0];
+
+    const nextObservedKey = latestForQueuedSegment
+      ? `${currentFocusItem.segment.id}:${latestForQueuedSegment.rating}:${latestForQueuedSegment.ratedAt}`
+      : null;
+
+    if (!nextObservedKey || nextObservedKey === lastObservedFocusRatingRef.current) {
+      return;
+    }
+
+    lastObservedFocusRatingRef.current = nextObservedKey;
+    setRefetchTrigger((prev) => prev + 1);
+    setCurrentFocusIndex((prev) => {
+      const lastIndex = Math.max(focusQueue.length - 1, 0);
+      return focusSortKey === 'song-order' ? Math.min(prev + 1, lastIndex) : Math.min(prev, lastIndex);
+    });
+  }, [currentFocusItem, focusQueue.length, focusSortKey]);
+
+  const stopAutoDrill = useCallback(() => {
+    autoDrillRunIdRef.current += 1;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setPracticeMode('manual');
+    setAutoDrillState('idle');
+    setAutoDrillMessage('Auto Drill idle');
+    setMode('practice');
+  }, []);
+
+  const startAutoDrill = useCallback(() => {
+    autoDrillRunIdRef.current += 1;
+    autoDrillTransitionRef.current = 'full';
+    autoDrillHandledCompletionRef.current = null;
+    setMode('auto');
+    setPracticeMode('auto-drill');
+    setAutoDrillIndex(0);
+    setAutoDrillCompletedPasses({});
+    setAutoDrillRunRatings({});
+    setAutoDrillPlaybackWarning(null);
+    setAutoDrillMessage('Auto Drill starting');
+    setAutoDrillState(autoDrillQueue.length > 0 ? 'announcing' : 'complete');
+  }, [autoDrillQueue.length]);
+
+  const handleAutoDrillRatingsSaved = useCallback((ratings: SessionState["ratings"]) => {
+    if (!currentAutoDrillItem) {
+      return;
+    }
+
+    setRatingsBySongId((prev) => ({ ...prev, [currentAutoDrillItem.song.id]: ratings }));
+    setRefetchTrigger((prev) => prev + 1);
+  }, [currentAutoDrillItem]);
+
+  const advanceAutoDrillSegment = useCallback((fromItem: AutoDrillQueueItem) => {
+    if (autoDrillIndex >= autoDrillQueue.length - 1) {
+      setAutoDrillState('complete');
+      setAutoDrillMessage('Playlist complete.');
+      setAutoDrillPlaybackWarning(null);
+      return;
+    }
+
+    const nextItem = autoDrillQueue[autoDrillIndex + 1];
+    autoDrillTransitionRef.current = nextItem?.song.id === fromItem.song.id ? 'quick' : 'full';
+    setAutoDrillIndex((prev) => Math.min(prev + 1, Math.max(autoDrillQueue.length - 1, 0)));
+    setAutoDrillState('announcing');
+    setAutoDrillPlaybackWarning(null);
+    setAutoDrillMessage(nextItem?.song.id === fromItem.song.id ? 'Next' : `${nextItem?.song.title ?? ''}`);
+  }, [autoDrillIndex, autoDrillQueue]);
+
+  const jumpAutoDrillSegment = useCallback((targetIndex: number, direction: 'previous' | 'next') => {
+    if (
+      !currentAutoDrillItem ||
+      practiceMode !== 'auto-drill' ||
+      autoDrillState === 'idle' ||
+      autoDrillState === 'complete' ||
+      targetIndex < 0 ||
+      targetIndex >= autoDrillQueue.length ||
+      targetIndex === autoDrillIndex
+    ) {
+      return;
+    }
+
+    const targetItem = autoDrillQueue[targetIndex];
+    if (!targetItem) {
+      return;
+    }
+
+    autoDrillHandledCompletionRef.current = null;
+    setAutoDrillCompletedPasses((prev) => ({
+      ...prev,
+      [targetItem.id]: 0,
+    }));
+    autoDrillTransitionRef.current = direction === 'previous'
+      ? 'previous'
+      : targetItem.song.id === currentAutoDrillItem.song.id ? 'quick' : 'full';
+    setAutoDrillIndex(targetIndex);
+    setAutoDrillState('announcing');
+    setAutoDrillPlaybackWarning(null);
+    setAutoDrillMessage(direction === 'previous'
+      ? 'Previous'
+      : targetItem.song.id === currentAutoDrillItem.song.id ? 'Next' : targetItem.song.title);
+  }, [autoDrillIndex, autoDrillQueue, autoDrillState, currentAutoDrillItem, practiceMode]);
+
+  const handlePrevAutoDrillSegment = useCallback(() => {
+    jumpAutoDrillSegment(autoDrillIndex - 1, 'previous');
+  }, [autoDrillIndex, jumpAutoDrillSegment]);
+
+  const handleNextAutoDrillSegment = useCallback(() => {
+    jumpAutoDrillSegment(autoDrillIndex + 1, 'next');
+  }, [autoDrillIndex, jumpAutoDrillSegment]);
+
+  const handleAutoDrillPlaybackComplete = useCallback(() => {
+    if (
+      practiceMode !== 'auto-drill' ||
+      autoDrillState !== 'playing'
+    ) {
+      return;
+    }
+
+    if (!currentAutoDrillItem) {
+      setAutoDrillState('complete');
+      setAutoDrillMessage('Playlist complete.');
+      return;
+    }
+
+    const completionKey = `${currentAutoDrillItem.id}:${autoDrillPlayToken}`;
+    if (autoDrillHandledCompletionRef.current === completionKey) {
+      return;
+    }
+    autoDrillHandledCompletionRef.current = completionKey;
+
+    const completedPasses = (autoDrillCompletedPasses[currentAutoDrillItem.id] ?? 0) + 1;
+    const activeRating = autoDrillRunRatings[currentAutoDrillItem.id] ?? currentAutoDrillItem.latestRating?.rating;
+    const targetPasses = getAutoDrillTargetPasses(activeRating);
+    const shouldReplaySegment = completedPasses < targetPasses;
+
+    setAutoDrillCompletedPasses((prev) => ({
+      ...prev,
+      [currentAutoDrillItem.id]: completedPasses,
+    }));
+    setAutoDrillPlaybackWarning(null);
+
+    if (shouldReplaySegment) {
+      autoDrillTransitionRef.current = 'again';
+      setAutoDrillState('repeating');
+      setAutoDrillMessage('Again');
+      return;
+    }
+
+    advanceAutoDrillSegment(currentAutoDrillItem);
+  }, [
+    advanceAutoDrillSegment,
+    autoDrillCompletedPasses,
+    autoDrillPlayToken,
+    autoDrillState,
+    currentAutoDrillItem,
+    practiceMode,
+    autoDrillRunRatings,
+  ]);
+
+  const handleAutoDrillRatingSubmitted = useCallback((rating: MemoryRating) => {
+    if (
+      !currentAutoDrillItem ||
+      practiceMode !== 'auto-drill' ||
+      autoDrillState === 'idle' ||
+      autoDrillState === 'complete'
+    ) {
+      return;
+    }
+
+    setAutoDrillRunRatings((prev) => ({
+      ...prev,
+      [currentAutoDrillItem.id]: rating,
+    }));
+    setAutoDrillPlaybackWarning(null);
+    setAutoDrillMessage(`Rated ${rating}.`);
+
+    if (autoDrillState !== 'playing') {
+      const completedPasses = autoDrillCompletedPasses[currentAutoDrillItem.id] ?? 0;
+      const targetPasses = getAutoDrillTargetPasses(rating);
+      if (completedPasses >= targetPasses) {
+        advanceAutoDrillSegment(currentAutoDrillItem);
+        return;
+      }
+      autoDrillTransitionRef.current = 'again';
+      setAutoDrillState('repeating');
+      setAutoDrillMessage('Again');
+    }
+  }, [advanceAutoDrillSegment, autoDrillCompletedPasses, autoDrillState, currentAutoDrillItem, practiceMode]);
+
+  useEffect(() => {
+    if (practiceMode !== 'auto-drill') {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        stopAutoDrill();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [practiceMode, stopAutoDrill]);
+
+  useEffect(() => {
+    if (practiceMode !== 'auto-drill') {
+      return;
+    }
+
+    if (autoDrillState === 'complete') {
+      autoDrillRunIdRef.current += 1;
+      setAutoDrillMessage('Playlist complete.');
+      void speakPrompt('Playlist complete.', autoDrillVoiceEnabled);
+      return;
+    }
+
+    if (!currentAutoDrillItem) {
+      setAutoDrillState('complete');
+      return;
+    }
+
+    if (autoDrillState !== 'announcing' && autoDrillState !== 'repeating') {
+      return;
+    }
+
+    const runId = autoDrillRunIdRef.current + 1;
+    autoDrillRunIdRef.current = runId;
+    let cancelled = false;
+
+    const runPromptSequence = async () => {
+      const transition = autoDrillTransitionRef.current;
+
+      if (autoDrillState === 'repeating' || transition === 'again') {
+        setAutoDrillMessage('Again');
+        await speakPrompt('Again', autoDrillVoiceEnabled);
+      } else if (transition === 'previous') {
+        setAutoDrillMessage('Previous');
+        await speakPrompt('Previous', autoDrillVoiceEnabled);
+      } else if (transition === 'quick') {
+        setAutoDrillMessage('Next');
+        await speakPrompt('Next', autoDrillVoiceEnabled);
+      } else {
+        const songMessage = currentAutoDrillItem.song.title;
+        setAutoDrillMessage(songMessage);
+        await speakPrompt(songMessage, autoDrillVoiceEnabled);
+      }
+
+      if (cancelled || autoDrillRunIdRef.current !== runId) {
+        return;
+      }
+
+      setAutoDrillState('playing');
+      setAutoDrillMessage(`Playing ${currentAutoDrillItem.segment.label}.`);
+      setAutoDrillPlaybackWarning(null);
+      autoDrillHandledCompletionRef.current = null;
+      setAutoDrillPlayToken((prev) => prev + 1);
+    };
+
+    void runPromptSequence();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [autoDrillIndex, autoDrillState, autoDrillVoiceEnabled, currentAutoDrillItem, practiceMode]);
 
   useEffect(() => {
     try {
@@ -374,7 +913,9 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
           setSort(parsed as SortState);
         }
       }
-    } catch { /* ignore */ }
+    } catch {
+      // Ignore malformed persisted sorting preferences.
+    }
   }, []);
 
   const updateSort = (next: SortState) => {
@@ -431,7 +972,6 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
 
       try {
         const playlistCache = await window.caches.open(PLAYLIST_PRACTICE_CACHE_NAME);
-        const audioCache = await window.caches.open(AUDIO_CACHE_NAME);
 
         await Promise.allSettled(
           livePlaylist.songs.map(async (song) => {
@@ -442,17 +982,6 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
             const songResponse = await fetch(songRequest, { cache: 'force-cache' });
             if (songResponse.ok) {
               await playlistCache.put(songRequest, songResponse.clone());
-            }
-
-            const proxyAudioUrl = buildProxyAudioUrl(parseAudioKey(song.audioUrl));
-            if (!proxyAudioUrl) {
-              return;
-            }
-
-            const audioRequest = new Request(proxyAudioUrl);
-            const audioResponse = await fetch(audioRequest, { cache: 'reload' });
-            if (audioResponse.ok && audioResponse.status === 200) {
-              await audioCache.put(audioRequest, withAudioCachedAt(audioResponse.clone()));
             }
           })
         );
@@ -509,31 +1038,90 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
   return (
     <section data-testid="playlist-practice-view" className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="mb-1 flex items-center gap-1 text-sm text-gray-600">
-            <button
-              data-testid="playlist-practice-exit"
-              className="hover:text-indigo-700 hover:underline"
-              onClick={onExit}
-            >
-              Playlists
-            </button>
-            <span>/</span>
-            <span className="text-gray-900">{livePlaylist.name}</span>
-          </div>
-          <h2 className="text-2xl font-bold text-slate-950">{livePlaylist.name}</h2>
-          <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
-            Playlist Knowledge: {playlistScore}%
-          </p>
-        </div>
-        <div className="flex gap-2">
+        <div className="flex min-w-0 items-start gap-3">
           <button
             type="button"
-            onClick={() => setMode(mode === 'practice' ? 'listen' : 'practice')}
-            className="flex h-10 items-center gap-2 rounded border border-indigo-300 px-3 text-indigo-700 hover:bg-indigo-50"
+            data-testid="playlist-practice-exit"
+            aria-label="Back to playlists"
+            title="Back to playlists"
+            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 hover:border-indigo-400 hover:text-indigo-700"
+            onClick={onExit}
           >
-            {mode === 'practice' ? '🎧 Listen' : '🎼 Practice'}
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+              <path d="M19 12H5" />
+              <path d="m12 19-7-7 7-7" />
+            </svg>
           </button>
+          <div className="min-w-0">
+            <h2 className="truncate text-2xl font-bold text-gray-900">{livePlaylist.name}</h2>
+            <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
+              Playlist Knowledge: {playlistScore}%
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <div className="inline-flex h-10 rounded border border-indigo-300 bg-white p-0.5">
+            {([
+              ['practice', 'Songs'],
+              ['focus', 'Focus'],
+              ['auto', 'Auto Drill'],
+              ['listen', 'Listen'],
+            ] as const).map(([nextMode, label]) => (
+              <button
+                key={nextMode}
+                type="button"
+                data-testid={`playlist-mode-${nextMode}`}
+                aria-pressed={mode === nextMode}
+                onClick={() => {
+                  if (nextMode === 'auto') {
+                    startAutoDrill();
+                    return;
+                  }
+                  if (practiceMode === 'auto-drill') {
+                    autoDrillRunIdRef.current += 1;
+                    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                      window.speechSynthesis.cancel();
+                    }
+                    setPracticeMode('manual');
+                    setAutoDrillState('idle');
+                  }
+                  setMode(nextMode);
+                }}
+                className={`rounded px-3 text-sm font-semibold ${
+                  mode === nextMode
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div
+            className="inline-flex h-10 rounded border border-slate-300 bg-white p-0.5"
+            data-testid="playlist-audio-preference-toggle"
+            title="Default audio version"
+          >
+            {([
+              ['part', 'Part'],
+              ['blend', 'Blend'],
+            ] as const).map(([version, label]) => (
+              <button
+                key={version}
+                type="button"
+                data-testid={`playlist-audio-preference-${version}`}
+                aria-pressed={preferredAudioVersion === version}
+                onClick={() => onPreferredAudioVersionChange?.(version)}
+                className={`rounded px-3 text-sm font-semibold ${
+                  preferredAudioVersion === version
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {onManage ? (
             <button
               data-testid="playlist-practice-manage"
@@ -613,9 +1201,10 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
               const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
               const masteryColor = getMasteryColor(mastery);
               const shouldRenderLabelInsideBar = mastery >= 10;
-              const hasAudio = Boolean(song.audioUrl?.trim());
+              const hasPartAudio = Boolean(song.audioUrl?.trim());
+              const hasBlendAudio = Boolean(song.alternateAudioUrl?.trim());
               const hasSegments = song.segments.length > 0;
-              const hasTapKeys = (song.pitchContourNotes?.length ?? 0) > 0;
+              const hasMidiContour = (song.pitchContourNotes?.length ?? 0) > 0;
               return (
                 <div
                   key={song.id}
@@ -648,13 +1237,14 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
                     ) : null}
                   </div>
 
-                  <h3 className="mb-2 text-xl font-semibold text-slate-950">{song.title}</h3>
+                  <h3 className="text-xl font-semibold text-gray-900 mb-2">{song.title}</h3>
                   {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
                   <div className="absolute bottom-3 right-3">
                     <SongReadinessIcons
-                      hasAudio={hasAudio}
+                      hasPartAudio={hasPartAudio}
+                      hasBlendAudio={hasBlendAudio}
                       hasSegments={hasSegments}
-                      hasTapKeys={hasTapKeys}
+                      hasMidiContour={hasMidiContour}
                       testIdPrefix={`playlist-practice-song-${song.id}`}
                     />
                   </div>
@@ -666,10 +1256,259 @@ export function PlaylistPracticeView({ playlist, userId, onExit, onManage, onSel
         </>
       )}
 
+      {mode === 'focus' && (
+        <div
+          className="space-y-4"
+          data-testid="playlist-focus-queue"
+          style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="inline-flex rounded border border-gray-300 bg-white p-0.5">
+              {([
+                ['mastery', 'Weakest'],
+                ['due-date', 'Oldest'],
+                ['song-order', 'Song Order'],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  data-testid={`focus-sort-${key}`}
+                  aria-pressed={focusSortKey === key}
+                  onClick={() => {
+                    setFocusSortKey(key);
+                    setCurrentFocusIndex(0);
+                  }}
+                  className={`rounded px-3 py-1.5 text-sm font-semibold ${
+                    focusSortKey === key
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              Pre-roll
+              <select
+                data-testid="focus-preroll-select"
+                value={focusPrerollMs}
+                onChange={(event) => setFocusPrerollMs(Number(event.target.value))}
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-sm"
+              >
+                <option value={0}>0s</option>
+                <option value={1000}>1s</option>
+                <option value={2000}>2s</option>
+                <option value={5000}>5s</option>
+                <option value={10000}>10s</option>
+              </select>
+            </label>
+          </div>
+
+          {focusRatingsLoading ? (
+            <div className="rounded border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+              Loading segment ratings...
+            </div>
+          ) : null}
+
+          {focusRatingsError ? (
+            <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {focusRatingsError}
+            </div>
+          ) : null}
+
+          {!currentFocusItem ? (
+            <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              No segments currently need focused practice.
+            </div>
+          ) : (
+            <>
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3" data-testid="focus-current-segment">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-indigo-800">
+                      Focus: {currentFocusItem.song.title}
+                      {currentFocusItem.song.artist ? ` - ${currentFocusItem.song.artist}` : ''}
+                    </p>
+                    <p className="text-sm text-indigo-950">
+                      {currentFocusItem.segment.label} - Song {currentFocusItem.songIndex + 1} of {livePlaylist.songs.length} - Segment {currentFocusItem.segmentIndex + 1} of {currentFocusItem.song.segments.length} - {formatMs(currentFocusItem.segment.startMs)} to {formatMs(currentFocusItem.segment.endMs)}
+                    </p>
+                  </div>
+                  <span className="text-sm font-medium text-indigo-900">
+                    {currentFocusIndex + 1} of {focusQueue.length}
+                  </span>
+                </div>
+              </div>
+
+              {focusPracticeSession ? (
+                <div className="min-h-[720px] rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="focus-practice-surface">
+                  <PracticeView
+                    key={`${currentFocusItem.song.id}:${currentFocusItem.segment.id}`}
+                    song={currentFocusItem.song}
+                    userId={userId}
+                    initialSession={focusPracticeSession}
+                    onSessionChange={handleFocusSessionChange}
+                    onRatingsSaved={handleFocusRatingsSaved}
+                    segmentPrerollMs={focusPrerollMs}
+                    preferredAudioVersion={preferredAudioVersion}
+                    onPreferredAudioVersionChange={onPreferredAudioVersionChange}
+                    collapseLyricLineBreaks={collapseLyricLineBreaks}
+                    defaultLooping
+                    playScope="segment"
+                    autoPlayOnMount={focusAutoPlayItemId === currentFocusItem.id}
+                    onPrevSegment={handlePrevFocusSegment}
+                    onNextSegment={handleNextFocusSegment}
+                    canUsePrevSegment={currentFocusIndex > 0}
+                    canUseNextSegment={currentFocusIndex < focusQueue.length - 1}
+                  />
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 md:grid-cols-2" data-testid="focus-queue-list">
+                {focusQueue.slice(0, 8).map((item, index) => {
+                  const isActive = index === currentFocusIndex;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      data-testid={`focus-queue-item-${item.segment.id}`}
+                      onClick={() => setCurrentFocusIndex(index)}
+                      className={`rounded-lg border p-3 text-left transition ${
+                        isActive
+                          ? 'border-indigo-500 bg-indigo-50'
+                          : 'border-gray-200 bg-white hover:border-indigo-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-gray-950">Segment {item.segmentIndex + 1}</span>
+                        <span className="text-xs font-semibold text-gray-500">{item.masteryPercent}% memorized</span>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {item.song.title} - {formatMs(item.segment.startMs)}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {mode === 'auto' && (
+        <div className="space-y-3" data-testid="playlist-auto-drill">
+          <div
+            aria-live="polite"
+            data-testid="auto-drill-live"
+            className="sr-only"
+          >
+            {autoDrillMessage}
+          </div>
+
+          {autoDrillPlaybackWarning ? (
+            <div
+              data-testid="auto-drill-playback-warning"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800"
+            >
+              {autoDrillPlaybackWarning}
+            </div>
+          ) : null}
+
+          {!currentAutoDrillItem ? (
+            <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              This playlist needs songs with audio and segments before Auto Drill can start.
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                <div className="min-w-0 flex-1" data-testid="auto-drill-current-segment">
+                  <p className="truncate text-sm font-semibold text-gray-950">
+                    {currentAutoDrillItem.song.title}
+                    {currentAutoDrillItem.song.artist ? ` - ${currentAutoDrillItem.song.artist}` : ''}
+                  </p>
+                  <p className="truncate text-xs text-gray-600">
+                    {currentAutoDrillItem.segment.label} - Song {currentAutoDrillItem.songIndex + 1} - Segment {currentAutoDrillItem.segmentIndex + 1}
+                  </p>
+                </div>
+                {autoDrillState === 'playing' ? (
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-900">
+                    Listening
+                  </span>
+                ) : practiceMode === 'auto-drill' && autoDrillState !== 'complete' ? (
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900">
+                    Rating optional
+                  </span>
+                ) : null}
+                {practiceMode === 'auto-drill' && autoDrillState !== 'idle' ? (
+                  <button
+                    type="button"
+                    data-testid="auto-drill-exit"
+                    aria-label="Exit Auto Drill"
+                    onClick={stopAutoDrill}
+                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Exit
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="auto-drill-start"
+                    aria-label="Start Auto Drill"
+                    onClick={startAutoDrill}
+                    disabled={autoDrillQueue.length === 0}
+                    className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+                  >
+                    Start
+                  </button>
+                )}
+                <label className="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    data-testid="auto-drill-voice-toggle"
+                    checked={autoDrillVoiceEnabled}
+                    onChange={(event) => setAutoDrillVoiceEnabled(event.target.checked)}
+                  />
+                  Voice
+                </label>
+                  </div>
+
+              {autoDrillPracticeSession ? (
+                <div className="min-h-[720px] rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="auto-drill-practice-surface">
+                  <PracticeView
+                    key={currentAutoDrillItem.song.id}
+                    song={currentAutoDrillItem.song}
+                    userId={userId}
+                    initialSession={autoDrillPracticeSession}
+                    onRatingsSaved={handleAutoDrillRatingsSaved}
+                    breadcrumbRootLabel="Auto Drill"
+                    segmentPrerollMs={AUTO_DRILL_PREROLL_MS}
+                    preferredAudioVersion={preferredAudioVersion}
+                    onPreferredAudioVersionChange={onPreferredAudioVersionChange}
+                    collapseLyricLineBreaks={collapseLyricLineBreaks}
+                    playScope="segment"
+                    autoPlayToken={autoDrillPlayToken}
+                    reducedControls={practiceMode === 'auto-drill'}
+                    showSegmentNavigationControls={practiceMode === 'auto-drill'}
+                    ratingKeysEnabled={practiceMode === 'auto-drill'}
+                    onSegmentPlaybackComplete={handleAutoDrillPlaybackComplete}
+                    onRatingSubmitted={handleAutoDrillRatingSubmitted}
+                    onAutoPlayBlocked={setAutoDrillPlaybackWarning}
+                    onPrevSegment={handlePrevAutoDrillSegment}
+                    onNextSegment={handleNextAutoDrillSegment}
+                    canUsePrevSegment={autoDrillIndex > 0}
+                    canUseNextSegment={autoDrillIndex < autoDrillQueue.length - 1}
+                  />
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      )}
+
       {mode === 'listen' && currentSong && (
         <div className="space-y-4">
           <div className="text-center">
-            <h3 className="text-2xl font-semibold text-slate-950">{currentSong.title}</h3>
+            <h3 className="text-2xl font-semibold text-gray-900">{currentSong.title}</h3>
             {currentSong.artist && <p className="text-gray-600">{currentSong.artist}</p>}
             <p className="text-sm text-gray-500">{currentSongIndex + 1} of {listenQueue.length}</p>
           </div>

@@ -35,6 +35,7 @@ export interface Song {
   artist?: string;
   description?: string;
   audioUrl: string;
+  alternateAudioUrl?: string;
   pitchContourNotes?: SongPitchContourNote[];
   segments: Segment[];
   createdAt: string;

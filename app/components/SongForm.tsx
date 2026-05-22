@@ -3,26 +3,29 @@ import { useUploadAudio } from '../hooks/useUploadAudio';
 
 interface SongFormProps {
   onSuccess: (songId: string) => void;
+  userId?: string;
 }
 
-function getErrorMessage(payload: unknown, fallback: string) {
-  return (
-    payload &&
-    typeof payload === 'object' &&
-    'error' in payload &&
-    typeof payload.error === 'string'
-  )
-    ? payload.error
-    : fallback;
+function getResponseErrorMessage(value: unknown, fallback: string): string {
+  if (value && typeof value === 'object' && 'error' in value && typeof value.error === 'string') {
+    return value.error;
+  }
+  return fallback;
 }
 
-export function SongForm({ onSuccess }: SongFormProps) {
+export function SongForm({ onSuccess, userId }: SongFormProps) {
   const [title, setTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedAlternateFile, setSelectedAlternateFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [debugMode, setDebugMode] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
-  const { upload, uploading, progress, error: uploadError } = useUploadAudio();
+  const { upload, uploading, progress, error: uploadError } = useUploadAudio(userId);
+
+  const withUserHeader = (headers: Record<string, string>) => ({
+    ...headers,
+    ...(userId ? { 'X-User-ID': userId } : {}),
+  });
 
   const appendDebug = (message: string) => {
     setDebugLog((prev) => [...prev, `${new Date().toISOString()} - ${message}`]);
@@ -42,7 +45,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
       // Create song record
       const createResponse = await fetch('/api/songs', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: withUserHeader({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ title: title.trim() }),
       });
 
@@ -57,16 +60,14 @@ export function SongForm({ onSuccess }: SongFormProps) {
       const newSongId = song.id;
       appendDebug(`Created song id=${newSongId}`);
 
-      // Upload file if selected
       if (selectedFile) {
-        appendDebug(`Uploading audio file ${selectedFile.name} for song ${newSongId}`);
-        const audioKey = await upload(newSongId, selectedFile);
-        appendDebug(`Upload result key=${audioKey}`);
+        appendDebug(`Uploading prominent audio file ${selectedFile.name} for song ${newSongId}`);
+        const audioKey = await upload(newSongId, selectedFile, 'prominent');
+        appendDebug(`Prominent upload result key=${audioKey}`);
 
-        // Update song with audioKey
         const updateResponse = await fetch(`/api/songs/${newSongId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withUserHeader({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ audioKey }),
         });
 
@@ -74,8 +75,26 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
         if (!updateResponse.ok) {
           const updateError = await updateResponse.json().catch(() => null);
-          const msg = getErrorMessage(updateError, 'Failed to update song with audio key');
-          throw new Error(msg);
+          throw new Error(getResponseErrorMessage(updateError, 'Failed to update song with audio key'));
+        }
+      }
+
+      if (selectedAlternateFile) {
+        appendDebug(`Uploading blend audio file ${selectedAlternateFile.name} for song ${newSongId}`);
+        const alternateAudioKey = await upload(newSongId, selectedAlternateFile, 'blend');
+        appendDebug(`Blend upload result key=${alternateAudioKey}`);
+
+        const updateResponse = await fetch(`/api/songs/${newSongId}`, {
+          method: 'PATCH',
+          headers: withUserHeader({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ alternateAudioKey }),
+        });
+
+        appendDebug(`PATCH alternate /api/songs/${newSongId} status=${updateResponse.status}`);
+
+        if (!updateResponse.ok) {
+          const updateError = await updateResponse.json().catch(() => null);
+          throw new Error(getResponseErrorMessage(updateError, 'Failed to update song with blend audio key'));
         }
       }
 
@@ -90,6 +109,11 @@ export function SongForm({ onSuccess }: SongFormProps) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setSelectedFile(file);
+  };
+
+  const handleAlternateFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setSelectedAlternateFile(file);
   };
 
   const displayError = error || uploadError;
@@ -113,7 +137,7 @@ export function SongForm({ onSuccess }: SongFormProps) {
 
       <div>
         <label htmlFor="audioFile" className="block text-sm font-medium text-gray-700">
-          Audio File (MP3)
+          Prominent Audio File (MP3)
         </label>
         <input
           id="audioFile"
@@ -124,6 +148,21 @@ export function SongForm({ onSuccess }: SongFormProps) {
           className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
         />
         <p className="mt-1 text-sm text-gray-500">Max 15 MB</p>
+      </div>
+
+      <div>
+        <label htmlFor="alternateAudioFile" className="block text-sm font-medium text-gray-700">
+          Blend Audio File (MP3)
+        </label>
+        <input
+          id="alternateAudioFile"
+          type="file"
+          accept="audio/mpeg,audio/mp3"
+          onChange={handleAlternateFileChange}
+          data-testid="alternate-audio-file-input"
+          className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+        />
+        <p className="mt-1 text-sm text-gray-500">Optional, max 15 MB</p>
         {uploading && (
           <div className="mt-2">
             <div className="w-full bg-gray-200 rounded-full h-2.5">

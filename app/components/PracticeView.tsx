@@ -8,14 +8,30 @@ import SegmentCard from "./SegmentCard";
 import KnowledgeBar from "./KnowledgeBar";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from "../lib/audioUrls";
+import { toPlayableAudioUrl, type PreferredAudioVersion } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
 import {
   DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   buildContourDirectionEvents,
+  classifyContourDirection,
   compareContourAttemptDetailed,
 } from "../lib/contourPractice";
 import type { AttemptNoteStatus } from "../lib/contourPractice";
+import {
+  scoreTapAttempt,
+  summarizeAccuracyByAudioVersion,
+  type BlendTapHeatMapMarker,
+  type DirectionTap,
+  type TapAudioVersion,
+  type TapDirection,
+  type TapPracticeMode,
+  type TapScoreResult,
+} from "../lib/enhancedTapPractice";
+import {
+  buildMidiBlendTapHeatMap,
+  scoreTapAttemptAgainstMidiKey,
+  type MidiSegmentAnswerKey,
+} from "../lib/midiGuidedTapPractice";
 import { getSegmentPitchContourNotes } from "../lib/pitchContour";
 
 interface TransportDebugState {
@@ -32,16 +48,35 @@ interface TransportDebugState {
 
 interface PracticeViewProps {
   song: Song;
+  userId?: string;
   initialSession: SessionState;
   onSessionChange?: (session: SessionState) => void;
+  onRatingsSaved?: (ratings: SessionState["ratings"]) => void;
   breadcrumbRootLabel?: string;
   onBreadcrumbRootClick?: () => void;
   onEditSongClick?: () => void;
   segmentPrerollMs?: number;
+  preferredAudioVersion?: PreferredAudioVersion;
+  onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
   collapseLyricLineBreaks?: boolean;
+  defaultLooping?: boolean;
+  playScope?: "song" | "segment";
+  autoPlayOnMount?: boolean;
+  autoPlayToken?: number;
+  reducedControls?: boolean;
+  showSegmentNavigationControls?: boolean;
+  ratingKeysEnabled?: boolean;
+  onSegmentPlaybackComplete?: () => void;
+  onRatingSubmitted?: (rating: MemoryRating) => void;
+  onAutoPlayBlocked?: (message: string | null) => void;
+  onPrevSegment?: (options?: { wasPlaying: boolean }) => void;
+  onNextSegment?: (options?: { wasPlaying: boolean }) => void;
+  canUsePrevSegment?: boolean;
+  canUseNextSegment?: boolean;
 }
 
 type LyricVisibilityMode = "full" | "hint" | "hidden";
+type AudioVersion = TapAudioVersion;
 
 const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
   full: "Full",
@@ -64,18 +99,6 @@ const TAP_MATCH_OPTIONS = {
   sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   durationToleranceRatio: 0.6,
 } as const;
-
-function hasActiveUserActivation(): boolean {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-
-  const userActivation = (navigator as Navigator & {
-    userActivation?: { isActive?: boolean };
-  }).userActivation;
-
-  return userActivation?.isActive === true;
-}
 
 function toDirectionLetter(direction: "up" | "down" | "same"): "U" | "D" | "S" {
   if (direction === "up") {
@@ -100,6 +123,21 @@ interface PersistedTapPayload {
   timeOffsetMs: number;
   durationMs: number;
   lane: number;
+  direction: TapDirection;
+}
+
+interface TapSessionSummaryPayload {
+  id: string;
+  songId: string;
+  segmentId?: string;
+  audioVersion: TapAudioVersion;
+  mode: TapPracticeMode;
+  startedAt: string;
+  completedAt?: string;
+  finalizedAt?: string;
+  autoScorePercent?: number;
+  scoreDetails?: TapScoreResult;
+  tapCount: number;
 }
 
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
@@ -116,34 +154,81 @@ function buildOfflineRatingsQueueKey(songId: string): string {
   return `${OFFLINE_RATING_QUEUE_PREFIX}${songId}`;
 }
 
+function toDirectionTaps(notes: PitchContourNote[]): DirectionTap[] {
+  const sorted = [...notes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+  return sorted.map((note, index) => ({
+    id: note.id,
+    timeOffsetMs: note.timeOffsetMs,
+    direction: index === 0 ? "same" : classifyContourDirection(note.lane - sorted[index - 1].lane, TAP_MATCH_OPTIONS.sameDeadZone),
+  }));
+}
+
 const PracticeView: React.FC<PracticeViewProps> = ({
   song,
+  userId,
   initialSession,
   onSessionChange,
+  onRatingsSaved,
   breadcrumbRootLabel,
   onBreadcrumbRootClick,
   onEditSongClick,
   segmentPrerollMs = 500,
+  preferredAudioVersion = "part",
+  onPreferredAudioVersionChange,
   collapseLyricLineBreaks = false,
+  defaultLooping = false,
+  playScope = "song",
+  autoPlayOnMount = false,
+  autoPlayToken = 0,
+  reducedControls = false,
+  showSegmentNavigationControls = !reducedControls,
+  ratingKeysEnabled = true,
+  onSegmentPlaybackComplete,
+  onRatingSubmitted,
+  onAutoPlayBlocked,
+  onPrevSegment,
+  onNextSegment,
+  canUsePrevSegment: canUsePrevSegmentOverride,
+  canUseNextSegment: canUseNextSegmentOverride,
 }) => {
+  const withUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
+    if (!userId) {
+      return init;
+    }
+
+    const headers = new Headers(init?.headers);
+    headers.set("X-User-ID", userId);
+    return {
+      ...init,
+      headers,
+    };
+  }, [userId]);
+
+  const request = React.useCallback((url: string, init?: RequestInit) => {
+    const scopedInit = withUserHeader(init);
+    return scopedInit ? fetch(url, scopedInit) : fetch(url);
+  }, [withUserHeader]);
+
   const effectiveSegmentPrerollMs = Math.max(0, segmentPrerollMs);
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const initialSegmentId = song.segments[initialSession.currentSegmentIndex]?.id ?? null;
   const segmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
+  const syncedInitialSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
   const lastSyncedSegmentIdRef = React.useRef<string | null>(initialSegmentId);
   const previousSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
   const lastSavedRatingsRef = React.useRef<string>("unloaded");
-  const sessionRatingsRef = React.useRef(initialSession.ratings);
   const [transitionDirection, setTransitionDirection] = React.useState<"forward" | "backward">("forward");
   const [transitionToken, setTransitionToken] = React.useState(0);
   const [ratingsLoading, setRatingsLoading] = React.useState(true);
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
-  const [isLooping, setIsLooping] = React.useState(false);
+  const [isLooping, setIsLooping] = React.useState(defaultLooping);
   const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
   const [showCardContourMap, setShowCardContourMap] = React.useState(false);
   const [showTapOverlay, setShowTapOverlay] = React.useState(true);
   const [showSameLaneGuides, setShowSameLaneGuides] = React.useState(false);
+  const [tapSessionSummaries, setTapSessionSummaries] = React.useState<TapSessionSummaryPayload[]>([]);
+  const [midiSegmentAnswerKeys, setMidiSegmentAnswerKeys] = React.useState<Record<string, MidiSegmentAnswerKey>>({});
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
   const [tapHeatMapBySegment, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
   const [tapHeatMapRefreshToken, setTapHeatMapRefreshToken] = React.useState(0);
@@ -164,18 +249,29 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // Snapshot of the current playback state readable in effects without adding each
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
-  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(song.audioUrl)), [song.audioUrl]);
-  const directPlaybackAudioUrl = useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
-  const canFallbackToProxy = proxyAudioUrl !== null && proxyAudioUrl !== directPlaybackAudioUrl;
-  const [useProxyFallback, setUseProxyFallback] = React.useState(false);
-  const pendingFallbackPlayRangeRef = React.useRef<{ startMs: number; endMs: number } | null>(null);
-  const playbackAudioUrl = useMemo(() => {
-    if (useProxyFallback && canFallbackToProxy && proxyAudioUrl) {
-      return proxyAudioUrl;
-    }
-    return directPlaybackAudioUrl;
-  }, [canFallbackToProxy, directPlaybackAudioUrl, proxyAudioUrl, useProxyFallback]);
-  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(playbackAudioUrl);
+  const [audioVersion, setAudioVersion] = React.useState<AudioVersion>(
+    preferredAudioVersion === "blend" ? "blend" : "straight"
+  );
+  const hasStraightAudio = Boolean(song.audioUrl?.trim());
+  const hasBlendAudio = Boolean(song.alternateAudioUrl?.trim());
+  const hasBothAudioVersions = hasStraightAudio && hasBlendAudio;
+  const activeAudioVersion: AudioVersion = hasBothAudioVersions ? audioVersion : hasBlendAudio ? "blend" : "straight";
+  const activeAudioUrl = activeAudioVersion === "blend" ? (song.alternateAudioUrl ?? "") : song.audioUrl;
+  const directPlaybackAudioUrl = useMemo(() => toPlayableAudioUrl(activeAudioUrl), [activeAudioUrl]);
+  const pendingAudioVersionSwitchRef = React.useRef<{
+    currentMs: number;
+    endMs: number;
+    wasPlaying: boolean;
+  } | null>(null);
+  const onSegmentPlaybackCompleteRef = React.useRef(onSegmentPlaybackComplete);
+  const playScopeRef = React.useRef(playScope);
+  const { isPlaying, isReady, currentMs, durationMs, endedCount = 0, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(directPlaybackAudioUrl, undefined, {
+    onRangeEnd: () => {
+      if (playScopeRef.current === "segment") {
+        onSegmentPlaybackCompleteRef.current?.();
+      }
+    },
+  });
   const [transportDebug, setTransportDebug] = React.useState<TransportDebugState>({
     playToggleClicks: 0,
     skipBackClicks: 0,
@@ -197,6 +293,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const tapCountInIntervalRef = React.useRef<number | null>(null);
   const tapCountInTimeoutRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
+  const autoPlayHandledKeyRef = React.useRef<string | null>(null);
+  const autoPlayTokenHandledRef = React.useRef<number>(0);
+  const playbackCompleteNotifiedRef = React.useRef<string | null>(null);
+  const lastHandledEndedCountRef = React.useRef(endedCount);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
   const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
   const tapSessionIdRef = React.useRef<string | null>(null);
@@ -208,7 +308,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const canRestartCurrentSegment = currentSegment
     ? currentMs > currentSegment.startMs + PREV_SEGMENT_GO_BACK_THRESHOLD_MS
     : false;
-  const canUsePrevSegment = hasSegments && (!isFirst || canRestartCurrentSegment);
+  const canUsePrevSegment = canUsePrevSegmentOverride ?? (hasSegments && (!isFirst || canRestartCurrentSegment));
+  const canUseNextSegment = canUseNextSegmentOverride ?? (hasSegments && !isLast);
   const tapDebugHref = React.useMemo(() => {
     const params = new URLSearchParams({ songId: song.id });
     if (tapSessionId) {
@@ -216,36 +317,120 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     return `/debug-tap-practice?${params.toString()}`;
   }, [song.id, tapSessionId]);
+
+  React.useEffect(() => {
+    onSegmentPlaybackCompleteRef.current = onSegmentPlaybackComplete;
+  }, [onSegmentPlaybackComplete]);
+
+  React.useEffect(() => {
+    playScopeRef.current = playScope;
+  }, [playScope]);
   const totalDurationMs = Math.max(durationMs, ...song.segments.map((segment) => segment.endMs), 0);
   const activeStartMs = currentSegment?.startMs ?? 0;
   const activeEndMs = currentSegment?.endMs ?? totalDurationMs;
-  const currentAttemptNotes = useMemo(
-    () => (currentSegment ? (tapAttemptsBySegment[currentSegment.id] ?? []) : []),
-    [currentSegment, tapAttemptsBySegment]
-  );
+  const currentAttemptNotes = currentSegment ? (tapAttemptsBySegment[currentSegment.id] ?? []) : [];
   const currentSegmentPitchContourNotes = useMemo(
     () => (currentSegment ? getSegmentPitchContourNotes(song.pitchContourNotes, currentSegment) : []),
     [currentSegment, song.pitchContourNotes]
   );
+  const currentMidiSegmentAnswerKey = useMemo(
+    () => currentSegment ? (midiSegmentAnswerKeys[currentSegment.id] ?? null) : null,
+    [currentSegment, midiSegmentAnswerKeys]
+  );
+  const currentMidiPitchContourNotes = useMemo<PitchContourNote[]>(() => {
+    if (!currentMidiSegmentAnswerKey || currentMidiSegmentAnswerKey.notes.length === 0) {
+      return [];
+    }
+
+    const pitches = currentMidiSegmentAnswerKey.notes.map((note) => note.midiPitch);
+    const minPitch = Math.min(...pitches);
+    const maxPitch = Math.max(...pitches);
+    const pitchRange = Math.max(1, maxPitch - minPitch);
+
+    return currentMidiSegmentAnswerKey.notes.map((note) => ({
+      id: `midi-contour-${currentMidiSegmentAnswerKey.segmentId}-${note.sourceWholeSongNoteIndex}`,
+      timeOffsetMs: Math.max(0, Math.round(note.segmentLocalStartTimeSeconds * 1000)),
+      durationMs: Math.max(MIN_TAP_DURATION_MS, Math.round(note.effectiveDurationSeconds * 1000)),
+      lane: Math.min(1, Math.max(0, (note.midiPitch - minPitch) / pitchRange)),
+    }));
+  }, [currentMidiSegmentAnswerKey]);
+  const currentCardContourNotes = currentSegmentPitchContourNotes.length > 0
+    ? currentSegmentPitchContourNotes
+    : currentMidiPitchContourNotes;
+  const hasCardContourData = currentCardContourNotes.length > 0;
   const currentSegmentMatch = useMemo(() => {
     if (!currentSegment) {
       return null;
     }
 
     return compareContourAttemptDetailed(
-      currentSegmentPitchContourNotes,
+      currentCardContourNotes,
       currentAttemptNotes,
       TAP_MATCH_OPTIONS
     );
-  }, [currentAttemptNotes, currentSegment, currentSegmentPitchContourNotes]);
+  }, [currentAttemptNotes, currentCardContourNotes, currentSegment]);
+  const currentDerivedAnswerKey = useMemo(
+    () => {
+      if (!currentSegment) {
+        return null;
+      }
+      if (currentMidiSegmentAnswerKey && currentMidiSegmentAnswerKey.taps.length > 0) {
+        return {
+          segmentId: currentSegment.id,
+          audioVersion: activeAudioVersion,
+          sourceTakeIds: [currentMidiSegmentAnswerKey.alignmentId],
+          taps: currentMidiSegmentAnswerKey.taps,
+        };
+      }
+      return null;
+    },
+    [activeAudioVersion, currentMidiSegmentAnswerKey, currentSegment]
+  );
+  const enhancedTapScore = useMemo(
+    () => {
+      if (currentMidiSegmentAnswerKey && currentMidiSegmentAnswerKey.taps.length > 0) {
+        return scoreTapAttemptAgainstMidiKey(currentMidiSegmentAnswerKey, toDirectionTaps(currentAttemptNotes), TAP_MATCH_OPTIONS.timeToleranceMs);
+      }
+      return currentDerivedAnswerKey ? scoreTapAttempt(currentDerivedAnswerKey, toDirectionTaps(currentAttemptNotes), TAP_MATCH_OPTIONS.timeToleranceMs) : null;
+    },
+    [currentAttemptNotes, currentDerivedAnswerKey, currentMidiSegmentAnswerKey]
+  );
+  const currentSegmentAccuracySummary = useMemo(
+    () => summarizeAccuracyByAudioVersion(
+      tapSessionSummaries
+        .filter((summary) => summary.segmentId === currentSegment?.id && summary.mode === "practice" && summary.completedAt)
+        .map((summary) => ({
+          id: summary.id,
+          segmentId: summary.segmentId ?? "",
+          audioVersion: summary.audioVersion,
+          completedAt: summary.completedAt ?? summary.startedAt,
+          autoScorePercent: typeof summary.autoScorePercent === "number" ? summary.autoScorePercent : null,
+        }))
+    ),
+    [currentSegment?.id, tapSessionSummaries]
+  );
+  const currentBlendHeatMap = useMemo<BlendTapHeatMapMarker[]>(() => {
+    if (!currentSegment) {
+      return [];
+    }
+    const scores = tapSessionSummaries
+      .filter((summary) => summary.segmentId === currentSegment.id && summary.audioVersion === "blend" && summary.mode === "practice")
+      .map((summary) => summary.scoreDetails)
+      .filter((score): score is TapScoreResult => Boolean(score && Array.isArray(score.details)));
+    const midiKey = midiSegmentAnswerKeys[currentSegment.id] ?? null;
+    if (midiKey) {
+      return buildMidiBlendTapHeatMap(midiKey, scores);
+    }
+    return [];
+  }, [currentSegment, midiSegmentAnswerKeys, tapSessionSummaries]);
   const answerDirectionLetters = useMemo(() => {
     if (!currentSegment) {
       return new Map<string, "U" | "D" | "S">();
     }
-    const sortedNotes = [...currentSegmentPitchContourNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+    const sortedNotes = [...currentCardContourNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
     const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
     return new Map(events.map((event, index) => [sortedNotes[index + 1]?.id, toDirectionLetter(event.direction)]).filter((entry): entry is [string, "U" | "D" | "S"] => Boolean(entry[0])));
-  }, [currentSegment, currentSegmentPitchContourNotes]);
+  }, [currentCardContourNotes, currentSegment]);
   const attemptDirectionLetters = useMemo(() => {
     const sortedNotes = [...currentAttemptNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
     const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
@@ -279,28 +464,35 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       heightPercent: Math.max(4, bottomPercent - topPercent),
     };
   }, [previousTapLane]);
-  const hasTapHeatMapData = useMemo(
-    () =>
-      Object.values(tapHeatMapBySegment).some((segmentHeatMap) =>
-        Object.values(segmentHeatMap).some((stat) => stat.sessionCount > 0)
-      ),
-    [tapHeatMapBySegment]
-  );
+  useEffect(() => {
+    setAudioVersion(preferredAudioVersion === "blend" ? "blend" : "straight");
+  }, [preferredAudioVersion, song.id]);
 
   useEffect(() => {
-    if (!hasTapAnswers && isTapPracticeMode) {
+    const pending = pendingAudioVersionSwitchRef.current;
+    if (!pending) {
+      return;
+    }
+
+    pendingAudioVersionSwitchRef.current = null;
+    seek(pending.currentMs);
+    if (pending.wasPlaying) {
+      play(pending.currentMs, pending.endMs);
+      return;
+    }
+    setPlaybackEndMs(pending.endMs);
+  }, [directPlaybackAudioUrl, play, seek, setPlaybackEndMs]);
+
+  useEffect(() => {
+    if (!hasSegments && isTapPracticeMode) {
       setIsTapPracticeMode(false);
       activeTapCaptureRef.current = null;
     }
-  }, [hasTapAnswers, isTapPracticeMode]);
-  const hasAutoplayedSongRef = React.useRef<string | null>(null);
+  }, [hasSegments, isTapPracticeMode]);
   const navigationGuardRef = React.useRef<{ index: number; releaseAtMs: number; createdAtMs: number } | null>(null);
   const requestPlay = React.useCallback((startMs: number, endMs: number) => {
-    pendingFallbackPlayRangeRef.current = !useProxyFallback && canFallbackToProxy
-      ? { startMs, endMs }
-      : null;
     play(startMs, endMs);
-  }, [canFallbackToProxy, play, useProxyFallback]);
+  }, [play]);
 
   const enqueueOfflineRatings = React.useCallback((snapshot: string) => {
     if (typeof window === "undefined") {
@@ -336,23 +528,28 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [song.id]);
 
   const postRatingsSnapshot = React.useCallback(async (snapshot: string) => {
-    const ratings = (JSON.parse(snapshot) as SessionState["ratings"])
-      .map((r) => ({
-        segmentId: r.segmentId,
-        rating: r.rating,
-        ratedAt: r.ratedAt,
+    const sessionRatings = JSON.parse(snapshot) as SessionState["ratings"];
+    const ratingsPayload = sessionRatings
+      .map((rating) => ({
+        segmentId: rating.segmentId,
+        rating: rating.rating,
+        ratedAt: rating.ratedAt,
       }));
 
-    const response = await fetch(`/api/songs/${song.id}/ratings`, {
+    const response = await request(`/api/songs/${song.id}/ratings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ratings }),
+      body: JSON.stringify({ ratings: ratingsPayload }),
     });
 
     if (!response.ok) {
       throw new Error(`Failed to save ratings (${response.status})`);
     }
-  }, [song.id]);
+    onRatingsSaved?.(sessionRatings);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("ratingsUpdated"));
+    }
+  }, [onRatingsSaved, request, song.id]);
 
   const flushOfflineRatingsIfPossible = React.useCallback(async () => {
     if (typeof navigator !== "undefined" && !navigator.onLine) {
@@ -407,7 +604,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       for (const payload of payloads) {
         try {
-          const response = await fetch(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
+          const response = await request(`/api/songs/${song.id}/tap-sessions/${activeSessionId}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -440,7 +637,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         setTapHeatMapRefreshToken((previous) => previous + 1);
       }
     });
-  }, [clearTapPersistenceWarning, showTapPersistenceWarning, song.id]);
+  }, [clearTapPersistenceWarning, request, showTapPersistenceWarning, song.id]);
 
   const queuePersistedTap = React.useCallback((payload: PersistedTapPayload) => {
     pendingPersistedTapsRef.current.push(payload);
@@ -475,8 +672,28 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [session.currentSegmentIndex]);
 
   useEffect(() => {
-    sessionRatingsRef.current = session.ratings;
-  }, [session.ratings]);
+    if (!hasSegments) {
+      return;
+    }
+
+    if (initialSession.currentSegmentIndex === syncedInitialSegmentIndexRef.current) {
+      return;
+    }
+
+    syncedInitialSegmentIndexRef.current = initialSession.currentSegmentIndex;
+    const targetIndex = Math.max(0, Math.min(song.segments.length - 1, initialSession.currentSegmentIndex));
+    if (targetIndex === session.currentSegmentIndex) {
+      return;
+    }
+
+    segmentIndexRef.current = targetIndex;
+    dispatch({ type: "SET_SEGMENT_INDEX", index: targetIndex });
+
+    const targetSegment = song.segments[targetIndex];
+    if (targetSegment && !isPlaying) {
+      seek(targetSegment.startMs);
+    }
+  }, [hasSegments, initialSession.currentSegmentIndex, isPlaying, seek, session.currentSegmentIndex, song.segments]);
 
   const flushPlayedTime = React.useCallback(() => {
     if (playbackStartedAtRef.current === null) {
@@ -496,42 +713,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     practicedRecordedRef.current = true;
-    void fetch(`/api/songs/${song.id}/practice`, { method: "POST" }).catch(() => {
+    void request(`/api/songs/${song.id}/practice`, { method: "POST" }).catch(() => {
       practicedRecordedRef.current = false;
     });
-  }, [song.id]);
+  }, [request, song.id]);
 
   useEffect(() => {
     practicedRecordedRef.current = false;
     accumulatedPlaybackMsRef.current = 0;
     playbackStartedAtRef.current = null;
   }, [song.id]);
-
-  useEffect(() => {
-    setUseProxyFallback(false);
-    pendingFallbackPlayRangeRef.current = null;
-  }, [song.id]);
-
-  useEffect(() => {
-    if (!playbackError || useProxyFallback || !canFallbackToProxy) {
-      return;
-    }
-    setUseProxyFallback(true);
-  }, [canFallbackToProxy, playbackError, useProxyFallback]);
-
-  useEffect(() => {
-    if (!useProxyFallback) {
-      return;
-    }
-
-    const pendingRange = pendingFallbackPlayRangeRef.current;
-    if (!pendingRange) {
-      return;
-    }
-
-    pendingFallbackPlayRangeRef.current = null;
-    play(pendingRange.startMs, pendingRange.endMs);
-  }, [play, useProxyFallback]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -591,7 +782,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [song.title, breadcrumbRootLabel]);
 
   useEffect(() => {
-    if (!song.audioUrl || !currentSegment) {
+    if (!activeAudioUrl || !currentSegment) {
       return;
     }
 
@@ -608,30 +799,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     seek(currentSegment.startMs);
-  }, [currentSegment, isPlaying, song.audioUrl, seek]);
-
-  React.useLayoutEffect(() => {
-    if (!song.audioUrl) {
-      return;
-    }
-    if (hasAutoplayedSongRef.current === song.id) {
-      return undefined;
-    }
-    hasAutoplayedSongRef.current = song.id;
-    seek(0);
-    if (!hasActiveUserActivation()) {
-      return undefined;
-    }
-    requestPlay(0, Number.POSITIVE_INFINITY);
-    return () => {
-      if (hasAutoplayedSongRef.current === song.id) {
-        hasAutoplayedSongRef.current = null;
-      }
-    };
-  }, [requestPlay, seek, song.audioUrl, song.id]);
+  }, [activeAudioUrl, currentSegment, isPlaying, seek]);
 
   useEffect(() => {
     if (!hasSegments || !isPlaying) {
+      return;
+    }
+
+    if (playScope === "segment") {
       return;
     }
 
@@ -697,7 +872,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       segmentIndexRef.current = song.segments.length - 1;
       dispatch({ type: "SET_SEGMENT_INDEX", index: song.segments.length - 1 });
     }
-  }, [currentMs, getSegmentIndexAtMs, hasSegments, isLooping, isPlaying, session.currentSegmentIndex, song.segments]);
+  }, [currentMs, getSegmentIndexAtMs, hasSegments, isLooping, isPlaying, playScope, session.currentSegmentIndex, song.segments]);
 
   useEffect(() => {
     let cancelled = false;
@@ -706,7 +881,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       setRatingsLoading(true);
       setRatingsError(null);
       try {
-        const response = await fetch(`/api/songs/${song.id}/ratings`);
+        const response = await request(`/api/songs/${song.id}/ratings`);
         if (!response.ok) {
           throw new Error(`Failed to load ratings (${response.status})`);
         }
@@ -727,11 +902,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               dispatch({ type: "LOAD_RATINGS", ratings: Array.isArray(queuedRatings) ? queuedRatings : [] });
               lastSavedRatingsRef.current = queuedSnapshot;
             } catch {
-              lastSavedRatingsRef.current = JSON.stringify(sessionRatingsRef.current);
+              lastSavedRatingsRef.current = JSON.stringify(session.ratings);
             }
           } else {
             // Load failed — treat existing state as already saved to avoid erasing server data
-            lastSavedRatingsRef.current = JSON.stringify(sessionRatingsRef.current);
+            lastSavedRatingsRef.current = JSON.stringify(session.ratings);
           }
           setRatingsError('Could not load previous ratings. Practice is still available.');
         }
@@ -747,7 +922,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [dequeueOfflineRatings, song.id]);
+  }, [dequeueOfflineRatings, request, song.id]);
 
   const currentRating: MemoryRating | undefined = (() => {
     if (!currentSegment) {
@@ -819,17 +994,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
 
-    // When looping, play the current segment from the current position (or start if past the end).
-    if (isLooping && currentSegment) {
+    if (playScope === "segment" && currentSegment) {
       pausedByUserRef.current = false;
-      const segmentStartWithPreroll = getSegmentStartWithPreroll(currentSegment.startMs);
-      const resumeMs = currentMs >= currentSegment.endMs
-        ? segmentStartWithPreroll
-        : Math.max(currentMs, segmentStartWithPreroll);
-      startTapPracticePlayback(resumeMs, currentSegment.endMs);
+      startTapPracticePlayback(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs, {
+        resetTapRun: isTapPracticeMode,
+      });
       return;
     }
-    const effectiveDurationMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
+
+    const effectiveDurationMs = isLooping && currentSegment
+      ? currentSegment.endMs
+      : durationMs > 0
+        ? durationMs
+        : Number.POSITIVE_INFINITY;
     const fullPieceResumeMs = durationMs > 0 && currentMs >= durationMs ? 0 : currentMs;
     startTapPracticePlayback(fullPieceResumeMs, effectiveDurationMs, {
       resetTapRun: isTapPracticeMode && fullPieceResumeMs === 0,
@@ -849,6 +1026,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   };
 
   const handlePrevSegment = () => {
+    if (onPrevSegment) {
+      onPrevSegment({ wasPlaying: isPlaying });
+      return;
+    }
+
     if (!hasSegments || !currentSegment) {
       return;
     }
@@ -874,6 +1056,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   };
 
   const handleNextSegment = () => {
+    if (onNextSegment) {
+      onNextSegment({ wasPlaying: isPlaying });
+      return;
+    }
+
     if (!hasSegments) {
       return;
     }
@@ -901,7 +1088,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastAction: "next-segment",
       lastActionAt: new Date().toISOString(),
     }));
-    jumpToSegment(activeIndex + 1, { preventBackwardWhilePlaying: true });
+    jumpToSegment(activeIndex + 1, { preventBackwardWhilePlaying: !isLooping });
   };
 
   const handleSeekSong = (ms: number) => {
@@ -938,6 +1125,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     setIsLooping((previous) => !previous);
   }, [currentMs, getSegmentIndexAtMs, isLooping, session.currentSegmentIndex]);
+
+  const handleAudioVersionChange = React.useCallback((nextVersion: AudioVersion) => {
+    if (nextVersion === activeAudioVersion || !hasBothAudioVersions) {
+      return;
+    }
+
+    pendingAudioVersionSwitchRef.current = {
+      currentMs,
+      endMs: isLooping && currentSegment
+        ? currentSegment.endMs
+        : durationMs > 0
+          ? durationMs
+          : Number.POSITIVE_INFINITY,
+      wasPlaying: isPlaying,
+    };
+
+    onPreferredAudioVersionChange?.(nextVersion === "blend" ? "blend" : "part");
+    setAudioVersion(nextVersion);
+  }, [activeAudioVersion, currentMs, currentSegment, durationMs, hasBothAudioVersions, isLooping, isPlaying, onPreferredAudioVersionChange]);
 
   const getTapLane = React.useCallback((clientY: number) => {
     const rect = tapBarRef.current?.getBoundingClientRect();
@@ -986,12 +1192,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const segmentId = currentSegment.id;
     const latestForSegment = tapAttemptsRef.current[segmentId] ?? [];
     const nextSegmentNotes = [...latestForSegment, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-      const immediateMatch = compareContourAttemptDetailed(
-      currentSegmentPitchContourNotes,
-      nextSegmentNotes,
-      TAP_MATCH_OPTIONS
-    );
-    const missedTap = immediateMatch.attemptNoteStatuses[note.id] === "mismatched";
+    const directionTaps = toDirectionTaps(nextSegmentNotes);
+    const noteDirection = directionTaps.find((tap) => tap.id === note.id)?.direction ?? "same";
+    const immediateScore = currentDerivedAnswerKey
+      ? scoreTapAttempt(currentDerivedAnswerKey, directionTaps, TAP_MATCH_OPTIONS.timeToleranceMs)
+      : null;
+    const contourFallbackMatch = currentDerivedAnswerKey
+      ? null
+      : compareContourAttemptDetailed(currentCardContourNotes, nextSegmentNotes, TAP_MATCH_OPTIONS);
+    const missedTap = immediateScore
+      ? immediateScore.details.some((detail) => detail.actual?.id === note.id && detail.status !== "matched")
+      : contourFallbackMatch?.attemptNoteStatuses[note.id] === "mismatched";
 
     setTapAttemptsBySegment((previous) => ({
       ...previous,
@@ -1011,10 +1222,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       timeOffsetMs: note.timeOffsetMs,
       durationMs: note.durationMs,
       lane: note.lane,
+      direction: noteDirection,
     });
 
     activeTapCaptureRef.current = null;
-  }, [currentMs, currentSegment, currentSegmentPitchContourNotes, queuePersistedTap, showAccuracyToast]);
+  }, [currentCardContourNotes, currentDerivedAnswerKey, currentMs, currentSegment, queuePersistedTap, showAccuracyToast]);
 
   const clearCurrentSegmentTaps = React.useCallback(() => {
     if (!currentSegment) {
@@ -1076,6 +1288,86 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }, TAP_PRACTICE_COUNT_IN_MS);
   }, [cancelTapPracticeCountIn, isTapPracticeMode, requestPlay, resetTapPracticeRun]);
 
+  React.useEffect(() => {
+    const targetIndex = hasSegments
+      ? Math.max(0, Math.min(song.segments.length - 1, initialSession.currentSegmentIndex))
+      : session.currentSegmentIndex;
+
+    if (!autoPlayOnMount || playScope !== "segment" || !currentSegment || targetIndex !== session.currentSegmentIndex) {
+      return;
+    }
+
+    const autoPlayKey = `${activeAudioUrl}:${currentSegment.id}`;
+    if (autoPlayHandledKeyRef.current === autoPlayKey) {
+      return;
+    }
+
+    autoPlayHandledKeyRef.current = autoPlayKey;
+    pausedByUserRef.current = false;
+    startTapPracticePlayback(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs, {
+      resetTapRun: isTapPracticeMode,
+    });
+  }, [
+    activeAudioUrl,
+    autoPlayOnMount,
+    currentSegment,
+    getSegmentStartWithPreroll,
+    hasSegments,
+    initialSession.currentSegmentIndex,
+    isTapPracticeMode,
+    playScope,
+    session.currentSegmentIndex,
+    song.segments.length,
+    startTapPracticePlayback,
+  ]);
+
+  React.useEffect(() => {
+    const targetIndex = hasSegments
+      ? Math.max(0, Math.min(song.segments.length - 1, initialSession.currentSegmentIndex))
+      : session.currentSegmentIndex;
+
+    if (
+      autoPlayToken <= 0 ||
+      autoPlayTokenHandledRef.current === autoPlayToken ||
+      playScope !== "segment" ||
+      !currentSegment ||
+      targetIndex !== session.currentSegmentIndex
+    ) {
+      return;
+    }
+
+    autoPlayTokenHandledRef.current = autoPlayToken;
+    playbackCompleteNotifiedRef.current = null;
+    pausedByUserRef.current = false;
+    startTapPracticePlayback(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs, {
+      resetTapRun: isTapPracticeMode,
+    });
+
+    const blockedCheckTimer = window.setTimeout(() => {
+      const state = playbackStateRef.current;
+      if (!state.isPlaying && state.currentSegment?.id === currentSegment.id) {
+        onAutoPlayBlocked?.(playbackError ?? "Your browser blocked automatic audio. Press Play once to continue Auto Drill.");
+      }
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(blockedCheckTimer);
+    };
+  }, [
+    autoPlayToken,
+    currentSegment,
+    getSegmentStartWithPreroll,
+    hasSegments,
+    initialSession.currentSegmentIndex,
+    isTapPracticeMode,
+    onAutoPlayBlocked,
+    playbackError,
+    playScope,
+    session.currentSegmentIndex,
+    song.segments.length,
+    startTapPracticePlayback,
+  ]);
+
   const getRollX = React.useCallback((noteOffsetMs: number) => {
     return 100 - ((currentSegmentOffsetMs - noteOffsetMs) / ROLL_WINDOW_MS) * 100;
   }, [currentSegmentOffsetMs]);
@@ -1096,10 +1388,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     if (rating === 1 && currentRating === 1) {
       dispatch({ type: "CLEAR_SEGMENT_RATING", segmentId: currentSegment.id });
+      onRatingSubmitted?.(rating);
       return;
     }
     dispatch({ type: "RATE_SEGMENT", segmentId: currentSegment.id, rating });
-  }, [currentSegment, currentRating]);
+    onRatingSubmitted?.(rating);
+  }, [currentSegment, currentRating, onRatingSubmitted]);
 
   const handleDebugPlayTest = () => {
     setTransportDebug((previous) => ({
@@ -1199,7 +1493,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
 
-      if (/^[1-5]$/.test(event.key)) {
+      if (ratingKeysEnabled && /^[1-5]$/.test(event.key)) {
         event.preventDefault();
         handleRateCurrentSegment(Number(event.key) as MemoryRating);
       }
@@ -1207,7 +1501,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-});
+}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, ratingKeysEnabled]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
@@ -1243,7 +1537,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       }
       loopHandledRef.current = loopKey;
       const loopMatch = compareContourAttemptDetailed(
-        currentSegmentPitchContourNotes,
+        currentCardContourNotes,
         tapAttemptsBySegment[currentSegment.id] ?? [],
         TAP_MATCH_OPTIONS
       );
@@ -1256,16 +1550,52 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       requestPlay(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
   }, [
+    currentCardContourNotes,
     currentMs,
     currentSegment,
     getSegmentStartWithPreroll,
     isLooping,
     isPlaying,
-    requestPlay,
+    play,
     showAccuracyToast,
     tapAttemptsBySegment,
-    currentSegmentPitchContourNotes,
   ]);
+
+  React.useEffect(() => {
+    if (!onSegmentPlaybackComplete || !currentSegment || isPlaying || playScope === "segment") {
+      return;
+    }
+    if (currentMs < currentSegment.endMs - 50) {
+      return;
+    }
+
+    const completionKey = `${currentSegment.id}:${autoPlayToken}:${Math.floor(currentMs)}`;
+    if (playbackCompleteNotifiedRef.current === completionKey) {
+      return;
+    }
+
+    playbackCompleteNotifiedRef.current = completionKey;
+    onSegmentPlaybackComplete();
+  }, [autoPlayToken, currentMs, currentSegment, isPlaying, onSegmentPlaybackComplete, playScope]);
+
+  React.useEffect(() => {
+    if (endedCount === lastHandledEndedCountRef.current) {
+      return;
+    }
+
+    lastHandledEndedCountRef.current = endedCount;
+    if (!onSegmentPlaybackComplete || !currentSegment || playScope !== "segment") {
+      return;
+    }
+
+    const completionKey = `${currentSegment.id}:${autoPlayToken}:ended:${endedCount}`;
+    if (playbackCompleteNotifiedRef.current === completionKey) {
+      return;
+    }
+
+    playbackCompleteNotifiedRef.current = completionKey;
+    onSegmentPlaybackComplete();
+  }, [autoPlayToken, currentSegment, endedCount, onSegmentPlaybackComplete, playScope]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;
@@ -1297,7 +1627,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     const generation = tapSessionGenerationRef.current;
 
-    void fetch(`/api/songs/${song.id}/tap-sessions`, { method: "POST" })
+    void request(`/api/songs/${song.id}/tap-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        segmentId: currentSegment?.id,
+        audioVersion: activeAudioVersion,
+        mode: "practice",
+      }),
+    })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`Failed to create tap session (${response.status})`);
@@ -1321,7 +1659,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         console.error("Failed to create tap practice session:", error);
         showTapPersistenceWarning("Could not start tap persistence session. Check your connection and try again.");
       });
-  }, [clearTapPersistenceWarning, flushPersistedTaps, isTapPracticeMode, showTapPersistenceWarning, song.id, tapSessionResetToken]);
+  }, [activeAudioVersion, clearTapPersistenceWarning, currentSegment?.id, flushPersistedTaps, isTapPracticeMode, request, showTapPersistenceWarning, song.id, tapSessionResetToken]);
 
   useEffect(() => {
     activeTapCaptureRef.current = null;
@@ -1340,6 +1678,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setIsTapPracticeMode(false);
     setShowCardContourMap(false);
     setShowTapOverlay(true);
+    setTapSessionSummaries([]);
+    setMidiSegmentAnswerKeys({});
     setAccuracyToast(null);
     activeTapCaptureRef.current = null;
     loopHandledRef.current = null;
@@ -1416,6 +1756,44 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   useEffect(() => {
     let cancelled = false;
 
+    const loadEnhancedTapData = async () => {
+      try {
+        const [response, midiResponse] = await Promise.all([
+          request(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }),
+          request(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
+        ]);
+        if (!response.ok) {
+          throw new Error(`Failed to load tap sessions (${response.status})`);
+        }
+        const payload = await response.json() as { sessions?: TapSessionSummaryPayload[] };
+        const midiPayload = midiResponse.ok
+          ? await midiResponse.json() as { segmentAnswerKeys?: Record<string, MidiSegmentAnswerKey> }
+          : { segmentAnswerKeys: {} };
+        const sessions = payload.sessions ?? [];
+
+        if (cancelled) {
+          return;
+        }
+        setTapSessionSummaries(sessions);
+        setMidiSegmentAnswerKeys(midiPayload.segmentAnswerKeys ?? {});
+      } catch {
+        if (!cancelled) {
+          setTapSessionSummaries([]);
+          setMidiSegmentAnswerKeys({});
+        }
+      }
+    };
+
+    void loadEnhancedTapData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [request, song.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     if (!hasTapAnswers) {
       setTapHeatMapBySegment({});
       return () => {
@@ -1425,7 +1803,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     const loadTapHeatMap = async () => {
       try {
-        const response = await fetch(`/api/songs/${song.id}/tap-heatmap`, { cache: "no-store" });
+        const response = await request(`/api/songs/${song.id}/tap-heatmap`, { cache: "no-store" });
         if (!response.ok) {
           throw new Error(`Failed to load tap heat map (${response.status})`);
         }
@@ -1449,7 +1827,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [hasTapAnswers, song.id, tapHeatMapRefreshToken]);
+  }, [hasTapAnswers, request, song.id, tapHeatMapRefreshToken]);
 
   return (
     <div
@@ -1464,7 +1842,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           {accuracyToast.text}
         </div>
       ) : null}
-      <header data-testid="practice-header" className="px-4 pb-2 pt-4 md:px-8">
+      <header data-testid="practice-header" className={isTapPracticeMode ? "sr-only" : "px-4 pb-2 pt-4 md:px-8"}>
         <div className="flex items-start justify-between gap-3">
           {breadcrumbRootLabel ? (
             <nav aria-label="Breadcrumb" className="min-w-0" data-testid="practice-breadcrumb">
@@ -1548,17 +1926,41 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         </p>
       </header>
 
-      <div className="px-4 md:px-8" data-testid="practice-top-bar">
-        {ratingsLoading ? (
+      {!reducedControls ? (
+      <div className={isTapPracticeMode ? "px-3 pb-1 pt-2 md:px-6" : "px-4 md:px-8"} data-testid="practice-top-bar">
+        {!isTapPracticeMode && ratingsLoading ? (
           <div
             data-testid="ratings-loading-skeleton"
             className="h-8 w-full animate-pulse rounded-full bg-gray-200"
           />
-        ) : (
+        ) : !isTapPracticeMode ? (
           <KnowledgeBar percent={knowledgeScore.overall} />
-        )}
-        <div className="mt-2 flex items-center gap-2">
-          {hasSegments && currentSegment && hasTapHeatMapData ? (
+        ) : null}
+        <div className={isTapPracticeMode ? "flex flex-wrap items-center gap-1.5" : "mt-2 flex items-center gap-2"}>
+          {hasBothAudioVersions ? (
+            <div
+              className="inline-flex rounded-full border border-indigo-300 bg-white p-0.5"
+              data-testid="practice-audio-version-toggle"
+            >
+              {(["straight", "blend"] as const).map((version) => (
+                <button
+                  key={version}
+                  type="button"
+                  data-testid={`practice-audio-version-${version}`}
+                  aria-pressed={activeAudioVersion === version}
+                  onClick={() => handleAudioVersionChange(version)}
+                  className={`${isTapPracticeMode ? "rounded-full px-2.5 py-1 text-xs" : "rounded-full px-3 py-1 text-sm"} font-semibold transition ${
+                    activeAudioVersion === version
+                      ? "bg-indigo-600 text-white"
+                      : "text-indigo-700 hover:bg-indigo-50"
+                  }`}
+                >
+                  {version === "straight" ? "Part" : "Blend"}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {hasSegments && currentSegment && hasCardContourData ? (
             <button
               type="button"
               data-testid="practice-card-contour-toggle"
@@ -1568,12 +1970,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   setTapHeatMapRefreshToken((previous) => previous + 1);
                 }
               }}
-              className="rounded-full border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+              aria-pressed={showCardContourMap}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                showCardContourMap
+                  ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
+                  : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+              }`}
             >
-              Card contour: {showCardContourMap ? "On" : "Off"}
+              Contour
             </button>
           ) : null}
-          {hasTapAnswers ? (
+          {hasSegments ? (
             <button
               type="button"
               data-testid="practice-tap-mode-toggle"
@@ -1581,16 +1988,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 setIsTapPracticeMode((previous) => !previous);
                 activeTapCaptureRef.current = null;
               }}
-              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+              className={`${isTapPracticeMode ? "rounded-full border px-2.5 py-1 text-xs" : "rounded-full border px-3 py-1.5 text-sm"} font-semibold transition ${
                 isTapPracticeMode
                   ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
                   : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
               }`}
             >
-              Tap practice: {isTapPracticeMode ? "On" : "Off"}
+              Tap
             </button>
           ) : null}
-          {isTapPracticeMode && hasSegments && currentSegment ? (
+          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
             <button
               type="button"
               data-testid="practice-overlay-toggle"
@@ -1650,18 +2057,35 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             </button>
           </div>
         ) : null}
+        {isTapPracticeMode && currentSegment && currentDerivedAnswerKey && enhancedTapScore ? (
+          <div
+            data-testid="practice-auto-score"
+            className="mt-1.5 rounded-xl border border-indigo-100 bg-white px-2.5 py-1.5 text-xs text-slate-700 shadow-sm"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate font-semibold text-slate-900">
+                Auto score: {enhancedTapScore.scorePercent}%
+              </span>
+            </div>
+          </div>
+        ) : null}
       </div>
+      ) : null}
 
-      <main data-testid="practice-main" className="flex flex-1 justify-center overflow-y-auto px-4 pb-44 pt-2 md:px-8 md:pb-48">
-        <section data-testid="practice-focus" className={`flex h-full min-h-full w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
-          {!isTapPracticeMode ? (
+      <main
+        data-testid="practice-main"
+        className={`flex flex-1 justify-center px-4 pt-2 md:px-8 ${isTapPracticeMode ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
+        style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
+      >
+        <section data-testid="practice-focus" className={`flex h-full min-h-0 w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
+          {!isTapPracticeMode && showSegmentNavigationControls ? (
             <button
               type="button"
               aria-label="Previous segment"
               data-testid="practice-prev-segment"
               onClick={handlePrevSegment}
               disabled={!canUsePrevSegment}
-              className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+              className="inline-flex h-24 w-10 shrink-0 self-center items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 12H6" />
@@ -1706,7 +2130,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   className={`relative z-10 h-full min-h-0 ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}
                 >
                   <SegmentCard
-                    segment={{ ...currentSegment, pitchContourNotes: currentSegmentPitchContourNotes }}
+                    segment={{ ...currentSegment, pitchContourNotes: currentCardContourNotes }}
                     currentRating={currentRating}
                     onRate={handleRateCurrentSegment}
                     playbackMs={currentMs}
@@ -1714,7 +2138,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     masteryPercent={masteryPercentForSegment(currentSegment.id)}
                     lyricVisibilityMode={lyricVisibilityMode}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
-                    showContourMap={showCardContourMap && hasTapHeatMapData}
+                    showContourMap={showCardContourMap && hasCardContourData}
                     contourHeatMap={tapHeatMapBySegment[currentSegment.id]}
                   />
                 </div>
@@ -1722,7 +2146,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden rounded-2xl border border-indigo-200/30 bg-indigo-50/10" data-testid="practice-piano-roll-overlay">
                     <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
                       <line x1="0" y1="50" x2="100" y2="50" stroke="rgb(199 210 254)" strokeWidth="0.5" opacity="0.45" />
-                      {showSameLaneGuides ? currentSegmentPitchContourNotes.map((note) => {
+                      {showSameLaneGuides ? currentCardContourNotes.map((note) => {
                         const x = getRollX(note.timeOffsetMs);
                         if (x < -5 || x > 105) {
                           return null;
@@ -1748,7 +2172,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                           </g>
                         );
                       }) : null}
-                      {currentSegmentPitchContourNotes.map((note) => {
+                      {currentCardContourNotes.map((note) => {
                         const x = getRollX(note.timeOffsetMs);
                         if (x < -5 || x > 105) {
                           return null;
@@ -1839,7 +2263,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               ref={tapBarRef}
               data-testid="practice-tap-bar"
               aria-label="Tap contour bar"
-              className="tap-input-surface relative h-full min-h-[28rem] w-28 shrink-0 overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm sm:w-32"
+              className="tap-input-surface relative h-full min-h-0 w-28 shrink-0 overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm sm:w-32"
               onContextMenu={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -1849,6 +2273,30 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 event.stopPropagation();
               }}
               onDragStart={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onSelect={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onTouchStart={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onTouchMove={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onTouchEnd={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onTouchCancel={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
               }}
@@ -1948,30 +2396,31 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 )}
               </div>
             </div>
-          ) : (
+          ) : !isTapPracticeMode && showSegmentNavigationControls ? (
             <button
               type="button"
               aria-label="Next segment"
               data-testid="practice-next-segment"
               onClick={handleNextSegment}
-              disabled={!hasSegments || isLast}
-              className="inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+              disabled={!canUseNextSegment}
+              className="inline-flex h-24 w-10 shrink-0 self-center items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M6 12h12" />
                 <path d="M14 8l4 4-4 4" />
               </svg>
             </button>
-          )}
+          ) : null}
         </section>
       </main>
 
       <section
         data-testid="practice-transport"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
+        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
       >
         <AudioPlayer
-          audioUrl={song.audioUrl}
+          audioUrl={activeAudioUrl}
           currentMs={currentMs}
           durationMs={totalDurationMs}
           segmentStartMs={activeStartMs}
@@ -1993,6 +2442,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           onToggleLoop={handleToggleLoop}
           lyricModeLabel={LYRIC_MODE_LABELS[lyricVisibilityMode]}
           onToggleLyricMode={() => setLyricVisibilityMode((previous) => getNextLyricMode(previous))}
+          reducedControls={reducedControls}
         />
       </section>
     </div>

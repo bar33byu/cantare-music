@@ -27,9 +27,11 @@ describe('GET /api/songs', () => {
       title: 'Song 1',
       artist: null,
       audioKey: null,
+      alternateAudioKey: null,
       pitchContourNotes: [{ id: 'n-1', absoluteMs: 0, durationMs: 100, lane: 0.5 }],
       createdAt: new Date('2024-01-01T00:00:00.000Z'),
       lastPracticedAt: new Date('2024-01-02T00:00:00.000Z'),
+      userId: 'default',
     }];
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
@@ -59,8 +61,11 @@ describe('GET /api/songs', () => {
         lastPracticedAt: '2024-01-02T00:00:00.000Z',
         masteryPercent: 65,
         hasAudio: false,
+        hasPartAudio: false,
+        hasBlendAudio: false,
         hasSegments: true,
         hasTapKeys: true,
+        hasMidiContour: true,
       },
     ]);
     expect(getAllSongs).toHaveBeenCalledWith('default');
@@ -94,10 +99,37 @@ describe('GET /api/songs', () => {
         lastPracticedAt: '2024-03-11T00:00:00.000Z',
         masteryPercent: 0,
         hasAudio: false,
+        hasPartAudio: false,
+        hasBlendAudio: false,
         hasSegments: false,
         hasTapKeys: false,
+        hasMidiContour: false,
       },
     ]);
+  });
+
+  it('treats alternate audio as audio readiness', async () => {
+    const mockSongs = [{
+      id: 'blend-only',
+      title: 'Blend Only',
+      artist: null,
+      audioKey: null,
+      alternateAudioKey: 'audio/blend.mp3',
+      pitchContourNotes: [],
+      createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      lastPracticedAt: null,
+      userId: 'default',
+    }];
+    vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
+    vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
+    vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
+    vi.mocked(getSegmentsBySongId).mockResolvedValue([]);
+
+    const response = await GET(new Request('http://localhost/api/songs') as any);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data[0].hasAudio).toBe(true);
   });
 
   it('returns empty list when database is not configured', async () => {
@@ -145,7 +177,7 @@ describe('POST /api/songs', () => {
   });
 
   it('creates song and returns 201', async () => {
-    const mockSong = { id: 'uuid-123', title: 'New Song', artist: 'Artist', audioKey: null, createdAt: null, lastPracticedAt: null };
+    const mockSong = { id: 'uuid-123', title: 'New Song', artist: 'Artist', audioKey: null, alternateAudioKey: null, pitchContourNotes: [], createdAt: null, lastPracticedAt: null, userId: 'default' };
     vi.mocked(createSong).mockResolvedValue(mockSong);
 
     const request = new Request('http://localhost/api/songs', {

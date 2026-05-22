@@ -30,19 +30,24 @@ vi.mock('./components/PracticeView', () => ({
     onBreadcrumbRootClick,
     onEditSongClick,
     segmentPrerollMs,
-    collapseLyricLineBreaks,
+    preferredAudioVersion,
+    onPreferredAudioVersionChange,
   }: {
     song: { segments: Array<unknown> };
     breadcrumbRootLabel?: string;
     onBreadcrumbRootClick?: () => void;
     onEditSongClick?: () => void;
     segmentPrerollMs?: number;
-    collapseLyricLineBreaks?: boolean;
+    preferredAudioVersion?: 'part' | 'blend';
+    onPreferredAudioVersionChange?: (version: 'part' | 'blend') => void;
   }) => {
-    practiceViewMock({ song, segmentPrerollMs, collapseLyricLineBreaks });
+    practiceViewMock({ song, segmentPrerollMs, preferredAudioVersion });
     return (
       <div data-testid="mock-practice-view">
         Segments: {song.segments.length}
+        <button data-testid="mock-prefer-blend" onClick={() => onPreferredAudioVersionChange?.('blend')}>
+          Prefer Blend
+        </button>
         {breadcrumbRootLabel ? (
           <button onClick={onBreadcrumbRootClick}>{breadcrumbRootLabel}</button>
         ) : null}
@@ -169,6 +174,7 @@ describe('Home page', () => {
     render(<Home />);
 
     expect(screen.getByText('Cantare Music')).toBeInTheDocument();
+    expect(screen.queryByText('Cantare')).not.toBeInTheDocument();
     expect(screen.getByTestId('mock-playlist-browser')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('library-tab'));
     fireEvent.click(screen.getByTestId('mock-select-song'));
@@ -205,11 +211,11 @@ describe('Home page', () => {
     expect(lastCall?.segmentPrerollMs).toBe(1000);
   });
 
-  it('passes compact lyric wrapping setting into practice view', async () => {
+  it('uses the selected default audio preference in practice', async () => {
     render(<Home />);
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
-    fireEvent.click(screen.getByTestId('settings-collapse-line-breaks-toggle'));
+    fireEvent.click(screen.getByTestId('settings-audio-preference-blend'));
 
     fireEvent.click(screen.getByTestId('library-tab'));
     fireEvent.click(screen.getByTestId('mock-select-song'));
@@ -218,8 +224,18 @@ describe('Home page', () => {
       expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
     });
 
-    const lastCall = practiceViewMock.mock.calls.at(-1)?.[0] as { collapseLyricLineBreaks?: boolean } | undefined;
-    expect(lastCall?.collapseLyricLineBreaks).toBe(true);
+    const lastCall = practiceViewMock.mock.calls.at(-1)?.[0] as { preferredAudioVersion?: 'part' | 'blend' } | undefined;
+    expect(lastCall?.preferredAudioVersion).toBe('blend');
+  });
+
+  it('shows build information in settings and omits compact lyric wrapping', async () => {
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('home-settings-toggle'));
+
+    expect(screen.queryByTestId('settings-collapse-line-breaks-toggle')).not.toBeInTheDocument();
+    expect(screen.getByTestId('settings-build-version')).toHaveTextContent(/^v\d+\.\d+\.\d+/);
+    expect(screen.getByTestId('settings-build-branch')).toBeInTheDocument();
   });
 
   it('switches to playlists and starts playlist practice', async () => {
@@ -368,7 +384,9 @@ describe('Home page', () => {
     await waitFor(() => {
       expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
     });
-    expect(window.location.hash).toContain('view=song_practice');
+    await waitFor(() => {
+      expect(window.location.hash).toContain('view=song_practice');
+    });
 
     fireEvent.click(screen.getByText('Songs'));
 
@@ -513,7 +531,6 @@ describe('Home page', () => {
   it('passes the current user id to playlist browser for both test and default users', async () => {
     window.localStorage.setItem('cantare:user-settings', JSON.stringify({
       segmentPrerollMs: 500,
-      collapseLyricLineBreaks: false,
       currentUserId: 'default',
       users: [
         { id: 'default', name: 'Default User' },

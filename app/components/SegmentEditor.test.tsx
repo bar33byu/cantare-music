@@ -62,6 +62,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -129,11 +130,44 @@ describe('SegmentEditor', () => {
     });
   });
 
-  it('uses a playable proxied audio URL for edit-page playback', async () => {
+  it('uses the direct song audio URL for edit-page playback', async () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(vi.mocked(useAudioPlayer)).toHaveBeenCalledWith('/api/audio/audio/song.mp3');
+      expect(vi.mocked(useAudioPlayer)).toHaveBeenCalledWith('/audio/song.mp3');
+    });
+  });
+
+  it('uses blend audio for edit-page playback when prominent audio is missing', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ audioUrl: '', alternateAudioUrl: '/audio/blend.mp3', title: 'My Song' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => sampleSegments,
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({ error: 'Unexpected request' }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(vi.mocked(useAudioPlayer)).toHaveBeenCalledWith('/audio/blend.mp3');
+      expect(screen.getByTestId('segment-editor-board')).toBeInTheDocument();
     });
   });
 
@@ -293,6 +327,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -381,6 +416,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -499,7 +535,7 @@ describe('SegmentEditor', () => {
     expect(segmentGetCalls).toHaveLength(1);
   });
 
-  it('probes proxy audio URL for duration before first play when direct probe fails', async () => {
+  it('probes the direct audio URL for duration before first play', async () => {
     vi.mocked(useAudioPlayer).mockReturnValue({
       isPlaying: false,
       isReady: false,
@@ -524,6 +560,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -534,7 +571,7 @@ describe('SegmentEditor', () => {
         return {
           ok: true,
           json: async () => ({
-            audioUrl: '/audio/song-1/test.mp3',
+            audioUrl: 'https://pub-example.r2.dev/audio/song-1/test.mp3',
             title: 'My Song',
           }),
         } as Response;
@@ -566,7 +603,7 @@ describe('SegmentEditor', () => {
       }
 
       load() {
-        if (this.src.includes('/api/audio/')) {
+        if (this.src === 'https://pub-example.r2.dev/audio/song-1/test.mp3') {
           this.duration = 180;
           this.dispatchEvent(new Event('loadedmetadata'));
           return;
@@ -621,6 +658,7 @@ describe('SegmentEditor', () => {
       play,
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -662,6 +700,7 @@ describe('SegmentEditor', () => {
       play,
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -700,6 +739,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek,
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -744,6 +784,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek,
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -783,6 +824,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek,
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -831,6 +873,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek,
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -949,6 +992,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1078,6 +1122,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1117,6 +1162,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1160,6 +1206,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1267,6 +1314,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" userId="test-user-vwzm4k" />);
@@ -1319,6 +1367,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
 
     render(<SegmentEditor songId="song-1" />);
@@ -1442,6 +1491,7 @@ describe('SegmentEditor', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
     });
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

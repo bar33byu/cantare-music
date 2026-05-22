@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Segment, SongPitchContourNote } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
+import { MidiSetupPanel } from './MidiSetupPanel';
 import { PitchContourThumbnail } from './PitchContourThumbnail';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
-import { buildProxyAudioUrl, parseAudioKey, toPlayableAudioUrl } from '../lib/audioUrls';
+import { toPlayableAudioUrl } from '../lib/audioUrls';
 import { getDefaultNewSegmentPlacement, getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
 import { getSegmentPitchContourNotes } from '../lib/pitchContour';
 import { classifyContourDirection } from '../lib/contourPractice';
@@ -80,7 +81,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [audioUrl, setAudioUrl] = useState('');
-  const [useProxyFallback, setUseProxyFallback] = useState(false);
+  const [alternateAudioUrl, setAlternateAudioUrl] = useState('');
   const [songTitle, setSongTitle] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
   const [showReplaceAudio, setShowReplaceAudio] = useState(false);
@@ -107,18 +108,15 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const focusedContourCardRef = useRef<HTMLDivElement | null>(null);
   const contourTapBarRef = useRef<HTMLDivElement | null>(null);
   const activeContourCaptureRef = useRef<ActiveContourCapture | null>(null);
-  const pendingFallbackPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
   const contourLastSavedSnapshotRef = useRef<string>('[]');
   const contourAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contourAutoSaveGenerationRef = useRef(0);
 
-  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(parseAudioKey(audioUrl)), [audioUrl]);
-  const playbackAudioUrl = useMemo(() => {
-    if (useProxyFallback && proxyAudioUrl) {
-      return proxyAudioUrl;
-    }
-    return toPlayableAudioUrl(audioUrl);
-  }, [audioUrl, proxyAudioUrl, useProxyFallback]);
+  const hasAnyAudio = Boolean(audioUrl.trim() || alternateAudioUrl.trim());
+  const playbackAudioUrl = useMemo(
+    () => toPlayableAudioUrl(audioUrl.trim() || alternateAudioUrl.trim()),
+    [audioUrl, alternateAudioUrl]
+  );
 
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
   const {
@@ -127,7 +125,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     currentMs,
     durationMs,
     playbackRate = 1,
-    playbackError,
     play,
     pause,
     seek,
@@ -246,15 +243,15 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       ...contourDraftNotes,
       ...(activeNote ? [activeNote] : []),
     ]);
-  }, [contourDraftNotes, currentMs, normalizeContourNotes]);
+  }, [contourDraftNotes, normalizeContourNotes]);
 
-  const updateLocalSegment = useCallback((segmentId: string, updates: Partial<Segment>) => {
+  const updateLocalSegment = (segmentId: string, updates: Partial<Segment>) => {
     setSegments((previous) =>
       previous.map((segment) => (segment.id === segmentId ? { ...segment, ...updates } : segment))
     );
-  }, []);
+  };
 
-  const saveSegmentPatch = useCallback(async (segmentId: string, updates: Partial<Segment>) => {
+  const saveSegmentPatch = async (segmentId: string, updates: Partial<Segment>) => {
     try {
       setSavingSegmentId(segmentId);
       const response = await request(`/api/songs/${songId}/segments/${segmentId}`, {
@@ -269,7 +266,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     } finally {
       setSavingSegmentId(null);
     }
-  }, [request, songId]);
+  };
 
   const getNextSectionNumber = () => {
     const numbers = segments
@@ -391,7 +388,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     });
   };
 
-  const probeAudioDurationCandidatesMs = useCallback(async (candidates: Array<string | null | undefined>): Promise<number | null> => {
+  const probeAudioDurationCandidatesMs = async (candidates: Array<string | null | undefined>): Promise<number | null> => {
     for (const candidate of candidates) {
       const normalized = candidate?.trim();
       if (!normalized) {
@@ -405,7 +402,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     }
 
     return null;
-  }, []);
+  };
 
   const resolveBulkDurationMs = async (): Promise<number> => {
     const knownDuration = Math.max(durationMs, stableDurationMs);
@@ -413,7 +410,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       return knownDuration;
     }
 
-    const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl, proxyAudioUrl]);
+    const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl]);
     if (probedDuration && probedDuration > 0) {
       setStableDurationMs((previous) => Math.max(previous, probedDuration));
       return probedDuration;
@@ -711,14 +708,14 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     }));
   }, [contourDraftNotes, focusedRecordingSegment]);
 
-  const msFromClientX = useCallback((clientX: number): number => {
+  const msFromClientX = (clientX: number): number => {
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || timelineDurationMs <= 0) {
       return 0;
     }
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     return Math.round(ratio * timelineDurationMs);
-  }, [timelineDurationMs]);
+  };
 
   const handleBoardSeek = (event: React.MouseEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) {
@@ -728,7 +725,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     seek(msFromClientX(event.clientX));
   };
 
-  const handleInteractionMove = useCallback((clientX: number, pointerId: number) => {
+  const handleInteractionMove = (clientX: number, pointerId: number) => {
     if (!activeInteraction || pointerId !== activeInteraction.pointerId) {
       return;
     }
@@ -758,9 +755,9 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
     const nextEndMs = Math.min(timelineDurationMs, Math.max(rawMs, target.startMs + MIN_SEGMENT_MS));
     updateLocalSegment(target.id, { endMs: nextEndMs });
-  }, [activeInteraction, msFromClientX, segments, timelineDurationMs, updateLocalSegment]);
+  };
 
-  const finishInteraction = useCallback(async (pointerId: number) => {
+  const finishInteraction = async (pointerId: number) => {
     if (!activeInteraction || pointerId !== activeInteraction.pointerId) {
       return;
     }
@@ -776,7 +773,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     } catch {
       setDeleteError('Failed to save section timing. Please try again.');
     }
-  }, [activeInteraction, saveSegmentPatch, segments]);
+  };
 
   useEffect(() => {
     if (!activeInteraction) {
@@ -820,7 +817,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         return;
       }
 
-      const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl, proxyAudioUrl]);
+      const probedDuration = await probeAudioDurationCandidatesMs([playbackAudioUrl]);
       if (!cancelled && probedDuration && probedDuration > 0) {
         setStableDurationMs((previous) => Math.max(previous, probedDuration));
       }
@@ -831,36 +828,13 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     return () => {
       cancelled = true;
     };
-  }, [durationMs, playbackAudioUrl, probeAudioDurationCandidatesMs, proxyAudioUrl, stableDurationMs]);
+  }, [durationMs, playbackAudioUrl, stableDurationMs]);
 
   useEffect(() => {
-    setUseProxyFallback(false);
     setIsContourRecording(false);
     setContourDraftNotes([]);
     activeContourCaptureRef.current = null;
-    pendingFallbackPlayRangeRef.current = null;
   }, [songId]);
-
-  useEffect(() => {
-    if (!playbackError || useProxyFallback || !proxyAudioUrl) {
-      return;
-    }
-    setUseProxyFallback(true);
-  }, [playbackError, proxyAudioUrl, useProxyFallback]);
-
-  useEffect(() => {
-    if (!useProxyFallback) {
-      return;
-    }
-
-    const pendingRange = pendingFallbackPlayRangeRef.current;
-    if (!pendingRange) {
-      return;
-    }
-
-    pendingFallbackPlayRangeRef.current = null;
-    play(pendingRange.startMs, pendingRange.endMs);
-  }, [play, useProxyFallback]);
 
   // Clean up undo timer on unmount to avoid memory leaks
   useEffect(() => {
@@ -882,10 +856,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     const startMs = atOrPastEnd
       ? 0
       : Math.max(0, Math.min(currentMs, safeDuration));
-    pendingFallbackPlayRangeRef.current = {
-      startMs,
-      endMs: safeDuration,
-    };
     play(startMs, safeDuration);
   };
 
@@ -1053,11 +1023,12 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         if (!response.ok) {
           return;
         }
-        const data = (await response.json()) as { audioUrl?: string; title?: string; pitchContourNotes?: SongPitchContourNote[] };
+        const data = (await response.json()) as { audioUrl?: string; alternateAudioUrl?: string; title?: string; pitchContourNotes?: SongPitchContourNote[] };
         if (!cancelled) {
           const loadedContourNotes = normalizeContourNotes(data.pitchContourNotes ?? []);
           contourLastSavedSnapshotRef.current = serializeContourNotes(loadedContourNotes);
           setAudioUrl(data.audioUrl ?? '');
+          setAlternateAudioUrl(data.alternateAudioUrl ?? '');
           setSongTitle(data.title ?? '');
           setTitleDraft(data.title ?? '');
           setContourDraftNotes(loadedContourNotes);
@@ -1066,6 +1037,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       } catch {
         if (!cancelled) {
           setAudioUrl('');
+          setAlternateAudioUrl('');
           setSongLoaded(true);
         }
       }
@@ -1129,7 +1101,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     }
   };
 
-  if (songLoaded && !audioUrl) {
+  if (songLoaded && !hasAnyAudio) {
     return (
       <div className="mx-auto w-full max-w-6xl">
         <div className="mb-4">
@@ -1150,7 +1122,14 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
             {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
           </div>
         </div>
-        <ReplaceAudioForm songId={songId} onReplaced={handleAudioUploaded} mode="upload" />
+        <ReplaceAudioForm
+          songId={songId}
+          userId={userId}
+          audioUrl={audioUrl}
+          alternateAudioUrl={alternateAudioUrl}
+          onReplaced={handleAudioUploaded}
+          mode="upload"
+        />
       </div>
     );
   }
@@ -1204,10 +1183,20 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         </button>
         {showReplaceAudio && (
           <div className="mt-2">
-            <ReplaceAudioForm songId={songId} onReplaced={handleAudioUploaded} />
+            <ReplaceAudioForm
+              songId={songId}
+              userId={userId}
+              audioUrl={audioUrl}
+              alternateAudioUrl={alternateAudioUrl}
+              onReplaced={handleAudioUploaded}
+            />
           </div>
         )}
       </div>
+      ) : null}
+
+      {!isContourRecording ? (
+        <MidiSetupPanel songId={songId} audioPlayer={audioPlayer} request={request} />
       ) : null}
 
       {deleteError && (

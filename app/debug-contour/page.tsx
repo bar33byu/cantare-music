@@ -109,13 +109,10 @@ function scorePillClasses(status: "matched" | "mismatched" | "pending") {
   return "border-rose-300 bg-rose-50 text-rose-800";
 }
 
-function buildAudioProxyPath(key: string): string {
-  const segments = key
-    .split("/")
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment));
-  return `/api/audio/${segments.join("/")}`;
+function buildAudioUrl(url: string): string {
+  // Audio URLs must now be direct R2 CDN URLs (no proxy fallback).
+  // Return the URL as-is after trimming.
+  return url.trim();
 }
 
 interface PlotProps {
@@ -314,9 +311,9 @@ export default function DebugContourPage() {
   const uploadedAudioObjectUrlRef = React.useRef<string | null>(null);
   const [timelineMs, setTimelineMs] = React.useState(DEFAULT_TIMELINE_MS);
   const [sameDeadZone, setSameDeadZone] = React.useState(DEFAULT_SAME_DEAD_ZONE);
-  const [audioKey, setAudioKey] = React.useState("audio/sample.mp3");
+  const [audioUrl, setAudioUrl] = React.useState("https://example.com/audio/sample.mp3");
   const [audioSrc, setAudioSrc] = React.useState<string | null>(null);
-  const [audioSource, setAudioSource] = React.useState<"key" | "upload" | null>(null);
+  const [audioSource, setAudioSource] = React.useState<"url" | "upload" | null>(null);
   const [uploadedAudioName, setUploadedAudioName] = React.useState<string | null>(null);
   const [audioError, setAudioError] = React.useState<string | null>(null);
   const [playheadMs, setPlayheadMs] = React.useState(0);
@@ -384,7 +381,7 @@ export default function DebugContourPage() {
 
   const loadAudio = React.useCallback(() => {
     setAudioError(null);
-    const trimmed = audioKey.trim();
+    const trimmed = audioUrl.trim();
     if (!trimmed) {
       setAudioSrc(null);
       setAudioSource(null);
@@ -395,11 +392,11 @@ export default function DebugContourPage() {
       URL.revokeObjectURL(uploadedAudioObjectUrlRef.current);
       uploadedAudioObjectUrlRef.current = null;
     }
-    setAudioSrc(buildAudioProxyPath(trimmed));
-    setAudioSource("key");
+    setAudioSrc(buildAudioUrl(trimmed));
+    setAudioSource("url");
     setUploadedAudioName(null);
     setPlayheadMs(0);
-  }, [audioKey]);
+  }, [audioUrl]);
 
   const handleUploadClick = React.useCallback(() => {
     uploadInputRef.current?.click();
@@ -623,12 +620,12 @@ export default function DebugContourPage() {
                 onChange={handleUploadAudio}
               />
               <label className="min-w-[260px] flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Audio key</span>
+                <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Audio URL</span>
                 <input
-                  value={audioKey}
-                  onChange={(event) => setAudioKey(event.target.value)}
+                  value={audioUrl}
+                  onChange={(event) => setAudioUrl(event.target.value)}
                   className="mt-1 w-full bg-transparent text-sm font-medium outline-none"
-                  placeholder="audio/sample.mp3"
+                  placeholder="https://pub-example.r2.dev/audio/sample.mp3"
                 />
               </label>
               <button
@@ -673,8 +670,8 @@ export default function DebugContourPage() {
 
             {audioSource === "upload" && uploadedAudioName ? (
               <p className="mt-2 text-sm text-slate-700">Loaded local file: {uploadedAudioName}</p>
-            ) : audioSource === "key" ? (
-              <p className="mt-2 text-sm text-slate-700">Loaded from key: {audioKey.trim() || "(none)"}</p>
+            ) : audioSource === "url" ? (
+              <p className="mt-2 text-sm text-slate-700">Loaded from URL: {audioUrl.trim() || "(none)"}</p>
             ) : null}
 
             {audioError ? <p className="mt-2 text-sm text-rose-700">Audio error: {audioError}</p> : null}
@@ -685,10 +682,10 @@ export default function DebugContourPage() {
                 controls
                 preload="metadata"
                 className="mt-3 w-full"
-                onError={() => setAudioError(audioSource === "upload" ? "Could not play the uploaded file." : "Could not load audio from the provided key.")}
+                onError={() => setAudioError(audioSource === "upload" ? "Could not play the uploaded file." : "Could not load audio from the provided URL.")}
               />
             ) : (
-              <p className="mt-3 text-sm text-slate-500">Load an audio key or upload a local file to enable a moving playhead and live tap capture.</p>
+              <p className="mt-3 text-sm text-slate-500">Load an audio URL or upload a local file to enable a moving playhead and live tap capture.</p>
             )}
 
             <div className="mt-4 grid gap-3 md:grid-cols-[120px_minmax(0,1fr)]">

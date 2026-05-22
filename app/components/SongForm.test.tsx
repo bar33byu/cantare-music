@@ -67,6 +67,21 @@ describe('SongForm', () => {
     });
   });
 
+  it('creates songs for the selected user', async () => {
+    render(<SongForm userId="test-user" onSuccess={mockOnSuccess} />);
+
+    fireEvent.change(screen.getByTestId('song-title-input'), { target: { value: 'Test Song' } });
+    fireEvent.click(screen.getByTestId('song-form-submit'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/songs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-User-ID': 'test-user' },
+        body: JSON.stringify({ title: 'Test Song' }),
+      });
+    });
+  });
+
   it('file larger than 15 MB sets error before submitting', async () => {
     // Mock useUploadAudio to simulate file size error
     const mockUseUploadAudio = vi.fn(() => ({

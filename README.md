@@ -1,6 +1,6 @@
 # Cantare
 
-Version 2.0 of Cantare is a practice application for singers to learn and master songs through deliberate, segment-based repetition, melodic contour training, playlists, and isolated multi-user libraries.
+Version 2.1 of Cantare is a practice application for singers to learn and master songs through deliberate, segment-based repetition, two-version audio playback, melodic contour training, playlists, and isolated multi-user libraries.
 
 > **Credits:** Cantare is a clone built to replicate the core functionality of [Musicators.com](https://www.musicators.com). All credit for the original concept and feature design goes to the Musicators team.
 
@@ -11,10 +11,12 @@ Cantare lets you upload songs, divide them into labeled segments (verses, chorus
 **Current features:**
 
 - **Song library** - upload audio files, add titles and artist info, and browse your collection
+- **Two-version audio** - keep separate Prominent and Blend recordings for a song, upload either version, and switch between them in practice when both are available
 - **Segment editor** - a visual timeline interface for slicing a song into segments, setting start/end times by dragging, attaching lyrics, and recording contour answer keys
 - **Contour answer-key autosave** - captured contour taps are saved automatically, can be saved on demand, and can be cleared for one section or the whole song
 - **User-aware editing** - segment and contour editor requests carry the active user context so shared instances keep each user's song data isolated
 - **Practice view** - plays each segment in sequence with configurable pre-roll, shows or hides lyrics, and lets you rate your memory after each repetition
+- **Audio version switching** - Practice view remembers the browser's last selected audio version and preserves timestamp, play state, playback rate, and loop boundaries when switching
 - **Tap practice** - tap melodic contour attempts during practice and compare them against saved answer keys, with background persistence and buffered early taps
 - **Contour review heat map** - the card contour can color recent trouble spots from saved tap attempts and refreshes after new attempts are saved
 - **Answer-key reset behavior** - updating contour answer keys clears older tap-practice history for that song so future heat maps compare against the current key
@@ -55,13 +57,14 @@ R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 R2_BUCKET_NAME=        # Preferred bucket variable name
 R2_BUCKET=             # Legacy fallback bucket variable name
-R2_PUBLIC_URL=         # Optional public base URL for audio delivery
+R2_PUBLIC_URL=         # Required: public base URL for audio CDN delivery
 ```
 
 Notes:
 
-- If `R2_PUBLIC_URL` is omitted, browser playback falls back to the same-origin audio proxy route.
+- `R2_PUBLIC_URL` is required. Audio is served directly from R2's CDN to the browser (no server-side proxy).
 - If `R2_ENDPOINT` is blank and `R2_ACCOUNT_ID` is set, the app derives the standard Cloudflare R2 endpoint automatically.
+- Prominent and Blend audio versions are both stored as R2 objects and exposed to the browser only as direct public R2 URLs.
 
 Run database migrations before first use:
 
@@ -84,9 +87,10 @@ npm test
   - Base duration is 20 seconds
   - While playback is active in the editor, start is anchored to `max(currentPlaybackMs, latestEnd + 500ms)`
 - Updating `startMs` or `endMs` re-normalizes ordering server-side to keep timeline position and sequence consistent.
-- If playback falls back from a public audio URL to the proxied source, pending play requests resume automatically once the fallback source is ready.
+- Segment editor playback uses the configured public R2 URL directly; there is no server-side audio proxy fallback.
 - Contour answer keys autosave shortly after edits. The manual save button is still available for immediate confirmation.
 - Clearing section taps removes only the notes overlapping the focused segment, while clearing all taps resets the entire song contour.
+- Replacing audio from the editor can target either the Prominent or Blend version while preserving existing segment timings and lyrics.
 
 ## Tap practice notes
 

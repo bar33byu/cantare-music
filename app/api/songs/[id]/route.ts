@@ -41,6 +41,7 @@ export async function GET(
       title: song.title,
       artist: song.artist,
       audioUrl: song.audioKey ? getPublicUrl(song.audioKey) : '',
+      alternateAudioUrl: song.alternateAudioKey ? getPublicUrl(song.alternateAudioKey) : undefined,
       pitchContourNotes: song.pitchContourNotes ?? [],
       segments: segments.map(segment => ({
         id: segment.id,
@@ -77,20 +78,23 @@ export async function DELETE(
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
-    if (song.audioKey) {
+    for (const audioKey of [song.audioKey, song.alternateAudioKey]) {
+      if (!audioKey) {
+        continue;
+      }
       try {
-        await deleteObject(song.audioKey);
+        await deleteObject(audioKey);
       } catch (audioDeleteError) {
         // Remote object cleanup should not block deleting the song record.
         // Record the key so it can be retried later.
         audioCleanupFailed = true;
         console.warn('Failed to delete audio object during song delete:', {
           songId: id,
-          audioKey: song.audioKey,
+          audioKey,
           error: audioDeleteError,
         });
         try {
-          await recordOrphanedAudioKey(crypto.randomUUID(), song.audioKey, userId);
+          await recordOrphanedAudioKey(crypto.randomUUID(), audioKey, userId);
         } catch (recordError) {
           console.error('Failed to record orphaned audio key:', recordError);
         }
@@ -116,7 +120,7 @@ export async function PATCH(
     const userId = resolveRequestUserId(request);
     const { id } = await params;
     const body = await request.json();
-    const { audioKey, title, artist, pitchContourNotes } = body;
+    const { audioKey, alternateAudioKey, title, artist, pitchContourNotes } = body;
 
     const existingSong = await getSongById(id, userId);
     if (!existingSong) {
@@ -128,8 +132,16 @@ export async function PATCH(
       return NextResponse.json({ error: pitchContourValidation.error }, { status: 400 });
     }
 
-    const updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist' | 'pitchContourNotes'>> = {};
+    if (audioKey !== undefined && typeof audioKey !== 'string') {
+      return NextResponse.json({ error: 'Audio key must be a string' }, { status: 400 });
+    }
+    if (alternateAudioKey !== undefined && typeof alternateAudioKey !== 'string') {
+      return NextResponse.json({ error: 'Alternate audio key must be a string' }, { status: 400 });
+    }
+
+    const updates: Partial<Pick<SongRow, 'audioKey' | 'alternateAudioKey' | 'title' | 'artist' | 'pitchContourNotes'>> = {};
     if (audioKey !== undefined) updates.audioKey = audioKey;
+    if (alternateAudioKey !== undefined) updates.alternateAudioKey = alternateAudioKey;
     if (title !== undefined) updates.title = title;
     if (artist !== undefined) updates.artist = artist;
     if (pitchContourNotes !== undefined) updates.pitchContourNotes = pitchContourNotes;
@@ -145,6 +157,13 @@ export async function PATCH(
     ) {
       await deleteObject(existingSong.audioKey);
     }
+    if (
+      updates.alternateAudioKey !== undefined &&
+      existingSong.alternateAudioKey &&
+      existingSong.alternateAudioKey !== updates.alternateAudioKey
+    ) {
+      await deleteObject(existingSong.alternateAudioKey);
+    }
 
     await updateSong(id, updates, userId);
     if (updates.pitchContourNotes !== undefined) {
@@ -156,6 +175,12 @@ export async function PATCH(
     if (errorCode === 'SONG_PITCH_CONTOUR_MIGRATION_REQUIRED') {
       return NextResponse.json(
         { error: 'Song pitch contour saving is unavailable until migration 0008_song_timeline_contour.sql is applied.' },
+        { status: 409 }
+      );
+    }
+    if (errorCode === 'SONG_ALTERNATE_AUDIO_MIGRATION_REQUIRED') {
+      return NextResponse.json(
+        { error: 'Alternate audio saving is unavailable until migration 0009_alternate_audio_key.sql is applied.' },
         { status: 409 }
       );
     }

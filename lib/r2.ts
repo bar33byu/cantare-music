@@ -65,15 +65,26 @@ export function getPublicUrl(key: string): string {
   );
 
   if (!configuredPublicUrl) {
-    // Fallback to same-origin proxy to avoid broken "undefined/..." URLs in production.
-    return `/api/audio/${encodedKey}`;
+    throw new Error(
+      'R2_PUBLIC_URL or R2_PUBLIC_BASE_URL must be configured for audio playback'
+    );
   }
 
   return `${configuredPublicUrl.replace(/\/$/, '')}/${encodedKey}`;
 }
 
-export function generateUploadKey(songId: string, filename: string): string {
-  return `audio/${songId}/${Date.now()}-${filename}`;
+export type AudioUploadVersion = 'prominent' | 'blend';
+
+export function generateUploadKey(
+  songId: string,
+  filename: string,
+  version: AudioUploadVersion = 'prominent'
+): string {
+  return `audio/${songId}/${version}/${Date.now()}-${filename}`;
+}
+
+export function generateMidiUploadKey(songId: string, filename: string): string {
+  return `midi/${songId}/${Date.now()}-${filename}`;
 }
 
 export async function deleteObject(key: string): Promise<void> {

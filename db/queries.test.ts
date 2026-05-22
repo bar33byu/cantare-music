@@ -93,6 +93,7 @@ describe("getAllSongs", () => {
     expect(result).toEqual([
       {
         ...fallbackRows[0],
+        alternateAudioKey: null,
         lastPracticedAt: null,
         pitchContourNotes: [],
       },
@@ -126,6 +127,7 @@ describe("getAllSongs", () => {
     expect(result).toEqual([
       {
         ...fallbackRows[0],
+        alternateAudioKey: null,
         lastPracticedAt: null,
         pitchContourNotes: [],
       },
@@ -745,11 +747,13 @@ describe("tap practice persistence", () => {
     const { createTapPracticeSession } = await getQueries();
     const result = await createTapPracticeSession("song-1", "default", startedAt);
 
-    expect(executeSpy).toHaveBeenCalledTimes(5);
+    expect(executeSpy).toHaveBeenCalledTimes(15);
     expect(insertSpy).toHaveBeenCalledTimes(2);
     expect(result).toEqual({
       id: "session-9",
       songId: "song-1",
+      audioVersion: "straight",
+      mode: "practice",
       startedAt: startedAt.toISOString(),
       tapCount: 0,
     });
@@ -774,6 +778,8 @@ describe("tap practice persistence", () => {
     expect(result).toEqual({
       id: "session-1",
       songId: "song-1",
+      audioVersion: "straight",
+      mode: "practice",
       startedAt: startedAt.toISOString(),
       tapCount: 0,
     });
@@ -839,6 +845,8 @@ describe("tap practice persistence", () => {
       {
         id: "session-2",
         songId: "song-1",
+        audioVersion: "straight",
+        mode: "practice",
         startedAt: "2026-04-11T12:00:00.000Z",
         tapCount: 2,
       },
@@ -875,6 +883,8 @@ describe("tap practice persistence", () => {
     expect(result).toEqual({
       id: "session-7",
       songId: "song-1",
+      audioVersion: "straight",
+      mode: "practice",
       startedAt: "2026-04-11T12:00:00.000Z",
       taps: [
         {
@@ -928,7 +938,7 @@ describe("createPlaylist", () => {
     insertSpy.mockReturnValue(insertChain);
 
     const { createPlaylist } = await getQueries();
-    const result = await createPlaylist({ name: "Sunday Set", eventDate: "2026-04-04" });
+    const result = await createPlaylist({ userId: "user-1", name: "Sunday Set", eventDate: "2026-04-04" });
 
     expect(insertSpy).toHaveBeenCalledWith(playlists);
     expect(result.id).toBe("pl-1");

@@ -322,7 +322,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
 
       <ul data-testid="playlist-song-list" className="space-y-2">
         {sortedSongs.map((song, index) => {
-          const hasAudio = Boolean(song.audioUrl?.trim());
+          const hasAudio = Boolean(song.audioUrl?.trim() || song.alternateAudioUrl?.trim());
           const hasSegments = song.segments.length > 0;
           return (
           <li

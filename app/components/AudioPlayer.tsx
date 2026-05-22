@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState, type MouseEvent, type SyntheticEvent } from "react";
+import { useCallback, useId, useMemo, useState, type MouseEvent, type SyntheticEvent } from "react";
 import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
-import { buildProxyAudioUrl, parseAudioKey } from "../lib/audioUrls";
 import type { Segment } from "../types";
 import { buildMasteryTimelineChunks, getMasteryColor } from "../lib/masteryColors";
 
@@ -39,6 +38,7 @@ interface AudioPlayerProps {
   onToggleLoop?: () => void;
   lyricModeLabel?: string;
   onToggleLyricMode?: () => void;
+  reducedControls?: boolean;
 }
 
 type ReachabilityState = {
@@ -50,20 +50,26 @@ type ReachabilityState = {
   contentLength: number | null;
 };
 
-type FetchProbeState = {
-  status: "idle" | "checking" | "ok" | "error";
-  message: string;
-  httpStatus: number | null;
-  contentType: string | null;
-  contentRange: string | null;
-  checkedAt: string | null;
-};
+function getAudioKeyFromPublicUrl(audioUrl: string): string | null {
+  const trimmed = audioUrl.trim();
+  if (!trimmed) {
+    return null;
+  }
 
-let audioPlayerMountCounter = 0;
-
-function getNextAudioPlayerMountId() {
-  audioPlayerMountCounter += 1;
-  return audioPlayerMountCounter;
+  try {
+    const pathname = new URL(trimmed).pathname.replace(/^\/+/, "");
+    const audioIndex = pathname.indexOf("audio/");
+    if (audioIndex === -1) {
+      return null;
+    }
+    return pathname
+      .slice(audioIndex)
+      .split("/")
+      .map((segment) => decodeURIComponent(segment))
+      .join("/");
+  } catch {
+    return null;
+  }
 }
 
 function formatMs(ms: number): string {
@@ -81,6 +87,7 @@ export function AudioPlayer({
   segmentEndMs,
   isPlaying,
   isReady,
+  playbackError,
   debugInfo,
   transportDebug,
   onPlayPause,
@@ -95,6 +102,7 @@ export function AudioPlayer({
   onToggleLoop,
   lyricModeLabel,
   onToggleLyricMode,
+  reducedControls = false,
 }: AudioPlayerProps) {
   const [reachability, setReachability] = useState<ReachabilityState>({
     status: "idle",
@@ -105,25 +113,14 @@ export function AudioPlayer({
     contentLength: null,
   });
   const [isDebugOpen, setIsDebugOpen] = useState(false);
-  const [fetchProbe, setFetchProbe] = useState<FetchProbeState>({
-    status: "idle",
-    message: "Not checked yet",
-    httpStatus: null,
-    contentType: null,
-    contentRange: null,
-    checkedAt: null,
-  });
-  const [mountId] = useState(getNextAudioPlayerMountId);
+  const mountId = useId();
   const [localClickAck, setLocalClickAck] = useState({
     playButtonClicks: 0,
     debugPlayButtonClicks: 0,
-    fetchProbeButtonClicks: 0,
     lastAck: "none",
     lastAckAt: "n/a",
   });
-
-  const audioKey = useMemo(() => parseAudioKey(audioUrl), [audioUrl]);
-  const proxyAudioUrl = useMemo(() => buildProxyAudioUrl(audioKey), [audioKey]);
+  const audioKey = useMemo(() => getAudioKeyFromPublicUrl(audioUrl), [audioUrl]);
 
   const checkReachability = useCallback(async () => {
     if (!audioKey) {
@@ -193,67 +190,14 @@ export function AudioPlayer({
     }
   }, [audioKey]);
 
-  const runProxyFetchProbe = useCallback(async () => {
-    if (!proxyAudioUrl) {
-      setFetchProbe({
-        status: "error",
-        message: "Proxy URL unavailable",
-        httpStatus: null,
-        contentType: null,
-        contentRange: null,
-        checkedAt: new Date().toISOString(),
-      });
-      return;
-    }
-
-    setFetchProbe({
-      status: "checking",
-      message: "Requesting first bytes from proxy...",
-      httpStatus: null,
-      contentType: null,
-      contentRange: null,
-      checkedAt: null,
-    });
-
-    try {
-      const response = await fetch(proxyAudioUrl, {
-        cache: "no-store",
-        headers: {
-          Range: "bytes=0-1023",
-        },
-      });
-
-      const statusOk = response.status === 200 || response.status === 206;
-      setFetchProbe({
-        status: statusOk ? "ok" : "error",
-        message: statusOk ? "Proxy responded with audio bytes" : `Unexpected status ${response.status}`,
-        httpStatus: response.status,
-        contentType: response.headers.get("content-type"),
-        contentRange: response.headers.get("content-range"),
-        checkedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Proxy fetch probe failed";
-      setFetchProbe({
-        status: "error",
-        message,
-        httpStatus: null,
-        contentType: null,
-        contentRange: null,
-        checkedAt: new Date().toISOString(),
-      });
-    }
-  }, [proxyAudioUrl]);
-
   const handleDebugToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
     const details = event.currentTarget;
     const opened = details.open;
     setIsDebugOpen(opened);
     if (opened) {
       void checkReachability();
-      void runProxyFetchProbe();
     }
-  }, [checkReachability, runProxyFetchProbe]);
+  }, [checkReachability]);
 
   const handlePlayPauseClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -278,18 +222,6 @@ export function AudioPlayer({
     }));
     onDebugPlayTest?.();
   }, [onDebugPlayTest]);
-
-  const handleFetchProbeClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setLocalClickAck((previous) => ({
-      ...previous,
-      fetchProbeButtonClicks: previous.fetchProbeButtonClicks + 1,
-      lastAck: "fetch-probe-button",
-      lastAckAt: new Date().toISOString(),
-    }));
-    void runProxyFetchProbe();
-  }, [runProxyFetchProbe]);
 
   const safeDurationMs = Math.max(durationMs, segmentEndMs);
   const segmentWidth = safeDurationMs > 0 ? ((segmentEndMs - segmentStartMs) / safeDurationMs) * 100 : 0;
@@ -324,22 +256,24 @@ export function AudioPlayer({
   return (
     <div data-testid="audio-player" className="space-y-2">
       <div className="flex items-center justify-center gap-2">
-        <button
-          type="button"
-          aria-label="Skip backward 5 seconds"
-          onClick={onSkipBack}
-          data-testid="audio-skip-back"
-          disabled={!isReady}
-          className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-        >
-          <span className="inline-flex items-center gap-1 text-sm font-semibold">
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 7L5 11l4 4" />
-              <path d="M6 12a8 8 0 1 0 3.2-6.4" />
-            </svg>
-            <span>-5</span>
-          </span>
-        </button>
+        {!reducedControls ? (
+          <button
+            type="button"
+            aria-label="Skip backward 5 seconds"
+            onClick={onSkipBack}
+            data-testid="audio-skip-back"
+            disabled={!isReady}
+            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+          >
+            <span className="inline-flex items-center gap-1 text-sm font-semibold">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 7L5 11l4 4" />
+                <path d="M6 12a8 8 0 1 0 3.2-6.4" />
+              </svg>
+              <span>-5</span>
+            </span>
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={handlePlayPauseClick}
@@ -358,42 +292,46 @@ export function AudioPlayer({
             </svg>
           )}
         </button>
-        <button
-          type="button"
-          aria-label="Skip forward 5 seconds"
-          onClick={onSkipForward}
-          data-testid="audio-skip-forward"
-          disabled={!isReady}
-          className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-        >
-          <span className="inline-flex items-center gap-1 text-sm font-semibold">
+        {!reducedControls ? (
+          <button
+            type="button"
+            aria-label="Skip forward 5 seconds"
+            onClick={onSkipForward}
+            data-testid="audio-skip-forward"
+            disabled={!isReady}
+            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+          >
+            <span className="inline-flex items-center gap-1 text-sm font-semibold">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 7l4 4-4 4" />
+                <path d="M18 12a8 8 0 1 1-3.2-6.4" />
+              </svg>
+              <span>+5</span>
+            </span>
+          </button>
+        ) : null}
+        {!reducedControls ? (
+          <button
+            type="button"
+            aria-label={isLooping ? "Stop looping" : "Loop segment"}
+            onClick={onToggleLoop}
+            data-testid="audio-loop-toggle"
+            title={isLooping ? "Loop: on (R to toggle)" : "Loop: off (R to toggle)"}
+            className={`flex h-9 w-[84px] items-center justify-center rounded-xl border text-sm transition ${
+              isLooping
+                ? "border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-700"
+                : "border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+            }`}
+          >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 7l4 4-4 4" />
-              <path d="M18 12a8 8 0 1 1-3.2-6.4" />
+              <path d="M17 2l4 4-4 4" />
+              <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+              <path d="M7 22l-4-4 4-4" />
+              <path d="M21 13v2a4 4 0 0 1-4 4H3" />
             </svg>
-            <span>+5</span>
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-label={isLooping ? "Stop looping" : "Loop segment"}
-          onClick={onToggleLoop}
-          data-testid="audio-loop-toggle"
-          title={isLooping ? "Loop: on (R to toggle)" : "Loop: off (R to toggle)"}
-          className={`flex h-9 w-[84px] items-center justify-center rounded-xl border text-sm transition ${
-            isLooping
-              ? "border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-700"
-              : "border-indigo-300 text-indigo-700 hover:bg-indigo-50"
-          }`}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 2l4 4-4 4" />
-            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-            <path d="M7 22l-4-4 4-4" />
-            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-          </svg>
-        </button>
-        {onToggleLyricMode ? (
+          </button>
+        ) : null}
+        {onToggleLyricMode && !reducedControls ? (
           <div className="ml-1 flex items-center border-l border-slate-300 pl-2">
             <button
               type="button"
@@ -408,6 +346,7 @@ export function AudioPlayer({
         ) : null}
       </div>
 
+      {!reducedControls ? (
       <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
         <div
           data-testid="audio-unified-timeline"
@@ -510,14 +449,6 @@ export function AudioPlayer({
               >
                 Run Hook Play Test
               </button>
-              <button
-                type="button"
-                data-testid="audio-debug-run-fetch-probe"
-                onClick={handleFetchProbeClick}
-                className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
-              >
-                Run Proxy Fetch Probe
-              </button>
             </div>
             <p data-testid="audio-debug-reachability">reachability: {reachability.status}</p>
             <p data-testid="audio-debug-reachability-message" className="break-all">reachabilityMessage: {reachability.message}</p>
@@ -525,19 +456,12 @@ export function AudioPlayer({
             <p data-testid="audio-debug-reachability-content-type">reachabilityContentType: {reachability.contentType ?? "n/a"}</p>
             <p data-testid="audio-debug-reachability-content-length">reachabilityContentLength: {reachability.contentLength ?? "n/a"}</p>
             <p data-testid="audio-debug-reachability-checked-at">reachabilityCheckedAt: {reachability.checkedAt ?? "n/a"}</p>
-            <p data-testid="audio-debug-fetch-probe-status">proxyFetchProbe: {fetchProbe.status}</p>
-            <p data-testid="audio-debug-fetch-probe-message" className="break-all">proxyFetchProbeMessage: {fetchProbe.message}</p>
-            <p data-testid="audio-debug-fetch-probe-http-status">proxyFetchHttpStatus: {fetchProbe.httpStatus ?? "n/a"}</p>
-            <p data-testid="audio-debug-fetch-probe-content-type">proxyFetchContentType: {fetchProbe.contentType ?? "n/a"}</p>
-            <p data-testid="audio-debug-fetch-probe-content-range">proxyFetchContentRange: {fetchProbe.contentRange ?? "n/a"}</p>
-            <p data-testid="audio-debug-fetch-probe-checked-at">proxyFetchCheckedAt: {fetchProbe.checkedAt ?? "n/a"}</p>
             <p data-testid="audio-debug-open">debugOpen: {String(isDebugOpen)}</p>
             <p data-testid="audio-debug-audio-url" className="break-all">audioUrl: {audioUrl}</p>
-            <p data-testid="audio-debug-proxy-url" className="break-all">proxyAudioUrl: {proxyAudioUrl ?? "n/a"}</p>
+            <p data-testid="audio-debug-playback-error" className="break-all">playbackError: {playbackError ?? "null"}</p>
             <p data-testid="audio-debug-mount-id">audioPlayerMountId: {mountId}</p>
             <p data-testid="audio-debug-local-play-clicks">localPlayButtonClicks: {localClickAck.playButtonClicks}</p>
             <p data-testid="audio-debug-local-debug-play-clicks">localDebugPlayButtonClicks: {localClickAck.debugPlayButtonClicks}</p>
-            <p data-testid="audio-debug-local-fetch-clicks">localFetchProbeButtonClicks: {localClickAck.fetchProbeButtonClicks}</p>
             <p data-testid="audio-debug-local-last-ack" className="break-all">localLastAck: {localClickAck.lastAck}</p>
             <p data-testid="audio-debug-local-last-ack-at">localLastAckAt: {localClickAck.lastAckAt}</p>
             <p data-testid="audio-debug-ui-play-toggle-clicks">uiPlayToggleClicks: {transportDebug?.playToggleClicks ?? 0}</p>
@@ -588,17 +512,12 @@ export function AudioPlayer({
             <div className="mt-3 rounded border border-slate-200 bg-white p-2" data-testid="audio-native-probe-wrap">
               <p className="font-semibold text-slate-800">Native Audio Probe (Direct URL)</p>
               <audio data-testid="audio-native-probe-direct" className="mt-2 w-full" controls preload="metadata" src={audioUrl} />
-              <p className="mt-2 font-semibold text-slate-800">Native Audio Probe (Proxy URL)</p>
-              {proxyAudioUrl ? (
-                <audio data-testid="audio-native-probe-proxy" className="mt-2 w-full" controls preload="metadata" src={proxyAudioUrl} />
-              ) : (
-                <p data-testid="audio-native-probe-proxy-unavailable">Proxy probe unavailable: could not derive audio key.</p>
-              )}
             </div>
             </div>
           </details>
         ) : null}
       </div>
+      ) : null}
     </div>
   );
 }

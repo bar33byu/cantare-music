@@ -9,12 +9,16 @@ interface SongListItem {
   title: string;
   artist?: string;
   audioKey?: string;
+  alternateAudioKey?: string | null;
   createdAt: string;
   lastPracticedAt?: string | null;
   masteryPercent?: number;
   hasAudio?: boolean;
+  hasPartAudio?: boolean;
+  hasBlendAudio?: boolean;
   hasSegments?: boolean;
   hasTapKeys?: boolean;
+  hasMidiContour?: boolean;
 }
 
 interface SongBrowserProps {
@@ -23,6 +27,15 @@ interface SongBrowserProps {
   selectedSongId?: string | null;
   refreshTrigger?: number; // Increment this to trigger refresh
   userId?: string;
+}
+
+function getSongReadiness(song: SongListItem) {
+  const hasPartAudio = song.hasPartAudio ?? Boolean(song.audioKey?.trim() || (song.hasAudio && !song.alternateAudioKey?.trim()));
+  const hasBlendAudio = song.hasBlendAudio ?? Boolean(song.alternateAudioKey?.trim());
+  const hasSegments = song.hasSegments ?? false;
+  const hasMidiContour = song.hasMidiContour ?? song.hasTapKeys ?? false;
+
+  return { hasPartAudio, hasBlendAudio, hasSegments, hasMidiContour };
 }
 
 export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refreshTrigger, userId }: SongBrowserProps) {
@@ -34,6 +47,12 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   const [isEditMode, setIsEditMode] = useState(false);
   const [filterText, setFilterText] = useState('');
   const [showFilter, setShowFilter] = useState(false);
+  const [missingFilters, setMissingFilters] = useState({
+    partAudio: false,
+    blendAudio: false,
+    sections: false,
+    midiContour: false,
+  });
 
   type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
   interface SortState { key: SortKey; asc: boolean }
@@ -107,6 +126,19 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
       const lower = filterText.toLowerCase();
       result = result.filter((s) => s.title.toLowerCase().includes(lower));
     }
+
+    if (Object.values(missingFilters).some(Boolean)) {
+      result = result.filter((song) => {
+        const readiness = getSongReadiness(song);
+        return (
+          (!missingFilters.partAudio || !readiness.hasPartAudio) &&
+          (!missingFilters.blendAudio || !readiness.hasBlendAudio) &&
+          (!missingFilters.sections || !readiness.hasSegments) &&
+          (!missingFilters.midiContour || !readiness.hasMidiContour)
+        );
+      });
+    }
+
     const dir = sort.asc ? 1 : -1;
     return [...result].sort((a, b) => {
       switch (sort.key) {
@@ -131,7 +163,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           return 0;
       }
     });
-  }, [songs, filterText, sort]);
+  }, [songs, filterText, missingFilters, sort]);
 
   const fetchSongs = useCallback(async () => {
     try {
@@ -277,9 +309,17 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           data-testid="song-browser-filter-toggle"
           onClick={() => {
             setShowFilter((prev) => !prev);
-            if (showFilter) setFilterText('');
+            if (showFilter) {
+              setFilterText('');
+              setMissingFilters({
+                partAudio: false,
+                blendAudio: false,
+                sections: false,
+                midiContour: false,
+              });
+            }
           }}
-          title="Filter by title"
+          title="Filter songs"
           className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm transition-colors ${
             showFilter ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'
           }`}
@@ -289,17 +329,44 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           </svg>
           Filter
         </button>
-        {showFilter && (
-          <input
-            type="text"
-            data-testid="song-browser-filter-input"
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            placeholder="Search titles…"
-            autoFocus
-            className="flex-1 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-400 focus:outline-none"
-          />
-        )}
+        {showFilter ? (
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <input
+              type="text"
+              data-testid="song-browser-filter-input"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              placeholder="Search titles..."
+              autoFocus
+              className="min-w-[12rem] flex-1 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-400 focus:outline-none"
+            />
+            {([
+              ['partAudio', 'Missing part audio'],
+              ['blendAudio', 'Missing blend audio'],
+              ['sections', 'Missing sections'],
+              ['midiContour', 'Missing MIDI contour'],
+            ] as const).map(([key, label]) => (
+              <label
+                key={key}
+                className="inline-flex items-center gap-1.5 rounded border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700"
+              >
+                <input
+                  type="checkbox"
+                  data-testid={`song-browser-missing-${key}`}
+                  checked={missingFilters[key]}
+                  onChange={(event) =>
+                    setMissingFilters((previous) => ({
+                      ...previous,
+                      [key]: event.target.checked,
+                    }))
+                  }
+                  className="h-3.5 w-3.5"
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        ) : null}
         <div className="relative ml-auto">
           <button
             type="button"
@@ -357,15 +424,13 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="song-browser-grid">
         {displayedSongs.length === 0 && (
           <p className="col-span-full text-center py-8 text-gray-500" data-testid="song-browser-filter-empty">
-            No songs match &ldquo;{filterText}&rdquo;.
+            No songs match the current filters.
           </p>
         )}
         {displayedSongs.map((song) => {
           const masteryPercent = clampPercent(song.masteryPercent);
           const masteryColor = getMasteryColor(masteryPercent);
-          const hasAudio = song.hasAudio ?? Boolean(song.audioKey?.trim());
-          const hasSegments = song.hasSegments ?? false;
-          const hasTapKeys = song.hasTapKeys ?? false;
+          const { hasPartAudio, hasBlendAudio, hasSegments, hasMidiContour } = getSongReadiness(song);
 
           return (
           <div
@@ -386,7 +451,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
             <p className="absolute right-2 top-1 text-[11px] font-semibold text-gray-700" data-testid={`song-mastery-percent-${song.id}`}>
               {masteryPercent}%
             </p>
-            <h3 className="text-xl font-semibold mb-2" data-testid={`song-title-${song.id}`}>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2" data-testid={`song-title-${song.id}`}>
               {song.title}
             </h3>
             {song.artist && (
@@ -396,9 +461,10 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
             )}
             <div className="absolute bottom-3 right-3">
               <SongReadinessIcons
-                hasAudio={hasAudio}
+                hasPartAudio={hasPartAudio}
+                hasBlendAudio={hasBlendAudio}
                 hasSegments={hasSegments}
-                hasTapKeys={hasTapKeys}
+                hasMidiContour={hasMidiContour}
                 testIdPrefix={`song-item-${song.id}`}
               />
             </div>

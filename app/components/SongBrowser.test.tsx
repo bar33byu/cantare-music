@@ -16,9 +16,13 @@ describe('SongBrowser', () => {
       title: 'Test Song 1',
       artist: 'Test Artist 1',
       audioKey: 'audio-1',
+      alternateAudioKey: 'blend-1',
       hasAudio: true,
+      hasPartAudio: true,
+      hasBlendAudio: true,
       hasSegments: true,
       hasTapKeys: true,
+      hasMidiContour: true,
       createdAt: '2024-01-01T00:00:00.000Z',
       lastPracticedAt: '2024-02-01T00:00:00.000Z',
       masteryPercent: 72,
@@ -29,8 +33,11 @@ describe('SongBrowser', () => {
       artist: 'Test Artist 2',
       audioKey: 'audio-2',
       hasAudio: true,
+      hasPartAudio: true,
+      hasBlendAudio: false,
       hasSegments: false,
       hasTapKeys: false,
+      hasMidiContour: false,
       createdAt: '2024-01-02T00:00:00.000Z',
       lastPracticedAt: null,
       masteryPercent: 10,
@@ -64,6 +71,7 @@ describe('SongBrowser', () => {
 
     expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
     expect(screen.getByTestId('song-title-song-1')).toHaveTextContent('Test Song 1');
+    expect(screen.getByTestId('song-title-song-1')).toHaveClass('text-gray-900');
     expect(screen.getByTestId('song-artist-song-1')).toHaveTextContent('Test Artist 1');
     expect(screen.getByTestId('song-last-practiced-song-1').textContent).toMatch(/^Last practiced .* ago$/);
     expect(screen.getByTestId('song-last-practiced-song-2')).toHaveTextContent('Not practiced yet');
@@ -73,9 +81,11 @@ describe('SongBrowser', () => {
     expect(screen.getByTestId('song-artist-song-2')).toHaveTextContent('Test Artist 2');
     expect(screen.getByTestId('song-mastery-percent-song-1')).toHaveTextContent('72%');
     expect(screen.getByTestId('song-mastery-fill-song-1')).toHaveStyle({ width: '72%' });
-    expect(screen.getByTestId('song-item-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file present');
+    expect(screen.getByTestId('song-item-song-1-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio present');
+    expect(screen.getByTestId('song-item-song-1-readiness-blend-audio')).toHaveAttribute('aria-label', 'Blend audio present');
     expect(screen.getByTestId('song-item-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections present');
-    expect(screen.getByTestId('song-item-song-1-readiness-tapkeys')).toHaveAttribute('aria-label', 'Tap keys present');
+    expect(screen.getByTestId('song-item-song-1-readiness-midi-contour')).toHaveAttribute('aria-label', 'MIDI contour present');
+    expect(screen.getByTestId('song-item-song-2-readiness-blend-audio')).toHaveAttribute('aria-label', 'Blend audio missing');
     expect(screen.getByTestId('song-item-song-2-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
@@ -317,6 +327,25 @@ describe('SongBrowser', () => {
     expect(screen.queryByTestId('song-item-song-1')).not.toBeInTheDocument();
   });
 
+  it('filters songs by missing readiness elements', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSongs),
+    });
+
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('song-browser-grid')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('song-browser-filter-toggle'));
+    fireEvent.click(screen.getByTestId('song-browser-missing-blendAudio'));
+
+    expect(screen.queryByTestId('song-item-song-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
+  });
+
   it('clears filter when filter toggle is clicked a second time', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
@@ -331,6 +360,7 @@ describe('SongBrowser', () => {
 
     fireEvent.click(screen.getByTestId('song-browser-filter-toggle'));
     fireEvent.change(screen.getByTestId('song-browser-filter-input'), { target: { value: 'Song 1' } });
+    fireEvent.click(screen.getByTestId('song-browser-missing-blendAudio'));
     expect(screen.queryByTestId('song-item-song-2')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('song-browser-filter-toggle'));

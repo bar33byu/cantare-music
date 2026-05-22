@@ -5,33 +5,80 @@ import { useUploadAudio } from "../hooks/useUploadAudio";
 
 interface ReplaceAudioFormProps {
   songId: string;
+  userId?: string;
   onReplaced?: () => void;
   mode?: 'upload' | 'replace';
+  audioUrl?: string;
+  alternateAudioUrl?: string;
 }
 
-export function ReplaceAudioForm({ songId, onReplaced, mode = 'replace' }: ReplaceAudioFormProps) {
-  const { upload, uploading, progress, error: uploadError } = useUploadAudio();
-  const [file, setFile] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+type AudioVersion = 'prominent' | 'blend';
+
+type VersionState = {
+  file: File | null;
+  error: string | null;
+  success: string | null;
+};
+
+const VERSION_DETAILS: Record<AudioVersion, { label: string; description: string; patchKey: 'audioKey' | 'alternateAudioKey' }> = {
+  prominent: {
+    label: 'Prominent',
+    description: 'The teaching-forward recording used as the main practice audio.',
+    patchKey: 'audioKey',
+  },
+  blend: {
+    label: 'Blend',
+    description: 'The blended reference recording for practicing in context.',
+    patchKey: 'alternateAudioKey',
+  },
+};
+
+export function ReplaceAudioForm({
+  songId,
+  userId,
+  onReplaced,
+  mode = 'replace',
+  audioUrl = '',
+  alternateAudioUrl = '',
+}: ReplaceAudioFormProps) {
+  const { upload, uploading, progress, error: uploadError } = useUploadAudio(userId);
+  const [versionState, setVersionState] = useState<Record<AudioVersion, VersionState>>({
+    prominent: { file: null, error: null, success: null },
+    blend: { file: null, error: null, success: null },
+  });
 
   const isUpload = mode === 'upload';
+  const hasAudio: Record<AudioVersion, boolean> = {
+    prominent: Boolean(audioUrl.trim()),
+    blend: Boolean(alternateAudioUrl.trim()),
+  };
 
-  const handleSubmit = async () => {
+  const updateVersionState = (version: AudioVersion, updates: Partial<VersionState>) => {
+    setVersionState((previous) => ({
+      ...previous,
+      [version]: { ...previous[version], ...updates },
+    }));
+  };
+
+  const handleSubmit = async (audioVersion: AudioVersion) => {
+    const file = versionState[audioVersion].file;
     if (!file) {
-      setError("Select an MP3 file first.");
+      updateVersionState(audioVersion, { error: `Select an MP3 file for ${VERSION_DETAILS[audioVersion].label} first.` });
       return;
     }
 
-    setError(null);
-    setSuccess(null);
+    updateVersionState(audioVersion, { error: null, success: null });
 
     try {
-      const audioKey = await upload(songId, file);
+      const uploadedKey = await upload(songId, file, audioVersion);
+      const details = VERSION_DETAILS[audioVersion];
       const response = await fetch(`/api/songs/${songId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audioKey }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(userId ? { "X-User-ID": userId } : {}),
+        },
+        body: JSON.stringify({ [details.patchKey]: uploadedKey }),
       });
 
       if (!response.ok) {
@@ -39,33 +86,100 @@ export function ReplaceAudioForm({ songId, onReplaced, mode = 'replace' }: Repla
         throw new Error(data.error || "Failed to update song audio");
       }
 
-      setSuccess(isUpload ? "Audio uploaded successfully." : "Audio replaced successfully.");
-      setFile(null);
+      updateVersionState(audioVersion, {
+        file: null,
+        success: `${details.label} audio ${hasAudio[audioVersion] ? 'replaced' : 'uploaded'} successfully.`,
+      });
       onReplaced?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Audio replacement failed");
+      updateVersionState(audioVersion, { error: err instanceof Error ? err.message : "Audio replacement failed" });
     }
   };
 
   return (
     <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="replace-audio-card">
-      <h3 className="text-lg font-semibold text-gray-900">{isUpload ? 'Upload Audio' : 'Replace Audio'}</h3>
+      <h3 className="text-lg font-semibold text-gray-900">{isUpload ? 'Upload Audio' : 'Manage Audio Files'}</h3>
       <p className="mt-1 text-sm text-gray-500">
-        {isUpload ? 'Upload an MP3 file to enable segment editing.' : 'Upload a new MP3 while keeping segment boundaries and lyrics.'}
+        {isUpload ? 'Upload an MP3 file to enable segment editing.' : 'Upload or replace MP3 files while keeping segment boundaries and lyrics.'}
       </p>
 
-      <div className="mt-3">
-        <input
-          type="file"
-          accept="audio/mpeg,audio/mp3"
-          data-testid="replace-audio-input"
-          onChange={(e) => {
-            setFile(e.target.files?.[0] ?? null);
-            setSuccess(null);
-            setError(null);
-          }}
-          className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-full file:border-0 file:bg-indigo-50 file:px-4 file:py-2 file:font-semibold file:text-indigo-700 hover:file:bg-indigo-100"
-        />
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {(['prominent', 'blend'] as const).map((version) => {
+          const details = VERSION_DETAILS[version];
+          const populated = hasAudio[version];
+          const state = versionState[version];
+          const sectionError = state.error || uploadError;
+          return (
+            <div
+              key={version}
+              data-testid={`replace-audio-section-${version}`}
+              className={`rounded-lg border p-4 ${populated ? 'border-emerald-200 bg-emerald-50/40' : 'border-amber-200 bg-amber-50/40'}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-base font-semibold text-gray-900">{details.label}</h4>
+                  <p className="mt-1 text-sm text-gray-600">{details.description}</p>
+                </div>
+                <span
+                  data-testid={`replace-audio-status-${version}`}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${populated ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}
+                >
+                  {populated ? 'Uploaded' : 'Missing'}
+                </span>
+              </div>
+
+              <div className="mt-4">
+                <input
+                  type="file"
+                  accept="audio/mpeg,audio/mp3"
+                  data-testid={`replace-audio-input-${version}`}
+                  onChange={(e) => {
+                    updateVersionState(version, {
+                      file: e.target.files?.[0] ?? null,
+                      success: null,
+                      error: null,
+                    });
+                  }}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-full file:border-0 file:bg-indigo-50 file:px-4 file:py-2 file:font-semibold file:text-indigo-700 hover:file:bg-indigo-100"
+                />
+              </div>
+
+              {state.file ? (
+                <p className="mt-2 truncate text-xs text-gray-600" data-testid={`replace-audio-selected-${version}`}>
+                  Selected: {state.file.name}
+                </p>
+              ) : null}
+
+              {sectionError && (
+                <p className="mt-3 text-sm text-red-600" role="alert" data-testid={`replace-audio-error-${version}`}>
+                  {sectionError}
+                </p>
+              )}
+
+              {state.success && (
+                <p className="mt-3 text-sm text-green-700" data-testid={`replace-audio-success-${version}`}>
+                  {state.success}
+                </p>
+              )}
+
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => void handleSubmit(version)}
+                  disabled={uploading}
+                  data-testid={`replace-audio-submit-${version}`}
+                  className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40"
+                >
+                  {uploading
+                    ? (populated ? "Replacing..." : "Uploading...")
+                    : populated
+                      ? `Replace ${details.label}`
+                      : `Upload ${details.label}`}
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {uploading && (
@@ -79,30 +193,6 @@ export function ReplaceAudioForm({ songId, onReplaced, mode = 'replace' }: Repla
           <p className="mt-1 text-xs text-gray-600">{progress}% uploaded</p>
         </div>
       )}
-
-      {(error || uploadError) && (
-        <p className="mt-3 text-sm text-red-600" role="alert" data-testid="replace-audio-error">
-          {error || uploadError}
-        </p>
-      )}
-
-      {success && (
-        <p className="mt-3 text-sm text-green-700" data-testid="replace-audio-success">
-          {success}
-        </p>
-      )}
-
-      <div className="mt-4">
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={uploading}
-          data-testid="replace-audio-submit"
-          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40"
-        >
-          {uploading ? "Replacing..." : "Replace Audio"}
-        </button>
-      </div>
     </section>
   );
 }

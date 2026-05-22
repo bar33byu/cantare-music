@@ -5,6 +5,10 @@ interface AppBuildBadgeProps {
 }
 
 export function AppBuildBadge({ version, branch, commitSha }: AppBuildBadgeProps) {
+  if (branch === "main") {
+    return null;
+  }
+
   const shortSha = commitSha ? commitSha.slice(0, 7) : null;
 
   return (

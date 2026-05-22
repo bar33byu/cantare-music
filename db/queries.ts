@@ -1,10 +1,14 @@
 import { eq, asc, desc, inArray, and, count, lte, sql } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData } from "./schema";
+import { getPublicUrl } from "../lib/r2";
+import type { SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
+import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
 
 const DEFAULT_QUERY_USER_ID = "default";
 let ensureTapPracticeTablesPromise: Promise<void> | null = null;
+let ensureMidiTablesPromise: Promise<void> | null = null;
 
 export type PersistedMemoryRating = 1 | 2 | 3 | 4 | 5;
 
@@ -22,21 +26,56 @@ export interface PersistedTapPracticeTap {
   timeOffsetMs: number;
   durationMs: number;
   lane: number;
+  direction?: TapDirection;
   createdAt: string;
 }
 
 export interface PersistedTapPracticeSessionSummary {
   id: string;
   songId: string;
+  segmentId?: string;
+  audioVersion: TapAudioVersion;
+  mode: TapPracticeMode;
   startedAt: string;
+  completedAt?: string;
+  finalizedAt?: string;
+  autoScorePercent?: number;
+  selfRating?: SelfRating;
+  scoreDetails?: unknown;
   tapCount: number;
 }
 
 export interface PersistedTapPracticeSessionDetail {
   id: string;
   songId: string;
+  segmentId?: string;
+  audioVersion: TapAudioVersion;
+  mode: TapPracticeMode;
   startedAt: string;
+  completedAt?: string;
+  finalizedAt?: string;
+  autoScorePercent?: number;
+  selfRating?: SelfRating;
+  scoreDetails?: unknown;
   taps: PersistedTapPracticeTap[];
+}
+
+export interface PersistedMidiSource {
+  id: string;
+  songId: string;
+  originalFilename: string;
+  storageKey: string;
+  uploadedAt: string;
+  contentType?: string | null;
+  fileSize: number;
+  parseStatus: string;
+  cleanupSettings: MidiCleanupSettingsData;
+  rawNotes: RawMidiNoteData[];
+  cleanedNotes: CleanedMidiNoteData[];
+  rawNoteCount: number;
+  cleanedNoteCount: number;
+  ignoredShortNoteCount: number;
+  parseError?: string | null;
 }
 
 export interface PlaylistSongItem {
@@ -44,6 +83,7 @@ export interface PlaylistSongItem {
   title: string;
   artist?: string;
   audioUrl: string;
+  alternateAudioUrl?: string;
   pitchContourNotes: SongRow["pitchContourNotes"];
   ratingCount: number;
   segments: SegmentRow[];
@@ -117,6 +157,32 @@ function isMissingPitchContourNotesColumnError(error: unknown): boolean {
       return true;
     }
     if (causeCode === "42703" && message.includes("pitch_contour_notes")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isMissingAlternateAudioKeyColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("alternate_audio_key") && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (causeMessage.includes("alternate_audio_key") && causeMessage.includes("does not exist")) {
+      return true;
+    }
+    if (causeCode === "42703" && message.includes("alternate_audio_key")) {
       return true;
     }
   }
@@ -213,6 +279,75 @@ function isMissingTapPracticeTableError(error: unknown): boolean {
   return false;
 }
 
+function isMissingMidiTableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const mentionsMidiTables =
+    message.includes("midi_sources") ||
+    message.includes("midi_alignments") ||
+    (message.includes("midi_") && message.includes("does not exist"));
+
+  if (mentionsMidiTables && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    const causeMentionsMidiTables = causeMessage.includes("midi_sources") || causeMessage.includes("midi_alignments") || causeMessage.includes("midi_");
+    if (causeCode === "42P01" && causeMentionsMidiTables) {
+      return true;
+    }
+    if (causeMentionsMidiTables && causeMessage.includes("does not exist")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isMissingEnhancedTapPracticeColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const columnNames = [
+    "segment_id",
+    "audio_version",
+    "mode",
+    "completed_at",
+    "finalized_at",
+    "auto_score_percent",
+    "self_rating",
+    "score_details",
+    "direction",
+  ];
+  if (columnNames.some((column) => message.includes(column)) && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (columnNames.some((column) => causeMessage.includes(column)) && causeMessage.includes("does not exist")) {
+      return true;
+    }
+    if (causeCode === "42703" && columnNames.some((column) => message.includes(column))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function ensureTapPracticeTables(): Promise<void> {
   if (!ensureTapPracticeTablesPromise) {
     ensureTapPracticeTablesPromise = (async () => {
@@ -251,6 +386,38 @@ async function ensureTapPracticeTables(): Promise<void> {
       await db().execute(sql.raw(`
         CREATE INDEX IF NOT EXISTS "idx_tap_practice_taps_session_created_at"
           ON "tap_practice_taps" ("session_id", "created_at")
+      `));
+
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "segment_id" text REFERENCES "segments"("id") ON DELETE cascade
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "audio_version" text NOT NULL DEFAULT 'straight'
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "mode" text NOT NULL DEFAULT 'practice'
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "completed_at" timestamp
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "finalized_at" timestamp
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "auto_score_percent" integer
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "self_rating" integer
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "score_details" jsonb NOT NULL DEFAULT '{}'::jsonb
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "tap_practice_taps" ADD COLUMN IF NOT EXISTS "direction" text
+      `));
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_song_segment_mode"
+          ON "tap_practice_sessions" ("user_id", "song_id", "segment_id", "mode")
       `));
     })().catch((error) => {
       ensureTapPracticeTablesPromise = null;
@@ -325,7 +492,25 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
       .from(songs)
       .where(eq(songs.userId, userId))
       .orderBy(desc(songs.createdAt))
-      .then((rows) => rows.map((row) => ({ ...row, pitchContourNotes: [] } as SongRow)));
+      .then((rows) => rows.map((row) => ({ ...row, alternateAudioKey: null, pitchContourNotes: [] } as SongRow)));
+  }
+
+  if (isMissingAlternateAudioKeyColumnError(primaryError)) {
+    return db()
+      .select({
+        id: songs.id,
+        userId: songs.userId,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        pitchContourNotes: songs.pitchContourNotes,
+        createdAt: songs.createdAt,
+        lastPracticedAt: songs.lastPracticedAt,
+      })
+      .from(songs)
+      .where(eq(songs.userId, userId))
+      .orderBy(desc(songs.createdAt))
+      .then((rows) => rows.map((row) => ({ ...row, alternateAudioKey: null } as SongRow)));
   }
 
   if (isMissingUserIdColumnError(primaryError)) {
@@ -342,7 +527,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
         .from(songs)
         .orderBy(desc(songs.createdAt));
 
-      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, pitchContourNotes: [] } as SongRow));
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, pitchContourNotes: [] } as SongRow));
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -359,7 +544,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
         .from(songs)
         .orderBy(desc(songs.createdAt));
 
-      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
     }
   }
 
@@ -377,7 +562,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
       .where(eq(songs.userId, userId))
       .orderBy(desc(songs.createdAt));
 
-    return legacyRows.map((row) => ({ ...row, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
+    return legacyRows.map((row) => ({ ...row, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
   } catch {
     throw primaryError;
   }
@@ -415,7 +600,27 @@ export async function getSongById(
       .limit(1);
 
     const row = rows[0];
-    return row ? ({ ...row, pitchContourNotes: [] } as SongRow) : undefined;
+    return row ? ({ ...row, alternateAudioKey: null, pitchContourNotes: [] } as SongRow) : undefined;
+  }
+
+  if (isMissingAlternateAudioKeyColumnError(primaryError)) {
+    const rows = await db()
+      .select({
+        id: songs.id,
+        userId: songs.userId,
+        title: songs.title,
+        artist: songs.artist,
+        audioKey: songs.audioKey,
+        pitchContourNotes: songs.pitchContourNotes,
+        createdAt: songs.createdAt,
+        lastPracticedAt: songs.lastPracticedAt,
+      })
+      .from(songs)
+      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
+      .limit(1);
+
+    const row = rows[0];
+    return row ? ({ ...row, alternateAudioKey: null } as SongRow) : undefined;
   }
 
   if (isMissingUserIdColumnError(primaryError)) {
@@ -436,7 +641,7 @@ export async function getSongById(
       if (!row) {
         return undefined;
       }
-      return { ...row, userId: DEFAULT_QUERY_USER_ID, pitchContourNotes: [] } as SongRow;
+      return { ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, pitchContourNotes: [] } as SongRow;
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -459,7 +664,7 @@ export async function getSongById(
         return undefined;
       }
 
-      return { ...row, userId: DEFAULT_QUERY_USER_ID, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
+      return { ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
     }
   }
 
@@ -482,7 +687,7 @@ export async function getSongById(
       return undefined;
     }
 
-    return { ...row, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
+    return { ...row, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
   } catch {
     throw primaryError;
   }
@@ -494,6 +699,7 @@ export async function createSong(data: {
   title: string;
   artist?: string;
   audioKey?: string;
+  alternateAudioKey?: string;
 }): Promise<SongRow> {
   try {
     const rows = await db()
@@ -504,6 +710,7 @@ export async function createSong(data: {
         title: data.title,
         artist: data.artist ?? null,
         audioKey: data.audioKey ?? null,
+        alternateAudioKey: data.alternateAudioKey ?? null,
       })
       .returning();
     return rows[0];
@@ -539,7 +746,7 @@ export async function updateSongAudioKey(
 
 export async function updateSong(
   id: string,
-  updates: Partial<Pick<SongRow, 'audioKey' | 'title' | 'artist' | 'pitchContourNotes'>>,
+  updates: Partial<Pick<SongRow, 'audioKey' | 'alternateAudioKey' | 'title' | 'artist' | 'pitchContourNotes'>>,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
   try {
@@ -548,6 +755,23 @@ export async function updateSong(
       .set(updates)
       .where(and(eq(songs.id, id), eq(songs.userId, userId)));
   } catch (error) {
+    if (isMissingAlternateAudioKeyColumnError(error)) {
+      const { alternateAudioKey: _alternateAudioKey, ...legacyUpdates } = updates;
+      if (Object.keys(legacyUpdates).length === 0) {
+        const migrationError = new Error(
+          'Alternate song audio requires database migration 0009_alternate_audio_key.sql before it can be saved.'
+        ) as Error & { code?: string };
+        migrationError.code = 'SONG_ALTERNATE_AUDIO_MIGRATION_REQUIRED';
+        throw migrationError;
+      }
+
+      await db()
+        .update(songs)
+        .set(legacyUpdates)
+        .where(and(eq(songs.id, id), eq(songs.userId, userId)));
+      return;
+    }
+
     if (!isMissingPitchContourNotesColumnError(error)) {
       throw error;
     }
@@ -1001,11 +1225,92 @@ export async function deleteRatingsForSong(
 
 // ── Tap Practice ─────────────────────────────────────────────────────────
 
-function mapTapPracticeSession(row: Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">): PersistedTapPracticeSessionSummary {
+function normalizeTapAudioVersion(value: string | null | undefined): TapAudioVersion {
+  return value === "blend" ? "blend" : "straight";
+}
+
+async function ensureMidiTables(): Promise<void> {
+  if (!ensureMidiTablesPromise) {
+    ensureMidiTablesPromise = (async () => {
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "midi_sources" (
+          "id" text PRIMARY KEY NOT NULL,
+          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
+          "original_filename" text NOT NULL,
+          "storage_key" text NOT NULL,
+          "uploaded_at" timestamp NOT NULL DEFAULT now(),
+          "content_type" text,
+          "file_size" integer NOT NULL DEFAULT 0,
+          "parse_status" text NOT NULL DEFAULT 'parsed',
+          "cleanup_settings" jsonb NOT NULL DEFAULT '{"shortNoteThresholdMs":100,"simultaneousThresholdMs":30}'::jsonb,
+          "raw_notes" jsonb NOT NULL DEFAULT '[]'::jsonb,
+          "cleaned_notes" jsonb NOT NULL DEFAULT '[]'::jsonb,
+          "raw_note_count" integer NOT NULL DEFAULT 0,
+          "cleaned_note_count" integer NOT NULL DEFAULT 0,
+          "ignored_short_note_count" integer NOT NULL DEFAULT 0,
+          "parse_error" text
+        )
+      `));
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_midi_sources_song_uploaded_at"
+          ON "midi_sources" ("song_id", "uploaded_at")
+      `));
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "midi_alignments" (
+          "id" text PRIMARY KEY NOT NULL,
+          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
+          "midi_source_id" text NOT NULL REFERENCES "midi_sources"("id") ON DELETE cascade,
+          "tapped_start_times_seconds" jsonb NOT NULL DEFAULT '[]'::jsonb,
+          "retained_midi_note_count" integer NOT NULL DEFAULT 0,
+          "is_complete" boolean NOT NULL DEFAULT false,
+          "status" text NOT NULL DEFAULT 'partial',
+          "notes" text,
+          "created_at" timestamp NOT NULL DEFAULT now(),
+          "updated_at" timestamp NOT NULL DEFAULT now()
+        )
+      `));
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_midi_alignments_song_updated_at"
+          ON "midi_alignments" ("song_id", "updated_at")
+      `));
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_midi_alignments_source_updated_at"
+          ON "midi_alignments" ("midi_source_id", "updated_at")
+      `));
+    })().catch((error) => {
+      ensureMidiTablesPromise = null;
+      throw error;
+    });
+  }
+
+  await ensureMidiTablesPromise;
+}
+
+function normalizeTapPracticeMode(value: string | null | undefined): TapPracticeMode {
+  return value === "answer_key" ? "answer_key" : "practice";
+}
+
+function normalizeTapDirection(value: string | null | undefined): TapDirection | undefined {
+  return value === "up" || value === "down" || value === "same" ? value : undefined;
+}
+
+type TapPracticeSessionProjection = Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt"> &
+  Partial<Pick<TapPracticeSessionRow, "segmentId" | "audioVersion" | "mode" | "completedAt" | "finalizedAt" | "autoScorePercent" | "selfRating" | "scoreDetails">>;
+
+function mapTapPracticeSession(row: TapPracticeSessionProjection): PersistedTapPracticeSessionSummary {
+  const selfRating = row.selfRating === 1 || row.selfRating === 2 || row.selfRating === 3 || row.selfRating === 4 || row.selfRating === 5 ? row.selfRating : undefined;
   return {
     id: row.id,
     songId: row.songId,
+    audioVersion: normalizeTapAudioVersion(row.audioVersion),
+    mode: normalizeTapPracticeMode(row.mode),
     startedAt: row.startedAt.toISOString(),
+    ...(row.segmentId ? { segmentId: row.segmentId } : {}),
+    ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
+    ...(row.finalizedAt ? { finalizedAt: row.finalizedAt.toISOString() } : {}),
+    ...(row.autoScorePercent !== null && row.autoScorePercent !== undefined ? { autoScorePercent: row.autoScorePercent } : {}),
+    ...(selfRating ? { selfRating } : {}),
+    ...(row.scoreDetails ? { scoreDetails: row.scoreDetails } : {}),
     tapCount: 0,
   };
 }
@@ -1041,7 +1346,12 @@ export async function deleteExpiredTapPracticeData(
 export async function createTapPracticeSession(
   songId: string,
   userId: string = DEFAULT_QUERY_USER_ID,
-  startedAt: Date = new Date()
+  startedAt: Date = new Date(),
+  options: {
+    segmentId?: string;
+    audioVersion?: TapAudioVersion;
+    mode?: TapPracticeMode;
+  } = {}
 ): Promise<PersistedTapPracticeSessionSummary> {
   try {
     const rows = await db()
@@ -1050,13 +1360,16 @@ export async function createTapPracticeSession(
         id: crypto.randomUUID(),
         userId,
         songId,
+        segmentId: options.segmentId ?? null,
+        audioVersion: options.audioVersion ?? "straight",
+        mode: options.mode ?? "practice",
         startedAt,
       })
       .returning();
 
     return mapTapPracticeSession(rows[0]);
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       const rows = await db()
         .insert(tapPracticeSessions)
@@ -1064,6 +1377,9 @@ export async function createTapPracticeSession(
           id: crypto.randomUUID(),
           userId,
           songId,
+          segmentId: options.segmentId ?? null,
+          audioVersion: options.audioVersion ?? "straight",
+          mode: options.mode ?? "practice",
           startedAt,
         })
         .returning();
@@ -1082,6 +1398,7 @@ export async function addTapPracticeTap(
     timeOffsetMs: number;
     durationMs: number;
     lane: number;
+    direction?: TapDirection;
   }
 ): Promise<void> {
   try {
@@ -1095,10 +1412,11 @@ export async function addTapPracticeTap(
         timeOffsetMs: data.timeOffsetMs,
         durationMs: data.durationMs,
         laneMilli: laneToMilli(data.lane),
+        direction: data.direction ?? null,
         createdAt: new Date(),
       });
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       await db()
         .insert(tapPracticeTaps)
@@ -1110,12 +1428,56 @@ export async function addTapPracticeTap(
           timeOffsetMs: data.timeOffsetMs,
           durationMs: data.durationMs,
           laneMilli: laneToMilli(data.lane),
+          direction: data.direction ?? null,
           createdAt: new Date(),
         });
       return;
     }
     throw error;
   }
+}
+
+export async function updateTapPracticeSessionProgress(
+  sessionId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  data: {
+    completedAt?: Date;
+    autoScorePercent?: number | null;
+    scoreDetails?: TapScoreResult | null;
+  } = {}
+): Promise<PersistedTapPracticeSessionDetail | null> {
+  const existing = await getTapPracticeSessionDetail(sessionId, userId);
+  if (!existing) {
+    return null;
+  }
+
+  const completedAt = data.completedAt ?? new Date();
+  try {
+    await db()
+      .update(tapPracticeSessions)
+      .set({
+        completedAt,
+        autoScorePercent: data.autoScorePercent ?? null,
+        scoreDetails: data.scoreDetails ?? {},
+      })
+      .where(eq(tapPracticeSessions.id, sessionId));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .update(tapPracticeSessions)
+        .set({
+          completedAt,
+          autoScorePercent: data.autoScorePercent ?? null,
+          scoreDetails: data.scoreDetails ?? {},
+        })
+        .where(eq(tapPracticeSessions.id, sessionId));
+    } else {
+      throw error;
+    }
+  }
+
+  return getTapPracticeSessionDetail(sessionId, userId);
 }
 
 export async function deleteTapPracticeSessionsForSong(
@@ -1143,26 +1505,42 @@ export async function listTapPracticeSessionsForSong(
   userId: string = DEFAULT_QUERY_USER_ID,
   limit: number = 20
 ): Promise<PersistedTapPracticeSessionSummary[]> {
-  let sessions: Array<Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">> = [];
+  let sessions: TapPracticeSessionProjection[] = [];
   try {
     sessions = await db()
       .select({
         id: tapPracticeSessions.id,
         songId: tapPracticeSessions.songId,
+        segmentId: tapPracticeSessions.segmentId,
+        audioVersion: tapPracticeSessions.audioVersion,
+        mode: tapPracticeSessions.mode,
         startedAt: tapPracticeSessions.startedAt,
+        completedAt: tapPracticeSessions.completedAt,
+        finalizedAt: tapPracticeSessions.finalizedAt,
+        autoScorePercent: tapPracticeSessions.autoScorePercent,
+        selfRating: tapPracticeSessions.selfRating,
+        scoreDetails: tapPracticeSessions.scoreDetails,
       })
       .from(tapPracticeSessions)
       .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
       .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
       .orderBy(desc(tapPracticeSessions.startedAt));
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       sessions = await db()
         .select({
           id: tapPracticeSessions.id,
           songId: tapPracticeSessions.songId,
+          segmentId: tapPracticeSessions.segmentId,
+          audioVersion: tapPracticeSessions.audioVersion,
+          mode: tapPracticeSessions.mode,
           startedAt: tapPracticeSessions.startedAt,
+          completedAt: tapPracticeSessions.completedAt,
+          finalizedAt: tapPracticeSessions.finalizedAt,
+          autoScorePercent: tapPracticeSessions.autoScorePercent,
+          selfRating: tapPracticeSessions.selfRating,
+          scoreDetails: tapPracticeSessions.scoreDetails,
         })
         .from(tapPracticeSessions)
         .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
@@ -1212,26 +1590,42 @@ export async function getTapPracticeSessionDetail(
   sessionId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedTapPracticeSessionDetail | null> {
-  let sessionRows: Array<Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt">> = [];
+  let sessionRows: TapPracticeSessionProjection[] = [];
   try {
     sessionRows = await db()
       .select({
         id: tapPracticeSessions.id,
         songId: tapPracticeSessions.songId,
+        segmentId: tapPracticeSessions.segmentId,
+        audioVersion: tapPracticeSessions.audioVersion,
+        mode: tapPracticeSessions.mode,
         startedAt: tapPracticeSessions.startedAt,
+        completedAt: tapPracticeSessions.completedAt,
+        finalizedAt: tapPracticeSessions.finalizedAt,
+        autoScorePercent: tapPracticeSessions.autoScorePercent,
+        selfRating: tapPracticeSessions.selfRating,
+        scoreDetails: tapPracticeSessions.scoreDetails,
       })
       .from(tapPracticeSessions)
       .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
       .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
       .limit(1);
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       sessionRows = await db()
         .select({
           id: tapPracticeSessions.id,
           songId: tapPracticeSessions.songId,
+          segmentId: tapPracticeSessions.segmentId,
+          audioVersion: tapPracticeSessions.audioVersion,
+          mode: tapPracticeSessions.mode,
           startedAt: tapPracticeSessions.startedAt,
+          completedAt: tapPracticeSessions.completedAt,
+          finalizedAt: tapPracticeSessions.finalizedAt,
+          autoScorePercent: tapPracticeSessions.autoScorePercent,
+          selfRating: tapPracticeSessions.selfRating,
+          scoreDetails: tapPracticeSessions.scoreDetails,
         })
         .from(tapPracticeSessions)
         .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
@@ -1254,6 +1648,7 @@ export async function getTapPracticeSessionDetail(
     timeOffsetMs: number;
     durationMs: number;
     laneMilli: number;
+    direction: string | null;
     createdAt: Date;
   }> = [];
   try {
@@ -1263,7 +1658,7 @@ export async function getTapPracticeSessionDetail(
       .where(eq(tapPracticeTaps.sessionId, sessionId))
       .orderBy(asc(tapPracticeTaps.createdAt));
   } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
       await ensureTapPracticeTables();
       taps = await db()
         .select()
@@ -1275,23 +1670,303 @@ export async function getTapPracticeSessionDetail(
     }
   }
 
+  const selfRating = sessionRow.selfRating === 1 || sessionRow.selfRating === 2 || sessionRow.selfRating === 3 || sessionRow.selfRating === 4 || sessionRow.selfRating === 5 ? sessionRow.selfRating : undefined;
   return {
     id: sessionRow.id,
     songId: sessionRow.songId,
+    audioVersion: normalizeTapAudioVersion(sessionRow.audioVersion),
+    mode: normalizeTapPracticeMode(sessionRow.mode),
     startedAt: sessionRow.startedAt.toISOString(),
-    taps: taps.map((tap) => ({
-      id: tap.id,
-      noteId: tap.noteId,
-      segmentId: tap.segmentId,
-      timeOffsetMs: tap.timeOffsetMs,
-      durationMs: tap.durationMs,
-      lane: laneFromMilli(tap.laneMilli),
-      createdAt: tap.createdAt.toISOString(),
-    })),
+    ...(sessionRow.segmentId ? { segmentId: sessionRow.segmentId } : {}),
+    ...(sessionRow.completedAt ? { completedAt: sessionRow.completedAt.toISOString() } : {}),
+    ...(sessionRow.finalizedAt ? { finalizedAt: sessionRow.finalizedAt.toISOString() } : {}),
+    ...(sessionRow.autoScorePercent !== null && sessionRow.autoScorePercent !== undefined ? { autoScorePercent: sessionRow.autoScorePercent } : {}),
+    ...(selfRating ? { selfRating } : {}),
+    ...(sessionRow.scoreDetails ? { scoreDetails: sessionRow.scoreDetails } : {}),
+    taps: taps.map((tap) => {
+      const direction = normalizeTapDirection(tap.direction);
+      return {
+        id: tap.id,
+        noteId: tap.noteId,
+        segmentId: tap.segmentId,
+        timeOffsetMs: tap.timeOffsetMs,
+        durationMs: tap.durationMs,
+        lane: laneFromMilli(tap.laneMilli),
+        ...(direction ? { direction } : {}),
+        createdAt: tap.createdAt.toISOString(),
+      };
+    }),
   };
 }
 
+export async function finalizeTapPracticeSession(
+  sessionId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  data: {
+    completedAt?: Date;
+    autoScorePercent?: number | null;
+    selfRating?: SelfRating | null;
+    scoreDetails?: TapScoreResult | null;
+  } = {}
+): Promise<PersistedTapPracticeSessionDetail | null> {
+  const existing = await getTapPracticeSessionDetail(sessionId, userId);
+  if (!existing) {
+    return null;
+  }
+
+  if (existing.finalizedAt) {
+    return existing;
+  }
+
+  const completedAt = data.completedAt ?? new Date();
+  try {
+    await db()
+      .update(tapPracticeSessions)
+      .set({
+        completedAt,
+        finalizedAt: new Date(),
+        autoScorePercent: data.autoScorePercent ?? null,
+        selfRating: data.selfRating ?? null,
+        scoreDetails: data.scoreDetails ?? {},
+      })
+      .where(eq(tapPracticeSessions.id, sessionId));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .update(tapPracticeSessions)
+        .set({
+          completedAt,
+          finalizedAt: new Date(),
+          autoScorePercent: data.autoScorePercent ?? null,
+          selfRating: data.selfRating ?? null,
+          scoreDetails: data.scoreDetails ?? {},
+        })
+        .where(eq(tapPracticeSessions.id, sessionId));
+    } else {
+      throw error;
+    }
+  }
+
+  return getTapPracticeSessionDetail(sessionId, userId);
+}
+
 // ── Playlists ─────────────────────────────────────────────────────────────
+
+// MIDI-guided Tap Practice
+
+function mapMidiSource(row: MidiSourceRow): PersistedMidiSource {
+  return {
+    id: row.id,
+    songId: row.songId,
+    originalFilename: row.originalFilename,
+    storageKey: row.storageKey,
+    uploadedAt: row.uploadedAt.toISOString(),
+    contentType: row.contentType,
+    fileSize: row.fileSize,
+    parseStatus: row.parseStatus,
+    cleanupSettings: row.cleanupSettings,
+    rawNotes: row.rawNotes,
+    cleanedNotes: row.cleanedNotes,
+    rawNoteCount: row.rawNoteCount,
+    cleanedNoteCount: row.cleanedNoteCount,
+    ignoredShortNoteCount: row.ignoredShortNoteCount,
+    parseError: row.parseError,
+  };
+}
+
+function mapMidiAlignment(row: MidiAlignmentRow): MidiAlignment {
+  const tappedStartTimesSeconds = Array.isArray(row.tappedStartTimesSeconds)
+    ? row.tappedStartTimesSeconds.filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    : [];
+  return {
+    id: row.id,
+    songId: row.songId,
+    midiSourceId: row.midiSourceId,
+    tappedStartTimesSeconds,
+    retainedMidiNoteCount: row.retainedMidiNoteCount,
+    isComplete: row.isComplete,
+    status: row.status === "complete" ? "complete" : "partial",
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    ...(row.notes ? { notes: row.notes } : {}),
+  };
+}
+
+export async function createMidiSource(data: Omit<PersistedMidiSource, "uploadedAt">): Promise<PersistedMidiSource> {
+  try {
+    const rows = await db()
+      .insert(midiSources)
+      .values({
+        ...data,
+        uploadedAt: new Date(),
+        contentType: data.contentType ?? null,
+        parseError: data.parseError ?? null,
+      })
+      .returning();
+    return mapMidiSource(rows[0]);
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      const rows = await db()
+        .insert(midiSources)
+        .values({
+          ...data,
+          uploadedAt: new Date(),
+          contentType: data.contentType ?? null,
+          parseError: data.parseError ?? null,
+        })
+        .returning();
+      return mapMidiSource(rows[0]);
+    }
+    throw error;
+  }
+}
+
+export async function getLatestMidiSourceForSong(songId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedMidiSource | null> {
+  try {
+    const rows = await db()
+      .select({ source: midiSources })
+      .from(midiSources)
+      .innerJoin(songs, eq(midiSources.songId, songs.id))
+      .where(and(eq(midiSources.songId, songId), eq(songs.userId, userId)))
+      .orderBy(desc(midiSources.uploadedAt))
+      .limit(1);
+    return rows[0] ? mapMidiSource(rows[0].source) : null;
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function getMidiSourceById(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedMidiSource | null> {
+  try {
+    const rows = await db()
+      .select({ source: midiSources })
+      .from(midiSources)
+      .innerJoin(songs, eq(midiSources.songId, songs.id))
+      .where(and(eq(midiSources.id, midiSourceId), eq(songs.userId, userId)))
+      .limit(1);
+    return rows[0] ? mapMidiSource(rows[0].source) : null;
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function updateMidiSourceCleanup(
+  midiSourceId: string,
+  userId: string,
+  data: {
+    cleanupSettings: MidiCleanupSettingsData;
+    cleanedNotes: CleanedMidiNoteData[];
+    cleanedNoteCount: number;
+    ignoredShortNoteCount: number;
+  }
+): Promise<PersistedMidiSource | null> {
+  await ensureMidiTables();
+  const source = await getMidiSourceById(midiSourceId, userId);
+  if (!source) {
+    return null;
+  }
+  const rows = await db()
+    .update(midiSources)
+    .set({
+      cleanupSettings: data.cleanupSettings,
+      cleanedNotes: data.cleanedNotes,
+      cleanedNoteCount: data.cleanedNoteCount,
+      ignoredShortNoteCount: data.ignoredShortNoteCount,
+    })
+    .where(eq(midiSources.id, midiSourceId))
+    .returning();
+  return rows[0] ? mapMidiSource(rows[0]) : null;
+}
+
+export async function getLatestMidiAlignmentForSource(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<MidiAlignment | null> {
+  try {
+    const rows = await db()
+      .select({ alignment: midiAlignments })
+      .from(midiAlignments)
+      .innerJoin(songs, eq(midiAlignments.songId, songs.id))
+      .where(and(eq(midiAlignments.midiSourceId, midiSourceId), eq(songs.userId, userId)))
+      .orderBy(desc(midiAlignments.updatedAt))
+      .limit(1);
+    return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function getLatestCompleteMidiAlignmentForSource(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<MidiAlignment | null> {
+  try {
+    const rows = await db()
+      .select({ alignment: midiAlignments })
+      .from(midiAlignments)
+      .innerJoin(songs, eq(midiAlignments.songId, songs.id))
+      .where(and(eq(midiAlignments.midiSourceId, midiSourceId), eq(midiAlignments.isComplete, true), eq(songs.userId, userId)))
+      .orderBy(desc(midiAlignments.updatedAt))
+      .limit(1);
+    return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function upsertMidiAlignment(
+  data: {
+    id?: string;
+    songId: string;
+    midiSourceId: string;
+    tappedStartTimesSeconds: number[];
+    retainedMidiNoteCount: number;
+    notes?: string | null;
+  },
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<MidiAlignment> {
+  await ensureMidiTables();
+  const song = await getSongById(data.songId, userId);
+  if (!song) {
+    throw new Error("Song not found");
+  }
+  const now = new Date();
+  const tapped = data.tappedStartTimesSeconds.slice(0, data.retainedMidiNoteCount);
+  const isComplete = tapped.length >= data.retainedMidiNoteCount;
+  const id = data.id ?? crypto.randomUUID();
+  const values = {
+    id,
+    songId: data.songId,
+    midiSourceId: data.midiSourceId,
+    tappedStartTimesSeconds: tapped,
+    retainedMidiNoteCount: data.retainedMidiNoteCount,
+    isComplete,
+    status: isComplete ? "complete" : "partial",
+    notes: data.notes ?? null,
+    updatedAt: now,
+  };
+  const rows = await db()
+    .insert(midiAlignments)
+    .values({ ...values, createdAt: now })
+    .onConflictDoUpdate({
+      target: midiAlignments.id,
+      set: values,
+    })
+    .returning();
+  return mapMidiAlignment(rows[0]);
+}
 
 function toIso(value: Date | null): string {
   return value ? value.toISOString() : new Date(0).toISOString();
@@ -1407,6 +2082,7 @@ export async function getPlaylistById(
     title: string;
     artist: string | null;
     audioKey: string | null;
+    alternateAudioKey: string | null;
     pitchContourNotes: SongRow["pitchContourNotes"];
     createdAt: Date | null;
     lastPracticedAt: Date | null;
@@ -1420,6 +2096,7 @@ export async function getPlaylistById(
         title: songs.title,
         artist: songs.artist,
         audioKey: songs.audioKey,
+        alternateAudioKey: songs.alternateAudioKey,
         pitchContourNotes: songs.pitchContourNotes,
         createdAt: songs.createdAt,
         lastPracticedAt: songs.lastPracticedAt,
@@ -1429,7 +2106,7 @@ export async function getPlaylistById(
       .where(and(eq(playlistSongs.playlistId, id), eq(songs.userId, playlist.userId)))
       .orderBy(asc(playlistSongs.position));
   } catch (error) {
-    if (!isMissingUserIdColumnError(error) && !isMissingPitchContourNotesColumnError(error)) {
+    if (!isMissingUserIdColumnError(error) && !isMissingPitchContourNotesColumnError(error) && !isMissingAlternateAudioKeyColumnError(error)) {
       throw error;
     }
 
@@ -1441,6 +2118,7 @@ export async function getPlaylistById(
         title: songs.title,
         artist: songs.artist,
         audioKey: songs.audioKey,
+        alternateAudioKey: sql<string | null>`null`,
         pitchContourNotes: sql<SongRow["pitchContourNotes"]>`'[]'::jsonb`,
         createdAt: songs.createdAt,
         lastPracticedAt: songs.lastPracticedAt,
@@ -1463,7 +2141,8 @@ export async function getPlaylistById(
     id: songRow.songId,
     title: songRow.title,
     artist: songRow.artist ?? undefined,
-    audioUrl: songRow.audioKey ?? "",
+    audioUrl: songRow.audioKey ? getPublicUrl(songRow.audioKey) : "",
+    alternateAudioUrl: songRow.alternateAudioKey ? getPublicUrl(songRow.alternateAudioKey) : undefined,
     pitchContourNotes: songRow.pitchContourNotes ?? [],
     ratingCount: ratingCounts[songRow.songId] ?? 0,
     segments: segmentsBySong[i],

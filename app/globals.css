@@ -3,7 +3,13 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  color-scheme: light;
+  --player-height: 11rem;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --player-height: 12rem;
+  }
 }
 
 @theme inline {
@@ -11,6 +17,13 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
 }
 
 body {
@@ -25,7 +38,17 @@ body {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
+  -webkit-user-drag: none;
+  caret-color: transparent;
   overscroll-behavior: contain;
+}
+
+.tap-input-surface,
+.tap-input-surface * {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
 }
 
 .segment-stack-shell {
