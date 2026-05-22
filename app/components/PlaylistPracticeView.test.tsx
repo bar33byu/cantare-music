@@ -1130,8 +1130,8 @@ describe('PlaylistPracticeView', () => {
     await waitFor(() => {
       expect(play).toHaveBeenCalledWith(0, 1000);
     });
-    expect(screen.queryByTestId('practice-prev-segment')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('practice-next-segment')).not.toBeInTheDocument();
+    expect(screen.getByTestId('practice-prev-segment')).toBeDisabled();
+    expect(screen.getByTestId('practice-next-segment')).not.toBeDisabled();
     expect(screen.queryByTestId('audio-skip-back')).not.toBeInTheDocument();
 
     for (let expectedPlayCount = 2; expectedPlayCount <= 5; expectedPlayCount += 1) {
@@ -1260,6 +1260,178 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
+  it('ignores stale Auto Drill completion events while announcing the next same-song segment', async () => {
+    class MockSpeechSynthesisUtterance {
+      text: string;
+      onend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+
+    const spoken: MockSpeechSynthesisUtterance[] = [];
+    Object.defineProperty(window, 'SpeechSynthesisUtterance', {
+      configurable: true,
+      value: MockSpeechSynthesisUtterance,
+    });
+    vi.stubGlobal('SpeechSynthesisUtterance', MockSpeechSynthesisUtterance);
+    Object.defineProperty(window, 'speechSynthesis', {
+      configurable: true,
+      value: {
+        cancel: vi.fn(),
+        speak: vi.fn((utterance: MockSpeechSynthesisUtterance) => {
+          spoken.push(utterance);
+        }),
+      },
+    });
+
+    const oneSongPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          segments: [
+            {
+              id: 'song-1-seg-1',
+              songId: 'song-1',
+              order: 0,
+              label: 'First',
+              lyricText: 'First line',
+              startMs: 0,
+              endMs: 1000,
+            },
+            {
+              id: 'song-1-seg-2',
+              songId: 'song-1',
+              order: 1,
+              label: 'Second',
+              lyricText: 'Second line',
+              startMs: 1000,
+              endMs: 2000,
+            },
+            {
+              id: 'song-1-seg-3',
+              songId: 'song-1',
+              order: 2,
+              label: 'Third',
+              lyricText: 'Third line',
+              startMs: 2000,
+              endMs: 3000,
+            },
+          ],
+        },
+      ],
+    };
+    const play = vi.fn();
+    let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
+    const audioState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 30000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    };
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation(((_audioUrl: string, _factory?: unknown, options?: { onRangeEnd?: () => void }) => {
+      latestAudioOptions = options;
+      return audioState;
+    }) as typeof audioPlayerHook.useAudioPlayer);
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/songs/song-1/ratings')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ratings: [
+              { id: 'rating-1', segmentId: 'song-1-seg-1', rating: 5, ratedAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'rating-2', segmentId: 'song-1-seg-2', rating: 5, ratedAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'rating-3', segmentId: 'song-1-seg-3', rating: 4, ratedAt: '2026-01-01T00:00:00.000Z' },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 93 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(oneSongPlaylist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={oneSongPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-auto'));
+    await waitFor(() => {
+      const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+      expect(fetchMock.mock.calls.some(([input]) => input === '/api/songs/song-1/ratings')).toBe(true);
+    });
+
+    await waitFor(() => expect(spoken.map((utterance) => utterance.text)).toContain('Alpha'));
+    act(() => {
+      [...spoken].reverse().find((utterance) => utterance.text === 'Alpha')?.onend?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('First');
+      expect(play).toHaveBeenCalledWith(0, 1000);
+    });
+
+    act(() => {
+      latestAudioOptions?.onRangeEnd?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Second');
+      expect(screen.getByTestId('auto-drill-live')).toHaveTextContent('Next');
+    });
+    expect(play).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      latestAudioOptions?.onRangeEnd?.();
+    });
+
+    expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Second');
+    expect(screen.getByTestId('auto-drill-live')).toHaveTextContent('Next');
+    expect(play).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      spoken.find((utterance) => utterance.text === 'Next')?.onend?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Second');
+      expect(play).toHaveBeenCalledWith(500, 2000);
+      expect(play).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('uses hands-free Auto Drill voice prompts without countdowns', async () => {
     installImmediateSpeechSynthesis();
     const play = vi.fn();
@@ -1336,9 +1508,10 @@ describe('PlaylistPracticeView', () => {
     expect(speak.mock.calls.map(([utterance]) => utterance.text)).toContain('Again');
   });
 
-  it('skips remaining Auto Drill loops for the current segment', async () => {
+  it('uses card arrows for Auto Drill navigation and restarts the target card loop count', async () => {
     installImmediateSpeechSynthesis();
     const play = vi.fn();
+    let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
     const audioState = {
       isPlaying: false,
       isReady: true,
@@ -1367,7 +1540,10 @@ describe('PlaylistPracticeView', () => {
       setPlaybackEndMs: vi.fn(),
       setPlaybackRate: vi.fn(),
     };
-    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((() => audioState) as typeof audioPlayerHook.useAudioPlayer);
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation(((_audioUrl: string, _factory?: unknown, options?: { onRangeEnd?: () => void }) => {
+      latestAudioOptions = options;
+      return audioState;
+    }) as typeof audioPlayerHook.useAudioPlayer);
 
     global.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -1394,11 +1570,32 @@ describe('PlaylistPracticeView', () => {
       expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Alpha');
     });
 
-    fireEvent.click(screen.getByTestId('auto-drill-skip-segment-loops'));
+    expect(screen.getByTestId('practice-prev-segment')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('practice-next-segment'));
 
     await waitFor(() => {
       expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Beta');
       expect(play).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByTestId('practice-prev-segment')).not.toBeDisabled();
+    expect(screen.getByTestId('practice-next-segment')).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('practice-prev-segment'));
+
+    let playsAfterReturning = 0;
+    await waitFor(() => {
+      expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Alpha');
+      expect(play.mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+    playsAfterReturning = play.mock.calls.length;
+
+    act(() => {
+      latestAudioOptions?.onRangeEnd?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Alpha');
+      expect(play).toHaveBeenCalledTimes(playsAfterReturning + 1);
     });
   });
 

@@ -62,6 +62,7 @@ interface PracticeViewProps {
   autoPlayOnMount?: boolean;
   autoPlayToken?: number;
   reducedControls?: boolean;
+  showSegmentNavigationControls?: boolean;
   ratingKeysEnabled?: boolean;
   onSegmentPlaybackComplete?: () => void;
   onRatingSubmitted?: (rating: MemoryRating) => void;
@@ -177,6 +178,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   autoPlayOnMount = false,
   autoPlayToken = 0,
   reducedControls = false,
+  showSegmentNavigationControls = !reducedControls,
   ratingKeysEnabled = true,
   onSegmentPlaybackComplete,
   onRatingSubmitted,
@@ -2079,7 +2081,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
       >
         <section data-testid="practice-focus" className={`flex h-full min-h-0 w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
-          {!isTapPracticeMode && !reducedControls ? (
+          {!isTapPracticeMode && showSegmentNavigationControls ? (
             <button
               type="button"
               aria-label="Previous segment"
@@ -2397,7 +2399,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 )}
               </div>
             </div>
-          ) : !isTapPracticeMode && !reducedControls ? (
+          ) : !isTapPracticeMode && showSegmentNavigationControls ? (
             <button
               type="button"
               aria-label="Next segment"

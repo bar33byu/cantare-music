@@ -171,7 +171,7 @@ export function PlaylistPracticeView({
   const lastObservedFocusRatingRef = useRef<string | null>(null);
   const listenStartedSongIdRef = useRef<string | null>(null);
   const autoDrillRunIdRef = useRef(0);
-  const autoDrillTransitionRef = useRef<'full' | 'quick' | 'again'>('full');
+  const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
 
   const userScopedHeaders = useMemo(() => {
@@ -700,24 +700,52 @@ export function PlaylistPracticeView({
     setAutoDrillMessage(nextItem?.song.id === fromItem.song.id ? 'Next' : `${nextItem?.song.title ?? ''}`);
   }, [autoDrillIndex, autoDrillQueue]);
 
-  const skipAutoDrillSegmentLoops = useCallback(() => {
-    if (!currentAutoDrillItem || practiceMode !== 'auto-drill' || autoDrillState === 'idle' || autoDrillState === 'complete') {
+  const jumpAutoDrillSegment = useCallback((targetIndex: number, direction: 'previous' | 'next') => {
+    if (
+      !currentAutoDrillItem ||
+      practiceMode !== 'auto-drill' ||
+      autoDrillState === 'idle' ||
+      autoDrillState === 'complete' ||
+      targetIndex < 0 ||
+      targetIndex >= autoDrillQueue.length ||
+      targetIndex === autoDrillIndex
+    ) {
+      return;
+    }
+
+    const targetItem = autoDrillQueue[targetIndex];
+    if (!targetItem) {
       return;
     }
 
     autoDrillHandledCompletionRef.current = null;
     setAutoDrillCompletedPasses((prev) => ({
       ...prev,
-      [currentAutoDrillItem.id]: getAutoDrillTargetPasses(autoDrillRunRatings[currentAutoDrillItem.id] ?? currentAutoDrillItem.latestRating?.rating),
+      [targetItem.id]: 0,
     }));
-    advanceAutoDrillSegment(currentAutoDrillItem);
-  }, [advanceAutoDrillSegment, autoDrillRunRatings, autoDrillState, currentAutoDrillItem, practiceMode]);
+    autoDrillTransitionRef.current = direction === 'previous'
+      ? 'previous'
+      : targetItem.song.id === currentAutoDrillItem.song.id ? 'quick' : 'full';
+    setAutoDrillIndex(targetIndex);
+    setAutoDrillState('announcing');
+    setAutoDrillPlaybackWarning(null);
+    setAutoDrillMessage(direction === 'previous'
+      ? 'Previous'
+      : targetItem.song.id === currentAutoDrillItem.song.id ? 'Next' : targetItem.song.title);
+  }, [autoDrillIndex, autoDrillQueue, autoDrillState, currentAutoDrillItem, practiceMode]);
+
+  const handlePrevAutoDrillSegment = useCallback(() => {
+    jumpAutoDrillSegment(autoDrillIndex - 1, 'previous');
+  }, [autoDrillIndex, jumpAutoDrillSegment]);
+
+  const handleNextAutoDrillSegment = useCallback(() => {
+    jumpAutoDrillSegment(autoDrillIndex + 1, 'next');
+  }, [autoDrillIndex, jumpAutoDrillSegment]);
 
   const handleAutoDrillPlaybackComplete = useCallback(() => {
     if (
       practiceMode !== 'auto-drill' ||
-      autoDrillState === 'idle' ||
-      autoDrillState === 'complete'
+      autoDrillState !== 'playing'
     ) {
       return;
     }
@@ -840,6 +868,9 @@ export function PlaylistPracticeView({
       if (autoDrillState === 'repeating' || transition === 'again') {
         setAutoDrillMessage('Again');
         await speakPrompt('Again', autoDrillVoiceEnabled);
+      } else if (transition === 'previous') {
+        setAutoDrillMessage('Previous');
+        await speakPrompt('Previous', autoDrillVoiceEnabled);
       } else if (transition === 'quick') {
         setAutoDrillMessage('Next');
         await speakPrompt('Next', autoDrillVoiceEnabled);
@@ -1007,22 +1038,26 @@ export function PlaylistPracticeView({
   return (
     <section data-testid="playlist-practice-view" className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="mb-1 flex items-center gap-1 text-sm text-gray-600">
-            <button
-              data-testid="playlist-practice-exit"
-              className="hover:text-indigo-700 hover:underline"
-              onClick={onExit}
-            >
-              Playlists
-            </button>
-            <span>/</span>
-            <span className="text-gray-900">{livePlaylist.name}</span>
+        <div className="flex min-w-0 items-start gap-3">
+          <button
+            type="button"
+            data-testid="playlist-practice-exit"
+            aria-label="Back to playlists"
+            title="Back to playlists"
+            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 hover:border-indigo-400 hover:text-indigo-700"
+            onClick={onExit}
+          >
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+              <path d="M19 12H5" />
+              <path d="m12 19-7-7 7-7" />
+            </svg>
+          </button>
+          <div className="min-w-0">
+            <h2 className="truncate text-2xl font-bold text-gray-900">{livePlaylist.name}</h2>
+            <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
+              Playlist Knowledge: {playlistScore}%
+            </p>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900">{livePlaylist.name}</h2>
-          <p data-testid="playlist-practice-score" className="text-sm font-medium text-indigo-700">
-            Playlist Knowledge: {playlistScore}%
-          </p>
         </div>
         <div className="flex gap-2">
           <div className="inline-flex h-10 rounded border border-indigo-300 bg-white p-0.5">
@@ -1332,61 +1367,23 @@ export function PlaylistPracticeView({
       )}
 
       {mode === 'auto' && (
-        <div className="space-y-4" data-testid="playlist-auto-drill">
+        <div className="space-y-3" data-testid="playlist-auto-drill">
           <div
             aria-live="polite"
             data-testid="auto-drill-live"
-            className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3"
+            className="sr-only"
           >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-indigo-800">Auto Drill</p>
-                <p className="text-sm text-indigo-950">{autoDrillMessage}</p>
-                {autoDrillPlaybackWarning ? (
-                  <p data-testid="auto-drill-playback-warning" className="mt-1 text-sm font-medium text-amber-800">
-                    {autoDrillPlaybackWarning}
-                  </p>
-                ) : null}
-              </div>
-              <span className="text-sm font-medium text-indigo-900">
-                {currentAutoDrillItem ? `${autoDrillIndex + 1} of ${autoDrillQueue.length}` : '0 of 0'}
-              </span>
-            </div>
+            {autoDrillMessage}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {practiceMode === 'auto-drill' && autoDrillState !== 'idle' ? (
-              <button
-                type="button"
-                data-testid="auto-drill-exit"
-                aria-label="Exit Auto Drill"
-                onClick={stopAutoDrill}
-                className="rounded border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-              >
-                Exit Auto Drill
-              </button>
-            ) : (
-              <button
-                type="button"
-                data-testid="auto-drill-start"
-                aria-label="Start Auto Drill"
-                onClick={startAutoDrill}
-                disabled={autoDrillQueue.length === 0}
-                className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
-              >
-                Start Auto Drill
-              </button>
-            )}
-            <label className="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700">
-              <input
-                type="checkbox"
-                data-testid="auto-drill-voice-toggle"
-                checked={autoDrillVoiceEnabled}
-                onChange={(event) => setAutoDrillVoiceEnabled(event.target.checked)}
-              />
-              Voice prompts
-            </label>
-          </div>
+          {autoDrillPlaybackWarning ? (
+            <div
+              data-testid="auto-drill-playback-warning"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800"
+            >
+              {autoDrillPlaybackWarning}
+            </div>
+          ) : null}
 
           {!currentAutoDrillItem ? (
             <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -1394,44 +1391,57 @@ export function PlaylistPracticeView({
             </div>
           ) : (
             <>
-              <div className="flex items-stretch gap-2">
-                <div className="min-w-0 flex-1 rounded-lg border border-indigo-100 bg-white px-4 py-3" data-testid="auto-drill-current-segment">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-950">
-                        {currentAutoDrillItem.song.title}
-                        {currentAutoDrillItem.song.artist ? ` - ${currentAutoDrillItem.song.artist}` : ''}
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        {currentAutoDrillItem.segment.label} - Song {currentAutoDrillItem.songIndex + 1} of {livePlaylist.songs.length} - Segment {currentAutoDrillItem.segmentIndex + 1} of {currentAutoDrillItem.song.segments.length}
-                      </p>
-                    </div>
-                    {autoDrillState === 'playing' ? (
-                      <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">
-                        Listening
-                      </span>
-                    ) : practiceMode === 'auto-drill' && autoDrillState !== 'complete' ? (
-                      <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
-                        Rating optional
-                      </span>
-                    ) : null}
-                  </div>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                <div className="min-w-0 flex-1" data-testid="auto-drill-current-segment">
+                  <p className="truncate text-sm font-semibold text-gray-950">
+                    {currentAutoDrillItem.song.title}
+                    {currentAutoDrillItem.song.artist ? ` - ${currentAutoDrillItem.song.artist}` : ''}
+                  </p>
+                  <p className="truncate text-xs text-gray-600">
+                    {currentAutoDrillItem.segment.label} - Song {currentAutoDrillItem.songIndex + 1} - Segment {currentAutoDrillItem.segmentIndex + 1}
+                  </p>
                 </div>
-                {practiceMode === 'auto-drill' && autoDrillState !== 'idle' && autoDrillState !== 'complete' ? (
+                {autoDrillState === 'playing' ? (
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-900">
+                    Listening
+                  </span>
+                ) : practiceMode === 'auto-drill' && autoDrillState !== 'complete' ? (
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900">
+                    Rating optional
+                  </span>
+                ) : null}
+                {practiceMode === 'auto-drill' && autoDrillState !== 'idle' ? (
                   <button
                     type="button"
-                    data-testid="auto-drill-skip-segment-loops"
-                    aria-label="Skip remaining loops for this segment"
-                    onClick={skipAutoDrillSegmentLoops}
-                    className="flex w-12 shrink-0 items-center justify-center rounded-lg border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+                    data-testid="auto-drill-exit"
+                    aria-label="Exit Auto Drill"
+                    onClick={stopAutoDrill}
+                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                   >
-                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M5 12h14" />
-                      <path d="m13 6 6 6-6 6" />
-                    </svg>
+                    Exit
                   </button>
-                ) : null}
-              </div>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="auto-drill-start"
+                    aria-label="Start Auto Drill"
+                    onClick={startAutoDrill}
+                    disabled={autoDrillQueue.length === 0}
+                    className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+                  >
+                    Start
+                  </button>
+                )}
+                <label className="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    data-testid="auto-drill-voice-toggle"
+                    checked={autoDrillVoiceEnabled}
+                    onChange={(event) => setAutoDrillVoiceEnabled(event.target.checked)}
+                  />
+                  Voice
+                </label>
+                  </div>
 
               {autoDrillPracticeSession ? (
                 <div className="min-h-[720px] rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="auto-drill-practice-surface">
@@ -1447,12 +1457,15 @@ export function PlaylistPracticeView({
                     playScope="segment"
                     autoPlayToken={autoDrillPlayToken}
                     reducedControls={practiceMode === 'auto-drill'}
+                    showSegmentNavigationControls={practiceMode === 'auto-drill'}
                     ratingKeysEnabled={practiceMode === 'auto-drill'}
                     onSegmentPlaybackComplete={handleAutoDrillPlaybackComplete}
                     onRatingSubmitted={handleAutoDrillRatingSubmitted}
                     onAutoPlayBlocked={setAutoDrillPlaybackWarning}
-                    canUsePrevSegment={false}
-                    canUseNextSegment={false}
+                    onPrevSegment={handlePrevAutoDrillSegment}
+                    onNextSegment={handleNextAutoDrillSegment}
+                    canUsePrevSegment={autoDrillIndex > 0}
+                    canUseNextSegment={autoDrillIndex < autoDrillQueue.length - 1}
                   />
                 </div>
               ) : null}
