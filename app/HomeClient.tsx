@@ -43,15 +43,19 @@ interface HashRouteState {
 
 interface UserSettings {
   segmentPrerollMs: number;
-  collapseLyricLineBreaks: boolean;
   currentUserId: string;
   users: KnownUser[];
+}
+
+interface BuildInfo {
+  version: string;
+  branch: string;
+  commitSha?: string;
 }
 
 const SETTINGS_STORAGE_KEY = "cantare:user-settings";
 const DEFAULT_USER_SETTINGS: UserSettings = {
   segmentPrerollMs: 500,
-  collapseLyricLineBreaks: false,
   currentUserId: DEFAULT_USER_ID,
   users: [{ id: DEFAULT_USER_ID, name: "Default User" }],
 };
@@ -97,7 +101,6 @@ function parseStoredSettings(raw: string | null): UserSettings {
     const currentUserId = normalizeUserId(parsed.currentUserId ?? DEFAULT_USER_SETTINGS.currentUserId);
     return {
       segmentPrerollMs: clampSegmentPrerollMs(parsed.segmentPrerollMs ?? DEFAULT_USER_SETTINGS.segmentPrerollMs),
-      collapseLyricLineBreaks: Boolean(parsed.collapseLyricLineBreaks),
       currentUserId: users.some((user) => user.id === currentUserId) ? currentUserId : DEFAULT_USER_ID,
       users,
     };
@@ -205,7 +208,7 @@ function UnifiedHeader({
   );
 }
 
-export default function Home() {
+export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [activeView, setActiveView] = useState<AppView>("playlists");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -613,7 +616,6 @@ export default function Home() {
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
             segmentPrerollMs={userSettings.segmentPrerollMs}
-            collapseLyricLineBreaks={userSettings.collapseLyricLineBreaks}
             onEditSongClick={() => {
               setSongEditorReturnView("song_practice");
               setActiveView("song_segment_editor");
@@ -713,7 +715,6 @@ export default function Home() {
           <PlaylistPracticeView
             playlist={selectedPlaylist}
             userId={activeUserId}
-            collapseLyricLineBreaks={userSettings.collapseLyricLineBreaks}
             onExit={() => setActiveView("playlists")}
             onManage={() => setActiveView("playlist_detail")}
             onSelectSong={(song) => {
@@ -742,7 +743,6 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-4xl mx-auto">
         <UnifiedHeader
-          breadcrumb={{ label: "Cantare" }}
           title="Cantare Music"
           action={
             <button
@@ -818,21 +818,6 @@ export default function Home() {
                     Starts segment playback slightly early to avoid clipped phrase starts on some devices.
                   </p>
 
-                  <label className="mt-4 flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      data-testid="settings-collapse-line-breaks-toggle"
-                      type="checkbox"
-                      checked={userSettings.collapseLyricLineBreaks}
-                      onChange={(event) => {
-                        const checked = event.target.checked;
-                        setUserSettings((previous) => ({ ...previous, collapseLyricLineBreaks: checked }));
-                      }}
-                    />
-                    Compact lyric wrapping (ignore pasted line breaks)
-                  </label>
-                  <p className="mt-1 text-xs text-gray-600">
-                    Shows lyrics as a continuous paragraph to reduce vertical scrolling during practice.
-                  </p>
                 </div>
 
                 <div className="rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500">
@@ -871,6 +856,21 @@ export default function Home() {
                       Add
                     </button>
                   </div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+                  <h3 className="text-sm font-semibold text-gray-800">Build</h3>
+                  <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                    <dt className="font-medium text-gray-700">Version</dt>
+                    <dd data-testid="settings-build-version">v{buildInfo.version}</dd>
+                    <dt className="font-medium text-gray-700">Branch</dt>
+                    <dd data-testid="settings-build-branch">{buildInfo.branch}</dd>
+                    {buildInfo.commitSha ? (
+                      <>
+                        <dt className="font-medium text-gray-700">Commit</dt>
+                        <dd data-testid="settings-build-commit">{buildInfo.commitSha.slice(0, 7)}</dd>
+                      </>
+                    ) : null}
+                  </dl>
                 </div>
               </div>
             </section>

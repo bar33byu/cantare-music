@@ -1176,9 +1176,10 @@ export function PlaylistPracticeView({
               const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
               const masteryColor = getMasteryColor(mastery);
               const shouldRenderLabelInsideBar = mastery >= 10;
-              const hasAudio = Boolean(getPlayableAudioUrl(song));
+              const hasPartAudio = Boolean(song.audioUrl?.trim());
+              const hasBlendAudio = Boolean(song.alternateAudioUrl?.trim());
               const hasSegments = song.segments.length > 0;
-              const hasTapKeys = (song.pitchContourNotes?.length ?? 0) > 0;
+              const hasMidiContour = (song.pitchContourNotes?.length ?? 0) > 0;
               return (
                 <div
                   key={song.id}
@@ -1215,9 +1216,10 @@ export function PlaylistPracticeView({
                   {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
                   <div className="absolute bottom-3 right-3">
                     <SongReadinessIcons
-                      hasAudio={hasAudio}
+                      hasPartAudio={hasPartAudio}
+                      hasBlendAudio={hasBlendAudio}
                       hasSegments={hasSegments}
-                      hasTapKeys={hasTapKeys}
+                      hasMidiContour={hasMidiContour}
                       testIdPrefix={`playlist-practice-song-${song.id}`}
                     />
                   </div>

@@ -164,13 +164,14 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-2')).toBeInTheDocument();
     expect(screen.getByTestId('playlist-practice-song-song-3')).toBeInTheDocument();
 
-    expect(screen.getByTestId('playlist-practice-song-song-2-readiness-audio')).toHaveAttribute('aria-label', 'Audio file missing');
+    expect(screen.getByTestId('playlist-practice-song-song-2-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio missing');
+    expect(screen.getByTestId('playlist-practice-song-song-2-readiness-blend-audio')).toHaveAttribute('aria-label', 'Blend audio missing');
     expect(screen.getByTestId('playlist-practice-song-song-2-readiness-segments')).toHaveAttribute('aria-label', 'Sections present');
-    expect(screen.getByTestId('playlist-practice-song-song-3-readiness-audio')).toHaveAttribute('aria-label', 'Audio file present');
+    expect(screen.getByTestId('playlist-practice-song-song-3-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio present');
     expect(screen.getByTestId('playlist-practice-song-song-3-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
-  it('treats blend-only audio as playable for readiness', async () => {
+  it('shows blend-only audio separately in readiness', async () => {
     const blendOnlyPlaylist: Playlist = {
       ...playlist,
       songs: [
@@ -182,7 +183,8 @@ describe('PlaylistPracticeView', () => {
     render(<PlaylistPracticeView playlist={blendOnlyPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file present');
+      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio missing');
+      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-blend-audio')).toHaveAttribute('aria-label', 'Blend audio present');
     });
   });
 
@@ -201,7 +203,8 @@ describe('PlaylistPracticeView', () => {
       expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file missing');
+    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio missing');
+    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-blend-audio')).toHaveAttribute('aria-label', 'Blend audio missing');
     expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
@@ -957,11 +960,11 @@ describe('PlaylistPracticeView', () => {
 
     render(<PlaylistPracticeView playlist={stalePlaylist} userId="user-1" onExit={() => undefined} onSelectSong={() => undefined} />);
 
-    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file missing');
+    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio missing');
     expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
 
     await waitFor(() => {
-      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-audio')).toHaveAttribute('aria-label', 'Audio file present');
+      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio present');
       expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections present');
     });
 

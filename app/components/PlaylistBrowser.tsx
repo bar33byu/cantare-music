@@ -14,9 +14,17 @@ type PlaylistListItem = {
 };
 
 type PlaylistHealthStats = {
-  songsWithAudio: number;
+  songsWithPartAudio: number;
+  songsWithBlendAudio: number;
   songsWithSegments: number;
-  songsWithTapKeys: number;
+  songsWithMidiContour: number;
+};
+
+const EMPTY_PLAYLIST_STATS: PlaylistHealthStats = {
+  songsWithPartAudio: 0,
+  songsWithBlendAudio: 0,
+  songsWithSegments: 0,
+  songsWithMidiContour: 0,
 };
 
 interface PlaylistBrowserProps {
@@ -100,18 +108,19 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
           list.map(async (playlist) => {
             const detailResponse = await request(`/api/playlists/${playlist.id}`, { signal: controller.signal });
             if (!detailResponse.ok) {
-              return [playlist.id, { songsWithAudio: 0, songsWithSegments: 0, songsWithTapKeys: 0 }] as const;
+              return [playlist.id, EMPTY_PLAYLIST_STATS] as const;
             }
             const detail = (await detailResponse.json()) as Playlist;
             const songs = Array.isArray(detail.songs) ? detail.songs : [];
 
-            const songsWithAudio = songs.filter((song) => Boolean(song.audioUrl?.trim() || song.alternateAudioUrl?.trim())).length;
+            const songsWithPartAudio = songs.filter((song) => Boolean(song.audioUrl?.trim())).length;
+            const songsWithBlendAudio = songs.filter((song) => Boolean(song.alternateAudioUrl?.trim())).length;
             const songsWithSegments = songs.filter((song) => (song.segments?.length ?? 0) > 0).length;
-            const songsWithTapKeys = songs.filter((song) =>
+            const songsWithMidiContour = songs.filter((song) =>
               (song.pitchContourNotes?.length ?? 0) > 0
             ).length;
 
-            return [playlist.id, { songsWithAudio, songsWithSegments, songsWithTapKeys }] as const;
+            return [playlist.id, { songsWithPartAudio, songsWithBlendAudio, songsWithSegments, songsWithMidiContour }] as const;
           })
         ),
       ]);
@@ -276,11 +285,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
             const retiredClass = playlist.isRetired ? 'text-gray-500 italic' : '';
             const playlistPayload = { ...playlist, songs: playlist.songs ?? [] } as Playlist;
             const knowledgePercent = Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100);
-            const stats = statsByPlaylist[playlist.id] ?? {
-              songsWithAudio: 0,
-              songsWithSegments: 0,
-              songsWithTapKeys: 0,
-            };
+            const stats = statsByPlaylist[playlist.id] ?? EMPTY_PLAYLIST_STATS;
             const totalSongs = Math.max(playlist.songCount ?? 0, 0);
             return (
               <article
@@ -304,15 +309,18 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                     <p className="text-sm font-semibold text-indigo-800" data-testid={`playlist-knowledge-${playlist.id}`}>
                       Knowledge: {knowledgePercent}%
                     </p>
-                    <div className="mt-2 hidden grid-cols-3 gap-2 text-[11px] text-indigo-900 lg:grid" data-testid={`playlist-health-${playlist.id}`}>
+                    <div className="mt-2 hidden grid-cols-4 gap-2 text-[11px] text-indigo-900 lg:grid" data-testid={`playlist-health-${playlist.id}`}>
                       <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
-                        Audio {stats.songsWithAudio}/{totalSongs}
+                        Part audio {stats.songsWithPartAudio}/{totalSongs}
+                      </span>
+                      <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
+                        Blend audio {stats.songsWithBlendAudio}/{totalSongs}
                       </span>
                       <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
                         Sections {stats.songsWithSegments}/{totalSongs}
                       </span>
                       <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
-                        Tap keys {stats.songsWithTapKeys}/{totalSongs}
+                        MIDI contour {stats.songsWithMidiContour}/{totalSongs}
                       </span>
                     </div>
                   </button>
@@ -347,7 +355,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                             onManagePlaylist(playlistPayload);
                           }}
                         >
-                          Manage
+                          Edit Playlist
                         </button>
                         <button
                           data-testid={`playlist-retire-${playlist.id}`}

@@ -57,8 +57,11 @@ export async function GET(request: NextRequest) {
         lastPracticedAt: toIsoString(song.lastPracticedAt ?? ratingFallbackBySongId[song.id] ?? null),
         masteryPercent: knowledgeBySongId[song.id] ?? 0,
         hasAudio: Boolean(song.audioKey || song.alternateAudioKey),
+        hasPartAudio: Boolean(song.audioKey),
+        hasBlendAudio: Boolean(song.alternateAudioKey),
         hasSegments: readinessBySongId[song.id]?.hasSegments ?? false,
         hasTapKeys: readinessBySongId[song.id]?.hasTapKeys ?? false,
+        hasMidiContour: readinessBySongId[song.id]?.hasTapKeys ?? false,
       })),
       {
         headers: {

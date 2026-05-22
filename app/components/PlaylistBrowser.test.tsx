@@ -130,11 +130,12 @@ describe('PlaylistBrowser', () => {
     });
   });
 
-  it('actions menu exposes manage action', async () => {
+  it('actions menu exposes edit playlist action', async () => {
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
     await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
 
     fireEvent.click(screen.getByTestId('playlist-actions-pl-1'));
+    expect(screen.getByTestId('playlist-manage-pl-1')).toHaveTextContent('Edit Playlist');
     fireEvent.click(screen.getByTestId('playlist-manage-pl-1'));
 
     expect(onManagePlaylist).toHaveBeenCalledWith(expect.objectContaining({ id: 'pl-1', songs: [] }));
@@ -155,9 +156,9 @@ describe('PlaylistBrowser', () => {
         json: async () => ({
           id: 'pl-1',
           songs: [
-            { id: 's1', audioUrl: '/a1.mp3', pitchContourNotes: [{ id: 'n1' }], segments: [{ id: 'seg-1' }] },
+            { id: 's1', audioUrl: '/a1.mp3', alternateAudioUrl: '/b1.mp3', pitchContourNotes: [{ id: 'n1' }], segments: [{ id: 'seg-1' }] },
             { id: 's2', audioUrl: '/a2.mp3', segments: [{ id: 'seg-2', pitchContourNotes: [] }] },
-            { id: 's3', audioUrl: '', segments: [] },
+            { id: 's3', audioUrl: '', alternateAudioUrl: '/b3.mp3', segments: [] },
           ],
         }),
       });
@@ -166,9 +167,10 @@ describe('PlaylistBrowser', () => {
 
     await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
 
-    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Audio 2/3');
+    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Part audio 2/3');
+    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Blend audio 2/3');
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Sections 2/3');
-    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Tap keys 1/3');
+    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('MIDI contour 1/3');
     expect(screen.getByTestId('playlist-knowledge-pl-1')).toHaveTextContent('Knowledge: 85%');
   });
 

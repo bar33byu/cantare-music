@@ -392,7 +392,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
         <div>
           <p className="text-sm font-semibold text-indigo-800">MIDI-guided tap practice</p>
           <p className="mt-1 text-xs text-slate-500">
-            {status?.source ? status.source.originalFilename : "Upload a single-part MIDI file to create tap keys from note onsets."}
+            {status?.source ? status.source.originalFilename : "Upload a single-part MIDI file to create a MIDI contour from note onsets."}
           </p>
         </div>
         <label className="inline-flex cursor-pointer items-center justify-center rounded-full border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">
