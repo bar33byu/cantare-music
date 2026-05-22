@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllSongs, createSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getSegmentsBySongId } from '../../../db/queries';
+import { getAllSongs, createSong, getLatestMidiSourceForSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getSegmentsBySongId } from '../../../db/queries';
 import { resolveRequestUserId } from '../_user';
 
 function toIsoString(value: unknown): string | null {
@@ -43,9 +43,11 @@ export async function GET(request: NextRequest) {
         songs.map(async (song) => {
           const segments = await getSegmentsBySongId(song.id);
           const hasSegments = segments.length > 0;
+          const midiSource = await getLatestMidiSourceForSong(song.id, userId);
           const hasTapKeys = (song.pitchContourNotes?.length ?? 0) > 0;
+          const hasMidiContour = hasTapKeys || (midiSource?.cleanedNoteCount ?? 0) > 0;
 
-          return [song.id, { hasSegments, hasTapKeys }] as const;
+          return [song.id, { hasSegments, hasTapKeys, hasMidiContour }] as const;
         })
       ).then((entries) => Object.fromEntries(entries)),
     ]);
@@ -61,7 +63,7 @@ export async function GET(request: NextRequest) {
         hasBlendAudio: Boolean(song.alternateAudioKey),
         hasSegments: readinessBySongId[song.id]?.hasSegments ?? false,
         hasTapKeys: readinessBySongId[song.id]?.hasTapKeys ?? false,
-        hasMidiContour: readinessBySongId[song.id]?.hasTapKeys ?? false,
+        hasMidiContour: readinessBySongId[song.id]?.hasMidiContour ?? false,
       })),
       {
         headers: {

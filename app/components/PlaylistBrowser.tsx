@@ -117,7 +117,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
             const songsWithBlendAudio = songs.filter((song) => Boolean(song.alternateAudioUrl?.trim())).length;
             const songsWithSegments = songs.filter((song) => (song.segments?.length ?? 0) > 0).length;
             const songsWithMidiContour = songs.filter((song) =>
-              (song.pitchContourNotes?.length ?? 0) > 0
+              song.hasMidiContour || (song.pitchContourNotes?.length ?? 0) > 0
             ).length;
 
             return [playlist.id, { songsWithPartAudio, songsWithBlendAudio, songsWithSegments, songsWithMidiContour }] as const;

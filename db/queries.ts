@@ -85,6 +85,7 @@ export interface PlaylistSongItem {
   audioUrl: string;
   alternateAudioUrl?: string;
   pitchContourNotes: SongRow["pitchContourNotes"];
+  hasMidiContour?: boolean;
   ratingCount: number;
   segments: SegmentRow[];
   createdAt: string;
@@ -2130,11 +2131,18 @@ export async function getPlaylistById(
   }
 
   const songIds = linkedSongs.map((s) => s.songId);
-  const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts] = await Promise.all([
+  const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts, midiContourEntries] = await Promise.all([
     Promise.all(linkedSongs.map((s) => getSegmentsBySongId(s.songId))),
     getSongKnowledgeBySongIds(songIds, playlist.userId),
     getLatestRatingTimeBySongIds(songIds, playlist.userId),
     getRatingCountBySongIds(songIds, playlist.userId),
+    Promise.all(
+      linkedSongs.map(async (song) => {
+        const source = await getLatestMidiSourceForSong(song.songId, playlist.userId);
+        const hasMidiContour = (song.pitchContourNotes?.length ?? 0) > 0 || (source?.cleanedNoteCount ?? 0) > 0;
+        return [song.songId, hasMidiContour] as const;
+      })
+    ).then((entries) => Object.fromEntries(entries)),
   ]);
 
   const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow, i) => ({
@@ -2144,6 +2152,7 @@ export async function getPlaylistById(
     audioUrl: songRow.audioKey ? getPublicUrl(songRow.audioKey) : "",
     alternateAudioUrl: songRow.alternateAudioKey ? getPublicUrl(songRow.alternateAudioKey) : undefined,
     pitchContourNotes: songRow.pitchContourNotes ?? [],
+    hasMidiContour: midiContourEntries[songRow.songId] ?? false,
     ratingCount: ratingCounts[songRow.songId] ?? 0,
     segments: segmentsBySong[i],
     createdAt: toIso(songRow.createdAt),

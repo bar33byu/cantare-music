@@ -157,7 +157,7 @@ describe('PlaylistBrowser', () => {
           id: 'pl-1',
           songs: [
             { id: 's1', audioUrl: '/a1.mp3', alternateAudioUrl: '/b1.mp3', pitchContourNotes: [{ id: 'n1' }], segments: [{ id: 'seg-1' }] },
-            { id: 's2', audioUrl: '/a2.mp3', segments: [{ id: 'seg-2', pitchContourNotes: [] }] },
+            { id: 's2', audioUrl: '/a2.mp3', hasMidiContour: true, segments: [{ id: 'seg-2', pitchContourNotes: [] }] },
             { id: 's3', audioUrl: '', alternateAudioUrl: '/b3.mp3', segments: [] },
           ],
         }),
@@ -170,7 +170,7 @@ describe('PlaylistBrowser', () => {
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Part audio 2/3');
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Blend audio 2/3');
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Sections 2/3');
-    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('MIDI contour 1/3');
+    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('MIDI contour 2/3');
     expect(screen.getByTestId('playlist-knowledge-pl-1')).toHaveTextContent('Knowledge: 85%');
   });
 
