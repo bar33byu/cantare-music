@@ -8,7 +8,7 @@ import SegmentCard from "./SegmentCard";
 import KnowledgeBar from "./KnowledgeBar";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { toPlayableAudioUrl } from "../lib/audioUrls";
+import { toPlayableAudioUrl, type PreferredAudioVersion } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
 import {
   DEFAULT_CONTOUR_SAME_DEAD_ZONE,
@@ -56,6 +56,8 @@ interface PracticeViewProps {
   onBreadcrumbRootClick?: () => void;
   onEditSongClick?: () => void;
   segmentPrerollMs?: number;
+  preferredAudioVersion?: PreferredAudioVersion;
+  onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
   collapseLyricLineBreaks?: boolean;
   defaultLooping?: boolean;
   playScope?: "song" | "segment";
@@ -82,7 +84,6 @@ const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
   hidden: "Hidden",
 };
 
-const AUDIO_VERSION_STORAGE_KEY = "cantare:practice-audio-version";
 const PRACTICED_PLAYBACK_THRESHOLD_MS = 10_000;
 const PREV_SEGMENT_GO_BACK_THRESHOLD_MS = 3_000;
 const OFFLINE_RATING_QUEUE_PREFIX = "cantare:offline-ratings:";
@@ -172,6 +173,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   onBreadcrumbRootClick,
   onEditSongClick,
   segmentPrerollMs = 500,
+  preferredAudioVersion = "part",
+  onPreferredAudioVersionChange,
   collapseLyricLineBreaks = false,
   defaultLooping = false,
   playScope = "song",
@@ -246,7 +249,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   // Snapshot of the current playback state readable in effects without adding each
   // value as a dep (used by the isLooping-change effect).
   const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
-  const [audioVersion, setAudioVersion] = React.useState<AudioVersion>("straight");
+  const [audioVersion, setAudioVersion] = React.useState<AudioVersion>(
+    preferredAudioVersion === "blend" ? "blend" : "straight"
+  );
   const hasStraightAudio = Boolean(song.audioUrl?.trim());
   const hasBlendAudio = Boolean(song.alternateAudioUrl?.trim());
   const hasBothAudioVersions = hasStraightAudio && hasBlendAudio;
@@ -460,13 +465,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     };
   }, [previousTapLane]);
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const stored = window.localStorage.getItem(AUDIO_VERSION_STORAGE_KEY);
-    setAudioVersion(hasBothAudioVersions && stored === "blend" ? "blend" : "straight");
-  }, [hasBothAudioVersions, song.id]);
+    setAudioVersion(preferredAudioVersion === "blend" ? "blend" : "straight");
+  }, [preferredAudioVersion, song.id]);
 
   useEffect(() => {
     const pending = pendingAudioVersionSwitchRef.current;
@@ -1141,12 +1141,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       wasPlaying: isPlaying,
     };
 
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(AUDIO_VERSION_STORAGE_KEY, nextVersion);
-    }
-
+    onPreferredAudioVersionChange?.(nextVersion === "blend" ? "blend" : "part");
     setAudioVersion(nextVersion);
-  }, [activeAudioVersion, currentMs, currentSegment, durationMs, hasBothAudioVersions, isLooping, isPlaying]);
+  }, [activeAudioVersion, currentMs, currentSegment, durationMs, hasBothAudioVersions, isLooping, isPlaying, onPreferredAudioVersionChange]);
 
   const getTapLane = React.useCallback((clientY: number) => {
     const rect = tapBarRef.current?.getBoundingClientRect();

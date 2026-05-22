@@ -30,17 +30,24 @@ vi.mock('./components/PracticeView', () => ({
     onBreadcrumbRootClick,
     onEditSongClick,
     segmentPrerollMs,
+    preferredAudioVersion,
+    onPreferredAudioVersionChange,
   }: {
     song: { segments: Array<unknown> };
     breadcrumbRootLabel?: string;
     onBreadcrumbRootClick?: () => void;
     onEditSongClick?: () => void;
     segmentPrerollMs?: number;
+    preferredAudioVersion?: 'part' | 'blend';
+    onPreferredAudioVersionChange?: (version: 'part' | 'blend') => void;
   }) => {
-    practiceViewMock({ song, segmentPrerollMs });
+    practiceViewMock({ song, segmentPrerollMs, preferredAudioVersion });
     return (
       <div data-testid="mock-practice-view">
         Segments: {song.segments.length}
+        <button data-testid="mock-prefer-blend" onClick={() => onPreferredAudioVersionChange?.('blend')}>
+          Prefer Blend
+        </button>
         {breadcrumbRootLabel ? (
           <button onClick={onBreadcrumbRootClick}>{breadcrumbRootLabel}</button>
         ) : null}
@@ -202,6 +209,23 @@ describe('Home page', () => {
 
     const lastCall = practiceViewMock.mock.calls.at(-1)?.[0] as { segmentPrerollMs?: number } | undefined;
     expect(lastCall?.segmentPrerollMs).toBe(1000);
+  });
+
+  it('uses the selected default audio preference in practice', async () => {
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    fireEvent.click(screen.getByTestId('settings-audio-preference-blend'));
+
+    fireEvent.click(screen.getByTestId('library-tab'));
+    fireEvent.click(screen.getByTestId('mock-select-song'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
+    });
+
+    const lastCall = practiceViewMock.mock.calls.at(-1)?.[0] as { preferredAudioVersion?: 'part' | 'blend' } | undefined;
+    expect(lastCall?.preferredAudioVersion).toBe('blend');
   });
 
   it('shows build information in settings and omits compact lyric wrapping', async () => {

@@ -999,6 +999,42 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
+  it('uses preferred blend audio for listen playback and falls back to part audio', async () => {
+    const useAudioPlayerSpy = vi.spyOn(audioPlayerHook, 'useAudioPlayer');
+    const mixedAudioPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          alternateAudioUrl: 'https://example.com/alpha-blend.mp3',
+        },
+        playlist.songs[1],
+      ],
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    render(
+      <PlaylistPracticeView
+        playlist={mixedAudioPlaylist}
+        preferredAudioVersion="blend"
+        onExit={() => undefined}
+        onSelectSong={() => undefined}
+      />
+    );
+
+    await waitFor(() => {
+      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://example.com/alpha-blend.mp3');
+    });
+
+    fireEvent.click(screen.getByTestId('playlist-mode-listen'));
+    fireEvent.click(screen.getByLabelText('Next song'));
+
+    await waitFor(() => {
+      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://example.com/beta.mp3');
+    });
+  });
+
   it('does not fall back to the proxy URL when direct listen playback reports an error', async () => {
     const useAudioPlayerSpy = vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
       isPlaying: false,

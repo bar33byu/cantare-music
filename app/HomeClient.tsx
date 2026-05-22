@@ -11,6 +11,7 @@ import { SegmentEditor } from "./components/SegmentEditor";
 import { makeSession } from "./lib/factories";
 import type { Playlist, Song } from "./types";
 import { createUserIdFromName, DEFAULT_USER_ID, normalizeUserId, type KnownUser, USER_COOKIE_NAME } from "./lib/userContext";
+import type { PreferredAudioVersion } from "./lib/audioUrls";
 
 interface SongListItem {
   id: string;
@@ -43,6 +44,7 @@ interface HashRouteState {
 
 interface UserSettings {
   segmentPrerollMs: number;
+  preferredAudioVersion: PreferredAudioVersion;
   currentUserId: string;
   users: KnownUser[];
 }
@@ -56,6 +58,7 @@ interface BuildInfo {
 const SETTINGS_STORAGE_KEY = "cantare:user-settings";
 const DEFAULT_USER_SETTINGS: UserSettings = {
   segmentPrerollMs: 500,
+  preferredAudioVersion: "part",
   currentUserId: DEFAULT_USER_ID,
   users: [{ id: DEFAULT_USER_ID, name: "Default User" }],
 };
@@ -90,6 +93,10 @@ function clampSegmentPrerollMs(value: number): number {
   return Math.max(0, Math.min(2000, Math.round(value)));
 }
 
+function normalizePreferredAudioVersion(value: unknown): PreferredAudioVersion {
+  return value === "blend" ? "blend" : "part";
+}
+
 function parseStoredSettings(raw: string | null): UserSettings {
   if (!raw) {
     return DEFAULT_USER_SETTINGS;
@@ -101,6 +108,7 @@ function parseStoredSettings(raw: string | null): UserSettings {
     const currentUserId = normalizeUserId(parsed.currentUserId ?? DEFAULT_USER_SETTINGS.currentUserId);
     return {
       segmentPrerollMs: clampSegmentPrerollMs(parsed.segmentPrerollMs ?? DEFAULT_USER_SETTINGS.segmentPrerollMs),
+      preferredAudioVersion: normalizePreferredAudioVersion(parsed.preferredAudioVersion),
       currentUserId: users.some((user) => user.id === currentUserId) ? currentUserId : DEFAULT_USER_ID,
       users,
     };
@@ -616,6 +624,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
             segmentPrerollMs={userSettings.segmentPrerollMs}
+            preferredAudioVersion={userSettings.preferredAudioVersion}
+            onPreferredAudioVersionChange={(version) => {
+              setUserSettings((previous) => ({ ...previous, preferredAudioVersion: version }));
+            }}
             onEditSongClick={() => {
               setSongEditorReturnView("song_practice");
               setActiveView("song_segment_editor");
@@ -715,6 +727,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           <PlaylistPracticeView
             playlist={selectedPlaylist}
             userId={activeUserId}
+            preferredAudioVersion={userSettings.preferredAudioVersion}
+            onPreferredAudioVersionChange={(version) => {
+              setUserSettings((previous) => ({ ...previous, preferredAudioVersion: version }));
+            }}
             onExit={() => setActiveView("playlists")}
             onManage={() => setActiveView("playlist_detail")}
             onSelectSong={(song) => {
@@ -797,6 +813,33 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               <div className="space-y-4">
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                   <h3 className="text-sm font-semibold text-gray-800">Playback</h3>
+                  <div className="mt-3">
+                    <p className="text-sm text-gray-700">Default audio</p>
+                    <div
+                      className="mt-1 inline-flex rounded border border-gray-300 bg-white p-0.5"
+                      data-testid="settings-audio-preference-toggle"
+                    >
+                      {([
+                        ["part", "Part"],
+                        ["blend", "Blend"],
+                      ] as const).map(([version, label]) => (
+                        <button
+                          key={version}
+                          type="button"
+                          data-testid={`settings-audio-preference-${version}`}
+                          aria-pressed={userSettings.preferredAudioVersion === version}
+                          onClick={() => setUserSettings((previous) => ({ ...previous, preferredAudioVersion: version }))}
+                          className={`rounded px-3 py-1 text-sm font-semibold ${
+                            userSettings.preferredAudioVersion === version
+                              ? "bg-indigo-600 text-white"
+                              : "text-indigo-700 hover:bg-indigo-50"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <label htmlFor="segment-preroll-slider" className="mt-3 block text-sm text-gray-700">
                     Segment preroll: <span className="font-semibold">{(userSettings.segmentPrerollMs / 1000).toFixed(1)}s</span>
                   </label>

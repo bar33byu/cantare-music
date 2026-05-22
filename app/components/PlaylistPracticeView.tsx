@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
-import { toPlayableAudioUrl } from '../lib/audioUrls';
+import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
 import { SongReadinessIcons } from './SongReadinessIcons';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import PracticeView from './PracticeView';
@@ -122,14 +122,12 @@ interface PlaylistPracticeViewProps {
   playlist: Playlist;
   userId?: string;
   segmentPrerollMs?: number;
+  preferredAudioVersion?: PreferredAudioVersion;
+  onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
   collapseLyricLineBreaks?: boolean;
   onExit: () => void;
   onManage?: () => void;
   onSelectSong: (song: Playlist["songs"][number]) => void;
-}
-
-function getPlayableAudioUrl(song?: Pick<Playlist["songs"][number], 'audioUrl' | 'alternateAudioUrl'> | null): string {
-  return song?.audioUrl?.trim() || song?.alternateAudioUrl?.trim() || '';
 }
 
 const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
@@ -138,6 +136,8 @@ export function PlaylistPracticeView({
   playlist,
   userId,
   segmentPrerollMs = DEFAULT_FOCUS_PREROLL_MS,
+  preferredAudioVersion = 'part',
+  onPreferredAudioVersionChange,
   collapseLyricLineBreaks = false,
   onExit,
   onManage,
@@ -382,7 +382,7 @@ export function PlaylistPracticeView({
 
   const autoDrillQueue = useMemo<AutoDrillQueueItem[]>(() => {
     return livePlaylist.songs.flatMap((song, songIndex) => {
-      if (!getPlayableAudioUrl(song)) {
+      if (!resolvePreferredAudioUrl(song, preferredAudioVersion)) {
         return [];
       }
 
@@ -403,7 +403,7 @@ export function PlaylistPracticeView({
           };
         });
     });
-  }, [livePlaylist.songs, ratingsBySongId]);
+  }, [livePlaylist.songs, preferredAudioVersion, ratingsBySongId]);
 
   const currentAutoDrillItem = autoDrillQueue[autoDrillIndex];
 
@@ -493,18 +493,18 @@ export function PlaylistPracticeView({
   const currentSong = listenQueue[currentSongIndex];
   const playbackSong = mode === 'focus' || mode === 'auto' ? undefined : currentSong;
   const currentSongId = playbackSong?.id;
-  const hasCurrentSongAudio = Boolean(getPlayableAudioUrl(playbackSong));
+  const hasCurrentSongAudio = Boolean(resolvePreferredAudioUrl(playbackSong, preferredAudioVersion));
   const findNextPlayableIndex = useCallback((startIndex: number) => {
     for (let index = Math.max(0, startIndex); index < listenQueue.length; index += 1) {
-      if (getPlayableAudioUrl(listenQueue[index])) {
+      if (resolvePreferredAudioUrl(listenQueue[index], preferredAudioVersion)) {
         return index;
       }
     }
     return -1;
-  }, [listenQueue]);
+  }, [listenQueue, preferredAudioVersion]);
   const playbackAudioUrl = useMemo(
-    () => toPlayableAudioUrl(getPlayableAudioUrl(playbackSong)),
-    [playbackSong]
+    () => toPlayableAudioUrl(resolvePreferredAudioUrl(playbackSong, preferredAudioVersion)),
+    [playbackSong, preferredAudioVersion]
   );
   const audioPlayer = useAudioPlayer(playbackAudioUrl);
   const {
@@ -1097,6 +1097,31 @@ export function PlaylistPracticeView({
               </button>
             ))}
           </div>
+          <div
+            className="inline-flex h-10 rounded border border-slate-300 bg-white p-0.5"
+            data-testid="playlist-audio-preference-toggle"
+            title="Default audio version"
+          >
+            {([
+              ['part', 'Part'],
+              ['blend', 'Blend'],
+            ] as const).map(([version, label]) => (
+              <button
+                key={version}
+                type="button"
+                data-testid={`playlist-audio-preference-${version}`}
+                aria-pressed={preferredAudioVersion === version}
+                onClick={() => onPreferredAudioVersionChange?.(version)}
+                className={`rounded px-3 text-sm font-semibold ${
+                  preferredAudioVersion === version
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {onManage ? (
             <button
               data-testid="playlist-practice-manage"
@@ -1325,6 +1350,8 @@ export function PlaylistPracticeView({
                     onSessionChange={handleFocusSessionChange}
                     onRatingsSaved={handleFocusRatingsSaved}
                     segmentPrerollMs={focusPrerollMs}
+                    preferredAudioVersion={preferredAudioVersion}
+                    onPreferredAudioVersionChange={onPreferredAudioVersionChange}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
                     defaultLooping
                     playScope="segment"
@@ -1455,6 +1482,8 @@ export function PlaylistPracticeView({
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel="Auto Drill"
                     segmentPrerollMs={AUTO_DRILL_PREROLL_MS}
+                    preferredAudioVersion={preferredAudioVersion}
+                    onPreferredAudioVersionChange={onPreferredAudioVersionChange}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
                     playScope="segment"
                     autoPlayToken={autoDrillPlayToken}

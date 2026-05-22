@@ -357,6 +357,29 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.alternateAudioUrl);
   });
 
+  it("defaults to blend audio when the preference asks for it", async () => {
+    const song: Song = {
+      ...makeSong(),
+      alternateAudioUrl: "https://cdn.example.com/audio/song-1/blend.mp3",
+    };
+
+    render(<PracticeView song={song} initialSession={makeSession(song)} preferredAudioVersion="blend" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.alternateAudioUrl);
+    });
+  });
+
+  it("falls back to part audio when blend is preferred but missing", async () => {
+    const song = makeSong();
+
+    render(<PracticeView song={song} initialSession={makeSession(song)} preferredAudioVersion="blend" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.audioUrl);
+    });
+  });
+
   it("switches to blend audio and resumes the current playback range", async () => {
     const song: Song = {
       ...makeSong(),
