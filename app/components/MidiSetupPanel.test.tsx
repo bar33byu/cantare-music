@@ -81,6 +81,33 @@ describe("MidiSetupPanel", () => {
     });
   });
 
+  it("defaults the short-note slider to zero before MIDI is uploaded", async () => {
+    request.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        source: null,
+        alignment: null,
+        summary: {
+          hasMidi: false,
+          rawNoteCount: 0,
+          cleanedNoteCount: 0,
+          ignoredShortNoteCount: 0,
+          shortNoteThresholdMs: 0,
+          alignedCount: 0,
+          retainedMidiNoteCount: 0,
+          hasCompleteAlignment: false,
+          hasDerivedAnswerKey: false,
+          latestAlignmentDate: null,
+        },
+      }),
+    });
+
+    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
+
+    expect(await screen.findByTestId("midi-short-note-threshold")).toHaveValue("0");
+    expect(screen.getByText("Ignore notes shorter than 0 ms")).toBeInTheDocument();
+  });
+
   it("confirms restart inline without using a blocking browser dialog", async () => {
     const confirmSpy = vi.spyOn(window, "confirm");
     render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);

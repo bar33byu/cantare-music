@@ -293,6 +293,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     lastActionAt: new Date().toISOString(),
   });
   const hasSegments = song.segments.length > 0;
+  const segmentTimingSignature = useMemo(
+    () => song.segments.map((segment) => `${segment.id}:${segment.startMs}-${segment.endMs}`).join("|"),
+    [song.segments]
+  );
   const hasMidiTapAnswers = Object.values(midiSegmentAnswerKeys).some((key) => key.taps.length > 0);
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
   const tapBarRef = React.useRef<HTMLDivElement | null>(null);
@@ -1803,7 +1807,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [request, song.id, tapHeatMapRefreshToken]);
+  }, [request, segmentTimingSignature, song.id, tapHeatMapRefreshToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1994,7 +1998,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               Contour
             </button>
           ) : null}
-          {hasSegments ? (
+          {hasSegments && (hasMidiTapAnswers || isTapPracticeMode) ? (
             <button
               type="button"
               data-testid="practice-tap-mode-toggle"

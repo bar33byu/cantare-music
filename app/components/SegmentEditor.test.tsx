@@ -191,16 +191,18 @@ describe('SegmentEditor', () => {
     });
   });
 
-  it('bulk-imports sections from separator-delimited lyrics with equal timing', async () => {
+  it('bulk-imports sections from blank-line-delimited lyrics with equal timing', async () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
       expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
     });
 
-    const pastedLyrics = ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n');
+    const pastedLyrics = ['Line A1', 'Line A2', '', 'Line B1', 'Line B2'].join('\n');
 
     fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('300%');
+    expect(screen.getByTestId('segment-editor-bulk-text')).toHaveClass('h-96');
     fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
       target: {
         value: pastedLyrics,
@@ -233,6 +235,38 @@ describe('SegmentEditor', () => {
       expect(createCalls.length).toBe(0);
       expect(screen.getByTestId('segment-editor-bulk-panel')).toBeInTheDocument();
       expect(screen.getByTestId('segment-editor-bulk-text')).toHaveValue(pastedLyrics);
+    });
+  });
+
+  it('supports a custom separator for bulk lyrics', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
+    });
+
+    const pastedLyrics = ['Line A1', 'Line A2', '***', 'Line B1', 'Line B2'].join('\n');
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    fireEvent.change(screen.getByTestId('segment-editor-bulk-separator'), {
+      target: { value: '***' },
+    });
+    fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
+      target: { value: pastedLyrics },
+    });
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
+
+    await waitFor(() => {
+      const patchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes('/api/songs/song-1/segments/') && init?.method === 'PATCH'
+      );
+      expect(patchCalls.length).toBeGreaterThanOrEqual(2);
+
+      const firstPatchBody = JSON.parse(String(patchCalls[patchCalls.length - 2][1]?.body ?? '{}'));
+      const secondPatchBody = JSON.parse(String(patchCalls[patchCalls.length - 1][1]?.body ?? '{}'));
+
+      expect(firstPatchBody.lyricText).toBe('Line A1\nLine A2');
+      expect(secondPatchBody.lyricText).toBe('Line B1\nLine B2');
     });
   });
 
@@ -283,7 +317,7 @@ describe('SegmentEditor', () => {
       expect(screen.getByTestId('segment-editor-bulk-open')).toBeInTheDocument();
     });
 
-    const pastedLyrics = ['Line A1', 'Line A2', '*', 'Line B1', 'Line B2'].join('\n');
+    const pastedLyrics = ['Line A1', 'Line A2', '', 'Line B1', 'Line B2'].join('\n');
 
     fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
     fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
@@ -370,7 +404,7 @@ describe('SegmentEditor', () => {
     fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
     fireEvent.click(screen.getByTestId('segment-editor-bulk-replace'));
     fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
-      target: { value: ['One', '*', 'Two', '*', 'Three'].join('\n') },
+      target: { value: ['One', '', 'Two', '', 'Three'].join('\n') },
     });
     fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));
 
@@ -479,7 +513,7 @@ describe('SegmentEditor', () => {
     fireEvent.click(screen.getByTestId('segment-editor-bulk-replace'));
     fireEvent.change(screen.getByTestId('segment-editor-bulk-text'), {
       target: {
-        value: ['Verse 1', '*', 'Verse 2'].join('\n'),
+        value: ['Verse 1', '', 'Verse 2'].join('\n'),
       },
     });
     fireEvent.click(screen.getByTestId('segment-editor-bulk-submit'));

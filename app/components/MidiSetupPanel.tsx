@@ -92,7 +92,7 @@ function emptySummary(): MidiStatusPayload["summary"] {
     rawNoteCount: 0,
     cleanedNoteCount: 0,
     ignoredShortNoteCount: 0,
-    shortNoteThresholdMs: 100,
+    shortNoteThresholdMs: 0,
     alignedCount: 0,
     retainedMidiNoteCount: 0,
     hasCompleteAlignment: false,
@@ -183,7 +183,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [thresholdDraft, setThresholdDraft] = useState(100);
+  const [thresholdDraft, setThresholdDraft] = useState(0);
   const [isAligning, setIsAligning] = useState(false);
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   const [resumeIndexDraft, setResumeIndexDraft] = useState("0");

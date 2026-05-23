@@ -12,6 +12,7 @@ const MIN_SEGMENT_MS = 1000;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.5;
+const BULK_IMPORT_ZOOM = 3;
 const DEFAULT_TIMELINE_FALLBACK_MS = 60000;
 const BULK_DURATION_PROBE_TIMEOUT_MS = 3000;
 const BULK_REQUEST_RETRIES = 4;
@@ -62,7 +63,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [stableDurationMs, setStableDurationMs] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
-  const [bulkSeparator, setBulkSeparator] = useState('*');
+  const [bulkSeparator, setBulkSeparator] = useState('');
   const [replaceExistingOnBulk, setReplaceExistingOnBulk] = useState(true);
   const [bulkImportPending, setBulkImportPending] = useState(false);
   const [songLoaded, setSongLoaded] = useState(false);
@@ -181,7 +182,10 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const parseBulkSections = (text: string, separator: string): string[] => {
     const normalizedSeparator = separator.trim();
     if (!normalizedSeparator) {
-      return [];
+      return text
+        .split(/\n\s*\n+/)
+        .map((section) => section.trim())
+        .filter((section) => section.length > 0);
     }
 
     return text
@@ -289,7 +293,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
     const sections = parseBulkSections(bulkText, bulkSeparator);
     if (sections.length === 0) {
-      setDeleteError('Bulk import needs at least one section split by the separator.');
+      setDeleteError('Bulk import needs at least one section split by a blank line or custom separator.');
       return;
     }
 
@@ -886,7 +890,13 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               data-testid="segment-editor-bulk-open"
               onClick={() => {
                 setDeleteError(null);
-                setShowBulkImport((previous) => !previous);
+                setShowBulkImport((previous) => {
+                  const next = !previous;
+                  if (next) {
+                    setZoom(BULK_IMPORT_ZOOM);
+                  }
+                  return next;
+                });
               }}
               className="px-3 py-1 border border-indigo-300 text-indigo-700 text-sm rounded hover:bg-indigo-50"
             >
@@ -978,17 +988,20 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
         {showBulkImport ? (
           <div data-testid="segment-editor-bulk-panel" className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
-            <div className="mb-2 grid gap-2 md:grid-cols-[1fr,180px]">
-              <label className="text-xs font-semibold text-indigo-800">
-                Separator token
-                <input
-                  data-testid="segment-editor-bulk-separator"
-                  value={bulkSeparator}
-                  onChange={(event) => setBulkSeparator(event.target.value)}
-                  className="mt-1 w-full rounded border border-indigo-300 bg-white px-2 py-1 text-sm"
-                  placeholder="***"
-                />
-              </label>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <details className="text-xs text-indigo-800">
+                <summary className="cursor-pointer font-semibold">Custom separator</summary>
+                <label className="mt-2 block">
+                  Separator token
+                  <input
+                    data-testid="segment-editor-bulk-separator"
+                    value={bulkSeparator}
+                    onChange={(event) => setBulkSeparator(event.target.value)}
+                    className="mt-1 w-44 rounded border border-indigo-300 bg-white px-2 py-1 text-sm"
+                    placeholder="Blank line"
+                  />
+                </label>
+              </details>
               <label className="mt-5 inline-flex items-center gap-2 text-xs text-indigo-900">
                 <input
                   data-testid="segment-editor-bulk-replace"
@@ -1007,14 +1020,14 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               placeholder={[
                 'Verse 1 line 1',
                 'Verse 1 line 2',
-                '***',
+                '',
                 'Verse 2 line 1',
                 'Verse 2 line 2',
               ].join('\n')}
-              className="mt-1 h-36 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm"
+              className="mt-1 h-96 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm"
             />
             <p className="mt-1 text-xs text-indigo-700">
-              Default separator is <strong>***</strong>. Each block becomes one section, spaced evenly across the full song.
+              Blank lines create new sections by default. Each block becomes one section, spaced evenly across the full song.
             </p>
             <div className="mt-3 flex gap-2">
               <button

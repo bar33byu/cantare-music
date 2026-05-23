@@ -122,6 +122,10 @@ const DEFAULT_TEMPO_MICROSECONDS_PER_QUARTER = 500000;
 const DEFAULT_SAFE_DURATION_SECONDS = 0.1;
 const PITCH_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
+function roundSeconds(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
 function readString(view: DataView, offset: number, length: number): string {
   let value = "";
   for (let i = 0; i < length; i += 1) {
@@ -306,7 +310,7 @@ export function cleanMidiNotes(
   rawNotes: RawMidiNote[],
   settings: Partial<MidiCleanupSettings> = {}
 ): MidiCleanupResult {
-  const shortNoteThresholdMs = Math.max(0, Math.min(300, settings.shortNoteThresholdMs ?? 100));
+  const shortNoteThresholdMs = Math.max(0, Math.min(300, settings.shortNoteThresholdMs ?? 0));
   const simultaneousThresholdSeconds = Math.max(0, (settings.simultaneousThresholdMs ?? 30) / 1000);
   const sorted = [...rawNotes].sort((a, b) => a.midiStartSeconds - b.midiStartSeconds || a.index - b.index);
   const longEnough = sorted.filter((note) => note.midiDurationSeconds * 1000 >= shortNoteThresholdMs);
@@ -451,20 +455,26 @@ export function deriveSegmentAnswerKey(
   const startSeconds = segment.startMs / 1000;
   const endSeconds = segment.endMs / 1000;
   const notes = wholeSongKey.notes
-    .filter((note) => note.tappedStartTimeSeconds >= startSeconds && note.tappedStartTimeSeconds <= endSeconds)
+    .filter((note) => {
+      const noteStartSeconds = note.tappedStartTimeSeconds;
+      const noteEndSeconds = noteStartSeconds + note.effectiveDurationSeconds;
+      return noteEndSeconds > startSeconds && noteStartSeconds < endSeconds;
+    })
     .map<SegmentMidiAnswerKeyNote>((note, index, segmentNotes) => {
       const previous = segmentNotes[index - 1];
       const movementFromPrevious: MidiMovement =
         !previous ? "start" : note.midiPitch > previous.midiPitch ? "up" : note.midiPitch < previous.midiPitch ? "down" : "same";
+      const clippedStartSeconds = Math.max(note.tappedStartTimeSeconds, startSeconds);
+      const clippedEndSeconds = Math.min(note.tappedStartTimeSeconds + note.effectiveDurationSeconds, endSeconds);
       return {
         sourceWholeSongNoteIndex: note.index,
         segmentId: segment.id,
-        segmentLocalStartTimeSeconds: note.tappedStartTimeSeconds - startSeconds,
+        segmentLocalStartTimeSeconds: roundSeconds(clippedStartSeconds - startSeconds),
         midiPitch: note.midiPitch,
         pitchName: note.pitchName,
         movementFromPrevious,
         midiDurationSeconds: note.midiDurationSeconds,
-        effectiveDurationSeconds: note.effectiveDurationSeconds,
+        effectiveDurationSeconds: roundSeconds(Math.max(0, clippedEndSeconds - clippedStartSeconds)),
       };
     });
 
