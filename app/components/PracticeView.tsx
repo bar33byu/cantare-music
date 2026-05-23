@@ -18,7 +18,6 @@ import {
 } from "../lib/contourPractice";
 import type { AttemptNoteStatus } from "../lib/contourPractice";
 import {
-  summarizeAccuracyByAudioVersion,
   type DirectionTap,
   type TapAudioVersion,
   type TapDirection,
@@ -240,7 +239,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [midiSegmentAnswerKeys, setMidiSegmentAnswerKeys] = React.useState<Record<string, MidiSegmentAnswerKey>>({});
   const [localMidiScoreAttemptsBySegment, setLocalMidiScoreAttemptsBySegment] = React.useState<Record<string, TapScoreResult[]>>({});
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
-  const [tapHeatMapBySegment, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
+  const [, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
   const [tapHeatMapRefreshToken, setTapHeatMapRefreshToken] = React.useState(0);
   const [tapSessionResetToken, setTapSessionResetToken] = React.useState(0);
   const [tapPracticeCountIn, setTapPracticeCountIn] = React.useState<number | null>(null);
@@ -398,20 +397,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return null;
     },
     [currentAttemptNotes, currentMidiSegmentAnswerKey]
-  );
-  const currentSegmentAccuracySummary = useMemo(
-    () => summarizeAccuracyByAudioVersion(
-      tapSessionSummaries
-        .filter((summary) => summary.segmentId === currentSegment?.id && summary.mode === "practice" && summary.completedAt)
-        .map((summary) => ({
-          id: summary.id,
-          segmentId: summary.segmentId ?? "",
-          audioVersion: summary.audioVersion,
-          completedAt: summary.completedAt ?? summary.startedAt,
-          autoScorePercent: typeof summary.autoScorePercent === "number" ? summary.autoScorePercent : null,
-        }))
-    ),
-    [currentSegment?.id, tapSessionSummaries]
   );
   const currentMidiContourHeatMap = useMemo<Record<string, ContourNoteHeatStat>>(() => {
     if (!currentSegment) {
