@@ -44,8 +44,8 @@ export async function GET(request: NextRequest) {
           const segments = await getSegmentsBySongId(song.id);
           const hasSegments = segments.length > 0;
           const midiSource = await getLatestMidiSourceForSong(song.id, userId);
-          const hasTapKeys = (song.pitchContourNotes?.length ?? 0) > 0;
-          const hasMidiContour = hasTapKeys || (midiSource?.cleanedNoteCount ?? 0) > 0;
+          const hasMidiContour = (midiSource?.cleanedNoteCount ?? 0) > 0;
+          const hasTapKeys = hasMidiContour;
 
           return [song.id, { hasSegments, hasTapKeys, hasMidiContour }] as const;
         })
@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       songs.map((song) => ({
         ...song,
+        pitchContourNotes: [],
         createdAt: toIsoString(song.createdAt) ?? new Date(0).toISOString(),
         lastPracticedAt: toIsoString(song.lastPracticedAt ?? ratingFallbackBySongId[song.id] ?? null),
         masteryPercent: knowledgeBySongId[song.id] ?? 0,
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest) {
       })),
       {
         headers: {
-          'Cache-Control': 'max-age=300', // Cache for 5 minutes
+          'Cache-Control': 'no-store',
         },
       }
     );

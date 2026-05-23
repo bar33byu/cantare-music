@@ -170,7 +170,7 @@ describe('PlaylistBrowser', () => {
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Part audio 2/3');
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Blend audio 2/3');
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Sections 2/3');
-    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('MIDI contour 2/3');
+    expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('MIDI contour 1/3');
     expect(screen.getByTestId('playlist-knowledge-pl-1')).toHaveTextContent('Knowledge: 85%');
   });
 

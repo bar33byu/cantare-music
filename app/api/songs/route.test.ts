@@ -37,7 +37,7 @@ describe('GET /api/songs', () => {
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({ '1': 65 });
-    vi.mocked(getLatestMidiSourceForSong).mockResolvedValue(null);
+    vi.mocked(getLatestMidiSourceForSong).mockResolvedValue({ cleanedNoteCount: 4 } as any);
     vi.mocked(getSegmentsBySongId).mockResolvedValue([
       {
         id: 'seg-1',
@@ -59,6 +59,7 @@ describe('GET /api/songs', () => {
     expect(data).toEqual([
       {
         ...mockSongs[0],
+        pitchContourNotes: [],
         createdAt: '2024-01-01T00:00:00.000Z',
         lastPracticedAt: '2024-01-02T00:00:00.000Z',
         masteryPercent: 65,
@@ -98,6 +99,7 @@ describe('GET /api/songs', () => {
     expect(data).toEqual([
       {
         ...mockSongs[0],
+        pitchContourNotes: [],
         createdAt: '2024-03-10T00:00:00.000Z',
         lastPracticedAt: '2024-03-11T00:00:00.000Z',
         masteryPercent: 0,
@@ -158,8 +160,45 @@ describe('GET /api/songs', () => {
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(data[0].hasTapKeys).toBe(false);
+    expect(data[0].hasTapKeys).toBe(true);
     expect(data[0].hasMidiContour).toBe(true);
+  });
+
+  it('does not treat legacy segment contour notes as MIDI contour readiness', async () => {
+    const mockSongs = [{
+      id: 'segment-contour-song',
+      title: 'Segment Contour Song',
+      artist: null,
+      audioKey: null,
+      alternateAudioKey: null,
+      pitchContourNotes: [],
+      createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      lastPracticedAt: null,
+      userId: 'default',
+    }];
+    vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
+    vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
+    vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
+    vi.mocked(getSegmentsBySongId).mockResolvedValue([
+      {
+        id: 'seg-1',
+        songId: 'segment-contour-song',
+        label: '1',
+        order: 0,
+        startMs: 0,
+        endMs: 1000,
+        lyricText: '',
+        pitchContourNotes: [{ id: 'tap-1', timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
+      } as any,
+    ]);
+    vi.mocked(getLatestMidiSourceForSong).mockResolvedValue(null);
+
+    const response = await GET(new Request('http://localhost/api/songs') as any);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data[0].hasTapKeys).toBe(false);
+    expect(data[0].hasMidiContour).toBe(false);
   });
 
   it('returns empty list when database is not configured', async () => {

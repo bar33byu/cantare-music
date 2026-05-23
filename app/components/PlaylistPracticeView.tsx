@@ -1204,7 +1204,7 @@ export function PlaylistPracticeView({
               const hasPartAudio = Boolean(song.audioUrl?.trim());
               const hasBlendAudio = Boolean(song.alternateAudioUrl?.trim());
               const hasSegments = song.segments.length > 0;
-              const hasMidiContour = (song.pitchContourNotes?.length ?? 0) > 0;
+              const hasMidiContour = Boolean(song.hasMidiContour);
               return (
                 <div
                   key={song.id}

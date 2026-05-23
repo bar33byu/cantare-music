@@ -4,11 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Segment, SongPitchContourNote } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { MidiSetupPanel } from './MidiSetupPanel';
-import { PitchContourThumbnail } from './PitchContourThumbnail';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { toPlayableAudioUrl } from '../lib/audioUrls';
 import { getDefaultNewSegmentPlacement, getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
-import { getSegmentPitchContourNotes } from '../lib/pitchContour';
 import { classifyContourDirection } from '../lib/contourPractice';
 
 const MIN_SEGMENT_MS = 1000;
@@ -154,14 +152,14 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     return fetch(url, withUserHeader(init));
   }, [withUserHeader]);
 
-  const hasContourDraft = contourDraftNotes.length > 0;
+  const hasContourDraft = false;
 
   const contourDraftPointCount = useMemo(
     () => contourDraftNotes.length,
     [contourDraftNotes]
   );
 
-  const isContourEditorOpen = isContourRecording || hasContourDraft;
+  const isContourEditorOpen = false;
 
   const updateContourDraftLane = (noteId: string, lane: number) => {
     setContourSaveMessage(null);
@@ -1023,15 +1021,14 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         if (!response.ok) {
           return;
         }
-        const data = (await response.json()) as { audioUrl?: string; alternateAudioUrl?: string; title?: string; pitchContourNotes?: SongPitchContourNote[] };
+        const data = (await response.json()) as { audioUrl?: string; alternateAudioUrl?: string; title?: string };
         if (!cancelled) {
-          const loadedContourNotes = normalizeContourNotes(data.pitchContourNotes ?? []);
-          contourLastSavedSnapshotRef.current = serializeContourNotes(loadedContourNotes);
+          contourLastSavedSnapshotRef.current = '[]';
           setAudioUrl(data.audioUrl ?? '');
           setAlternateAudioUrl(data.alternateAudioUrl ?? '');
           setSongTitle(data.title ?? '');
           setTitleDraft(data.title ?? '');
-          setContourDraftNotes(loadedContourNotes);
+          setContourDraftNotes([]);
           setSongLoaded(true);
         }
       } catch {
@@ -1355,63 +1352,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
                 <span className="text-gray-400">/</span>
                 <span>{formatMs(timelineDurationMs)}</span>
                 {savingSegmentId ? <span className="text-indigo-600">Saving...</span> : null}
-                {isSavingContourDraft ? <span className="text-indigo-600">Saving contour...</span> : null}
-                {isAutoSavingContourDraft ? <span className="text-indigo-600">Autosaving answer key...</span> : null}
-                {contourSaveMessage ? (
-                  <span data-testid="segment-editor-contour-save-message" className="text-emerald-700">
-                    {contourSaveMessage}
-                  </span>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  data-testid="segment-editor-contour-record-toggle"
-                  onClick={handleToggleContourRecording}
-                  className={`rounded px-2 py-1 text-xs font-semibold transition ${
-                    isContourRecording
-                      ? 'bg-rose-600 text-white hover:bg-rose-700'
-                      : 'border border-indigo-300 bg-white text-indigo-800 hover:bg-indigo-50'
-                  }`}
-                >
-                  {isContourRecording ? 'Stop answer key recording' : hasContourDraft ? 'Resume recording' : 'Record answer key'}
-                </button>
-                {(isContourRecording || hasContourDraft) ? (
-                  <>
-                    <button
-                      type="button"
-                      data-testid="segment-editor-contour-save"
-                      onClick={() => { void saveContourDraft(); }}
-                      disabled={isSavingContourDraft}
-                      className="rounded bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      Save now
-                    </button>
-                    {focusedRecordingSegment ? (
-                      <button
-                        type="button"
-                        data-testid="segment-editor-contour-clear-segment"
-                        onClick={clearFocusedSegmentContourDraft}
-                        disabled={isSavingContourDraft}
-                        className="rounded border border-rose-300 bg-white px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                      >
-                        Clear section taps
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      data-testid="segment-editor-contour-clear-draft"
-                      onClick={clearContourDraft}
-                      disabled={isSavingContourDraft}
-                      className="rounded border border-indigo-300 bg-white px-2 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
-                    >
-                      Clear all taps
-                    </button>
-                    <span className="text-xs text-indigo-800">
-                      Draft points: <strong data-testid="segment-editor-contour-draft-count">{contourDraftPointCount}</strong>
-                    </span>
-                  </>
-                ) : null}
               </div>
           </div>
         </div>
@@ -1716,10 +1656,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
                     }}
                     className="min-h-[180px] flex-1 rounded border border-indigo-200 px-2 py-2 text-sm leading-5 resize-none overflow-y-auto"
                     placeholder="lyrics"
-                  />
-                  <PitchContourThumbnail
-                    notes={getSegmentPitchContourNotes(contourDraftNotes, segment)}
-                    segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
                   />
                   <div className="mt-auto flex items-center justify-between text-xs text-indigo-700">
                     <span>{Math.floor(segment.startMs / 1000)}s</span>

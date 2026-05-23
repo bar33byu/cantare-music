@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSongById, getSegmentsBySongId, updateSegment, deleteSegment, reorderSegments } from '../../../../../../db/queries';
 import type { SegmentRow } from '../../../../../../db/schema';
 import { inferTimelineOrder } from '../../../../../lib/segmentTiming';
-import { validatePitchContourNotes } from '../../../../../lib/pitchContour';
 import { resolveRequestUserId } from '../../../../_user';
 
 function formatError(error: unknown) {
@@ -34,7 +33,7 @@ export async function GET(
       return NextResponse.json({ error: 'Segment not found' }, { status: 404 });
     }
 
-    return NextResponse.json(segment);
+    return NextResponse.json({ ...segment, pitchContourNotes: [] });
   } catch (error) {
     console.error('Error fetching segment:', error);
     return NextResponse.json(formatError(error), { status: 500 });
@@ -54,7 +53,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { label, startMs, endMs, lyricText, pitchContourNotes } = body;
+    const { label, startMs, endMs, lyricText } = body;
 
     // Validate input
     if (label !== undefined && typeof label !== 'string') {
@@ -69,11 +68,6 @@ export async function PATCH(
     if (lyricText !== undefined && typeof lyricText !== 'string') {
       return NextResponse.json({ error: 'Lyric text must be a string' }, { status: 400 });
     }
-    const pitchContourValidation = validatePitchContourNotes(pitchContourNotes);
-    if (!pitchContourValidation.ok) {
-      return NextResponse.json({ error: pitchContourValidation.error }, { status: 400 });
-    }
-
     // Check if segment exists
     const segments = await getSegmentsBySongId(songId);
     const segmentToUpdate = segments.find(s => s.id === segmentId);
@@ -83,12 +77,11 @@ export async function PATCH(
     }
 
     // Prepare updates object
-    const updates: Partial<Pick<SegmentRow, 'label' | 'startMs' | 'endMs' | 'lyricText' | 'pitchContourNotes'>> = {};
+    const updates: Partial<Pick<SegmentRow, 'label' | 'startMs' | 'endMs' | 'lyricText'>> = {};
     if (label !== undefined) updates.label = label;
     if (startMs !== undefined) updates.startMs = startMs;
     if (endMs !== undefined) updates.endMs = endMs;
     if (lyricText !== undefined) updates.lyricText = lyricText;
-    if (pitchContourNotes !== undefined) updates.pitchContourNotes = pitchContourNotes;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });

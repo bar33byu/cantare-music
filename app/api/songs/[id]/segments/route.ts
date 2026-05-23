@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments, getSongById } from '../../../../../db/queries';
 import { inferTimelineOrder } from '../../../../lib/segmentTiming';
-import { validatePitchContourNotes } from '../../../../lib/pitchContour';
 import { resolveRequestUserId } from '../../../_user';
 
 export async function GET(
@@ -16,7 +15,7 @@ export async function GET(
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
     const segments = await getSegmentsBySongId(id);
-    return NextResponse.json(segments);
+    return NextResponse.json(segments.map((segment) => ({ ...segment, pitchContourNotes: [] })));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown server error';
     console.error('Error fetching segments:', error);
@@ -40,7 +39,7 @@ export async function POST(
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
     const body = await request.json();
-    const { id, label, startMs, endMs, lyricText, pitchContourNotes } = body;
+    const { id, label, startMs, endMs, lyricText } = body;
 
     if (!id || typeof id !== 'string') {
       return NextResponse.json({ error: 'Segment ID is required and must be a string' }, { status: 400 });
@@ -56,11 +55,6 @@ export async function POST(
     }
     if (lyricText === undefined || typeof lyricText !== 'string') {
       return NextResponse.json({ error: 'Lyric text is required and must be a string' }, { status: 400 });
-    }
-
-    const pitchContourValidation = validatePitchContourNotes(pitchContourNotes);
-    if (!pitchContourValidation.ok) {
-      return NextResponse.json({ error: pitchContourValidation.error }, { status: 400 });
     }
 
     const existingSegments = await getSegmentsBySongId(songId);
@@ -82,7 +76,7 @@ export async function POST(
       startMs,
       endMs,
       lyricText,
-      pitchContourNotes,
+      pitchContourNotes: [],
     });
 
     await reorderSegments(timelineOrdered.map((segment, order) => ({ id: segment.id, order })));
@@ -118,11 +112,6 @@ export async function PUT(
     }
 
     for (const segment of segments) {
-      const pitchContourValidation = validatePitchContourNotes(segment.pitchContourNotes);
-      if (!pitchContourValidation.ok) {
-        return NextResponse.json({ error: pitchContourValidation.error }, { status: 400 });
-      }
-
       if (
         typeof segment.id !== 'string' ||
         typeof segment.label !== 'string' ||
@@ -135,7 +124,7 @@ export async function PUT(
       }
     }
 
-    await upsertSegments(id, segments);
+    await upsertSegments(id, segments.map((segment) => ({ ...segment, pitchContourNotes: [] })));
     return NextResponse.json({ success: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown server error';

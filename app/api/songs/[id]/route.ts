@@ -5,12 +5,10 @@ import {
   updateSong,
   getSegmentsBySongId,
   recordOrphanedAudioKey,
-  deleteTapPracticeSessionsForSong,
 } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
 import { resolveRequestUserId } from '../../_user';
-import { validateSongPitchContourNotes } from '../../../lib/pitchContour';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -42,7 +40,7 @@ export async function GET(
       artist: song.artist,
       audioUrl: song.audioKey ? getPublicUrl(song.audioKey) : '',
       alternateAudioUrl: song.alternateAudioKey ? getPublicUrl(song.alternateAudioKey) : undefined,
-      pitchContourNotes: song.pitchContourNotes ?? [],
+      pitchContourNotes: [],
       segments: segments.map(segment => ({
         id: segment.id,
         songId: segment.songId,
@@ -120,16 +118,11 @@ export async function PATCH(
     const userId = resolveRequestUserId(request);
     const { id } = await params;
     const body = await request.json();
-    const { audioKey, alternateAudioKey, title, artist, pitchContourNotes } = body;
+    const { audioKey, alternateAudioKey, title, artist } = body;
 
     const existingSong = await getSongById(id, userId);
     if (!existingSong) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
-    }
-
-    const pitchContourValidation = validateSongPitchContourNotes(pitchContourNotes);
-    if (!pitchContourValidation.ok) {
-      return NextResponse.json({ error: pitchContourValidation.error }, { status: 400 });
     }
 
     if (audioKey !== undefined && typeof audioKey !== 'string') {
@@ -139,12 +132,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'Alternate audio key must be a string' }, { status: 400 });
     }
 
-    const updates: Partial<Pick<SongRow, 'audioKey' | 'alternateAudioKey' | 'title' | 'artist' | 'pitchContourNotes'>> = {};
+    const updates: Partial<Pick<SongRow, 'audioKey' | 'alternateAudioKey' | 'title' | 'artist'>> = {};
     if (audioKey !== undefined) updates.audioKey = audioKey;
     if (alternateAudioKey !== undefined) updates.alternateAudioKey = alternateAudioKey;
     if (title !== undefined) updates.title = title;
     if (artist !== undefined) updates.artist = artist;
-    if (pitchContourNotes !== undefined) updates.pitchContourNotes = pitchContourNotes;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
@@ -166,9 +158,6 @@ export async function PATCH(
     }
 
     await updateSong(id, updates, userId);
-    if (updates.pitchContourNotes !== undefined) {
-      await deleteTapPracticeSessionsForSong(id, userId);
-    }
     return NextResponse.json({ success: true });
   } catch (error) {
     const errorCode = (error as { code?: string })?.code;

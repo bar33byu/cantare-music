@@ -2223,7 +2223,7 @@ export async function getPlaylistById(
     Promise.all(
       linkedSongs.map(async (song) => {
         const source = await getLatestMidiSourceForSong(song.songId, playlist.userId);
-        const hasMidiContour = (song.pitchContourNotes?.length ?? 0) > 0 || (source?.cleanedNoteCount ?? 0) > 0;
+        const hasMidiContour = (source?.cleanedNoteCount ?? 0) > 0;
         return [song.songId, hasMidiContour] as const;
       })
     ).then((entries) => Object.fromEntries(entries)),
@@ -2235,7 +2235,7 @@ export async function getPlaylistById(
     artist: songRow.artist ?? undefined,
     audioUrl: songRow.audioKey ? getPublicUrl(songRow.audioKey) : "",
     alternateAudioUrl: songRow.alternateAudioKey ? getPublicUrl(songRow.alternateAudioKey) : undefined,
-    pitchContourNotes: songRow.pitchContourNotes ?? [],
+    pitchContourNotes: [],
     hasMidiContour: midiContourEntries[songRow.songId] ?? false,
     ratingCount: ratingCounts[songRow.songId] ?? 0,
     segments: segmentsBySong[i],

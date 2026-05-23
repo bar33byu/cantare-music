@@ -4,17 +4,14 @@ import {
   getLatestMidiSourceForSong,
   getSongById,
   getSegmentsBySongId,
-  getTapPracticeSessionDetail,
   listTapPracticeSessionsForSong,
 } from '../../../../../db/queries';
-import { DEFAULT_CONTOUR_SAME_DEAD_ZONE, computeContourNoteHeatMap } from '../../../../lib/contourPractice';
 import {
   buildMidiContourTapHeatMap,
   deriveSegmentAnswerKeys,
   deriveWholeSongAnswerKey,
   type MidiSegmentAnswerKey,
 } from '../../../../lib/midiGuidedTapPractice';
-import { getSegmentPitchContourNotes } from '../../../../lib/pitchContour';
 import type { TapScoreResult } from '../../../../lib/enhancedTapPractice';
 import { resolveRequestUserId } from '../../../_user';
 
@@ -60,11 +57,6 @@ export async function GET(
     const segments = await getSegmentsBySongId(id);
 
     const sessions = await listTapPracticeSessionsForSong(id, userId, TAP_HEAT_MAP_SESSION_LIMIT);
-    const sessionDetails = await Promise.all(
-      sessions
-        .filter((session) => session.mode === 'practice')
-        .map(async (session) => getTapPracticeSessionDetail(session.id, userId))
-    );
     const scoredAttemptsBySegment = sessions
       .filter((session) => session.mode === 'practice' && session.segmentId && hasCompletedScoreSummary(session))
       .reduce<Record<string, TapScoreResult[]>>((accumulator, session) => {
@@ -88,36 +80,14 @@ export async function GET(
       : {};
 
     const heatMapBySegment = Object.fromEntries(
-      segments.map((segment) => {
-        const contourNotes = getSegmentPitchContourNotes(song.pitchContourNotes ?? [], segment);
-        const attempts = sessionDetails
-          .flatMap((detail) => (detail ? [detail] : []))
-          .map((detail) =>
-            detail.taps
-              .filter((tap) => tap.segmentId === segment.id)
-              .map((tap) => ({
-                id: tap.id,
-                timeOffsetMs: tap.timeOffsetMs,
-                durationMs: tap.durationMs,
-                lane: tap.lane,
-              }))
-          );
-
-        return [
-          segment.id,
-          contourNotes.length > 0
-            ? computeContourNoteHeatMap(contourNotes, attempts, {
-                timeToleranceMs: 400,
-                sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
-                durationToleranceRatio: 0.6,
-              })
-            : buildMidiContourTapHeatMap(
-                midiSegmentKeys[segment.id] ?? null,
-                scoredAttemptsBySegment[segment.id] ?? [],
-                TAP_HEAT_MAP_ATTEMPT_LIMIT
-              ),
-        ];
-      })
+      segments.map((segment) => [
+        segment.id,
+        buildMidiContourTapHeatMap(
+          midiSegmentKeys[segment.id] ?? null,
+          scoredAttemptsBySegment[segment.id] ?? [],
+          TAP_HEAT_MAP_ATTEMPT_LIMIT
+        ),
+      ])
     );
 
     return NextResponse.json({ heatMapBySegment });
