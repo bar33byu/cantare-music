@@ -86,6 +86,10 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function formatSeconds(value: number): string {
+  return `${value.toFixed(2)}s`;
+}
+
 function emptySummary(): MidiStatusPayload["summary"] {
   return {
     hasMidi: false,
@@ -187,9 +191,15 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
   const [isAligning, setIsAligning] = useState(false);
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   const [resumeIndexDraft, setResumeIndexDraft] = useState("0");
+  const [firstAudioStartDraftSeconds, setFirstAudioStartDraftSeconds] = useState(0);
   const tapSaveChainRef = useRef<Promise<void>>(Promise.resolve());
   const audioContextRef = useRef<AudioContext | null>(null);
+  const currentMsRef = useRef(0);
   const { isPlaying, isReady, currentMs, durationMs, play, pause, seek } = audioPlayer;
+
+  useEffect(() => {
+    currentMsRef.current = currentMs;
+  }, [currentMs]);
 
   const loadStatus = useCallback(async (options: { showLoading?: boolean } = {}) => {
     if (options.showLoading ?? true) {
@@ -221,6 +231,19 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
   const retainedCount = status?.source?.cleanedNoteCount ?? 0;
   const summary = status?.summary ?? emptySummary();
   const nextNote = status?.source?.cleanedNotes[alignedCount] ?? null;
+  const firstMidiStartSeconds = status?.source?.cleanedNotes[0]?.midiStartSeconds ?? 0;
+  const offsetSliderMaxSeconds = Math.max(60, Math.ceil(durationMs / 1000), Math.ceil(firstAudioStartDraftSeconds + 10));
+  const setClampedFirstAudioStartDraftSeconds = useCallback((value: number) => {
+    setFirstAudioStartDraftSeconds(clamp(value, 0, Math.max(60, Math.ceil(durationMs / 1000), value)));
+  }, [durationMs]);
+  const offsetPreviewNotes = useMemo(
+    () => (status?.source?.cleanedNotes ?? []).filter((note) => {
+      const audioStartSeconds = firstAudioStartDraftSeconds + (note.midiStartSeconds - firstMidiStartSeconds);
+      const deltaSeconds = audioStartSeconds - (currentMs / 1000);
+      return deltaSeconds >= -2.5 && deltaSeconds <= 8;
+    }),
+    [currentMs, firstAudioStartDraftSeconds, firstMidiStartSeconds, status?.source?.cleanedNotes]
+  );
   const pianoRollNotes = useMemo(
     () => (status?.source?.cleanedNotes ?? []).filter((note) => {
       const audioStartSeconds = estimateNoteAudioStartSeconds(
@@ -233,6 +256,20 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
     }),
     [currentMs, status?.alignment?.tappedStartTimesSeconds, status?.source?.cleanedNotes]
   );
+
+  useEffect(() => {
+    if (!status?.source) {
+      setFirstAudioStartDraftSeconds(0);
+      return;
+    }
+
+    const existingFirstAudioStartSeconds = status.alignment?.tappedStartTimesSeconds[0];
+    setFirstAudioStartDraftSeconds(
+      typeof existingFirstAudioStartSeconds === "number"
+        ? existingFirstAudioStartSeconds
+        : currentMsRef.current / 1000
+    );
+  }, [status?.alignment?.updatedAt, status?.source]);
 
   const uploadMidi = async (file: File | null) => {
     if (!file) return;
@@ -368,7 +405,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
 
   const applyStartOffset = async () => {
     try {
-      const firstAudioStartSeconds = currentMs / 1000;
+      const firstAudioStartSeconds = firstAudioStartDraftSeconds;
       await postAlignmentAction({ action: "offset", firstAudioStartSeconds });
       setIsAligning(false);
       setConfirmingRestart(false);
@@ -376,6 +413,10 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not apply MIDI start offset.");
     }
+  };
+
+  const nudgeFirstAudioStart = (deltaSeconds: number) => {
+    setClampedFirstAudioStartDraftSeconds(firstAudioStartDraftSeconds + deltaSeconds);
   };
 
   const startPlayback = () => {
@@ -465,6 +506,98 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
 
       {status?.source ? (
         <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
+          <div className="mb-3 rounded-lg border border-indigo-100 bg-white p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs font-semibold text-slate-700" htmlFor="midi-start-offset-slider">
+                First MIDI note at {formatSeconds(firstAudioStartDraftSeconds)}
+              </label>
+              <button
+                type="button"
+                data-testid="midi-start-offset-use-playhead"
+                onClick={() => setClampedFirstAudioStartDraftSeconds(currentMs / 1000)}
+                className="rounded-full border border-indigo-300 bg-white px-3 py-1 text-xs font-semibold text-indigo-700"
+              >
+                Use playhead
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                aria-label="Move MIDI one second earlier"
+                onClick={() => nudgeFirstAudioStart(-1)}
+                className="h-8 w-9 rounded border border-slate-300 bg-white text-sm font-semibold text-slate-700"
+              >
+                -1
+              </button>
+              <button
+                type="button"
+                aria-label="Move MIDI one tenth second earlier"
+                onClick={() => nudgeFirstAudioStart(-0.1)}
+                className="h-8 w-9 rounded border border-slate-300 bg-white text-sm font-semibold text-slate-700"
+              >
+                -.1
+              </button>
+              <input
+                id="midi-start-offset-slider"
+                data-testid="midi-start-offset-slider"
+                type="range"
+                min={0}
+                max={offsetSliderMaxSeconds}
+                step={0.05}
+                value={firstAudioStartDraftSeconds}
+                onChange={(event) => setClampedFirstAudioStartDraftSeconds(Number(event.currentTarget.value))}
+                className="min-w-0 flex-1"
+              />
+              <button
+                type="button"
+                aria-label="Move MIDI one tenth second later"
+                onClick={() => nudgeFirstAudioStart(0.1)}
+                className="h-8 w-9 rounded border border-slate-300 bg-white text-sm font-semibold text-slate-700"
+              >
+                +.1
+              </button>
+              <button
+                type="button"
+                aria-label="Move MIDI one second later"
+                onClick={() => nudgeFirstAudioStart(1)}
+                className="h-8 w-9 rounded border border-slate-300 bg-white text-sm font-semibold text-slate-700"
+              >
+                +1
+              </button>
+            </div>
+            <div className="mt-3 h-28 overflow-hidden rounded-lg border border-indigo-100 bg-slate-50" data-testid="midi-offset-preview">
+              <div className="relative h-full min-w-full">
+                <div className="absolute bottom-2 top-2 left-[28%] border-l-2 border-indigo-600" />
+                <div className="absolute inset-x-0 top-1/2 border-t border-slate-200" />
+                {offsetPreviewNotes.map((note) => {
+                  const audioStartSeconds = firstAudioStartDraftSeconds + (note.midiStartSeconds - firstMidiStartSeconds);
+                  const deltaSeconds = audioStartSeconds - (currentMs / 1000);
+                  const leftPercent = PIANO_ROLL_NOW_PERCENT + deltaSeconds * PIANO_ROLL_PERCENT_PER_SECOND;
+                  const topPercent = normalizePitchPosition(status.source?.cleanedNotes ?? [], note.midiPitch);
+                  const widthPercent = clamp(
+                    note.midiDurationSeconds * PIANO_ROLL_PERCENT_PER_SECOND,
+                    MIN_NOTE_WIDTH_PERCENT,
+                    MAX_NOTE_WIDTH_PERCENT
+                  );
+                  return (
+                    <span
+                      key={note.index}
+                      title={`Offset preview ${note.index + 1}: ${note.pitchName} ${movementLabel(note.movementFromPrevious)}`}
+                      data-testid={`midi-offset-note-${note.index + 1}`}
+                      className="absolute h-3 rounded-full border border-indigo-300 bg-indigo-200"
+                      style={{
+                        left: `${leftPercent}%`,
+                        top: `${topPercent}%`,
+                        minWidth: note.index === 0 ? "2rem" : "1.4rem",
+                        width: `${widthPercent}%`,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"

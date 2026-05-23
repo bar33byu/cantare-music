@@ -85,6 +85,30 @@ describe("MidiSetupPanel", () => {
     render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
 
     expect(await screen.findByText("part.mid")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("midi-start-offset-use-playhead"));
+    fireEvent.click(screen.getByTestId("midi-apply-start-offset"));
+
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith("/api/songs/song-1/midi/alignment", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "offset", firstAudioStartSeconds: 2.5 }),
+      }));
+    });
+  });
+
+  it("scrubs the MIDI offset before applying it", async () => {
+    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
+
+    expect(await screen.findByText("part.mid")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("midi-offset-note-1")).toHaveStyle({ left: "10%" });
+    });
+
+    fireEvent.change(screen.getByTestId("midi-start-offset-slider"), { target: { value: "2.5" } });
+
+    expect(screen.getByText("First MIDI note at 2.50s")).toBeInTheDocument();
+    expect(screen.getByTestId("midi-offset-note-1")).toHaveStyle({ left: "28%" });
+
     fireEvent.click(screen.getByTestId("midi-apply-start-offset"));
 
     await waitFor(() => {
