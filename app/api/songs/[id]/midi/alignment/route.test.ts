@@ -23,6 +23,11 @@ describe("POST /api/songs/[id]/midi/alignment", () => {
       id: "midi-1",
       songId: "song-1",
       cleanedNoteCount: 3,
+      cleanedNotes: [
+        { index: 0, midiPitch: 60, pitchName: "C4", midiStartSeconds: 0.5, midiDurationSeconds: 1, movementFromPrevious: "start" },
+        { index: 1, midiPitch: 62, pitchName: "D4", midiStartSeconds: 2, midiDurationSeconds: 1, movementFromPrevious: "up" },
+        { index: 2, midiPitch: 64, pitchName: "E4", midiStartSeconds: 3, midiDurationSeconds: 1, movementFromPrevious: "up" },
+      ],
     } as any);
     vi.mocked(upsertMidiAlignment).mockImplementation(async (data) => ({
       id: data.id ?? "align-new",
@@ -89,5 +94,24 @@ describe("POST /api/songs/[id]/midi/alignment", () => {
 
     expect(response.status).toBe(200);
     expect(data.alignment.tappedStartTimesSeconds).toEqual([1]);
+  });
+
+  it("creates a complete alignment from the first audio start offset", async () => {
+    vi.mocked(getLatestMidiAlignmentForSource).mockResolvedValue(null);
+
+    const response = await POST(new Request("http://localhost/api/songs/song-1/midi/alignment", {
+      method: "POST",
+      body: JSON.stringify({ action: "offset", firstAudioStartSeconds: 3 }),
+    }) as any, {
+      params: Promise.resolve({ id: "song-1" }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.alignment.tappedStartTimesSeconds).toEqual([3, 4.5, 5.5]);
+    expect(upsertMidiAlignment).toHaveBeenCalledWith(expect.objectContaining({
+      tappedStartTimesSeconds: [3, 4.5, 5.5],
+      retainedMidiNoteCount: 3,
+    }), "default");
   });
 });

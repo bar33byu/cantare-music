@@ -130,6 +130,53 @@ describe('SegmentEditor', () => {
     });
   });
 
+  it('creates a manual section at the current playhead', async () => {
+    vi.mocked(useAudioPlayer).mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 12_345,
+      durationMs: 60000,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 0,
+        networkState: 0,
+        preload: 'none',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-new-section')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('segment-editor-new-section'));
+
+    await waitFor(() => {
+      const createCall = mockFetch.mock.calls.find(
+        ([url, init]) => String(url).endsWith('/api/songs/song-1/segments') && init?.method === 'POST'
+      );
+      expect(createCall).toBeTruthy();
+      const body = JSON.parse(String(createCall?.[1]?.body ?? '{}'));
+      expect(body.startMs).toBe(12_345);
+      expect(body.endMs).toBe(32_345);
+    });
+  });
+
   it('uses the direct song audio URL for edit-page playback', async () => {
     render(<SegmentEditor songId="song-1" />);
 
@@ -171,7 +218,7 @@ describe('SegmentEditor', () => {
     });
   });
 
-  it('creates new section using timeline-aware defaults', async () => {
+  it('creates new section at the playhead', async () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
@@ -186,8 +233,8 @@ describe('SegmentEditor', () => {
       );
       expect(postCall).toBeTruthy();
       const body = JSON.parse(String(postCall?.[1]?.body ?? '{}'));
-      expect(body.startMs).toBe(40500);
-      expect(body.endMs).toBe(60500);
+      expect(body.startMs).toBe(1500);
+      expect(body.endMs).toBe(21500);
     });
   });
 

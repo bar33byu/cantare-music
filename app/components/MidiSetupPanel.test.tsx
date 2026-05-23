@@ -70,13 +70,27 @@ describe("MidiSetupPanel", () => {
     expect(await screen.findByText("part.mid")).toBeInTheDocument();
     expect(screen.getByText(/3 raw, 2 retained, 1 ignored/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Resume alignment"));
+    fireEvent.click(screen.getByText("Resume tap alignment"));
     fireEvent.pointerDown(await screen.findByTestId("midi-alignment-tap"));
 
     await waitFor(() => {
       expect(request).toHaveBeenCalledWith("/api/songs/song-1/midi/alignment", expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ action: "tap", timeSeconds: 2.5 }),
+      }));
+    });
+  });
+
+  it("sets a complete MIDI alignment from the current playhead offset", async () => {
+    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
+
+    expect(await screen.findByText("part.mid")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("midi-apply-start-offset"));
+
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith("/api/songs/song-1/midi/alignment", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "offset", firstAudioStartSeconds: 2.5 }),
       }));
     });
   });
@@ -134,7 +148,7 @@ describe("MidiSetupPanel", () => {
     const { rerender } = render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
 
     expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume alignment"));
+    fireEvent.click(screen.getByText("Resume tap alignment"));
 
     const currentNote = await screen.findByTitle("2: D4 Up");
     expect(currentNote).toHaveStyle({ left: "28%" });
@@ -209,7 +223,7 @@ describe("MidiSetupPanel", () => {
     );
 
     expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume alignment"));
+    fireEvent.click(screen.getByText("Resume tap alignment"));
 
     const firstNote = await screen.findByTitle("1: C4 Start");
     const secondNote = await screen.findByTitle("2: D4 Up");
@@ -221,7 +235,7 @@ describe("MidiSetupPanel", () => {
     render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
 
     expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume alignment"));
+    fireEvent.click(screen.getByText("Resume tap alignment"));
 
     const resumeInput = screen.getByTestId("midi-resume-index");
     expect(resumeInput).toHaveValue(1);
@@ -260,7 +274,7 @@ describe("MidiSetupPanel", () => {
     render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={delayedRequest} />);
 
     expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume alignment"));
+    fireEvent.click(screen.getByText("Resume tap alignment"));
     fireEvent.pointerDown(await screen.findByTestId("midi-alignment-tap"));
 
     expect(screen.getAllByText("2 / 2 notes").length).toBeGreaterThan(0);
@@ -325,7 +339,7 @@ describe("MidiSetupPanel", () => {
     render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
 
     expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume alignment"));
+    fireEvent.click(screen.getByText("Resume tap alignment"));
     fireEvent.pointerDown(await screen.findByTestId("midi-alignment-tap"));
 
     expect(setFrequency).toHaveBeenCalled();

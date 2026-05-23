@@ -399,6 +399,24 @@ export function appendAlignmentTap(alignment: MidiAlignment, tappedStartTimeSeco
   ]);
 }
 
+export function alignMidiByFirstAudioStart(
+  alignment: MidiAlignment,
+  cleanedNotes: CleanedMidiNote[],
+  firstAudioStartSeconds: number
+): MidiAlignment {
+  const firstNote = cleanedNotes[0];
+  if (!firstNote) {
+    return normalizeAlignment(alignment, []);
+  }
+
+  const offsetSeconds = Math.max(0, firstAudioStartSeconds) - firstNote.midiStartSeconds;
+  const tappedStartTimesSeconds = cleanedNotes
+    .slice(0, alignment.retainedMidiNoteCount)
+    .map((note) => roundSeconds(Math.max(0, note.midiStartSeconds + offsetSeconds)));
+
+  return normalizeAlignment(alignment, tappedStartTimesSeconds);
+}
+
 export function undoLastAlignmentTap(alignment: MidiAlignment): MidiAlignment {
   return normalizeAlignment(alignment, alignment.tappedStartTimesSeconds.slice(0, -1));
 }

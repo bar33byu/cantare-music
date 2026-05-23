@@ -6,7 +6,7 @@ import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { MidiSetupPanel } from './MidiSetupPanel';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { toPlayableAudioUrl } from '../lib/audioUrls';
-import { getDefaultNewSegmentPlacement, getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
+import { getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
 
 const MIN_SEGMENT_MS = 1000;
 const MIN_ZOOM = 1;
@@ -144,9 +144,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   };
 
   const createSegment = async () => {
-    const basePlacement = isReady
-      ? getPlaybackAnchoredNewSegmentPlacement(segments, currentMs)
-      : getDefaultNewSegmentPlacement(segments);
+    const basePlacement = getPlaybackAnchoredNewSegmentPlacement(segments, currentMs);
 
     const payload = {
       id: crypto.randomUUID(),

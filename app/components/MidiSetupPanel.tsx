@@ -366,6 +366,18 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
       });
   };
 
+  const applyStartOffset = async () => {
+    try {
+      const firstAudioStartSeconds = currentMs / 1000;
+      await postAlignmentAction({ action: "offset", firstAudioStartSeconds });
+      setIsAligning(false);
+      setConfirmingRestart(false);
+      setMessage("MIDI start offset applied.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not apply MIDI start offset.");
+    }
+  };
+
   const startPlayback = () => {
     const startMs = Math.max(0, currentMs);
     play(startMs, durationMs > startMs ? durationMs : startMs + 60_000);
@@ -456,13 +468,11 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => {
-                setIsAligning(true);
-                void postAlignmentAction({ action: "start" }).catch((error) => setMessage(error instanceof Error ? error.message : "Could not start alignment."));
-              }}
+              data-testid="midi-apply-start-offset"
+              onClick={() => { void applyStartOffset(); }}
               className="rounded-full bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white"
             >
-              {alignedCount > 0 ? "Resume alignment" : "Start alignment"}
+              {summary.hasDerivedAnswerKey ? "Update start offset" : "Set start offset here"}
             </button>
             <button
               type="button"
@@ -480,15 +490,31 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
             >
               Undo last tap
             </button>
-            <button
-              type="button"
-              data-testid="midi-restart-alignment"
-              onClick={() => setConfirmingRestart(true)}
-              className="rounded-full border border-rose-300 bg-white px-3 py-1.5 text-sm font-semibold text-rose-700"
-            >
-              Restart
-            </button>
           </div>
+
+          <details className="mt-3 rounded-lg border border-indigo-100 bg-white px-3 py-2">
+            <summary className="cursor-pointer text-sm font-semibold text-indigo-700">Full realignment</summary>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAligning(true);
+                  void postAlignmentAction({ action: "start" }).catch((error) => setMessage(error instanceof Error ? error.message : "Could not start alignment."));
+                }}
+                className="rounded-full bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white"
+              >
+                {alignedCount > 0 ? "Resume tap alignment" : "Start tap alignment"}
+              </button>
+              <button
+                type="button"
+                data-testid="midi-restart-alignment"
+                onClick={() => setConfirmingRestart(true)}
+                className="rounded-full border border-rose-300 bg-white px-3 py-1.5 text-sm font-semibold text-rose-700"
+              >
+                Restart
+              </button>
+            </div>
+          </details>
 
           {confirmingRestart ? (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">

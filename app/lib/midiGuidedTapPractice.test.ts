@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  alignMidiByFirstAudioStart,
   appendAlignmentTap,
   buildMidiBlendTapHeatMap,
   buildMidiContourTapHeatMap,
@@ -142,6 +143,18 @@ describe("midiGuidedTapPractice", () => {
 
     expect(keys["seg-a"].notes[0].sourceWholeSongNoteIndex).toBe(0);
     expect(keys["seg-b"].notes[0].sourceWholeSongNoteIndex).toBe(0);
+  });
+
+  it("aligns MIDI notes from a single first-audio-start offset", () => {
+    const notes = cleanMidiNotes([raw(0, 60, 0.5, 1), raw(1, 62, 2, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const alignment = alignMidiByFirstAudioStart(
+      createMidiAlignment({ id: "a", songId: "s", midiSourceId: "m", retainedMidiNoteCount: 2 }),
+      notes,
+      3
+    );
+
+    expect(alignment.tappedStartTimesSeconds).toEqual([3, 4.5]);
+    expect(alignment.isComplete).toBe(true);
   });
 
   it("projects sustained notes into segments they overlap after boundaries move", () => {
