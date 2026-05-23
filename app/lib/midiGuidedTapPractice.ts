@@ -5,6 +5,7 @@ import type {
   TapScoreResult,
   TapMissKind,
 } from "./enhancedTapPractice";
+import type { ContourNoteHeatStat } from "../types";
 
 export type MidiMovement = "start" | "up" | "down" | "same";
 export type MidiParseStatus = "parsed" | "error";
@@ -564,4 +565,38 @@ export function buildMidiBlendTapHeatMap(
       attemptCount,
     };
   });
+}
+
+export function buildMidiContourTapHeatMap(
+  segmentKey: MidiSegmentAnswerKey | null,
+  scoredAttempts: TapScoreResult[],
+  attemptLimit: number = 5
+): Record<string, ContourNoteHeatStat> {
+  if (!segmentKey) {
+    return {};
+  }
+
+  const recentAttempts = scoredAttempts.slice(0, Math.max(1, attemptLimit));
+  return Object.fromEntries(
+    segmentKey.notes.map((note, index) => {
+      let missCount = 0;
+      for (const attempt of recentAttempts) {
+        const detail = attempt.details.find((item) => item.index === index);
+        if (detail && detail.status !== "matched" && detail.status !== "extra") {
+          missCount += 1;
+        }
+      }
+
+      const sessionCount = recentAttempts.length;
+      const missRate = sessionCount === 0 ? 0 : missCount / sessionCount;
+      return [
+        `midi-contour-${segmentKey.segmentId}-${note.sourceWholeSongNoteIndex}`,
+        {
+          sessionCount,
+          missCount,
+          missRate,
+        },
+      ];
+    })
+  );
 }

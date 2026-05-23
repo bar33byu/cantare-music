@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendAlignmentTap,
   buildMidiBlendTapHeatMap,
+  buildMidiContourTapHeatMap,
   cleanMidiNotes,
   createMidiAlignment,
   deriveSegmentAnswerKey,
@@ -162,5 +163,24 @@ describe("midiGuidedTapPractice", () => {
     const score = scoreTapAttemptAgainstMidiKey(segmentKey, [{ timeOffsetMs: 0, direction: "same" }], 400);
 
     expect(buildMidiBlendTapHeatMap(segmentKey, [score])[1].missingCount).toBe(1);
+  });
+
+  it("builds capped contour heat stats from MIDI score details", () => {
+    const notes = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
+    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
+    const missed = scoreTapAttemptAgainstMidiKey(segmentKey, [{ timeOffsetMs: 0, direction: "same" }], 400);
+    const matched = scoreTapAttemptAgainstMidiKey(segmentKey, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 1000, direction: "up" },
+    ], 400);
+
+    const heatMap = buildMidiContourTapHeatMap(segmentKey, [missed, matched, matched], 2);
+
+    expect(heatMap["midi-contour-seg-1-1"]).toEqual({
+      sessionCount: 2,
+      missCount: 1,
+      missRate: 0.5,
+    });
   });
 });
