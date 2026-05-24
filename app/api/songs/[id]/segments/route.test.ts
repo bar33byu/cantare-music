@@ -31,7 +31,7 @@ describe('GET /api/songs/[id]/segments', () => {
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(data).toEqual(mockSegments);
+    expect(data).toEqual([{ ...mockSegments[0], pitchContourNotes: [] }]);
     expect(getSegmentsBySongId).toHaveBeenCalledWith('123');
   });
 });
@@ -61,7 +61,7 @@ describe('POST /api/songs/[id]/segments', () => {
         lyricText: '',
       },
     ];
-    const createdSegment = { ...newSegment, songId: 'song-1', order: 1 };
+    const createdSegment = { ...newSegment, songId: 'song-1', order: 1, pitchContourNotes: [] };
 
     vi.mocked(getSongById).mockResolvedValue({ id: 'song-1', title: 'Song 1' } as any);
     vi.mocked(getSegmentsBySongId).mockResolvedValue(existingSegments as any);
@@ -88,7 +88,7 @@ describe('POST /api/songs/[id]/segments', () => {
       startMs: 0,
       endMs: 1000,
       lyricText: 'Lyrics here',
-      pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 100, durationMs: 300, lane: 0.7 }],
+      pitchContourNotes: [],
     });
     expect(reorderSegments).toHaveBeenCalledWith([
       { id: 'seg-older', order: 0 },
@@ -148,6 +148,7 @@ describe('POST /api/songs/[id]/segments', () => {
       startMs: 2000,
       endMs: 2500,
       lyricText: 'middle section',
+      pitchContourNotes: [],
     });
     expect(reorderSegments).toHaveBeenCalledWith([
       { id: 'seg-1', order: 0 },
@@ -190,7 +191,21 @@ describe('POST /api/songs/[id]/segments', () => {
     expect(data.error).toBe('Start time is required and must be a number');
   });
 
-  it('returns 400 for invalid pitch contour notes', async () => {
+  it('ignores legacy pitch contour notes when creating a segment', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: 'song-1', title: 'Song 1' } as any);
+    vi.mocked(getSegmentsBySongId).mockResolvedValue([]);
+    vi.mocked(createSegment).mockResolvedValue({
+      id: 'seg-1',
+      songId: 'song-1',
+      label: 'Verse 1',
+      order: 0,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: 'Lyrics here',
+      pitchContourNotes: [],
+    } as any);
+    vi.mocked(reorderSegments).mockResolvedValue(undefined);
+
     const request = new Request('http://localhost/api/songs/song-1/segments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -205,10 +220,11 @@ describe('POST /api/songs/[id]/segments', () => {
     });
 
     const response = await POST(request as any, { params: Promise.resolve({ id: 'song-1' }) });
-    const data = await response.json();
 
-    expect(response.status).toBe(400);
-    expect(data.error).toContain('Each pitch contour note must include');
+    expect(response.status).toBe(201);
+    expect(createSegment).toHaveBeenCalledWith(expect.objectContaining({
+      pitchContourNotes: [],
+    }));
   });
 });
 
@@ -240,10 +256,15 @@ describe('PUT /api/songs/[id]/segments', () => {
     const response = await PUT(request as any, { params: Promise.resolve({ id: '123' }) });
 
     expect(response.status).toBe(200);
-    expect(upsertSegments).toHaveBeenCalledWith('123', segments);
+    expect(upsertSegments).toHaveBeenCalledWith('123', [
+      {
+        ...segments[0],
+        pitchContourNotes: [],
+      },
+    ]);
   });
 
-  it('returns 400 for invalid pitch contour notes in PUT payload', async () => {
+  it('ignores legacy pitch contour notes in PUT payload', async () => {
     vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 123' } as any);
     const request = new Request('http://localhost/api/songs/123/segments', {
       method: 'PUT',
@@ -264,10 +285,19 @@ describe('PUT /api/songs/[id]/segments', () => {
     });
 
     const response = await PUT(request as any, { params: Promise.resolve({ id: '123' }) });
-    const data = await response.json();
 
-    expect(response.status).toBe(400);
-    expect(data.error).toContain('Each pitch contour note must include');
+    expect(response.status).toBe(200);
+    expect(upsertSegments).toHaveBeenCalledWith('123', [
+      {
+        id: 'seg-1',
+        label: 'Verse 1',
+        order: 1,
+        startMs: 0,
+        endMs: 1000,
+        lyricText: 'Lyrics here',
+        pitchContourNotes: [],
+      },
+    ]);
   });
 
   it('returns 400 for invalid segments', async () => {

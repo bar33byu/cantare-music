@@ -69,6 +69,18 @@ describe("/api/songs/[id]/midi", () => {
     }));
   });
 
+  it("defaults empty MIDI status to no short-note filtering", async () => {
+    vi.mocked(getLatestMidiSourceForSong).mockResolvedValue(null);
+
+    const response = await GET(new Request("http://localhost/api/songs/song-1/midi") as any, {
+      params: Promise.resolve({ id: "song-1" }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.summary.shortNoteThresholdMs).toBe(0);
+  });
+
   it("re-cleans a MIDI source when the short-note threshold changes", async () => {
     vi.mocked(getLatestMidiSourceForSong).mockResolvedValue({
       id: "midi-1",

@@ -85,13 +85,25 @@ describe('getPlaybackAnchoredNewSegmentPlacement', () => {
     expect(placement).toEqual({ startMs: 45_000, endMs: 65_000 });
   });
 
-  it('keeps last-segment offset when playback is behind it', () => {
+  it('anchors to playback even when playback is inside existing segments', () => {
     const placement = getPlaybackAnchoredNewSegmentPlacement(
       [{ id: 'seg-1', startMs: 0, endMs: 30_000 }],
       20_000
     );
 
-    expect(placement).toEqual({ startMs: 30_500, endMs: 50_500 });
+    expect(placement).toEqual({ startMs: 20_000, endMs: 40_000 });
+  });
+
+  it('anchors to playback even when there is a nearby later segment', () => {
+    const placement = getPlaybackAnchoredNewSegmentPlacement(
+      [
+        { id: 'seg-1', startMs: 0, endMs: 10_000 },
+        { id: 'seg-2', startMs: 25_000, endMs: 40_000 },
+      ],
+      12_000
+    );
+
+    expect(placement).toEqual({ startMs: 12_000, endMs: 32_000 });
   });
 
   it('clamps invalid playback to zero', () => {

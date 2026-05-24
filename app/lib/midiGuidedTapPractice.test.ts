@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  alignMidiByFirstAudioStart,
   appendAlignmentTap,
   buildMidiBlendTapHeatMap,
+  buildMidiContourTapHeatMap,
   cleanMidiNotes,
   createMidiAlignment,
   deriveSegmentAnswerKey,
@@ -143,6 +145,40 @@ describe("midiGuidedTapPractice", () => {
     expect(keys["seg-b"].notes[0].sourceWholeSongNoteIndex).toBe(0);
   });
 
+  it("aligns MIDI notes from a single first-audio-start offset", () => {
+    const notes = cleanMidiNotes([raw(0, 60, 0.5, 1), raw(1, 62, 2, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const alignment = alignMidiByFirstAudioStart(
+      createMidiAlignment({ id: "a", songId: "s", midiSourceId: "m", retainedMidiNoteCount: 2 }),
+      notes,
+      3
+    );
+
+    expect(alignment.tappedStartTimesSeconds).toEqual([3, 4.5]);
+    expect(alignment.isComplete).toBe(true);
+  });
+
+  it("projects sustained notes into segments they overlap after boundaries move", () => {
+    const notes = cleanMidiNotes([
+      raw(0, 60, 0, 2),
+      raw(1, 62, 2, 1),
+    ], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 7]));
+    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5500, endMs: 7200 });
+
+    expect(segmentKey.notes.map((note) => note.sourceWholeSongNoteIndex)).toEqual([0, 1]);
+    expect(segmentKey.notes[0]).toEqual(expect.objectContaining({
+      segmentLocalStartTimeSeconds: 0,
+      effectiveDurationSeconds: 1.5,
+      movementFromPrevious: "start",
+    }));
+    expect(segmentKey.notes[1]).toEqual(expect.objectContaining({
+      segmentLocalStartTimeSeconds: 1.5,
+      effectiveDurationSeconds: 0.2,
+      movementFromPrevious: "up",
+    }));
+    expect(segmentKey.taps.map((tap) => tap.timeOffsetMs)).toEqual([0, 1500]);
+  });
+
   it("scores regular tap practice against a MIDI-derived segment key", () => {
     const notes: CleanedMidiNote[] = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
     const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
@@ -162,5 +198,24 @@ describe("midiGuidedTapPractice", () => {
     const score = scoreTapAttemptAgainstMidiKey(segmentKey, [{ timeOffsetMs: 0, direction: "same" }], 400);
 
     expect(buildMidiBlendTapHeatMap(segmentKey, [score])[1].missingCount).toBe(1);
+  });
+
+  it("builds capped contour heat stats from MIDI score details", () => {
+    const notes = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
+    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
+    const missed = scoreTapAttemptAgainstMidiKey(segmentKey, [{ timeOffsetMs: 0, direction: "same" }], 400);
+    const matched = scoreTapAttemptAgainstMidiKey(segmentKey, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 1000, direction: "up" },
+    ], 400);
+
+    const heatMap = buildMidiContourTapHeatMap(segmentKey, [missed, matched, matched], 2);
+
+    expect(heatMap["midi-contour-seg-1-1"]).toEqual({
+      sessionCount: 2,
+      missCount: 1,
+      missRate: 0.5,
+    });
   });
 });

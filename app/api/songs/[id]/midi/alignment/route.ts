@@ -7,6 +7,7 @@ import {
 } from "../../../../../../db/queries";
 import { resolveRequestUserId } from "../../../../_user";
 import {
+  alignMidiByFirstAudioStart,
   appendAlignmentTap,
   createMidiAlignment,
   resumeAlignmentFromNote,
@@ -15,6 +16,7 @@ import {
 
 type AlignmentActionBody =
   | { action?: "start" }
+  | { action: "offset"; firstAudioStartSeconds?: unknown }
   | { action: "tap"; timeSeconds?: unknown }
   | { action: "undo" }
   | { action: "resumeFrom"; noteIndex?: unknown }
@@ -60,7 +62,13 @@ export async function POST(
     });
 
     let next = base;
-    if (body.action === "tap") {
+    if (body.action === "offset") {
+      const firstAudioStartSeconds = getNumber(body.firstAudioStartSeconds);
+      if (firstAudioStartSeconds === null) {
+        return NextResponse.json({ error: "firstAudioStartSeconds is required" }, { status: 400 });
+      }
+      next = alignMidiByFirstAudioStart(base, source.cleanedNotes, firstAudioStartSeconds);
+    } else if (body.action === "tap") {
       const timeSeconds = getNumber(body.timeSeconds);
       if (timeSeconds === null) {
         return NextResponse.json({ error: "timeSeconds is required" }, { status: 400 });

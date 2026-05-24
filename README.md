@@ -1,32 +1,30 @@
 # Cantare
 
-Version 2.1 of Cantare is a practice application for singers to learn and master songs through deliberate, segment-based repetition, two-version audio playback, melodic contour training, playlists, and isolated multi-user libraries.
+Cantare 2.4 is a practice application for singers to learn and master songs through deliberate, segment-based repetition, two-version audio playback, MIDI-guided melodic contour training, playlist practice modes, and lightweight tap-practice feedback.
 
 > **Credits:** Cantare is a clone built to replicate the core functionality of [Musicators.com](https://www.musicators.com). All credit for the original concept and feature design goes to the Musicators team.
 
-## What it does
+## What It Does
 
-Cantare lets you upload songs, divide them into labeled segments (verses, choruses, bridges, etc.), and practice those segments one at a time. After each playback you rate your recall from 1-5. The app tracks your ratings over time and surfaces a **knowledge score** so you can see at a glance how well you know each song and which segments still need work.
+Cantare lets you upload songs, divide them into labeled segments, add lyrics, and practice those segments with focused repetition. After each playback you rate your recall from 1-5. The app tracks those ratings and shows a knowledge score so you can see which songs and segments are solid and which still need attention.
 
 **Current features:**
 
-- **Song library** - upload audio files, add titles and artist info, and browse your collection
-- **Two-version audio** - keep separate Prominent and Blend recordings for a song, upload either version, and switch between them in practice when both are available
-- **Segment editor** - a visual timeline interface for slicing a song into segments, setting start/end times by dragging, attaching lyrics, and recording contour answer keys
-- **Contour answer-key autosave** - captured contour taps are saved automatically, can be saved on demand, and can be cleared for one section or the whole song
-- **User-aware editing** - segment and contour editor requests carry the active user context so shared instances keep each user's song data isolated
-- **Practice view** - plays each segment in sequence with configurable pre-roll, shows or hides lyrics, and lets you rate your memory after each repetition
-- **Audio version switching** - Practice view remembers the browser's last selected audio version and preserves timestamp, play state, playback rate, and loop boundaries when switching
-- **Tap practice** - tap melodic contour attempts during practice and compare them against saved answer keys, with background persistence and buffered early taps
-- **Contour review heat map** - the card contour can color recent trouble spots from saved tap attempts and refreshes after new attempts are saved
-- **Answer-key reset behavior** - updating contour answer keys clears older tap-practice history for that song so future heat maps compare against the current key
-- **Tap debug tools** - inspect persisted tap sessions and review contour-matching diagnostics
-- **Knowledge bar** - color-coded mastery visualization across all segments of a song
-- **Playlists** - group songs together for a rehearsal or event, with aggregate knowledge scores across the whole playlist
-- **Listen mode** - play entire playlists sequentially without the practice interface
-- **Multi-user support** - multiple user profiles share the same instance, each with fully isolated songs, playlists, and ratings
+- **Song library** - upload songs, edit titles, browse your catalog, and filter for missing song assets such as audio, sections, or MIDI contour data.
+- **Two-version audio** - store separate Part and Blend recordings, see which versions are present, choose a preferred version, and switch gracefully when a song only has one file.
+- **Visual segment editor** - create, move, resize, overlap, and label sections on a timeline; manual new sections insert at the current playhead.
+- **Bulk lyric import** - paste lyrics into a larger bulk editor, split sections by blank lines by default, keep custom delimiters available, and start the workflow at 300% zoom.
+- **MIDI-guided contour setup** - upload MIDI files, filter short notes, align by start offset with a scrubber/preview, or fall back to full tap-by-note realignment.
+- **Segment-aware MIDI contour** - MIDI notes are stored at the song level and projected into any segment window they overlap, so contours follow later boundary edits and overlapping sections.
+- **Practice view** - practice one segment at a time with lyric visibility controls, segment navigation, ratings, knowledge tracking, and compact mobile-friendly controls.
+- **Tap practice** - tap along only when a MIDI contour is available, compare attempts against the MIDI-derived up/down/same key, and persist recent attempts.
+- **Contour heat map** - color the card contour from recent tap misses so trouble spots become visible immediately and improve as more attempts are saved.
+- **Playlist practice** - group songs into rehearsal playlists with aggregate stats, asset summaries, Focus, Auto Drill, Listen, and standard Songs modes.
+- **Auto Drill** - automatically loop segments based on ratings, allow forward/back navigation with the card arrows, and keep the auto-drill header compact.
+- **Listen mode** - play playlist songs sequentially without the practice-card workflow.
+- **Offline-tolerant ratings and tap persistence** - buffer early taps and queue rating updates where possible so practice interactions are not easily lost.
 
-## Tech stack
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
@@ -36,7 +34,7 @@ Cantare lets you upload songs, divide them into labeled segments (verses, chorus
 | Audio storage | S3-compatible object storage (presigned upload/download URLs) |
 | Testing | Vitest + Testing Library |
 
-## Getting started
+## Getting Started
 
 Install dependencies and start the development server:
 
@@ -62,9 +60,9 @@ R2_PUBLIC_URL=         # Required: public base URL for audio CDN delivery
 
 Notes:
 
-- `R2_PUBLIC_URL` is required. Audio is served directly from R2's CDN to the browser (no server-side proxy).
+- `R2_PUBLIC_URL` is required. Audio is served directly from R2's CDN to the browser.
 - If `R2_ENDPOINT` is blank and `R2_ACCOUNT_ID` is set, the app derives the standard Cloudflare R2 endpoint automatically.
-- Prominent and Blend audio versions are both stored as R2 objects and exposed to the browser only as direct public R2 URLs.
+- Part and Blend audio versions are both stored as R2 objects and exposed to the browser as direct public R2 URLs.
 
 Run database migrations before first use:
 
@@ -72,32 +70,17 @@ Run database migrations before first use:
 npm run db:migrate
 ```
 
-## Running tests
+## Running Tests
 
 ```bash
 npm test
 ```
 
-## Segment editor notes
+## Workflow Notes
 
-- Segment ordering is inferred from timeline placement. The backend normalizes order by `startMs`, then `endMs`, then `id` for deterministic ties.
-- The segment form no longer accepts manual sequence input. Users edit label, timeline boundaries, and lyrics only.
-- New segment defaults use timeline-aware placement:
-  - Base start is 500 ms after the latest visible segment end
-  - Base duration is 20 seconds
-  - While playback is active in the editor, start is anchored to `max(currentPlaybackMs, latestEnd + 500ms)`
-- Updating `startMs` or `endMs` re-normalizes ordering server-side to keep timeline position and sequence consistent.
+- Segment ordering is inferred from timeline placement and normalized by `startMs`, then `endMs`, then `id`.
 - Segment editor playback uses the configured public R2 URL directly; there is no server-side audio proxy fallback.
-- Contour answer keys autosave shortly after edits. The manual save button is still available for immediate confirmation.
-- Clearing section taps removes only the notes overlapping the focused segment, while clearing all taps resets the entire song contour.
-- Replacing audio from the editor can target either the Prominent or Blend version while preserving existing segment timings and lyrics.
-
-## Tap practice notes
-
-- Tap practice creates a per-song tap session and persists taps in the background while you practice.
-- If you tap immediately after enabling tap practice, early taps are buffered until the session exists instead of being dropped.
-- Starting playback in tap practice adds a two-second visual count-in so you have time to move from the play button to the tap bar.
-- Replaying from the beginning or seeking back to the active segment start resets the current tap run so old dots do not pollute a new attempt.
-- Contour scoring is time-anchored to the whole segment first and then checked for `up` / `down` / `same`, which keeps later taps aligned to the part of the music you actually attempted.
-- The card contour can color each note by recent miss rate, using saved tap sessions as a lightweight practice heat map.
-- Heat-map data is fetched with fresh requests and refreshed after successful tap persistence so practice feedback stays current.
+- Replacing audio from the editor can target either the Part or Blend version while preserving existing segment timings and lyrics.
+- MIDI contour data is song-level; segment-level contours are derived from the current segment boundaries.
+- Tap practice depends on a MIDI contour. Songs without MIDI contour data do not show the Tap button.
+- Tap heat-map data is refreshed after successful tap persistence so practice feedback stays current.

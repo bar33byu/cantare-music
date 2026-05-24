@@ -1,59 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Segment, SongPitchContourNote } from '../types/index';
+import { Segment } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { MidiSetupPanel } from './MidiSetupPanel';
-import { PitchContourThumbnail } from './PitchContourThumbnail';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { toPlayableAudioUrl } from '../lib/audioUrls';
-import { getDefaultNewSegmentPlacement, getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
-import { getSegmentPitchContourNotes } from '../lib/pitchContour';
-import { classifyContourDirection } from '../lib/contourPractice';
+import { getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
 
 const MIN_SEGMENT_MS = 1000;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.5;
+const BULK_IMPORT_ZOOM = 3;
 const DEFAULT_TIMELINE_FALLBACK_MS = 60000;
 const BULK_DURATION_PROBE_TIMEOUT_MS = 3000;
 const BULK_REQUEST_RETRIES = 4;
 const BULK_REQUEST_RETRY_DELAY_MS = 250;
-const CONTOUR_PLAYBACK_RATES = [0.5, 0.75, 1] as const;
-const MIN_CONTOUR_TAP_DURATION_MS = 80;
-const CONTOUR_AUTOSAVE_DELAY_MS = 650;
-
-interface ActiveContourCapture {
-  id: string;
-  startMs: number;
-  lane: number;
-  pointerId: number;
-}
-
-interface ContourDraftPoint {
-  id: string;
-  absoluteMs: number;
-  durationMs: number;
-  lane: number;
-  direction: 'U' | 'D' | 'S' | null;
-}
 
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
-
-function getContourDirectionLabel(previousLane: number, nextLane: number): 'U' | 'D' | 'S' {
-  const direction = classifyContourDirection(nextLane - previousLane);
-  if (direction === 'up') {
-    return 'U';
-  }
-  if (direction === 'down') {
-    return 'D';
-  }
-  return 'S';
 }
 
 type ResizeEdge = 'start' | 'end';
@@ -94,23 +63,12 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [stableDurationMs, setStableDurationMs] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
-  const [bulkSeparator, setBulkSeparator] = useState('*');
+  const [bulkSeparator, setBulkSeparator] = useState('');
   const [replaceExistingOnBulk, setReplaceExistingOnBulk] = useState(true);
   const [bulkImportPending, setBulkImportPending] = useState(false);
   const [songLoaded, setSongLoaded] = useState(false);
   const [songLoadKey, setSongLoadKey] = useState(0);
-  const [isContourRecording, setIsContourRecording] = useState(false);
-  const [contourDraftNotes, setContourDraftNotes] = useState<SongPitchContourNote[]>([]);
-  const [isSavingContourDraft, setIsSavingContourDraft] = useState(false);
-  const [isAutoSavingContourDraft, setIsAutoSavingContourDraft] = useState(false);
-  const [contourSaveMessage, setContourSaveMessage] = useState<string | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
-  const focusedContourCardRef = useRef<HTMLDivElement | null>(null);
-  const contourTapBarRef = useRef<HTMLDivElement | null>(null);
-  const activeContourCaptureRef = useRef<ActiveContourCapture | null>(null);
-  const contourLastSavedSnapshotRef = useRef<string>('[]');
-  const contourAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const contourAutoSaveGenerationRef = useRef(0);
 
   const hasAnyAudio = Boolean(audioUrl.trim() || alternateAudioUrl.trim());
   const playbackAudioUrl = useMemo(
@@ -124,11 +82,9 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     isReady,
     currentMs,
     durationMs,
-    playbackRate = 1,
     play,
     pause,
     seek,
-    setPlaybackRate,
   } = audioPlayer;
 
   const selectedSegment = useMemo(
@@ -153,97 +109,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const request = useCallback((url: string, init?: RequestInit) => {
     return fetch(url, withUserHeader(init));
   }, [withUserHeader]);
-
-  const hasContourDraft = contourDraftNotes.length > 0;
-
-  const contourDraftPointCount = useMemo(
-    () => contourDraftNotes.length,
-    [contourDraftNotes]
-  );
-
-  const isContourEditorOpen = isContourRecording || hasContourDraft;
-
-  const updateContourDraftLane = (noteId: string, lane: number) => {
-    setContourSaveMessage(null);
-    setContourDraftNotes((previous) => previous.map((note) => (note.id === noteId ? { ...note, lane } : note)));
-  };
-
-  const normalizeContourNotes = useCallback((notes: SongPitchContourNote[]) => {
-    return [...notes].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id));
-  }, []);
-
-  const serializeContourNotes = useCallback((notes: SongPitchContourNote[]) => {
-    return JSON.stringify(normalizeContourNotes(notes));
-  }, [normalizeContourNotes]);
-
-  const getLaneFromClientY = (clientY: number): number => {
-    const rect = contourTapBarRef.current?.getBoundingClientRect();
-    if (!rect || rect.height <= 0) {
-      return 0.5;
-    }
-
-    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
-    return 1 - ratio;
-  };
-
-  const getBoardLaneFromClientY = (clientY: number): number => {
-    const rect = boardRef.current?.getBoundingClientRect();
-    if (!rect || rect.height <= 0) {
-      return 0.5;
-    }
-
-    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
-    return 1 - ratio;
-  };
-
-  const getFocusedContourLaneFromClientY = (clientY: number): number => {
-    const rect = focusedContourCardRef.current?.getBoundingClientRect();
-    if (!rect || rect.height <= 0) {
-      return 0.5;
-    }
-
-    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
-    return 1 - ratio;
-  };
-
-  const finalizeContourCapture = (endLane?: number) => {
-    const capture = activeContourCaptureRef.current;
-    if (!capture) {
-      return;
-    }
-
-    const endMs = Math.max(capture.startMs + MIN_CONTOUR_TAP_DURATION_MS, currentMs);
-    const lane = typeof endLane === 'number' ? endLane : capture.lane;
-    setContourSaveMessage(null);
-    setContourDraftNotes((previous) => [
-      ...previous,
-      {
-        id: capture.id,
-        absoluteMs: capture.startMs,
-        durationMs: endMs - capture.startMs,
-        lane,
-      },
-    ].sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id)));
-
-    activeContourCaptureRef.current = null;
-  };
-
-  const getContourDraftNotesForSave = useCallback(() => {
-    const activeCapture = activeContourCaptureRef.current;
-    const activeNote = activeCapture
-      ? {
-          id: activeCapture.id,
-          absoluteMs: activeCapture.startMs,
-          durationMs: Math.max(activeCapture.startMs + MIN_CONTOUR_TAP_DURATION_MS, currentMs) - activeCapture.startMs,
-          lane: activeCapture.lane,
-        }
-      : null;
-
-    return normalizeContourNotes([
-      ...contourDraftNotes,
-      ...(activeNote ? [activeNote] : []),
-    ]);
-  }, [contourDraftNotes, normalizeContourNotes]);
 
   const updateLocalSegment = (segmentId: string, updates: Partial<Segment>) => {
     setSegments((previous) =>
@@ -279,9 +144,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   };
 
   const createSegment = async () => {
-    const basePlacement = isReady
-      ? getPlaybackAnchoredNewSegmentPlacement(segments, currentMs)
-      : getDefaultNewSegmentPlacement(segments);
+    const basePlacement = getPlaybackAnchoredNewSegmentPlacement(segments, currentMs);
 
     const payload = {
       id: crypto.randomUUID(),
@@ -317,7 +180,10 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const parseBulkSections = (text: string, separator: string): string[] => {
     const normalizedSeparator = separator.trim();
     if (!normalizedSeparator) {
-      return [];
+      return text
+        .split(/\n\s*\n+/)
+        .map((section) => section.trim())
+        .filter((section) => section.length > 0);
     }
 
     return text
@@ -425,7 +291,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
     const sections = parseBulkSections(bulkText, bulkSeparator);
     if (sections.length === 0) {
-      setDeleteError('Bulk import needs at least one section split by the separator.');
+      setDeleteError('Bulk import needs at least one section split by a blank line or custom separator.');
       return;
     }
 
@@ -650,64 +516,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     [segments]
   );
 
-  const playbackSegment = useMemo(
-    () => orderedSegments.find((segment) => currentMs >= segment.startMs && currentMs < segment.endMs) ?? null,
-    [currentMs, orderedSegments]
-  );
-
-  const focusedRecordingSegment = isContourRecording
-    ? playbackSegment ?? selectedSegment ?? orderedSegments[0] ?? null
-    : selectedSegment ?? playbackSegment ?? orderedSegments[0] ?? null;
-  const focusedRecordingSegmentIndex = focusedRecordingSegment
-    ? orderedSegments.findIndex((segment) => segment.id === focusedRecordingSegment.id)
-    : -1;
-  const focusedSegmentDurationMs = focusedRecordingSegment
-    ? Math.max(1, focusedRecordingSegment.endMs - focusedRecordingSegment.startMs)
-    : 1;
-
-  const contourDraftPoints = useMemo<ContourDraftPoint[]>(() => {
-    const points = [...contourDraftNotes]
-      .sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id))
-      .map((note) => ({
-        id: note.id,
-        absoluteMs: note.absoluteMs,
-        durationMs: note.durationMs,
-        lane: note.lane,
-        direction: null,
-      }));
-
-    return points.map((point, index) => ({
-      ...point,
-      direction: index === 0 ? null : getContourDirectionLabel(points[index - 1].lane, point.lane),
-    }));
-  }, [contourDraftNotes]);
-
-  const focusedContourDraftPoints = useMemo<ContourDraftPoint[]>(() => {
-    if (!focusedRecordingSegment) {
-      return [];
-    }
-
-    const points = contourDraftNotes
-      .filter((note) => {
-        const noteStartMs = note.absoluteMs;
-        const noteEndMs = noteStartMs + note.durationMs;
-        return noteEndMs > focusedRecordingSegment.startMs && noteStartMs < focusedRecordingSegment.endMs;
-      })
-      .sort((a, b) => a.absoluteMs - b.absoluteMs || a.id.localeCompare(b.id))
-      .map((note) => ({
-        id: note.id,
-        absoluteMs: note.absoluteMs,
-        durationMs: note.durationMs,
-        lane: note.lane,
-        direction: null,
-      }));
-
-    return points.map((point, index) => ({
-      ...point,
-      direction: index === 0 ? null : getContourDirectionLabel(points[index - 1].lane, point.lane),
-    }));
-  }, [contourDraftNotes, focusedRecordingSegment]);
-
   const msFromClientX = (clientX: number): number => {
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || timelineDurationMs <= 0) {
@@ -830,12 +638,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     };
   }, [durationMs, playbackAudioUrl, stableDurationMs]);
 
-  useEffect(() => {
-    setIsContourRecording(false);
-    setContourDraftNotes([]);
-    activeContourCaptureRef.current = null;
-  }, [songId]);
-
   // Clean up undo timer on unmount to avoid memory leaks
   useEffect(() => {
     return () => {
@@ -863,130 +665,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     const safeDuration = timelineDurationMs > 0 ? timelineDurationMs : Math.max(durationMs, currentMs, 0);
     const targetMs = Math.max(0, Math.min(safeDuration, currentMs + deltaMs));
     seek(targetMs);
-  };
-
-  const clearContourDraft = () => {
-    activeContourCaptureRef.current = null;
-    setContourSaveMessage(null);
-    setContourDraftNotes([]);
-  };
-
-  const clearFocusedSegmentContourDraft = () => {
-    if (!focusedRecordingSegment) {
-      return;
-    }
-
-    activeContourCaptureRef.current = null;
-    setContourSaveMessage(null);
-    setContourDraftNotes((previous) =>
-      previous.filter((note) => {
-        const noteStartMs = note.absoluteMs;
-        const noteEndMs = noteStartMs + note.durationMs;
-        return !(noteEndMs > focusedRecordingSegment.startMs && noteStartMs < focusedRecordingSegment.endMs);
-      })
-    );
-  };
-
-  const handleToggleContourRecording = () => {
-    if (isContourRecording) {
-      finalizeContourCapture();
-      setIsContourRecording(false);
-      return;
-    }
-
-    setDeleteError(null);
-    setContourSaveMessage(null);
-    if (!hasContourDraft) {
-      clearContourDraft();
-    }
-    const startingSegment = playbackSegment ?? selectedSegment ?? orderedSegments[0] ?? null;
-    if (startingSegment) {
-      setSelectedSegmentId(startingSegment.id);
-    }
-    setIsContourRecording(true);
-  };
-
-  const selectRecordingSegment = (index: number) => {
-    const nextSegment = orderedSegments[index];
-    if (!nextSegment) {
-      return;
-    }
-
-    setSelectedSegmentId(nextSegment.id);
-    seek(nextSegment.startMs);
-  };
-
-  const persistContourDraft = useCallback(async (
-    notes: SongPitchContourNote[],
-    options: { mode: 'auto' | 'manual' } = { mode: 'manual' }
-  ) => {
-    const normalizedNotes = normalizeContourNotes(notes);
-    const snapshot = serializeContourNotes(normalizedNotes);
-    if (snapshot === contourLastSavedSnapshotRef.current) {
-      if (options.mode === 'manual') {
-        setIsContourRecording(false);
-        setContourSaveMessage(`Saved ${normalizedNotes.length} answer key point${normalizedNotes.length === 1 ? '' : 's'}.`);
-      }
-      return false;
-    }
-
-    const generation = contourAutoSaveGenerationRef.current + 1;
-    contourAutoSaveGenerationRef.current = generation;
-    if (options.mode === 'auto') {
-      setIsAutoSavingContourDraft(true);
-    } else {
-      setIsSavingContourDraft(true);
-    }
-
-    try {
-      const response = await request(`/api/songs/${songId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pitchContourNotes: normalizedNotes }),
-      });
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(payload.error ?? `Contour save failed (${response.status})`);
-      }
-
-      contourLastSavedSnapshotRef.current = snapshot;
-      setContourDraftNotes(normalizedNotes);
-      if (options.mode === 'manual') {
-        setIsContourRecording(false);
-        setContourSaveMessage(`Saved ${normalizedNotes.length} answer key point${normalizedNotes.length === 1 ? '' : 's'}.`);
-      } else {
-        setContourSaveMessage('Answer key autosaved.');
-      }
-      setSongLoadKey((previous) => previous + 1);
-      onSongUpdated?.();
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Please try again.';
-      setDeleteError(`Failed to save contour answer key. ${message}`);
-      return false;
-    } finally {
-      if (contourAutoSaveGenerationRef.current === generation) {
-        setIsAutoSavingContourDraft(false);
-        setIsSavingContourDraft(false);
-      } else if (options.mode === 'manual') {
-        setIsSavingContourDraft(false);
-      }
-    }
-  }, [normalizeContourNotes, onSongUpdated, request, serializeContourNotes, songId]);
-
-  const saveContourDraft = async () => {
-    const normalizedNotes = getContourDraftNotesForSave();
-    activeContourCaptureRef.current = null;
-    setContourDraftNotes(normalizedNotes);
-
-    setDeleteError(null);
-    setContourSaveMessage(null);
-    if (contourAutoSaveTimerRef.current) {
-      clearTimeout(contourAutoSaveTimerRef.current);
-      contourAutoSaveTimerRef.current = null;
-    }
-    await persistContourDraft(normalizedNotes, { mode: 'manual' });
   };
 
   useEffect(() => {
@@ -1023,15 +701,12 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         if (!response.ok) {
           return;
         }
-        const data = (await response.json()) as { audioUrl?: string; alternateAudioUrl?: string; title?: string; pitchContourNotes?: SongPitchContourNote[] };
+        const data = (await response.json()) as { audioUrl?: string; alternateAudioUrl?: string; title?: string };
         if (!cancelled) {
-          const loadedContourNotes = normalizeContourNotes(data.pitchContourNotes ?? []);
-          contourLastSavedSnapshotRef.current = serializeContourNotes(loadedContourNotes);
           setAudioUrl(data.audioUrl ?? '');
           setAlternateAudioUrl(data.alternateAudioUrl ?? '');
           setSongTitle(data.title ?? '');
           setTitleDraft(data.title ?? '');
-          setContourDraftNotes(loadedContourNotes);
           setSongLoaded(true);
         }
       } catch {
@@ -1048,34 +723,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     return () => {
       cancelled = true;
     };
-  }, [normalizeContourNotes, request, serializeContourNotes, songId, songLoadKey]);
-
-  useEffect(() => {
-    if (!songLoaded) {
-      return;
-    }
-
-    const snapshot = serializeContourNotes(contourDraftNotes);
-    if (snapshot === contourLastSavedSnapshotRef.current) {
-      return;
-    }
-
-    if (contourAutoSaveTimerRef.current) {
-      clearTimeout(contourAutoSaveTimerRef.current);
-    }
-
-    contourAutoSaveTimerRef.current = setTimeout(() => {
-      contourAutoSaveTimerRef.current = null;
-      void persistContourDraft(contourDraftNotes, { mode: 'auto' });
-    }, CONTOUR_AUTOSAVE_DELAY_MS);
-
-    return () => {
-      if (contourAutoSaveTimerRef.current) {
-        clearTimeout(contourAutoSaveTimerRef.current);
-        contourAutoSaveTimerRef.current = null;
-      }
-    };
-  }, [contourDraftNotes, persistContourDraft, serializeContourNotes, songLoaded]);
+  }, [request, songId, songLoadKey]);
 
   const handleAudioUploaded = () => {
     setSongLoadKey((previous) => previous + 1);
@@ -1135,14 +783,13 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   }
 
   return (
-    <div className={`mx-auto w-full ${isContourEditorOpen ? 'max-w-[92rem]' : 'max-w-6xl'}`}>
+    <div className="mx-auto w-full max-w-6xl">
       {/* Header */}
       <div className="mb-4">
         <h2 className="text-2xl font-bold text-gray-900">Edit Song</h2>
       </div>
 
       {/* Song title */}
-      {!isContourRecording ? (
       <div className="mb-4 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
         <label className="block text-xs font-semibold text-indigo-700 mb-1">Song title</label>
         <div className="flex items-center gap-2">
@@ -1158,10 +805,8 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
           {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
         </div>
       </div>
-      ) : null}
 
       {/* Replace audio (collapsible) */}
-      {!isContourRecording ? (
       <div className="mb-4">
         <button
           type="button"
@@ -1193,11 +838,8 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
           </div>
         )}
       </div>
-      ) : null}
 
-      {!isContourRecording ? (
-        <MidiSetupPanel songId={songId} audioPlayer={audioPlayer} request={request} />
-      ) : null}
+      <MidiSetupPanel songId={songId} audioPlayer={audioPlayer} request={request} />
 
       {deleteError && (
         <div role="alert" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -1231,35 +873,33 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
             <p className="text-sm font-semibold text-indigo-800">
-              {isContourRecording ? 'Answer key recording' : hasContourDraft ? 'Answer key editing' : 'Sections'}
+              Sections
             </p>
-            {!isContourEditorOpen ? (
-              <>
-                <button
-                  type="button"
-                  data-testid="segment-editor-new-section"
-                  onClick={handleAddNew}
-                  className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
-                >
-                  + New section
-                </button>
-                <button
-                  type="button"
-                  data-testid="segment-editor-bulk-open"
-                  onClick={() => {
-                    setDeleteError(null);
-                    setShowBulkImport((previous) => !previous);
-                  }}
-                  className="px-3 py-1 border border-indigo-300 text-indigo-700 text-sm rounded hover:bg-indigo-50"
-                >
-                  Bulk Lyrics
-                </button>
-              </>
-            ) : (
-              <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
-                {isContourRecording ? 'Tap bar is active' : 'Draft dots are editable'}
-              </span>
-            )}
+            <button
+              type="button"
+              data-testid="segment-editor-new-section"
+              onClick={handleAddNew}
+              className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+            >
+              + New section
+            </button>
+            <button
+              type="button"
+              data-testid="segment-editor-bulk-open"
+              onClick={() => {
+                setDeleteError(null);
+                setShowBulkImport((previous) => {
+                  const next = !previous;
+                  if (next) {
+                    setZoom(BULK_IMPORT_ZOOM);
+                  }
+                  return next;
+                });
+              }}
+              className="px-3 py-1 border border-indigo-300 text-indigo-700 text-sm rounded hover:bg-indigo-50"
+            >
+              Bulk Lyrics
+            </button>
           </div>
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
             <p className="w-full text-xs text-gray-500 md:w-auto">Drag top bar to move • Drag edges to resize</p>
@@ -1334,101 +974,32 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
                     <span>+5s</span>
                   </span>
                 </button>
-                {isContourRecording ? (
-                <label className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-indigo-800">
-                  Speed
-                  <select
-                    data-testid="segment-editor-playback-rate"
-                    value={String(playbackRate)}
-                    onChange={(event) => setPlaybackRate?.(Number(event.target.value))}
-                    className="rounded border border-indigo-300 bg-white px-1 py-0.5 text-xs text-indigo-800"
-                  >
-                    {CONTOUR_PLAYBACK_RATES.map((rate) => (
-                      <option key={rate} value={rate}>{rate}x</option>
-                    ))}
-                  </select>
-                </label>
-                ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
                 <span data-testid="segment-editor-current-ms">{formatMs(currentMs)}</span>
                 <span className="text-gray-400">/</span>
                 <span>{formatMs(timelineDurationMs)}</span>
                 {savingSegmentId ? <span className="text-indigo-600">Saving...</span> : null}
-                {isSavingContourDraft ? <span className="text-indigo-600">Saving contour...</span> : null}
-                {isAutoSavingContourDraft ? <span className="text-indigo-600">Autosaving answer key...</span> : null}
-                {contourSaveMessage ? (
-                  <span data-testid="segment-editor-contour-save-message" className="text-emerald-700">
-                    {contourSaveMessage}
-                  </span>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  data-testid="segment-editor-contour-record-toggle"
-                  onClick={handleToggleContourRecording}
-                  className={`rounded px-2 py-1 text-xs font-semibold transition ${
-                    isContourRecording
-                      ? 'bg-rose-600 text-white hover:bg-rose-700'
-                      : 'border border-indigo-300 bg-white text-indigo-800 hover:bg-indigo-50'
-                  }`}
-                >
-                  {isContourRecording ? 'Stop answer key recording' : hasContourDraft ? 'Resume recording' : 'Record answer key'}
-                </button>
-                {(isContourRecording || hasContourDraft) ? (
-                  <>
-                    <button
-                      type="button"
-                      data-testid="segment-editor-contour-save"
-                      onClick={() => { void saveContourDraft(); }}
-                      disabled={isSavingContourDraft}
-                      className="rounded bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      Save now
-                    </button>
-                    {focusedRecordingSegment ? (
-                      <button
-                        type="button"
-                        data-testid="segment-editor-contour-clear-segment"
-                        onClick={clearFocusedSegmentContourDraft}
-                        disabled={isSavingContourDraft}
-                        className="rounded border border-rose-300 bg-white px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                      >
-                        Clear section taps
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      data-testid="segment-editor-contour-clear-draft"
-                      onClick={clearContourDraft}
-                      disabled={isSavingContourDraft}
-                      className="rounded border border-indigo-300 bg-white px-2 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
-                    >
-                      Clear all taps
-                    </button>
-                    <span className="text-xs text-indigo-800">
-                      Draft points: <strong data-testid="segment-editor-contour-draft-count">{contourDraftPointCount}</strong>
-                    </span>
-                  </>
-                ) : null}
               </div>
           </div>
         </div>
 
-        {showBulkImport && !isContourEditorOpen ? (
+        {showBulkImport ? (
           <div data-testid="segment-editor-bulk-panel" className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
-            <div className="mb-2 grid gap-2 md:grid-cols-[1fr,180px]">
-              <label className="text-xs font-semibold text-indigo-800">
-                Separator token
-                <input
-                  data-testid="segment-editor-bulk-separator"
-                  value={bulkSeparator}
-                  onChange={(event) => setBulkSeparator(event.target.value)}
-                  className="mt-1 w-full rounded border border-indigo-300 bg-white px-2 py-1 text-sm"
-                  placeholder="***"
-                />
-              </label>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <details className="text-xs text-indigo-800">
+                <summary className="cursor-pointer font-semibold">Custom separator</summary>
+                <label className="mt-2 block">
+                  Separator token
+                  <input
+                    data-testid="segment-editor-bulk-separator"
+                    value={bulkSeparator}
+                    onChange={(event) => setBulkSeparator(event.target.value)}
+                    className="mt-1 w-44 rounded border border-indigo-300 bg-white px-2 py-1 text-sm"
+                    placeholder="Blank line"
+                  />
+                </label>
+              </details>
               <label className="mt-5 inline-flex items-center gap-2 text-xs text-indigo-900">
                 <input
                   data-testid="segment-editor-bulk-replace"
@@ -1447,14 +1018,14 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               placeholder={[
                 'Verse 1 line 1',
                 'Verse 1 line 2',
-                '***',
+                '',
                 'Verse 2 line 1',
                 'Verse 2 line 2',
               ].join('\n')}
-              className="mt-1 h-36 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm"
+              className="mt-1 h-96 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm"
             />
             <p className="mt-1 text-xs text-indigo-700">
-              Default separator is <strong>***</strong>. Each block becomes one section, spaced evenly across the full song.
+              Blank lines create new sections by default. Each block becomes one section, spaced evenly across the full song.
             </p>
             <div className="mt-3 flex gap-2">
               <button
@@ -1478,105 +1049,8 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
           </div>
         ) : null}
 
-        <div className={isContourRecording ? 'grid gap-3 lg:grid-cols-[minmax(0,1fr)_9rem]' : ''}>
+        <div>
           <div className="min-w-0">
-          {isContourEditorOpen && focusedRecordingSegment ? (
-            <div className="rounded-2xl border border-indigo-300 bg-white shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 px-3 py-2">
-                <button
-                  type="button"
-                  data-testid="segment-editor-recording-prev"
-                  onClick={() => selectRecordingSegment(focusedRecordingSegmentIndex - 1)}
-                  disabled={focusedRecordingSegmentIndex <= 0}
-                  className="h-9 rounded-xl border border-indigo-300 px-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-                >
-                  Previous
-                </button>
-                <div className="min-w-0 text-center">
-                  <p className="truncate text-sm font-semibold text-indigo-950">
-                    {focusedRecordingSegment.label}
-                  </p>
-                  <p className="text-xs text-indigo-600">
-                    {formatMs(focusedRecordingSegment.startMs)} / {formatMs(focusedRecordingSegment.endMs)}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  data-testid="segment-editor-recording-next"
-                  onClick={() => selectRecordingSegment(focusedRecordingSegmentIndex + 1)}
-                  disabled={focusedRecordingSegmentIndex < 0 || focusedRecordingSegmentIndex >= orderedSegments.length - 1}
-                  className="h-9 rounded-xl border border-indigo-300 px-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-                >
-                  Next
-                </button>
-              </div>
-              <div className="grid gap-3 p-3 md:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)]">
-                <div className="min-h-[16rem] rounded-xl border border-indigo-100 bg-indigo-50/30 p-3">
-                  <p className="text-center text-sm font-semibold text-indigo-950">{focusedRecordingSegment.label}</p>
-                  <div className="mt-3 max-h-[18rem] overflow-y-auto whitespace-pre-wrap rounded-lg border border-indigo-100 bg-white p-3 text-sm leading-6 text-slate-900">
-                    {focusedRecordingSegment.lyricText || 'No lyrics for this section.'}
-                  </div>
-                </div>
-                <div
-                  ref={focusedContourCardRef}
-                  data-testid="segment-editor-recording-card"
-                  className="relative h-[52dvh] min-h-[24rem] touch-none select-none overflow-hidden rounded-xl border border-indigo-200 bg-gradient-to-b from-sky-50 via-white to-amber-50"
-                >
-                  <div
-                    className="pointer-events-none absolute inset-y-0 w-0.5 bg-rose-500/80"
-                    style={{
-                      left: `${Math.max(0, Math.min(100, ((currentMs - focusedRecordingSegment.startMs) / focusedSegmentDurationMs) * 100))}%`,
-                    }}
-                  />
-                  {focusedContourDraftPoints.map((point) => {
-                    const left = Math.round(((point.absoluteMs - focusedRecordingSegment.startMs) / focusedSegmentDurationMs) * 1000) / 10;
-                    const top = Math.round((1 - point.lane) * 1000) / 10;
-                    const width = Math.round(Math.max(2, (point.durationMs / focusedSegmentDurationMs) * 100) * 10) / 10;
-                    const label = point.direction ?? 'S';
-                    return (
-                      <div
-                        key={`focused-draft-note-${point.id}`}
-                        data-testid="segment-editor-focused-contour-note"
-                        className="absolute h-4 -translate-y-1/2 rounded-full bg-sky-300/55 shadow-sm"
-                        style={{ left: `${left}%`, top: `${top}%`, width: `${width}%` }}
-                      >
-                        <button
-                          type="button"
-                          data-testid="segment-editor-focused-contour-dot"
-                          aria-label={`Adjust focused contour dot ${label}`}
-                          className="absolute left-0 top-1/2 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 touch-none select-none items-center justify-center rounded-full border-2 border-white bg-sky-600 text-xs font-bold text-white shadow-md"
-                          onPointerDown={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            if (typeof event.currentTarget.setPointerCapture === 'function') {
-                              event.currentTarget.setPointerCapture(event.pointerId);
-                            }
-                            updateContourDraftLane(point.id, getFocusedContourLaneFromClientY(event.clientY));
-                          }}
-                          onPointerMove={(event) => {
-                            if (event.buttons === 0) {
-                              return;
-                            }
-                            event.preventDefault();
-                            event.stopPropagation();
-                            updateContourDraftLane(point.id, getFocusedContourLaneFromClientY(event.clientY));
-                          }}
-                          onPointerUp={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            updateContourDraftLane(point.id, getFocusedContourLaneFromClientY(event.clientY));
-                          }}
-                        >
-                          {label}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          ) : (
-          <>
           <div className="overflow-x-auto rounded-lg border border-indigo-300">
             <div
               ref={boardRef}
@@ -1717,10 +1191,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
                     className="min-h-[180px] flex-1 rounded border border-indigo-200 px-2 py-2 text-sm leading-5 resize-none overflow-y-auto"
                     placeholder="lyrics"
                   />
-                  <PitchContourThumbnail
-                    notes={getSegmentPitchContourNotes(contourDraftNotes, segment)}
-                    segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
-                  />
                   <div className="mt-auto flex items-center justify-between text-xs text-indigo-700">
                     <span>{Math.floor(segment.startMs / 1000)}s</span>
                     <span>{Math.floor(segment.endMs / 1000)}s</span>
@@ -1745,54 +1215,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
             );
           })}
           {timelineDurationMs > 0 && (
-            <>
-              {contourDraftPoints.map((point) => {
-                const left = Math.round((point.absoluteMs / timelineDurationMs) * 1000) / 10;
-                const top = Math.round((1 - point.lane) * 1000) / 10;
-                const width = Math.round(Math.max(1.2, (point.durationMs / timelineDurationMs) * 100) * 10) / 10;
-                const label = point.direction ?? 'S';
-                return (
-                  <div
-                    key={`draft-note-${point.id}`}
-                    data-testid="segment-editor-contour-draft-note"
-                    className="absolute z-50 h-3 -translate-y-1/2 rounded-full bg-sky-300/50 shadow-sm"
-                    style={{ left: `${left}%`, top: `${top}%`, width: `${width}%` }}
-                  >
-                    <button
-                      type="button"
-                      data-testid="segment-editor-contour-draft-dot"
-                      aria-label={`Adjust contour dot ${label}`}
-                      className="absolute left-0 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 touch-none select-none items-center justify-center rounded-full border-2 border-white bg-sky-600 text-xs font-bold text-white shadow-md"
-                      onPointerDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (typeof event.currentTarget.setPointerCapture === 'function') {
-                          event.currentTarget.setPointerCapture(event.pointerId);
-                        }
-                        updateContourDraftLane(point.id, getBoardLaneFromClientY(event.clientY));
-                      }}
-                      onPointerMove={(event) => {
-                        if (event.buttons === 0) {
-                          return;
-                        }
-                        event.preventDefault();
-                        event.stopPropagation();
-                        updateContourDraftLane(point.id, getBoardLaneFromClientY(event.clientY));
-                      }}
-                      onPointerUp={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        updateContourDraftLane(point.id, getBoardLaneFromClientY(event.clientY));
-                      }}
-                    >
-                      {label}
-                    </button>
-                  </div>
-                );
-              })}
-            </>
-          )}
-          {timelineDurationMs > 0 && (
             <div
               data-testid="segment-editor-canvas-playhead"
               className="pointer-events-none absolute inset-y-0 z-40 w-0.5 bg-rose-500/80"
@@ -1806,102 +1228,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
           <span>0:00</span>
           <span>{Math.floor(timelineDurationMs / 60000)}:{String(Math.floor((timelineDurationMs % 60000) / 1000)).padStart(2, '0')}</span>
         </div>
-          </>
-          )}
           </div>
-
-          {isContourRecording ? (
-            <div className="flex min-h-[calc(100svh-8rem)] justify-start lg:block lg:min-h-0">
-              <div
-                ref={contourTapBarRef}
-                data-testid="segment-editor-contour-tapbar"
-                aria-label="Contour tap bar"
-                className="tap-input-surface sticky top-[7rem] h-[calc(100svh-8rem)] min-h-[70svh] w-[calc(100%-3rem)] touch-none select-none overflow-hidden rounded-2xl border-2 border-indigo-500 bg-gradient-to-b from-emerald-50 via-white to-amber-50 shadow-sm lg:h-[calc(100dvh-12rem)] lg:min-h-0 lg:w-full"
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                onDoubleClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                onDragStart={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  finalizeContourCapture();
-                  if (typeof event.currentTarget.setPointerCapture === 'function') {
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                  }
-                  activeContourCaptureRef.current = {
-                    id: crypto.randomUUID(),
-                    startMs: currentMs,
-                    lane: getLaneFromClientY(event.clientY),
-                    pointerId: event.pointerId,
-                  };
-                }}
-                onPointerMove={(event) => {
-                  const activeCapture = activeContourCaptureRef.current;
-                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
-                    return;
-                  }
-                  event.preventDefault();
-                  event.stopPropagation();
-                  activeCapture.lane = getLaneFromClientY(event.clientY);
-                }}
-                onPointerUp={(event) => {
-                  const activeCapture = activeContourCaptureRef.current;
-                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
-                    return;
-                  }
-                  event.preventDefault();
-                  event.stopPropagation();
-                  finalizeContourCapture(getLaneFromClientY(event.clientY));
-                }}
-                onPointerCancel={(event) => {
-                  const activeCapture = activeContourCaptureRef.current;
-                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
-                    return;
-                  }
-                  event.preventDefault();
-                  event.stopPropagation();
-                  finalizeContourCapture(getLaneFromClientY(event.clientY));
-                }}
-                onLostPointerCapture={(event) => {
-                  const activeCapture = activeContourCaptureRef.current;
-                  if (!activeCapture || activeCapture.pointerId !== event.pointerId) {
-                    return;
-                  }
-                  finalizeContourCapture();
-                }}
-              >
-                <div className="pointer-events-none absolute inset-0">
-                  <div className="absolute inset-x-0 top-0 flex h-16 items-start justify-center bg-gradient-to-b from-emerald-200/45 to-transparent pt-4 text-emerald-700">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 19V5" />
-                      <path d="M6 11l6-6 6 6" />
-                    </svg>
-                  </div>
-                  <div className="absolute inset-x-0 bottom-0 flex h-16 items-end justify-center bg-gradient-to-t from-amber-200/55 to-transparent pb-4 text-amber-700">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 5v14" />
-                      <path d="M18 13l-6 6-6-6" />
-                    </svg>
-                  </div>
-                  <div className="absolute inset-x-3 top-1/2 -translate-y-1/2 rounded-xl border border-indigo-200 bg-white/70 py-2 text-center text-indigo-500 shadow-sm">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" className="mx-auto h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 5v14" />
-                      <path d="M6 11l6-6 6 6" />
-                      <path d="M18 13l-6 6-6-6" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
         </div>
 
         <div data-testid="segment-editor-song-timeline" className="mt-4 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-3">

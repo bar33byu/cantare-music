@@ -5,6 +5,7 @@ import type {
   TapScoreResult,
   TapMissKind,
 } from "./enhancedTapPractice";
+import type { ContourNoteHeatStat } from "../types";
 
 export type MidiMovement = "start" | "up" | "down" | "same";
 export type MidiParseStatus = "parsed" | "error";
@@ -120,6 +121,10 @@ export interface MidiAttemptSummary {
 const DEFAULT_TEMPO_MICROSECONDS_PER_QUARTER = 500000;
 const DEFAULT_SAFE_DURATION_SECONDS = 0.1;
 const PITCH_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+function roundSeconds(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
 
 function readString(view: DataView, offset: number, length: number): string {
   let value = "";
@@ -305,7 +310,7 @@ export function cleanMidiNotes(
   rawNotes: RawMidiNote[],
   settings: Partial<MidiCleanupSettings> = {}
 ): MidiCleanupResult {
-  const shortNoteThresholdMs = Math.max(0, Math.min(300, settings.shortNoteThresholdMs ?? 100));
+  const shortNoteThresholdMs = Math.max(0, Math.min(300, settings.shortNoteThresholdMs ?? 0));
   const simultaneousThresholdSeconds = Math.max(0, (settings.simultaneousThresholdMs ?? 30) / 1000);
   const sorted = [...rawNotes].sort((a, b) => a.midiStartSeconds - b.midiStartSeconds || a.index - b.index);
   const longEnough = sorted.filter((note) => note.midiDurationSeconds * 1000 >= shortNoteThresholdMs);
@@ -394,6 +399,24 @@ export function appendAlignmentTap(alignment: MidiAlignment, tappedStartTimeSeco
   ]);
 }
 
+export function alignMidiByFirstAudioStart(
+  alignment: MidiAlignment,
+  cleanedNotes: CleanedMidiNote[],
+  firstAudioStartSeconds: number
+): MidiAlignment {
+  const firstNote = cleanedNotes[0];
+  if (!firstNote) {
+    return normalizeAlignment(alignment, []);
+  }
+
+  const offsetSeconds = Math.max(0, firstAudioStartSeconds) - firstNote.midiStartSeconds;
+  const tappedStartTimesSeconds = cleanedNotes
+    .slice(0, alignment.retainedMidiNoteCount)
+    .map((note) => roundSeconds(Math.max(0, note.midiStartSeconds + offsetSeconds)));
+
+  return normalizeAlignment(alignment, tappedStartTimesSeconds);
+}
+
 export function undoLastAlignmentTap(alignment: MidiAlignment): MidiAlignment {
   return normalizeAlignment(alignment, alignment.tappedStartTimesSeconds.slice(0, -1));
 }
@@ -450,20 +473,26 @@ export function deriveSegmentAnswerKey(
   const startSeconds = segment.startMs / 1000;
   const endSeconds = segment.endMs / 1000;
   const notes = wholeSongKey.notes
-    .filter((note) => note.tappedStartTimeSeconds >= startSeconds && note.tappedStartTimeSeconds <= endSeconds)
+    .filter((note) => {
+      const noteStartSeconds = note.tappedStartTimeSeconds;
+      const noteEndSeconds = noteStartSeconds + note.effectiveDurationSeconds;
+      return noteEndSeconds > startSeconds && noteStartSeconds < endSeconds;
+    })
     .map<SegmentMidiAnswerKeyNote>((note, index, segmentNotes) => {
       const previous = segmentNotes[index - 1];
       const movementFromPrevious: MidiMovement =
         !previous ? "start" : note.midiPitch > previous.midiPitch ? "up" : note.midiPitch < previous.midiPitch ? "down" : "same";
+      const clippedStartSeconds = Math.max(note.tappedStartTimeSeconds, startSeconds);
+      const clippedEndSeconds = Math.min(note.tappedStartTimeSeconds + note.effectiveDurationSeconds, endSeconds);
       return {
         sourceWholeSongNoteIndex: note.index,
         segmentId: segment.id,
-        segmentLocalStartTimeSeconds: note.tappedStartTimeSeconds - startSeconds,
+        segmentLocalStartTimeSeconds: roundSeconds(clippedStartSeconds - startSeconds),
         midiPitch: note.midiPitch,
         pitchName: note.pitchName,
         movementFromPrevious,
         midiDurationSeconds: note.midiDurationSeconds,
-        effectiveDurationSeconds: note.effectiveDurationSeconds,
+        effectiveDurationSeconds: roundSeconds(Math.max(0, clippedEndSeconds - clippedStartSeconds)),
       };
     });
 
@@ -564,4 +593,38 @@ export function buildMidiBlendTapHeatMap(
       attemptCount,
     };
   });
+}
+
+export function buildMidiContourTapHeatMap(
+  segmentKey: MidiSegmentAnswerKey | null,
+  scoredAttempts: TapScoreResult[],
+  attemptLimit: number = 5
+): Record<string, ContourNoteHeatStat> {
+  if (!segmentKey) {
+    return {};
+  }
+
+  const recentAttempts = scoredAttempts.slice(0, Math.max(1, attemptLimit));
+  return Object.fromEntries(
+    segmentKey.notes.map((note, index) => {
+      let missCount = 0;
+      for (const attempt of recentAttempts) {
+        const detail = attempt.details.find((item) => item.index === index);
+        if (detail && detail.status !== "matched" && detail.status !== "extra") {
+          missCount += 1;
+        }
+      }
+
+      const sessionCount = recentAttempts.length;
+      const missRate = sessionCount === 0 ? 0 : missCount / sessionCount;
+      return [
+        `midi-contour-${segmentKey.segmentId}-${note.sourceWholeSongNoteIndex}`,
+        {
+          sessionCount,
+          missCount,
+          missRate,
+        },
+      ];
+    })
+  );
 }

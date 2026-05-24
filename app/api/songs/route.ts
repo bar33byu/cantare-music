@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllSongs, createSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getSegmentsBySongId } from '../../../db/queries';
+import { getAllSongs, createSong, getLatestMidiSourceForSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getSegmentsBySongId } from '../../../db/queries';
 import { resolveRequestUserId } from '../_user';
 
 function toIsoString(value: unknown): string | null {
@@ -43,9 +43,11 @@ export async function GET(request: NextRequest) {
         songs.map(async (song) => {
           const segments = await getSegmentsBySongId(song.id);
           const hasSegments = segments.length > 0;
-          const hasTapKeys = (song.pitchContourNotes?.length ?? 0) > 0;
+          const midiSource = await getLatestMidiSourceForSong(song.id, userId);
+          const hasMidiContour = (midiSource?.cleanedNoteCount ?? 0) > 0;
+          const hasTapKeys = hasMidiContour;
 
-          return [song.id, { hasSegments, hasTapKeys }] as const;
+          return [song.id, { hasSegments, hasTapKeys, hasMidiContour }] as const;
         })
       ).then((entries) => Object.fromEntries(entries)),
     ]);
@@ -53,6 +55,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       songs.map((song) => ({
         ...song,
+        pitchContourNotes: [],
         createdAt: toIsoString(song.createdAt) ?? new Date(0).toISOString(),
         lastPracticedAt: toIsoString(song.lastPracticedAt ?? ratingFallbackBySongId[song.id] ?? null),
         masteryPercent: knowledgeBySongId[song.id] ?? 0,
@@ -61,11 +64,11 @@ export async function GET(request: NextRequest) {
         hasBlendAudio: Boolean(song.alternateAudioKey),
         hasSegments: readinessBySongId[song.id]?.hasSegments ?? false,
         hasTapKeys: readinessBySongId[song.id]?.hasTapKeys ?? false,
-        hasMidiContour: readinessBySongId[song.id]?.hasTapKeys ?? false,
+        hasMidiContour: readinessBySongId[song.id]?.hasMidiContour ?? false,
       })),
       {
         headers: {
-          'Cache-Control': 'max-age=300', // Cache for 5 minutes
+          'Cache-Control': 'no-store',
         },
       }
     );

@@ -208,7 +208,7 @@ export const midiSources = pgTable(
     cleanupSettings: jsonb("cleanup_settings")
       .$type<MidiCleanupSettingsData>()
       .notNull()
-      .default(sql`'{"shortNoteThresholdMs":100,"simultaneousThresholdMs":30}'::jsonb`),
+      .default(sql`'{"shortNoteThresholdMs":0,"simultaneousThresholdMs":30}'::jsonb`),
     rawNotes: jsonb("raw_notes").$type<RawMidiNoteData[]>().notNull().default(sql`'[]'::jsonb`),
     cleanedNotes: jsonb("cleaned_notes").$type<CleanedMidiNoteData[]>().notNull().default(sql`'[]'::jsonb`),
     rawNoteCount: integer("raw_note_count").notNull().default(0),

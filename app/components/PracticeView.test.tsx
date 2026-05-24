@@ -125,6 +125,70 @@ const makeSession = (song: Song): SessionState => ({
   currentSongId: song.id,
 });
 
+const makeMidiSegmentAnswerKeysResponse = () => ({
+  segmentAnswerKeys: {
+    "seg-0": {
+      segmentId: "seg-0",
+      midiSourceId: "midi-source-1",
+      alignmentId: "alignment-1",
+      taps: [
+        { id: "midi-seg-0-1", timeOffsetMs: 0, direction: "same" },
+        { id: "midi-seg-0-2", timeOffsetMs: 100, direction: "up" },
+      ],
+      notes: [
+        {
+          sourceWholeSongNoteIndex: 1,
+          segmentId: "seg-0",
+          segmentLocalStartTimeSeconds: 0,
+          midiPitch: 60,
+          pitchName: "C4",
+          movementFromPrevious: "start",
+          midiDurationSeconds: 0.1,
+          effectiveDurationSeconds: 0.1,
+        },
+        {
+          sourceWholeSongNoteIndex: 2,
+          segmentId: "seg-0",
+          segmentLocalStartTimeSeconds: 0.1,
+          midiPitch: 64,
+          pitchName: "E4",
+          movementFromPrevious: "up",
+          midiDurationSeconds: 0.1,
+          effectiveDurationSeconds: 0.1,
+        },
+      ],
+    },
+  },
+});
+
+const mockPracticeFetchWithMidiAnswerKey = () => {
+  mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
+      return makeFetchResponse({ ratings: [] });
+    }
+    if (url.endsWith("/midi") && (!init || init.method === undefined)) {
+      return makeFetchResponse(makeMidiSegmentAnswerKeysResponse());
+    }
+    if (url.endsWith("/tap-heatmap") && (!init || init.method === undefined)) {
+      return makeFetchResponse({ heatMapBySegment: {} });
+    }
+    if (url.endsWith("/tap-sessions") && init?.method === "POST") {
+      return makeFetchResponse({ session: { id: "tap-session-1" } });
+    }
+    if (url.includes("/tap-sessions/") && init?.method === "POST") {
+      return makeFetchResponse({});
+    }
+    if (url.endsWith("/practice") && init?.method === "POST") {
+      return makeFetchResponse({});
+    }
+    if (url.endsWith("/ratings") && init?.method === "POST") {
+      return makeFetchResponse({});
+    }
+    return makeFetchResponse({});
+  });
+};
+
 describe("PracticeView", () => {
   const renderAndWaitForRatings = async (
     song: Song,
@@ -151,6 +215,9 @@ describe("PracticeView", () => {
       const url = String(input);
       if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
         return makeFetchResponse({ ratings: [] });
+      }
+      if (url.endsWith("/midi") && (!init || init.method === undefined)) {
+        return makeFetchResponse({ segmentAnswerKeys: {} });
       }
       if (url.endsWith("/tap-sessions") && init?.method === "POST") {
         return makeFetchResponse({ session: { id: "tap-session-1" } });
@@ -585,6 +652,8 @@ describe("PracticeView", () => {
   });
 
   it("hides segment arrows and shows tap bar in tap practice mode", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
     const song = makeSong(3);
     await renderAndWaitForRatings(song);
 
@@ -606,6 +675,8 @@ describe("PracticeView", () => {
   });
 
   it("creates a tap session when tap practice is enabled", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
     const song = makeSong(1);
     await renderAndWaitForRatings(song);
 
@@ -619,6 +690,8 @@ describe("PracticeView", () => {
   });
 
   it("stores the selected audio version on tap practice attempts", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
     const song: Song = {
       ...makeSong(1),
       alternateAudioUrl: "https://cdn.example.com/audio/song-1/blend.mp3",
@@ -642,23 +715,13 @@ describe("PracticeView", () => {
     });
   });
 
-  it("toggles static contour map on section card before heat map history exists", async () => {
+  it("does not show the contour map toggle for legacy song answer-key notes", async () => {
     const song = makeSong(2);
     await renderAndWaitForRatings(song);
-    await waitFor(() => {
-      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
-    });
 
     const segmentCard = screen.getByTestId("mock-segment-card");
+    expect(screen.queryByTestId("practice-card-contour-toggle")).not.toBeInTheDocument();
     expect(segmentCard).toHaveAttribute("data-show-contour-map", "false");
-
-    fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
-    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
-
-    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
-    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
-
-    expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
   });
 
   it("shows the contour map toggle when only a MIDI answer key exists", async () => {
@@ -739,7 +802,7 @@ describe("PracticeView", () => {
     await renderAndWaitForRatings(song);
 
     expect(screen.queryByTestId("practice-card-contour-toggle")).not.toBeInTheDocument();
-    expect(screen.getByTestId("practice-tap-mode-toggle")).toBeInTheDocument();
+    expect(screen.queryByTestId("practice-tap-mode-toggle")).not.toBeInTheDocument();
     expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
   });
 
@@ -757,11 +820,9 @@ describe("PracticeView", () => {
       setPlaybackEndMs: mockSetPlaybackEndMs,
     });
 
+    mockPracticeFetchWithMidiAnswerKey();
+
     const song = makeSong(1);
-    song.pitchContourNotes = [
-      { id: "k1", absoluteMs: song.segments[0].startMs, durationMs: 100, lane: 0.2 },
-      { id: "k2", absoluteMs: song.segments[0].startMs + 10, durationMs: 100, lane: 0.8 },
-    ];
 
     await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
@@ -797,6 +858,8 @@ describe("PracticeView", () => {
   });
 
   it("persists captured taps to the active tap session", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: true,
       isReady: true,
@@ -852,6 +915,8 @@ describe("PracticeView", () => {
   });
 
   it("refreshes the card contour heat map after saving tap practice attempts", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: true,
       isReady: true,
@@ -864,6 +929,8 @@ describe("PracticeView", () => {
       seek: mockSeek,
       setPlaybackEndMs: mockSetPlaybackEndMs,
     });
+
+    mockPracticeFetchWithMidiAnswerKey();
 
     const song = makeSong(1);
     await renderAndWaitForRatings(song);
@@ -926,6 +993,8 @@ describe("PracticeView", () => {
       setPlaybackEndMs: mockSetPlaybackEndMs,
     });
 
+    mockPracticeFetchWithMidiAnswerKey();
+
     const song = makeSong(1);
     await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
@@ -977,6 +1046,9 @@ describe("PracticeView", () => {
       const url = String(input);
       if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
         return makeFetchResponse({ ratings: [] });
+      }
+      if (url.endsWith("/midi") && (!init || init.method === undefined)) {
+        return makeFetchResponse(makeMidiSegmentAnswerKeysResponse());
       }
       if (url.endsWith("/tap-sessions") && init?.method === "POST") {
         return makeFetchResponse({ session: { id: "tap-session-1" } });
@@ -1037,6 +1109,9 @@ describe("PracticeView", () => {
       if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
         return makeFetchResponse({ ratings: [] });
       }
+      if (url.endsWith("/midi") && (!init || init.method === undefined)) {
+        return makeFetchResponse(makeMidiSegmentAnswerKeysResponse());
+      }
       if (url.endsWith("/tap-sessions") && init?.method === "POST") {
         return makeFetchResponse({ session: { id: "tap-session-1" } });
       }
@@ -1082,6 +1157,8 @@ describe("PracticeView", () => {
   });
 
   it("keeps the contour overlay visible without adding tap-mode toolbar chrome", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
     const song = makeSong(1);
     await renderAndWaitForRatings(song);
 
@@ -1091,6 +1168,8 @@ describe("PracticeView", () => {
   });
 
   it("hides auxiliary tap debugging controls from the simplified toolbar", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: true,
       isReady: true,
@@ -1128,6 +1207,8 @@ describe("PracticeView", () => {
     };
 
     mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    mockPracticeFetchWithMidiAnswerKey();
 
     const song = makeSong(1);
     const view = render(<PracticeView song={song} initialSession={makeSession(song)} />);
@@ -1185,6 +1266,8 @@ describe("PracticeView", () => {
   });
 
   it("shows a two-second count-in before starting playback in tap practice mode", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
     const song = makeSong(1);
     await renderAndWaitForRatings(song);
 
@@ -1224,6 +1307,8 @@ describe("PracticeView", () => {
     };
 
     mockUseAudioPlayer.mockImplementation(() => playbackState);
+
+    mockPracticeFetchWithMidiAnswerKey();
 
     const song = makeSong(1);
     song.segments[0] = {
@@ -1271,6 +1356,8 @@ describe("PracticeView", () => {
   });
 
   it("shows loop accuracy toast and clears taps when loop restarts", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,
       isReady: true,
@@ -1339,11 +1426,9 @@ describe("PracticeView", () => {
       setPlaybackEndMs: mockSetPlaybackEndMs,
     });
 
+    mockPracticeFetchWithMidiAnswerKey();
+
     const song = makeSong(1);
-    song.pitchContourNotes = [
-      { id: "k1", absoluteMs: song.segments[0].startMs, durationMs: 120, lane: 0.2 },
-      { id: "k2", absoluteMs: song.segments[0].startMs + 100, durationMs: 120, lane: 0.8 },
-    ];
 
     await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
@@ -1382,6 +1467,10 @@ describe("PracticeView", () => {
 
       if (url.endsWith("/ratings") && method === "GET") {
         return Promise.resolve(makeFetchResponse({ ratings: [] }));
+      }
+
+      if (url.endsWith("/midi") && method === "GET") {
+        return Promise.resolve(makeFetchResponse(makeMidiSegmentAnswerKeysResponse()));
       }
 
       if (url.endsWith("/tap-sessions") && method === "POST") {

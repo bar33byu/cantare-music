@@ -37,6 +37,7 @@ export interface Song {
   audioUrl: string;
   alternateAudioUrl?: string;
   pitchContourNotes?: SongPitchContourNote[];
+  hasMidiContour?: boolean;
   segments: Segment[];
   createdAt: string;
   lastPracticedAt?: string | null;

@@ -15,7 +15,6 @@ vi.mock('../../../../db/queries', () => ({
   updateSong: vi.fn(),
   getSegmentsBySongId: vi.fn(),
   recordOrphanedAudioKey: vi.fn(),
-  deleteTapPracticeSessionsForSong: vi.fn(),
 }));
 
 vi.mock('../../../../lib/r2', () => ({
@@ -29,7 +28,6 @@ import {
   deleteSong,
   updateSong,
   getSegmentsBySongId,
-  deleteTapPracticeSessionsForSong,
 } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 
@@ -41,7 +39,7 @@ describe('GET /api/songs/[id]', () => {
       artist: 'Artist',
       audioKey: 'key.mp3',
       alternateAudioKey: 'blend-key.mp3',
-      pitchContourNotes: [{ id: 'n-1', absoluteMs: 0, durationMs: 100, lane: 0.5 }],
+      pitchContourNotes: [],
       createdAt: new Date('2023-01-01'),
       lastPracticedAt: new Date('2023-01-04'),
       userId: 'default',
@@ -62,7 +60,7 @@ describe('GET /api/songs/[id]', () => {
       artist: 'Artist',
       audioUrl: 'https://example.com/key.mp3',
       alternateAudioUrl: 'https://example.com/key.mp3',
-      pitchContourNotes: [{ id: 'n-1', absoluteMs: 0, durationMs: 100, lane: 0.5 }],
+      pitchContourNotes: [],
       segments: [{
         id: 'seg1',
         songId: '123',
@@ -184,7 +182,7 @@ describe('PATCH /api/songs/[id]', () => {
     expect(deleteObject).not.toHaveBeenCalled();
   });
 
-  it('clears tap practice history when pitch contour answers change', async () => {
+  it('ignores legacy pitch contour answer-key updates', async () => {
     vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 1', audioKey: null } as any);
     const pitchContourNotes = [{ id: 'n-1', absoluteMs: 100, durationMs: 80, lane: 0.5 }];
 
@@ -195,10 +193,11 @@ describe('PATCH /api/songs/[id]', () => {
     });
 
     const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
+    const data = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(updateSong).toHaveBeenCalledWith('123', { pitchContourNotes }, 'default');
-    expect(deleteTapPracticeSessionsForSong).toHaveBeenCalledWith('123', 'default');
+    expect(response.status).toBe(400);
+    expect(data.error).toBe('No valid fields to update');
+    expect(updateSong).not.toHaveBeenCalled();
   });
 
   it('returns 404 for unknown song', async () => {

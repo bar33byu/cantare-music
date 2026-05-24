@@ -33,7 +33,7 @@ function getSongReadiness(song: SongListItem) {
   const hasPartAudio = song.hasPartAudio ?? Boolean(song.audioKey?.trim() || (song.hasAudio && !song.alternateAudioKey?.trim()));
   const hasBlendAudio = song.hasBlendAudio ?? Boolean(song.alternateAudioKey?.trim());
   const hasSegments = song.hasSegments ?? false;
-  const hasMidiContour = song.hasMidiContour ?? song.hasTapKeys ?? false;
+  const hasMidiContour = song.hasMidiContour ?? false;
 
   return { hasPartAudio, hasBlendAudio, hasSegments, hasMidiContour };
 }

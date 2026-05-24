@@ -85,6 +85,7 @@ export interface PlaylistSongItem {
   audioUrl: string;
   alternateAudioUrl?: string;
   pitchContourNotes: SongRow["pitchContourNotes"];
+  hasMidiContour?: boolean;
   ratingCount: number;
   segments: SegmentRow[];
   createdAt: string;
@@ -1242,7 +1243,7 @@ async function ensureMidiTables(): Promise<void> {
           "content_type" text,
           "file_size" integer NOT NULL DEFAULT 0,
           "parse_status" text NOT NULL DEFAULT 'parsed',
-          "cleanup_settings" jsonb NOT NULL DEFAULT '{"shortNoteThresholdMs":100,"simultaneousThresholdMs":30}'::jsonb,
+          "cleanup_settings" jsonb NOT NULL DEFAULT '{"shortNoteThresholdMs":0,"simultaneousThresholdMs":30}'::jsonb,
           "raw_notes" jsonb NOT NULL DEFAULT '[]'::jsonb,
           "cleaned_notes" jsonb NOT NULL DEFAULT '[]'::jsonb,
           "raw_note_count" integer NOT NULL DEFAULT 0,
@@ -1297,6 +1298,8 @@ function normalizeTapDirection(value: string | null | undefined): TapDirection |
 type TapPracticeSessionProjection = Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt"> &
   Partial<Pick<TapPracticeSessionRow, "segmentId" | "audioVersion" | "mode" | "completedAt" | "finalizedAt" | "autoScorePercent" | "selfRating" | "scoreDetails">>;
 
+const TAP_PRACTICE_SESSION_KEEP_LIMIT = 5;
+
 function mapTapPracticeSession(row: TapPracticeSessionProjection): PersistedTapPracticeSessionSummary {
   const selfRating = row.selfRating === 1 || row.selfRating === 2 || row.selfRating === 3 || row.selfRating === 4 || row.selfRating === 5 ? row.selfRating : undefined;
   return {
@@ -1337,6 +1340,80 @@ export async function deleteExpiredTapPracticeData(
       await db()
         .delete(tapPracticeSessions)
         .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
+      return;
+    }
+    throw error;
+  }
+}
+
+async function pruneTapPracticeSessionsForSegment(
+  songId: string,
+  segmentId: string,
+  currentSessionId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  keepLimit: number = TAP_PRACTICE_SESSION_KEEP_LIMIT
+): Promise<void> {
+  let sessions: Array<{ id: string; startedAt: Date }> = [];
+  try {
+    sessions = await db()
+      .select({
+        id: tapPracticeSessions.id,
+        startedAt: tapPracticeSessions.startedAt,
+      })
+      .from(tapPracticeSessions)
+      .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+      .where(and(
+        eq(tapPracticeSessions.songId, songId),
+        eq(tapPracticeSessions.segmentId, segmentId),
+        eq(tapPracticeSessions.mode, "practice"),
+        eq(songs.userId, userId)
+      ))
+      .orderBy(desc(tapPracticeSessions.startedAt));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
+      await ensureTapPracticeTables();
+      sessions = await db()
+        .select({
+          id: tapPracticeSessions.id,
+          startedAt: tapPracticeSessions.startedAt,
+        })
+        .from(tapPracticeSessions)
+        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+        .where(and(
+          eq(tapPracticeSessions.songId, songId),
+          eq(tapPracticeSessions.segmentId, segmentId),
+          eq(tapPracticeSessions.mode, "practice"),
+          eq(songs.userId, userId)
+        ))
+        .orderBy(desc(tapPracticeSessions.startedAt));
+    } else {
+      throw error;
+    }
+  }
+
+  const retained = new Set<string>([currentSessionId]);
+  for (const session of sessions) {
+    if (retained.size >= Math.max(1, keepLimit)) {
+      break;
+    }
+    retained.add(session.id);
+  }
+
+  const staleSessionIds = sessions.map((session) => session.id).filter((id) => !retained.has(id));
+  if (staleSessionIds.length === 0) {
+    return;
+  }
+
+  try {
+    await db()
+      .delete(tapPracticeSessions)
+      .where(inArray(tapPracticeSessions.id, staleSessionIds));
+  } catch (error) {
+    if (isMissingTapPracticeTableError(error)) {
+      await ensureTapPracticeTables();
+      await db()
+        .delete(tapPracticeSessions)
+        .where(inArray(tapPracticeSessions.id, staleSessionIds));
       return;
     }
     throw error;
@@ -1475,6 +1552,10 @@ export async function updateTapPracticeSessionProgress(
     } else {
       throw error;
     }
+  }
+
+  if (existing.segmentId && existing.mode === "practice") {
+    await pruneTapPracticeSessionsForSegment(existing.songId, existing.segmentId, sessionId, userId);
   }
 
   return getTapPracticeSessionDetail(sessionId, userId);
@@ -1746,6 +1827,10 @@ export async function finalizeTapPracticeSession(
     } else {
       throw error;
     }
+  }
+
+  if (existing.segmentId && existing.mode === "practice") {
+    await pruneTapPracticeSessionsForSegment(existing.songId, existing.segmentId, sessionId, userId);
   }
 
   return getTapPracticeSessionDetail(sessionId, userId);
@@ -2130,11 +2215,18 @@ export async function getPlaylistById(
   }
 
   const songIds = linkedSongs.map((s) => s.songId);
-  const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts] = await Promise.all([
+  const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts, midiContourEntries] = await Promise.all([
     Promise.all(linkedSongs.map((s) => getSegmentsBySongId(s.songId))),
     getSongKnowledgeBySongIds(songIds, playlist.userId),
     getLatestRatingTimeBySongIds(songIds, playlist.userId),
     getRatingCountBySongIds(songIds, playlist.userId),
+    Promise.all(
+      linkedSongs.map(async (song) => {
+        const source = await getLatestMidiSourceForSong(song.songId, playlist.userId);
+        const hasMidiContour = (source?.cleanedNoteCount ?? 0) > 0;
+        return [song.songId, hasMidiContour] as const;
+      })
+    ).then((entries) => Object.fromEntries(entries)),
   ]);
 
   const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow, i) => ({
@@ -2143,7 +2235,8 @@ export async function getPlaylistById(
     artist: songRow.artist ?? undefined,
     audioUrl: songRow.audioKey ? getPublicUrl(songRow.audioKey) : "",
     alternateAudioUrl: songRow.alternateAudioKey ? getPublicUrl(songRow.alternateAudioKey) : undefined,
-    pitchContourNotes: songRow.pitchContourNotes ?? [],
+    pitchContourNotes: [],
+    hasMidiContour: midiContourEntries[songRow.songId] ?? false,
     ratingCount: ratingCounts[songRow.songId] ?? 0,
     segments: segmentsBySong[i],
     createdAt: toIso(songRow.createdAt),

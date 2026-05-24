@@ -21,7 +21,7 @@ import {
 
 const MAX_MIDI_FILE_SIZE = 2_000_000;
 const DEFAULT_CLEANUP_SETTINGS: MidiCleanupSettings = {
-  shortNoteThresholdMs: 100,
+  shortNoteThresholdMs: 0,
   simultaneousThresholdMs: 30,
 };
 const ALLOWED_EXTENSIONS = [".mid", ".midi"];
