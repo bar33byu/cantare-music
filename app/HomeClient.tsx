@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PracticeView from "./components/PracticeView";
 import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
@@ -9,8 +9,15 @@ import { SongForm } from "./components/SongForm";
 import { SongBrowser } from "./components/SongBrowser";
 import { SegmentEditor } from "./components/SegmentEditor";
 import { makeSession } from "./lib/factories";
+import {
+  clearGuestProgress,
+  getGuestProgressSongIds,
+  hasDeclinedGuestProgressClaim,
+  hasGuestProgress,
+  markGuestProgressClaimDeclined,
+} from "./lib/guestProgress";
 import type { Playlist, Song } from "./types";
-import { createUserIdFromName, DEFAULT_USER_ID, normalizeUserId, type KnownUser, USER_COOKIE_NAME } from "./lib/userContext";
+import { createPublicUsernameFromName, DEFAULT_USER_ID, normalizeUserId, normalizeUsername, type KnownUser, USER_COOKIE_NAME } from "./lib/userContext";
 import type { PreferredAudioVersion } from "./lib/audioUrls";
 
 interface SongListItem {
@@ -54,14 +61,15 @@ interface BuildInfo {
 }
 
 const SETTINGS_STORAGE_KEY = "cantare:user-settings";
+const AUTH_SESSION_COOKIE_NAME = "cantare-session";
 const DEFAULT_USER_SETTINGS: UserSettings = {
   segmentPrerollMs: 500,
   preferredAudioVersion: "part",
   currentUserId: DEFAULT_USER_ID,
-  users: [{ id: DEFAULT_USER_ID, name: "Default User" }],
+  users: [{ id: DEFAULT_USER_ID, username: "default", name: "Default User", email: "", profileVisibility: "private" }],
 };
 
-function normalizeKnownUsers(users: KnownUser[] | undefined): KnownUser[] {
+function normalizeKnownUsers(users: Array<Partial<KnownUser>> | undefined): KnownUser[] {
   if (!Array.isArray(users)) {
     return DEFAULT_USER_SETTINGS.users;
   }
@@ -72,16 +80,29 @@ function normalizeKnownUsers(users: KnownUser[] | undefined): KnownUser[] {
       continue;
     }
     const id = normalizeUserId(user.id);
+    const username = normalizeUsername(user.username) || createPublicUsernameFromName(user.name || id);
     if (!deduped.has(id)) {
-      deduped.set(id, { id, name: user.name.trim() || id });
+      deduped.set(id, {
+        id,
+        username,
+        name: user.name.trim() || username,
+        email: typeof user.email === "string" ? user.email.trim().toLowerCase() : "",
+        avatarUrl: user.avatarUrl ?? null,
+        profileVisibility: user.profileVisibility ?? "private",
+        isAdmin: user.isAdmin ?? false,
+      });
     }
   }
 
   if (!deduped.has(DEFAULT_USER_ID)) {
-    deduped.set(DEFAULT_USER_ID, { id: DEFAULT_USER_ID, name: "Default User" });
+    deduped.set(DEFAULT_USER_ID, DEFAULT_USER_SETTINGS.users[0]);
   }
 
   return Array.from(deduped.values());
+}
+
+interface AuthSessionPayload {
+  user?: KnownUser | null;
 }
 
 function clampSegmentPrerollMs(value: number): number {
@@ -93,6 +114,16 @@ function clampSegmentPrerollMs(value: number): number {
 
 function normalizePreferredAudioVersion(value: unknown): PreferredAudioVersion {
   return value === "blend" ? "blend" : "part";
+}
+
+function readCookieValue(name: string): string | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const prefix = `${name}=`;
+  const entry = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix));
+  return entry ? decodeURIComponent(entry.slice(prefix.length)) : null;
 }
 
 function parseStoredSettings(raw: string | null): UserSettings {
@@ -120,16 +151,18 @@ function mergeUsersWithDatabase(cachedUsers: KnownUser[], dbUsers: KnownUser[]):
 
   for (const user of cachedUsers) {
     const id = normalizeUserId(user.id);
-    merged.set(id, { id, name: user.name.trim() || id });
+    const username = normalizeUsername(user.username) || createPublicUsernameFromName(user.name || id);
+    merged.set(id, { ...user, id, username, name: user.name.trim() || username });
   }
 
   for (const user of dbUsers) {
     const id = normalizeUserId(user.id);
-    merged.set(id, { id, name: user.name.trim() || id });
+    const username = normalizeUsername(user.username) || createPublicUsernameFromName(user.name || id);
+    merged.set(id, { ...user, id, username, name: user.name.trim() || username });
   }
 
   if (!merged.has(DEFAULT_USER_ID)) {
-    merged.set(DEFAULT_USER_ID, { id: DEFAULT_USER_ID, name: "Default User" });
+    merged.set(DEFAULT_USER_ID, DEFAULT_USER_SETTINGS.users[0]);
   }
 
   return Array.from(merged.values());
@@ -222,11 +255,35 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
-  const [newUserName, setNewUserName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [profileDisplayName, setProfileDisplayName] = useState("");
+  const [profileMessage, setProfileMessage] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [guestClaimVisible, setGuestClaimVisible] = useState(false);
+  const [guestClaimLoading, setGuestClaimLoading] = useState(false);
+  const [guestClaimMessage, setGuestClaimMessage] = useState("");
   const settingsLoadedRef = useRef(false);
   const usersHydratedFromDbRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
   const activeUserId = userSettings.currentUserId;
+  const currentUser = useMemo(
+    () => userSettings.users.find((user) => user.id === userSettings.currentUserId) ?? DEFAULT_USER_SETTINGS.users[0],
+    [userSettings.currentUserId, userSettings.users]
+  );
+  const isSignedIn = (currentUser.email ?? "").trim().length > 0;
+
+  const applyAuthenticatedUser = useCallback((user: KnownUser) => {
+    setUserSettings((previous) => {
+      const users = mergeUsersWithDatabase(previous.users, normalizeKnownUsers([user]));
+      return {
+        ...previous,
+        currentUserId: normalizeUserId(user.id),
+        users,
+      };
+    });
+  }, []);
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     return {
@@ -255,9 +312,59 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    setUserSettings(storedSettings);
+    const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
+    if (cookieUserId !== DEFAULT_USER_ID && !storedSettings.users.some((user) => user.id === cookieUserId)) {
+      setUserSettings({
+        ...storedSettings,
+        currentUserId: cookieUserId,
+        users: [
+          ...storedSettings.users,
+          { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" },
+        ],
+      });
+    } else {
+      setUserSettings({
+        ...storedSettings,
+        currentUserId: storedSettings.users.some((user) => user.id === cookieUserId) ? cookieUserId : storedSettings.currentUserId,
+      });
+    }
     settingsLoadedRef.current = true;
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const shouldCleanAuthParam = params.get("auth") === "signed-in";
+    if (!readCookieValue(AUTH_SESSION_COOKIE_NAME) && !shouldCleanAuthParam) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/auth/session");
+        if (!response.ok) {
+          return;
+        }
+        const payload = (await response.json()) as AuthSessionPayload;
+        if (!cancelled && payload.user) {
+          applyAuthenticatedUser(payload.user);
+          if (shouldCleanAuthParam) {
+            window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+          }
+        }
+      } catch {
+        // Session hydration is best-effort; the signed user cookie still scopes API requests.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyAuthenticatedUser]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !settingsLoadedRef.current) {
@@ -268,6 +375,23 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     const cookieValue = encodeURIComponent(userSettings.currentUserId);
     document.cookie = `${USER_COOKIE_NAME}=${cookieValue}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
   }, [userSettings]);
+
+  useEffect(() => {
+    if (settingsOpen) {
+      setProfileDisplayName(currentUser.name);
+      setProfileMessage("");
+    }
+  }, [currentUser.name, settingsOpen]);
+
+  useEffect(() => {
+    if (!isSignedIn || typeof window === "undefined") {
+      setGuestClaimVisible(false);
+      return;
+    }
+
+    setGuestClaimVisible(hasGuestProgress() && !hasDeclinedGuestProgressClaim(currentUser.id));
+    setGuestClaimMessage("");
+  }, [currentUser.id, isSignedIn]);
 
   useEffect(() => {
     if (!settingsOpen || usersHydratedFromDbRef.current) {
@@ -319,50 +443,116 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     };
   }, [settingsOpen]);
 
-  const handleSwitchUser = (nextUserId: string) => {
-    const normalized = normalizeUserId(nextUserId);
-    setUserSettings((previous) => ({ ...previous, currentUserId: normalized }));
-    setSelectedSong(null);
-    setSelectedPlaylist(null);
-    setRefreshTrigger((previous) => previous + 1);
-    setActiveView("playlists");
-  };
-
-  const handleAddUser = async () => {
-    const trimmed = newUserName.trim();
-    if (!trimmed) {
+  const handleMagicLinkRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!authEmail.trim()) {
       return;
     }
 
-    const id = createUserIdFromName(trimmed);
-    setUserSettings((previous) => {
-      const existing = previous.users.find((user) => user.name.toLowerCase() === trimmed.toLowerCase());
-      if (existing) {
-        return { ...previous, currentUserId: existing.id };
-      }
-
-      return {
-        ...previous,
-        currentUserId: id,
-        users: [...previous.users, { id, name: trimmed }],
-      };
-    });
-    setNewUserName("");
-    setSelectedSong(null);
-    setSelectedPlaylist(null);
-    setRefreshTrigger((previous) => previous + 1);
-    setActiveView("playlists");
-
+    setAuthLoading(true);
+    setAuthMessage("");
     try {
-      await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, name: trimmed }),
+      const response = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail.trim() }),
       });
+      const payload = await response.json().catch(() => ({})) as { message?: string };
+      setAuthMessage(payload.message ?? "If that email can sign in to Cantare, a login link is on the way.");
+    } catch {
+      setAuthMessage("If that email can sign in to Cantare, a login link is on the way.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleProfileSave = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const displayName = profileDisplayName.trim();
+    if (!displayName) {
+      setProfileMessage("Display name is required.");
+      return;
+    }
+
+    setProfileSaving(true);
+    setProfileMessage("");
+    try {
+      const response = await fetch("/api/users/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to update profile");
+      }
+      const payload = (await response.json()) as AuthSessionPayload;
+      if (payload.user) {
+        applyAuthenticatedUser(payload.user);
+        setProfileDisplayName(payload.user.name);
+      }
+      setProfileMessage("Profile saved.");
       usersHydratedFromDbRef.current = false;
     } catch {
-      // Local cache already has the user; DB sync can retry later.
+      setProfileMessage("Could not save profile.");
+    } finally {
+      setProfileSaving(false);
     }
+  };
+
+  const handleSignOut = async () => {
+    setAuthLoading(true);
+    try {
+      await fetch("/api/auth/sign-out", { method: "POST" });
+    } catch {
+      // Clear local state even if the server-side revoke request cannot complete.
+    } finally {
+      setUserSettings((previous) => ({ ...previous, currentUserId: DEFAULT_USER_ID }));
+      setSelectedSong(null);
+      setSelectedPlaylist(null);
+      setRefreshTrigger((previous) => previous + 1);
+      setActiveView("playlists");
+      setAuthMessage("Signed out.");
+      setAuthLoading(false);
+    }
+  };
+
+  const handleClaimGuestProgress = async () => {
+    const songIds = getGuestProgressSongIds();
+    if (songIds.length === 0) {
+      clearGuestProgress();
+      setGuestClaimVisible(false);
+      return;
+    }
+
+    setGuestClaimLoading(true);
+    setGuestClaimMessage("");
+    try {
+      const response = await fetch("/api/guest-progress/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ songIds }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to import guest progress");
+      }
+
+      clearGuestProgress();
+      setGuestClaimVisible(false);
+      setRefreshTrigger((previous) => previous + 1);
+      setSelectedSong(null);
+      setSelectedPlaylist(null);
+      setActiveView("playlists");
+    } catch {
+      setGuestClaimMessage("Could not import guest progress. Your local progress is still here.");
+    } finally {
+      setGuestClaimLoading(false);
+    }
+  };
+
+  const handleDeclineGuestProgressClaim = () => {
+    markGuestProgressClaimDeclined(currentUser.id);
+    setGuestClaimVisible(false);
+    setGuestClaimMessage("");
   };
 
   const loadSongById = useCallback(async (songId: string): Promise<Song | null> => {
@@ -628,6 +818,51 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     setActiveView("library");
   };
 
+  const guestClaimPrompt = guestClaimVisible ? (
+    <div
+      className="fixed inset-x-4 top-4 z-50 mx-auto max-w-xl rounded-lg border border-indigo-200 bg-white p-4 shadow-xl"
+      data-testid="guest-claim-prompt"
+      role="dialog"
+      aria-label="Import guest progress"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Import guest practice progress?</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            We found practice progress from before you signed in. Import it into this account.
+          </p>
+          {guestClaimMessage ? (
+            <p className="mt-2 text-xs text-amber-700" role="status">
+              {guestClaimMessage}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            data-testid="guest-claim-decline"
+            onClick={handleDeclineGuestProgressClaim}
+            disabled={guestClaimLoading}
+            className="rounded border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Not now
+          </button>
+          <button
+            type="button"
+            data-testid="guest-claim-import"
+            onClick={() => {
+              void handleClaimGuestProgress();
+            }}
+            disabled={guestClaimLoading}
+            className="rounded border border-indigo-500 bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {guestClaimLoading ? "Importing" : "Import"}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (activeView === "song_practice" && selectedSong) {
     const session = makeSession({ songId: selectedSong.id });
     const breadcrumbRootLabel = selectedPlaylist?.name ?? "Songs";
@@ -646,6 +881,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {guestClaimPrompt}
         <div className="max-w-4xl mx-auto">
           <PracticeView
             song={selectedSong}
@@ -677,6 +913,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {guestClaimPrompt}
         <div className="max-w-4xl mx-auto">
           <UnifiedHeader
             breadcrumb={{
@@ -709,6 +946,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   if (activeView === "song_add") {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {guestClaimPrompt}
         <div className="max-w-2xl mx-auto">
           <UnifiedHeader
             breadcrumb={{
@@ -731,6 +969,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   if (activeView === "playlist_detail" && selectedPlaylist) {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {guestClaimPrompt}
         <div className="mx-auto max-w-4xl">
           <PlaylistDetail
             key={`playlist-detail:${activeUserId}:${selectedPlaylist.id}`}
@@ -753,6 +992,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   if (activeView === "playlist_practice" && selectedPlaylist) {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {guestClaimPrompt}
         <div className="mx-auto max-w-4xl">
           <PlaylistPracticeView
             playlist={selectedPlaylist}
@@ -787,6 +1027,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
+      {guestClaimPrompt}
       <div className="max-w-4xl mx-auto">
         <UnifiedHeader
           title="Cantare Music"
@@ -893,42 +1134,81 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
                 </div>
 
-                <div className="rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500">
-                  <h3 className="text-sm font-semibold text-gray-800">User</h3>
-                  <label htmlFor="active-user" className="mt-3 block text-sm text-gray-700">
-                    Active user
-                  </label>
-                  <select
-                    id="active-user"
-                    data-testid="active-user-select"
-                    value={userSettings.currentUserId}
-                    onChange={(event) => handleSwitchUser(event.target.value)}
-                    className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-800"
-                  >
-                    {userSettings.users.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="mt-3 flex gap-2">
-                    <input
-                      type="text"
-                      value={newUserName}
-                      onChange={(event) => setNewUserName(event.target.value)}
-                      placeholder="Add user name"
-                      className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleAddUser();
-                      }}
-                      className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      Add
-                    </button>
-                  </div>
+                <div className="rounded-lg border border-gray-200 bg-white p-3">
+                  <h3 className="text-sm font-semibold text-gray-800">Account</h3>
+                  {isSignedIn ? (
+                    <>
+                      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded border border-gray-200 bg-gray-50 p-2 text-sm">
+                        <dt className="font-medium text-gray-700">Email</dt>
+                        <dd data-testid="settings-current-email" className="break-all text-gray-800">
+                          {currentUser.email}
+                        </dd>
+                        <dt className="font-medium text-gray-700">Username</dt>
+                        <dd data-testid="settings-current-username" className="text-gray-800">
+                          @{currentUser.username}
+                        </dd>
+                      </dl>
+                      <form className="mt-3 grid gap-2" onSubmit={handleProfileSave}>
+                        <label htmlFor="profile-display-name" className="text-sm font-medium text-gray-700">
+                          Display name
+                        </label>
+                        <input
+                          id="profile-display-name"
+                          data-testid="profile-display-name"
+                          type="text"
+                          value={profileDisplayName}
+                          onChange={(event) => setProfileDisplayName(event.target.value)}
+                          className="min-w-0 rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
+                        />
+                        <button
+                          type="submit"
+                          disabled={profileSaving || !profileDisplayName.trim() || profileDisplayName.trim() === currentUser.name}
+                          className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Save profile
+                        </button>
+                      </form>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleSignOut();
+                        }}
+                        disabled={authLoading}
+                        className="mt-3 rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Sign out
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <form className="mt-3 grid gap-2" onSubmit={handleMagicLinkRequest}>
+                        <input
+                          type="email"
+                          value={authEmail}
+                          onChange={(event) => setAuthEmail(event.target.value)}
+                          placeholder="Email address"
+                          className="min-w-0 rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
+                        />
+                        <button
+                          type="submit"
+                          disabled={authLoading || !authEmail.trim()}
+                          className="rounded border border-indigo-300 px-3 py-1 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Send login link
+                        </button>
+                      </form>
+                      {authMessage ? (
+                        <p className="mt-2 text-xs text-gray-600" role="status">
+                          {authMessage}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                  {isSignedIn && profileMessage ? (
+                    <p className="mt-2 text-xs text-gray-600" role="status">
+                      {profileMessage}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
                   <h3 className="text-sm font-semibold text-gray-800">Build</h3>

@@ -6,6 +6,8 @@ import {
   playlists,
   playlistSongs,
   users,
+  magicLinkTokens,
+  userSessions,
   orphanedAudioKeys,
   tapPracticeSessions,
   tapPracticeTaps,
@@ -15,9 +17,34 @@ describe("schema tables", () => {
   it("users table has expected columns", () => {
     const cols = Object.keys(users);
     expect(cols).toContain("id");
+    expect(cols).toContain("username");
     expect(cols).toContain("name");
+    expect(cols).toContain("email");
+    expect(cols).toContain("avatarUrl");
+    expect(cols).toContain("profileVisibility");
     expect(cols).toContain("createdAt");
+    expect(cols).toContain("updatedAt");
   });
+  it("magic link tokens table has expected columns", () => {
+    const cols = Object.keys(magicLinkTokens);
+    expect(cols).toContain("id");
+    expect(cols).toContain("email");
+    expect(cols).toContain("tokenHash");
+    expect(cols).toContain("createdAt");
+    expect(cols).toContain("expiresAt");
+    expect(cols).toContain("consumedAt");
+  });
+
+  it("user sessions table has expected columns", () => {
+    const cols = Object.keys(userSessions);
+    expect(cols).toContain("id");
+    expect(cols).toContain("userId");
+    expect(cols).toContain("tokenHash");
+    expect(cols).toContain("createdAt");
+    expect(cols).toContain("expiresAt");
+    expect(cols).toContain("revokedAt");
+  });
+
   it("songs table has expected columns", () => {
     const cols = Object.keys(songs);
     expect(cols).toContain("id");
@@ -56,6 +83,12 @@ describe("schema tables", () => {
     expect(cols).toContain("name");
     expect(cols).toContain("eventDate");
     expect(cols).toContain("isRetired");
+    expect(cols).toContain("shareToken");
+    expect(cols).toContain("sharedAt");
+    expect(cols).toContain("sourcePlaylistId");
+    expect(cols).toContain("sourceOwnerId");
+    expect(cols).toContain("sourceShareToken");
+    expect(cols).toContain("importedAt");
     expect(cols).toContain("createdAt");
   });
 

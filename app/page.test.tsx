@@ -528,31 +528,27 @@ describe('Home page', () => {
     });
   });
 
-  it('passes the current user id to playlist browser for both test and default users', async () => {
+  it('shows current account details without legacy add-user controls', async () => {
     window.localStorage.setItem('cantare:user-settings', JSON.stringify({
       segmentPrerollMs: 500,
-      currentUserId: 'default',
+      currentUserId: 'test-user',
       users: [
-        { id: 'default', name: 'Default User' },
-        { id: 'test-user', name: 'Test User' },
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
       ],
     }));
+    document.cookie = 'cantare-user-id=test-user; path=/';
 
     render(<Home />);
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
-    fireEvent.change(screen.getByTestId('active-user-select'), { target: { value: 'test-user' } });
 
     await waitFor(() => {
-      const lastCall = playlistBrowserMock.mock.calls.at(-1)?.[0] as { userId?: string } | undefined;
-      expect(lastCall?.userId).toBe('test-user');
+      expect(screen.getByTestId('settings-current-email')).toHaveTextContent('test@example.com');
     });
-
-    fireEvent.change(screen.getByTestId('active-user-select'), { target: { value: 'default' } });
-
-    await waitFor(() => {
-      const lastCall = playlistBrowserMock.mock.calls.at(-1)?.[0] as { userId?: string } | undefined;
-      expect(lastCall?.userId).toBe('default');
-    });
+    expect(screen.getByTestId('settings-current-username')).toHaveTextContent('@test-user');
+    expect(screen.getByTestId('profile-display-name')).toHaveValue('Test User');
+    expect(screen.queryByText('Add')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('active-user-select')).not.toBeInTheDocument();
   });
 });

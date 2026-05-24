@@ -10,6 +10,7 @@ import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { toPlayableAudioUrl, type PreferredAudioVersion } from "../lib/audioUrls";
 import { getMasteryPercent } from "../lib/masteryColors";
+import { markGuestSongProgress } from "../lib/guestProgress";
 import {
   DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   buildContourDirectionEvents,
@@ -494,11 +495,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
     try {
+      markGuestSongProgress(song.id, userId);
       window.localStorage.setItem(buildOfflineRatingsQueueKey(song.id), snapshot);
     } catch {
       // Ignore queue persistence failures.
     }
-  }, [song.id]);
+  }, [song.id, userId]);
 
   const dequeueOfflineRatings = React.useCallback((): string | null => {
     if (typeof window === "undefined") {
@@ -708,10 +710,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     practicedRecordedRef.current = true;
+    markGuestSongProgress(song.id, userId);
     void request(`/api/songs/${song.id}/practice`, { method: "POST" }).catch(() => {
       practicedRecordedRef.current = false;
     });
-  }, [request, song.id]);
+  }, [request, song.id, userId]);
 
   useEffect(() => {
     practicedRecordedRef.current = false;
@@ -884,6 +887,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         const payload = await response.json() as { ratings?: SessionState['ratings'] };
         if (!cancelled) {
           const loadedRatings = Array.isArray(payload.ratings) ? payload.ratings : [];
+          if (loadedRatings.length > 0) {
+            markGuestSongProgress(song.id, userId);
+          }
           dispatch({ type: 'LOAD_RATINGS', ratings: loadedRatings });
           // Mark what's already on the server so the save effect skips the initial load
           lastSavedRatingsRef.current = JSON.stringify(loadedRatings);
@@ -917,7 +923,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [dequeueOfflineRatings, request, song.id]);
+  }, [dequeueOfflineRatings, request, song.id, userId]);
 
   const currentRating: MemoryRating | undefined = (() => {
     if (!currentSegment) {
@@ -1670,13 +1676,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
         setTapSessionId(nextSessionId);
         tapSessionIdRef.current = nextSessionId;
+        markGuestSongProgress(song.id, userId);
         flushPersistedTaps(nextSessionId);
       })
       .catch((error) => {
         console.error("Failed to create tap practice session:", error);
         showTapPersistenceWarning("Could not start tap persistence session. Check your connection and try again.");
       });
-  }, [activeAudioVersion, clearTapPersistenceWarning, currentSegment?.id, flushPersistedTaps, isTapPracticeMode, request, showTapPersistenceWarning, song.id, tapSessionResetToken]);
+  }, [activeAudioVersion, clearTapPersistenceWarning, currentSegment?.id, flushPersistedTaps, isTapPracticeMode, request, showTapPersistenceWarning, song.id, tapSessionResetToken, userId]);
 
   useEffect(() => {
     activeTapCaptureRef.current = null;
@@ -1744,6 +1751,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       void postRatingsSnapshot(snapshot)
         .then(() => {
           lastSavedRatingsRef.current = snapshot;
+          markGuestSongProgress(song.id, userId);
           clearOfflineRatingsQueue();
         })
         .catch(() => {
@@ -1751,7 +1759,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         });
     }, 400);
     return () => clearTimeout(timer);
-  }, [clearOfflineRatingsQueue, enqueueOfflineRatings, postRatingsSnapshot, ratingsLoading, session.ratings]);
+  }, [clearOfflineRatingsQueue, enqueueOfflineRatings, postRatingsSnapshot, ratingsLoading, session.ratings, song.id, userId]);
 
   useEffect(() => {
     void flushOfflineRatingsIfPossible();
@@ -1792,6 +1800,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         if (cancelled) {
           return;
         }
+        if (sessions.length > 0) {
+          markGuestSongProgress(song.id, userId);
+        }
         setTapSessionSummaries(sessions);
         setMidiSegmentAnswerKeys(midiPayload.segmentAnswerKeys ?? {});
       } catch {
@@ -1807,7 +1818,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [request, segmentTimingSignature, song.id, tapHeatMapRefreshToken]);
+  }, [request, segmentTimingSignature, song.id, tapHeatMapRefreshToken, userId]);
 
   useEffect(() => {
     let cancelled = false;

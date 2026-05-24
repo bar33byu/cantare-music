@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { eq, desc } from "drizzle-orm";
-import { songs, segments, practiceRatings, playlists, playlistSongs, tapPracticeSessions, tapPracticeTaps } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, tapPracticeSessions, tapPracticeTaps, users, magicLinkTokens, userSessions } from "./schema";
 
 // ── chainable mock builder ─────────────────────────────────────────────────────
 // Creates a fluent mock object where every method returns itself and
@@ -49,6 +49,109 @@ async function getQueries() {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe("users", () => {
+  it("upsertUser stores account profile fields only", async () => {
+    const row = {
+      id: "internal-user-1",
+      username: "singer-one",
+      name: "Singer One",
+      email: "singer@example.com",
+      avatarUrl: null,
+      profileVisibility: "private",
+    };
+    const chain = makeChain([row]);
+    insertSpy.mockReturnValue(chain);
+
+    const { upsertUser } = await getQueries();
+    const result = await upsertUser(row);
+
+    expect(insertSpy).toHaveBeenCalledWith(users);
+    const valuesSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
+    expect(valuesSpy).toHaveBeenCalledWith(expect.objectContaining({
+      id: "internal-user-1",
+      username: "singer-one",
+      name: "Singer One",
+      email: "singer@example.com",
+      profileVisibility: "private",
+    }));
+    expect(result).toEqual(row);
+  });
+
+  it("getAllUsers maps profile fields and keeps profiles private by default", async () => {
+    const chain = makeChain([
+      {
+        id: "internal-user-2",
+        username: "singer-two",
+        name: "Singer Two",
+        email: "",
+        avatarUrl: null,
+        profileVisibility: "private",
+      },
+    ]);
+    selectSpy.mockReturnValue(chain);
+
+    const { getAllUsers } = await getQueries();
+    const result = await getAllUsers();
+
+    expect(result).toEqual([
+      {
+        id: "internal-user-2",
+        username: "singer-two",
+        name: "Singer Two",
+        email: "",
+        avatarUrl: null,
+        profileVisibility: "private",
+      },
+    ]);
+  });
+
+  it("createMagicLinkToken stores only a token hash", async () => {
+    const expiresAt = new Date("2026-05-24T12:15:00.000Z");
+    const row = {
+      id: "magic-1",
+      email: "singer@example.com",
+      tokenHash: "hashed-token",
+      createdAt: new Date("2026-05-24T12:00:00.000Z"),
+      expiresAt,
+      consumedAt: null,
+    };
+    const chain = makeChain([row]);
+    insertSpy.mockReturnValue(chain);
+
+    const { createMagicLinkToken } = await getQueries();
+    const result = await createMagicLinkToken({ email: "Singer@Example.com", tokenHash: "hashed-token", expiresAt });
+
+    expect(insertSpy).toHaveBeenCalledWith(magicLinkTokens);
+    const valuesSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
+    expect(valuesSpy).toHaveBeenCalledWith(expect.objectContaining({
+      email: "singer@example.com",
+      tokenHash: "hashed-token",
+      expiresAt,
+    }));
+    expect(result).toEqual(row);
+  });
+
+  it("createUserSession stores a hashed persistent session token", async () => {
+    const expiresAt = new Date("2026-08-22T12:00:00.000Z");
+    const row = {
+      id: "session-1",
+      userId: "user-1",
+      tokenHash: "hashed-session-token",
+      createdAt: new Date("2026-05-24T12:00:00.000Z"),
+      expiresAt,
+      revokedAt: null,
+    };
+    const chain = makeChain([row]);
+    insertSpy.mockReturnValue(chain);
+
+    const { createUserSession } = await getQueries();
+    const result = await createUserSession({ userId: "user-1", tokenHash: "hashed-session-token", expiresAt });
+
+    expect(insertSpy).toHaveBeenCalledWith(userSessions);
+    expect(result).toEqual(row);
+  });
+});
 
 describe("getAllSongs", () => {
   it("calls select().from(songs).orderBy(desc(createdAt))", async () => {

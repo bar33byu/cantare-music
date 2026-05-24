@@ -71,6 +71,41 @@
       "when": 1778976000000,
       "tag": "0010_enhanced_tap_practice",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779235200000,
+      "tag": "0011_midi_guided_tap_practice",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779580800000,
+      "tag": "0012_user_account_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779667200000,
+      "tag": "0013_magic_link_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779753600000,
+      "tag": "0014_playlist_sharing",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1779840000000,
+      "tag": "0015_playlist_import_lineage",
+      "breakpoints": true
     }
   ]
 }

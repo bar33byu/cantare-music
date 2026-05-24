@@ -73,6 +73,13 @@ export interface Playlist {
   name: string;
   eventDate?: string;
   isRetired: boolean;
+  shareToken?: string | null;
+  shareUrl?: string | null;
+  sharedAt?: string | null;
+  sourcePlaylistId?: string | null;
+  sourceOwnerId?: string | null;
+  sourceShareToken?: string | null;
+  importedAt?: string | null;
   createdAt: string;
   songs: Array<Song & { position: number; masteryPercent?: number; ratingCount?: number }>;
 }

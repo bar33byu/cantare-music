@@ -143,6 +143,40 @@ describe('PlaylistDetail', () => {
     });
   });
 
+  it('enables and disables playlist sharing', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'pl-1',
+          name: 'April Set',
+          isRetired: false,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          shareToken: 'share-token-1',
+          shareUrl: 'http://localhost/share/playlists/share-token-1',
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+    await waitFor(() => expect(screen.getByTestId('playlist-share')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('playlist-share'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/share', expect.objectContaining({ method: 'POST' }));
+      expect(screen.getByTestId('playlist-share-link')).toHaveAttribute('href', expect.stringContaining('/share/playlists/share-token-1'));
+    });
+
+    fireEvent.click(screen.getByTestId('playlist-unshare'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/share', expect.objectContaining({ method: 'DELETE' }));
+      expect(screen.getByTestId('playlist-share')).toBeInTheDocument();
+    });
+  });
+
   it('back button calls onBack', async () => {
     render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
     await waitFor(() => expect(screen.getByTestId('playlist-detail-back')).toBeInTheDocument());

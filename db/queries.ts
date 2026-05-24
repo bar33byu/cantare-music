@@ -1,7 +1,7 @@
 import { eq, asc, desc, inArray, and, count, lte, sql } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, magicLinkTokens, userSessions, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow } from "./schema";
 import { getPublicUrl } from "../lib/r2";
 import type { SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
 import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
@@ -100,6 +100,12 @@ export interface PlaylistDetail {
   name: string;
   eventDate?: string;
   isRetired: boolean;
+  shareToken?: string | null;
+  sharedAt?: string | null;
+  sourcePlaylistId?: string | null;
+  sourceOwnerId?: string | null;
+  sourceShareToken?: string | null;
+  importedAt?: string | null;
   createdAt: string;
   songs: PlaylistSongItem[];
 }
@@ -109,8 +115,22 @@ export interface PlaylistSummary {
   name: string;
   eventDate?: string;
   isRetired: boolean;
+  shareToken?: string | null;
+  sharedAt?: string | null;
+  sourcePlaylistId?: string | null;
+  sourceOwnerId?: string | null;
+  sourceShareToken?: string | null;
+  importedAt?: string | null;
   createdAt: string;
   songCount: number;
+}
+
+export interface SharedPlaylistDetail extends PlaylistDetail {
+  owner: {
+    id: string;
+    displayName: string;
+    username: string;
+  };
 }
 
 function isMissingLastPracticedColumnError(error: unknown): boolean {
@@ -236,6 +256,84 @@ function isMissingUsersTableError(error: unknown): boolean {
       return true;
     }
     if (causeCode === "42P01" && causeMessage.includes("users")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isMissingAuthTableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const mentionsAuthTables = message.includes("magic_link_tokens") || message.includes("user_sessions");
+  if (mentionsAuthTables && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (causeCode === "42P01" && (causeMessage.includes("magic_link_tokens") || causeMessage.includes("user_sessions"))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isMissingUserProfileColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const profileColumns = ["username", "email", "avatar_url", "profile_visibility", "updated_at"];
+  const message = error.message.toLowerCase();
+  if (profileColumns.some((column) => message.includes(column)) && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (profileColumns.some((column) => causeMessage.includes(column)) && causeMessage.includes("does not exist")) {
+      return true;
+    }
+    if (causeCode === "42703" && profileColumns.some((column) => message.includes(column))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isMissingPlaylistSharingColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const columns = ["share_token", "shared_at", "source_playlist_id", "source_owner_id", "source_share_token", "imported_at"];
+  const message = error.message.toLowerCase();
+  if (columns.some((column) => message.includes(column)) && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (columns.some((column) => causeMessage.includes(column)) && causeMessage.includes("does not exist")) {
+      return true;
+    }
+    if (causeCode === "42703" && columns.some((column) => message.includes(column))) {
       return true;
     }
   }
@@ -431,41 +529,400 @@ async function ensureTapPracticeTables(): Promise<void> {
 
 // ── Users ─────────────────────────────────────────────────────────────────
 
-export async function getAllUsers(): Promise<Array<{ id: string; name: string }>> {
+export interface PublicUser {
+  id: string;
+  username: string;
+  name: string;
+  email: string;
+  avatarUrl?: string | null;
+  profileVisibility: string;
+}
+
+function fallbackUsername(id: string, name: string): string {
+  const base = (name || id).trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
+  return base || "default";
+}
+
+function mapUserRow(row: Pick<UserRow, "id" | "username" | "name" | "email" | "avatarUrl" | "profileVisibility">): PublicUser {
+  return {
+    id: row.id,
+    username: row.username,
+    name: row.name,
+    email: row.email,
+    avatarUrl: row.avatarUrl,
+    profileVisibility: row.profileVisibility,
+  };
+}
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function usernameFromEmail(email: string): string {
+  const localPart = email.split("@")[0] ?? "user";
+  const base = localPart.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 24);
+  return base || "user";
+}
+
+export async function getAllUsers(): Promise<PublicUser[]> {
   try {
-    const rows = await db().select({ id: users.id, name: users.name }).from(users).orderBy(asc(users.name));
+    const rows = await db()
+      .select({
+        id: users.id,
+        username: users.username,
+        name: users.name,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        profileVisibility: users.profileVisibility,
+      })
+      .from(users)
+      .orderBy(asc(users.name));
     if (rows.length === 0) {
-      return [{ id: DEFAULT_QUERY_USER_ID, name: "Default User" }];
+      return [{ id: DEFAULT_QUERY_USER_ID, username: "default", name: "Default User", email: "", avatarUrl: null, profileVisibility: "private" }];
     }
-    return rows;
+    return rows.map(mapUserRow);
   } catch (error) {
     if (!isMissingUsersTableError(error)) {
+      if (isMissingUserProfileColumnError(error)) {
+        const legacyRows = await db().select({ id: users.id, name: users.name }).from(users).orderBy(asc(users.name));
+        return legacyRows.length > 0
+          ? legacyRows.map((row) => ({
+              id: row.id,
+              username: fallbackUsername(row.id, row.name),
+              name: row.name,
+              email: "",
+              avatarUrl: null,
+              profileVisibility: "private",
+            }))
+          : [{ id: DEFAULT_QUERY_USER_ID, username: "default", name: "Default User", email: "", avatarUrl: null, profileVisibility: "private" }];
+      }
       throw error;
     }
-    return [{ id: DEFAULT_QUERY_USER_ID, name: "Default User" }];
+    return [{ id: DEFAULT_QUERY_USER_ID, username: "default", name: "Default User", email: "", avatarUrl: null, profileVisibility: "private" }];
   }
 }
 
-export async function upsertUser(data: { id: string; name: string }): Promise<{ id: string; name: string }> {
+export async function getUserById(id: string): Promise<PublicUser | null> {
+  try {
+    const rows = await db()
+      .select({
+        id: users.id,
+        username: users.username,
+        name: users.name,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        profileVisibility: users.profileVisibility,
+      })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+    return rows[0] ? mapUserRow(rows[0]) : null;
+  } catch (error) {
+    if (isMissingUsersTableError(error)) {
+      return id === DEFAULT_QUERY_USER_ID
+        ? { id: DEFAULT_QUERY_USER_ID, username: "default", name: "Default User", email: "", avatarUrl: null, profileVisibility: "private" }
+        : null;
+    }
+    if (isMissingUserProfileColumnError(error)) {
+      const rows = await db().select({ id: users.id, name: users.name }).from(users).where(eq(users.id, id)).limit(1);
+      return rows[0]
+        ? {
+            id: rows[0].id,
+            username: fallbackUsername(rows[0].id, rows[0].name),
+            name: rows[0].name,
+            email: "",
+            avatarUrl: null,
+            profileVisibility: "private",
+          }
+        : null;
+    }
+    throw error;
+  }
+}
+
+export async function getUserByEmail(email: string): Promise<PublicUser | null> {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  try {
+    const rows = await db()
+      .select({
+        id: users.id,
+        username: users.username,
+        name: users.name,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        profileVisibility: users.profileVisibility,
+      })
+      .from(users)
+      .where(eq(users.email, normalizedEmail))
+      .limit(1);
+    return rows[0] ? mapUserRow(rows[0]) : null;
+  } catch (error) {
+    if (isMissingUsersTableError(error) || isMissingUserProfileColumnError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function updateUserProfile(
+  id: string,
+  data: {
+    name?: string;
+    avatarUrl?: string | null;
+    profileVisibility?: string;
+  }
+): Promise<PublicUser | null> {
+  const updates: Partial<Pick<UserRow, "name" | "avatarUrl" | "profileVisibility" | "updatedAt">> = {
+    updatedAt: new Date(),
+  };
+  if (data.name !== undefined) updates.name = data.name;
+  if (data.avatarUrl !== undefined) updates.avatarUrl = data.avatarUrl;
+  if (data.profileVisibility !== undefined) updates.profileVisibility = data.profileVisibility;
+
+  try {
+    const rows = await db()
+      .update(users)
+      .set(updates)
+      .where(eq(users.id, id))
+      .returning({
+        id: users.id,
+        username: users.username,
+        name: users.name,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        profileVisibility: users.profileVisibility,
+      });
+    return rows[0] ? mapUserRow(rows[0]) : null;
+  } catch (error) {
+    if (isMissingUsersTableError(error) || isMissingUserProfileColumnError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function upsertUser(data: {
+  id: string;
+  username: string;
+  name: string;
+  email?: string;
+  avatarUrl?: string | null;
+  profileVisibility?: string;
+}): Promise<PublicUser> {
+  const values = {
+    id: data.id,
+    username: data.username,
+    name: data.name,
+    email: data.email ?? "",
+    avatarUrl: data.avatarUrl ?? null,
+    profileVisibility: data.profileVisibility ?? "private",
+    updatedAt: new Date(),
+  };
+
   try {
     const rows = await db()
       .insert(users)
-      .values({ id: data.id, name: data.name })
+      .values(values)
       .onConflictDoUpdate({
         target: users.id,
-        set: { name: data.name },
+        set: {
+          username: values.username,
+          name: values.name,
+          email: values.email,
+          avatarUrl: values.avatarUrl,
+          profileVisibility: values.profileVisibility,
+          updatedAt: values.updatedAt,
+        },
       })
-      .returning({ id: users.id, name: users.name });
-    return rows[0] ?? data;
+      .returning({
+        id: users.id,
+        username: users.username,
+        name: users.name,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        profileVisibility: users.profileVisibility,
+      });
+    return rows[0] ? mapUserRow(rows[0]) : { ...values, avatarUrl: values.avatarUrl };
   } catch (error) {
+    if (isMissingUserProfileColumnError(error)) {
+      const rows = await db()
+        .insert(users)
+        .values({ id: data.id, name: data.name } as typeof users.$inferInsert)
+        .onConflictDoUpdate({
+          target: users.id,
+          set: { name: data.name },
+        })
+        .returning({ id: users.id, name: users.name });
+      const row = rows[0] ?? { id: data.id, name: data.name };
+      return {
+        id: row.id,
+        username: fallbackUsername(row.id, row.name),
+        name: row.name,
+        email: data.email ?? "",
+        avatarUrl: data.avatarUrl ?? null,
+        profileVisibility: data.profileVisibility ?? "private",
+      };
+    }
     if (!isMissingUsersTableError(error)) {
       throw error;
     }
-    return data;
+    return { ...values, avatarUrl: values.avatarUrl };
   }
 }
 
 // ── Songs ──────────────────────────────────────────────────────────────────
+
+export async function getOrCreateUserForEmail(email: string): Promise<PublicUser> {
+  const normalizedEmail = normalizeEmail(email);
+  const existing = await getUserByEmail(normalizedEmail);
+  if (existing) {
+    return existing;
+  }
+
+  const baseUsername = usernameFromEmail(normalizedEmail);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const username = attempt === 0 ? baseUsername : `${baseUsername}-${attempt + 1}`;
+    try {
+      return await upsertUser({
+        id: crypto.randomUUID(),
+        username,
+        name: normalizedEmail.split("@")[0] || "Cantare Singer",
+        email: normalizedEmail,
+        profileVisibility: "private",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      if (message.includes("users_username_unique") || message.includes("users_email_unique")) {
+        const racedUser = await getUserByEmail(normalizedEmail);
+        if (racedUser) {
+          return racedUser;
+        }
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return upsertUser({
+    id: crypto.randomUUID(),
+    username: `${baseUsername}-${Math.random().toString(36).slice(2, 8)}`,
+    name: normalizedEmail.split("@")[0] || "Cantare Singer",
+    email: normalizedEmail,
+    profileVisibility: "private",
+  });
+}
+
+export async function createMagicLinkToken(data: {
+  email: string;
+  tokenHash: string;
+  expiresAt: Date;
+}): Promise<MagicLinkTokenRow> {
+  try {
+    const rows = await db()
+      .insert(magicLinkTokens)
+      .values({
+        id: crypto.randomUUID(),
+        email: normalizeEmail(data.email),
+        tokenHash: data.tokenHash,
+        expiresAt: data.expiresAt,
+      })
+      .returning();
+    return rows[0];
+  } catch (error) {
+    if (isMissingAuthTableError(error)) {
+      throw Object.assign(new Error("Auth tables are missing; run database migrations before enabling magic-link auth."), {
+        code: "AUTH_MIGRATION_REQUIRED",
+      });
+    }
+    throw error;
+  }
+}
+
+export async function consumeMagicLinkToken(tokenHash: string, now: Date = new Date()): Promise<MagicLinkTokenRow | null> {
+  try {
+    const rows = await db()
+      .select()
+      .from(magicLinkTokens)
+      .where(eq(magicLinkTokens.tokenHash, tokenHash))
+      .limit(1);
+    const token = rows[0];
+    if (!token || token.consumedAt || token.expiresAt <= now) {
+      return null;
+    }
+
+    const consumedRows = await db()
+      .update(magicLinkTokens)
+      .set({ consumedAt: now })
+      .where(and(eq(magicLinkTokens.tokenHash, tokenHash), sql`${magicLinkTokens.consumedAt} IS NULL`))
+      .returning();
+    return consumedRows[0] ?? null;
+  } catch (error) {
+    if (isMissingAuthTableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function createUserSession(data: {
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+}): Promise<UserSessionRow> {
+  try {
+    const rows = await db()
+      .insert(userSessions)
+      .values({
+        id: crypto.randomUUID(),
+        userId: data.userId,
+        tokenHash: data.tokenHash,
+        expiresAt: data.expiresAt,
+      })
+      .returning();
+    return rows[0];
+  } catch (error) {
+    if (isMissingAuthTableError(error)) {
+      throw Object.assign(new Error("Auth tables are missing; run database migrations before enabling sessions."), {
+        code: "AUTH_MIGRATION_REQUIRED",
+      });
+    }
+    throw error;
+  }
+}
+
+export async function getUserForSessionTokenHash(tokenHash: string, now: Date = new Date()): Promise<PublicUser | null> {
+  try {
+    const rows = await db()
+      .select({ user: users, session: userSessions })
+      .from(userSessions)
+      .innerJoin(users, eq(userSessions.userId, users.id))
+      .where(and(eq(userSessions.tokenHash, tokenHash), sql`${userSessions.revokedAt} IS NULL`, sql`${userSessions.expiresAt} > ${now}`))
+      .limit(1);
+    return rows[0] ? mapUserRow(rows[0].user) : null;
+  } catch (error) {
+    if (isMissingAuthTableError(error) || isMissingUsersTableError(error) || isMissingUserProfileColumnError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function revokeUserSession(tokenHash: string, revokedAt: Date = new Date()): Promise<void> {
+  try {
+    await db()
+      .update(userSessions)
+      .set({ revokedAt })
+      .where(eq(userSessions.tokenHash, tokenHash));
+  } catch (error) {
+    if (!isMissingAuthTableError(error)) {
+      throw error;
+    }
+  }
+}
 
 export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promise<SongRow[]> {
   let primaryError: unknown;
@@ -1225,6 +1682,248 @@ export async function deleteRatingsForSong(
 }
 
 // ── Tap Practice ─────────────────────────────────────────────────────────
+
+export interface GuestProgressClaimResult {
+  claimedSongIds: string[];
+  transferredSongIds: string[];
+  mergedSongIds: string[];
+  skippedSongIds: string[];
+  importedRatingCount: number;
+  importedTapSessionCount: number;
+}
+
+function normalizeSongIdentityPart(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function buildSongIdentityKey(song: Pick<SongRow, "title" | "artist">): string {
+  return `${normalizeSongIdentityPart(song.title)}\n${normalizeSongIdentityPart(song.artist)}`;
+}
+
+function buildSegmentIdentityKey(segment: Pick<SegmentRow, "order" | "label" | "startMs" | "endMs">): string {
+  return `${segment.order}\n${normalizeSongIdentityPart(segment.label)}\n${segment.startMs}\n${segment.endMs}`;
+}
+
+function mapGuestSegmentsToTarget(guestSegments: SegmentRow[], targetSegments: SegmentRow[]): Map<string, string> {
+  const targetById = new Map(targetSegments.map((segment) => [segment.id, segment.id]));
+  const targetByIdentity = new Map(targetSegments.map((segment) => [buildSegmentIdentityKey(segment), segment.id]));
+  const targetByOrder = new Map(targetSegments.map((segment) => [segment.order, segment.id]));
+  const mapped = new Map<string, string>();
+
+  for (const guestSegment of guestSegments) {
+    const targetSegmentId =
+      targetById.get(guestSegment.id) ??
+      targetByIdentity.get(buildSegmentIdentityKey(guestSegment)) ??
+      targetByOrder.get(guestSegment.order);
+    if (targetSegmentId) {
+      mapped.set(guestSegment.id, targetSegmentId);
+    }
+  }
+
+  return mapped;
+}
+
+function isTapScoreResultForClaim(value: unknown): value is TapScoreResult {
+  return Boolean(value && typeof value === "object" && Array.isArray((value as TapScoreResult).details));
+}
+
+async function copyGuestRatingsToTarget(
+  guestSongId: string,
+  targetSongId: string,
+  targetUserId: string,
+  segmentIdMap: Map<string, string>
+): Promise<number> {
+  const [guestRatings, targetRatings] = await Promise.all([
+    getRatingsForSong(guestSongId, DEFAULT_QUERY_USER_ID),
+    getRatingsForSong(targetSongId, targetUserId),
+  ]);
+  const mergedBySegment = new Map<string, { segmentId: string; rating: PersistedMemoryRating; ratedAt: Date }>();
+
+  for (const rating of targetRatings) {
+    mergedBySegment.set(rating.segmentId, {
+      segmentId: rating.segmentId,
+      rating: rating.rating,
+      ratedAt: new Date(rating.ratedAt),
+    });
+  }
+
+  let importedCount = 0;
+  for (const rating of guestRatings) {
+    const targetSegmentId = segmentIdMap.get(rating.segmentId);
+    if (!targetSegmentId) {
+      continue;
+    }
+
+    const nextRating = {
+      segmentId: targetSegmentId,
+      rating: rating.rating,
+      ratedAt: new Date(rating.ratedAt),
+    };
+    const existing = mergedBySegment.get(targetSegmentId);
+    if (!existing || nextRating.ratedAt.getTime() >= existing.ratedAt.getTime()) {
+      mergedBySegment.set(targetSegmentId, nextRating);
+    }
+    importedCount += 1;
+  }
+
+  if (importedCount > 0) {
+    await saveRatings(targetSongId, targetUserId, Array.from(mergedBySegment.values()));
+  }
+
+  return importedCount;
+}
+
+async function copyGuestTapSessionsToTarget(
+  guestSongId: string,
+  targetSongId: string,
+  targetUserId: string,
+  segmentIdMap: Map<string, string>
+): Promise<number> {
+  const sessions = await listTapPracticeSessionsForSong(guestSongId, DEFAULT_QUERY_USER_ID, 100);
+  let importedCount = 0;
+
+  for (const session of sessions) {
+    const detail = await getTapPracticeSessionDetail(session.id, DEFAULT_QUERY_USER_ID);
+    if (!detail) {
+      continue;
+    }
+    const targetSegmentId = detail.segmentId ? segmentIdMap.get(detail.segmentId) : undefined;
+    if (detail.segmentId && !targetSegmentId) {
+      continue;
+    }
+
+    const imported = await createTapPracticeSession(targetSongId, targetUserId, new Date(detail.startedAt), {
+      ...(targetSegmentId ? { segmentId: targetSegmentId } : {}),
+      audioVersion: detail.audioVersion,
+      mode: detail.mode,
+    });
+
+    for (const tap of detail.taps) {
+      const tapSegmentId = segmentIdMap.get(tap.segmentId);
+      if (!tapSegmentId) {
+        continue;
+      }
+      await addTapPracticeTap(imported.id, {
+        segmentId: tapSegmentId,
+        noteId: tap.noteId,
+        timeOffsetMs: tap.timeOffsetMs,
+        durationMs: tap.durationMs,
+        lane: tap.lane,
+        direction: tap.direction,
+      });
+    }
+
+    if (detail.finalizedAt) {
+      await finalizeTapPracticeSession(imported.id, targetUserId, {
+        completedAt: detail.completedAt ? new Date(detail.completedAt) : undefined,
+        autoScorePercent: detail.autoScorePercent ?? null,
+        selfRating: detail.selfRating ?? null,
+        scoreDetails: isTapScoreResultForClaim(detail.scoreDetails) ? detail.scoreDetails : null,
+      });
+    } else if (detail.completedAt || detail.autoScorePercent !== undefined || detail.scoreDetails) {
+      await updateTapPracticeSessionProgress(imported.id, targetUserId, {
+        completedAt: detail.completedAt ? new Date(detail.completedAt) : undefined,
+        autoScorePercent: detail.autoScorePercent ?? null,
+        scoreDetails: isTapScoreResultForClaim(detail.scoreDetails) ? detail.scoreDetails : null,
+      });
+    }
+
+    importedCount += 1;
+  }
+
+  return importedCount;
+}
+
+export async function claimGuestProgressForUser(
+  targetUserId: string,
+  guestSongIds: string[]
+): Promise<GuestProgressClaimResult> {
+  const uniqueGuestSongIds = Array.from(new Set(guestSongIds.filter((id) => typeof id === "string" && id.trim().length > 0)));
+  const result: GuestProgressClaimResult = {
+    claimedSongIds: [],
+    transferredSongIds: [],
+    mergedSongIds: [],
+    skippedSongIds: [],
+    importedRatingCount: 0,
+    importedTapSessionCount: 0,
+  };
+
+  if (targetUserId === DEFAULT_QUERY_USER_ID || uniqueGuestSongIds.length === 0) {
+    return result;
+  }
+
+  const [guestSongs, targetSongs] = await Promise.all([
+    db()
+      .select()
+      .from(songs)
+      .where(and(eq(songs.userId, DEFAULT_QUERY_USER_ID), inArray(songs.id, uniqueGuestSongIds))),
+    getAllSongs(targetUserId),
+  ]);
+
+  const targetByIdentity = new Map<string, SongRow>();
+  for (const song of targetSongs) {
+    const key = buildSongIdentityKey(song);
+    if (!targetByIdentity.has(key)) {
+      targetByIdentity.set(key, song);
+    }
+  }
+
+  for (const guestSong of guestSongs) {
+    const targetSong = targetByIdentity.get(buildSongIdentityKey(guestSong));
+    if (!targetSong) {
+      await db()
+        .update(songs)
+        .set({ userId: targetUserId })
+        .where(and(eq(songs.id, guestSong.id), eq(songs.userId, DEFAULT_QUERY_USER_ID)));
+      try {
+        await db()
+          .update(tapPracticeSessions)
+          .set({ userId: targetUserId })
+          .where(and(eq(tapPracticeSessions.songId, guestSong.id), eq(tapPracticeSessions.userId, DEFAULT_QUERY_USER_ID)));
+      } catch (error) {
+        if (!isMissingTapPracticeTableError(error)) {
+          throw error;
+        }
+      }
+
+      result.claimedSongIds.push(guestSong.id);
+      result.transferredSongIds.push(guestSong.id);
+      continue;
+    }
+
+    const [guestSegments, targetSegments] = await Promise.all([
+      getSegmentsBySongId(guestSong.id),
+      getSegmentsBySongId(targetSong.id),
+    ]);
+    const segmentIdMap = mapGuestSegmentsToTarget(guestSegments, targetSegments);
+    if (segmentIdMap.size === 0 && guestSegments.length > 0) {
+      result.skippedSongIds.push(guestSong.id);
+      continue;
+    }
+
+    result.importedRatingCount += await copyGuestRatingsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap);
+    result.importedTapSessionCount += await copyGuestTapSessionsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap);
+
+    const guestPracticedAt = guestSong.lastPracticedAt?.getTime() ?? 0;
+    const targetPracticedAt = targetSong.lastPracticedAt?.getTime() ?? 0;
+    if (guestSong.lastPracticedAt && guestPracticedAt > targetPracticedAt) {
+      await markSongPracticed(targetSong.id, targetUserId, guestSong.lastPracticedAt);
+    }
+
+    await deleteSong(guestSong.id, DEFAULT_QUERY_USER_ID);
+    result.claimedSongIds.push(targetSong.id);
+    result.mergedSongIds.push(targetSong.id);
+  }
+
+  const foundGuestSongIds = new Set(guestSongs.map((song) => song.id));
+  for (const songId of uniqueGuestSongIds) {
+    if (!foundGuestSongIds.has(songId)) {
+      result.skippedSongIds.push(songId);
+    }
+  }
+
+  return result;
+}
 
 function normalizeTapAudioVersion(value: string | null | undefined): TapAudioVersion {
   return value === "blend" ? "blend" : "straight";
@@ -2063,9 +2762,37 @@ function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSu
     name: row.name,
     eventDate: row.eventDate ?? undefined,
     isRetired: row.isRetired,
+    shareToken: row.shareToken ?? null,
+    sharedAt: row.sharedAt ? row.sharedAt.toISOString() : null,
+    sourcePlaylistId: row.sourcePlaylistId ?? null,
+    sourceOwnerId: row.sourceOwnerId ?? null,
+    sourceShareToken: row.sourceShareToken ?? null,
+    importedAt: row.importedAt ? row.importedAt.toISOString() : null,
     createdAt: toIso(row.createdAt),
     songCount,
   };
+}
+
+async function ensurePlaylistSharingColumns(): Promise<void> {
+  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "share_token" text`));
+  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "shared_at" timestamp`));
+  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "source_playlist_id" text`));
+  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "source_owner_id" text`));
+  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "source_share_token" text`));
+  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "imported_at" timestamp`));
+  await db().execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "playlists_share_token_unique"
+      ON "playlists" ("share_token")
+      WHERE "share_token" IS NOT NULL
+  `));
+  await db().execute(sql.raw(`
+    CREATE INDEX IF NOT EXISTS "idx_playlists_user_source_playlist"
+      ON "playlists" ("user_id", "source_playlist_id")
+  `));
+}
+
+function createShareToken(): string {
+  return crypto.randomUUID();
 }
 
 export async function getAllPlaylists(
@@ -2086,13 +2813,14 @@ export async function getAllPlaylists(
         ? await baseQuery.where(eq(playlists.userId, userId))
         : await baseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
   } catch (error) {
-    if (!isMissingUserIdColumnError(error)) {
+    if (!isMissingUserIdColumnError(error) && !isMissingPlaylistSharingColumnError(error)) {
       throw error;
     }
 
     const legacyBaseQuery = db()
       .select({
         id: playlists.id,
+        userId: playlists.userId,
         name: playlists.name,
         eventDate: playlists.eventDate,
         isRetired: playlists.isRetired,
@@ -2101,11 +2829,38 @@ export async function getAllPlaylists(
       .from(playlists)
       .orderBy(desc(playlists.createdAt));
 
-    const legacyRows = includeRetired
-      ? await legacyBaseQuery
-      : await legacyBaseQuery.where(eq(playlists.isRetired, false));
+    try {
+      const legacyRows = legacyMode
+        ? includeRetired
+          ? await legacyBaseQuery
+          : await legacyBaseQuery.where(eq(playlists.isRetired, false))
+        : includeRetired
+          ? await legacyBaseQuery.where(eq(playlists.userId, userId))
+          : await legacyBaseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
 
-    rows = legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID } as PlaylistRow));
+      rows = legacyRows.map((row) => ({ ...row, shareToken: null, sharedAt: null } as PlaylistRow));
+    } catch (legacyError) {
+      if (!isMissingUserIdColumnError(legacyError)) {
+        throw legacyError;
+      }
+
+      const userlessBaseQuery = db()
+        .select({
+          id: playlists.id,
+          name: playlists.name,
+          eventDate: playlists.eventDate,
+          isRetired: playlists.isRetired,
+          createdAt: playlists.createdAt,
+        })
+        .from(playlists)
+        .orderBy(desc(playlists.createdAt));
+
+      const userlessRows = includeRetired
+        ? await userlessBaseQuery
+        : await userlessBaseQuery.where(eq(playlists.isRetired, false));
+
+      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, shareToken: null, sharedAt: null } as PlaylistRow));
+    }
   }
 
   // Get song counts for each playlist
@@ -2136,23 +2891,44 @@ export async function getPlaylistById(
       .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
       .limit(1);
   } catch (error) {
-    if (!isMissingUserIdColumnError(error)) {
+    if (!isMissingUserIdColumnError(error) && !isMissingPlaylistSharingColumnError(error)) {
       throw error;
     }
 
-    const legacyPlaylistRows = await db()
-      .select({
-        id: playlists.id,
-        name: playlists.name,
-        eventDate: playlists.eventDate,
-        isRetired: playlists.isRetired,
-        createdAt: playlists.createdAt,
-      })
-      .from(playlists)
-      .where(eq(playlists.id, id))
-      .limit(1);
+    try {
+      const legacyPlaylistRows = await db()
+        .select({
+          id: playlists.id,
+          userId: playlists.userId,
+          name: playlists.name,
+          eventDate: playlists.eventDate,
+          isRetired: playlists.isRetired,
+          createdAt: playlists.createdAt,
+        })
+        .from(playlists)
+        .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
+        .limit(1);
 
-    playlistRows = legacyPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID } as PlaylistRow));
+      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, shareToken: null, sharedAt: null } as PlaylistRow));
+    } catch (legacyError) {
+      if (!isMissingUserIdColumnError(legacyError)) {
+        throw legacyError;
+      }
+
+      const userlessPlaylistRows = await db()
+        .select({
+          id: playlists.id,
+          name: playlists.name,
+          eventDate: playlists.eventDate,
+          isRetired: playlists.isRetired,
+          createdAt: playlists.createdAt,
+        })
+        .from(playlists)
+        .where(eq(playlists.id, id))
+        .limit(1);
+
+      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, shareToken: null, sharedAt: null } as PlaylistRow));
+    }
   }
 
   const playlist = playlistRows[0];
@@ -2254,6 +3030,304 @@ export async function getPlaylistById(
     ...mapPlaylistSummary(playlist),
     songs: songsWithSegments,
   };
+}
+
+export async function enablePlaylistSharing(
+  id: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PlaylistSummary | null> {
+  await ensurePlaylistSharingColumns();
+  const existingRows = await db()
+    .select()
+    .from(playlists)
+    .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
+    .limit(1);
+
+  const existing = existingRows[0];
+  if (!existing) {
+    return null;
+  }
+
+  if (existing.shareToken) {
+    return mapPlaylistSummary(existing);
+  }
+
+  const sharedAt = new Date();
+  const rows = await db()
+    .update(playlists)
+    .set({ shareToken: createShareToken(), sharedAt })
+    .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
+    .returning();
+
+  return rows[0] ? mapPlaylistSummary(rows[0]) : null;
+}
+
+export async function disablePlaylistSharing(
+  id: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<boolean> {
+  await ensurePlaylistSharingColumns();
+  const rows = await db()
+    .update(playlists)
+    .set({ shareToken: null, sharedAt: null })
+    .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
+    .returning({ id: playlists.id });
+
+  return rows.length > 0;
+}
+
+export async function getSharedPlaylistByToken(token: string): Promise<SharedPlaylistDetail | null> {
+  if (!token.trim()) {
+    return null;
+  }
+  await ensurePlaylistSharingColumns();
+
+  let rows: Array<{
+    playlist: PlaylistRow;
+    ownerId: string;
+    ownerName: string;
+    ownerUsername: string;
+  }>;
+
+  try {
+    rows = await db()
+      .select({
+        playlist: playlists,
+        ownerId: users.id,
+        ownerName: users.name,
+        ownerUsername: users.username,
+      })
+      .from(playlists)
+      .innerJoin(users, eq(playlists.userId, users.id))
+      .where(eq(playlists.shareToken, token))
+      .limit(1);
+  } catch (error) {
+    if (isMissingPlaylistSharingColumnError(error)) {
+      return null;
+    }
+    if (isMissingUsersTableError(error) || isMissingUserProfileColumnError(error)) {
+      const playlistRows = await db()
+        .select()
+        .from(playlists)
+        .where(eq(playlists.shareToken, token))
+        .limit(1);
+      rows = playlistRows.map((playlist) => ({
+        playlist,
+        ownerId: playlist.userId,
+        ownerName: "Default User",
+        ownerUsername: "default",
+      }));
+    } else {
+      throw error;
+    }
+  }
+
+  const row = rows[0];
+  if (!row || !row.playlist.shareToken) {
+    return null;
+  }
+
+  const detail = await getPlaylistById(row.playlist.id, row.playlist.userId);
+  if (!detail || detail.shareToken !== token) {
+    return null;
+  }
+
+  return {
+    ...detail,
+    owner: {
+      id: row.ownerId,
+      displayName: row.ownerName,
+      username: row.ownerUsername,
+    },
+  };
+}
+
+export async function getPlaylistImportsForSource(
+  sourcePlaylistId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PlaylistSummary[]> {
+  await ensurePlaylistSharingColumns();
+  const rows = await db()
+    .select()
+    .from(playlists)
+    .where(and(eq(playlists.userId, userId), eq(playlists.sourcePlaylistId, sourcePlaylistId)))
+    .orderBy(desc(playlists.importedAt));
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const songCounts = await db()
+    .select({
+      playlistId: playlistSongs.playlistId,
+      count: count(playlistSongs.songId),
+    })
+    .from(playlistSongs)
+    .where(inArray(playlistSongs.playlistId, rows.map((row) => row.id)))
+    .groupBy(playlistSongs.playlistId);
+
+  const countMap = Object.fromEntries(songCounts.map((row) => [row.playlistId, row.count]));
+  return rows.map((row) => mapPlaylistSummary(row, countMap[row.id] ?? 0));
+}
+
+async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId: string): Promise<void> {
+  try {
+    const sourceRows = await db()
+      .select()
+      .from(midiSources)
+      .where(eq(midiSources.songId, sourceSongId));
+
+    if (sourceRows.length === 0) {
+      return;
+    }
+
+    const sourceIdMap = new Map<string, string>();
+    const importedSources = sourceRows.map((source) => {
+      const importedSourceId = crypto.randomUUID();
+      sourceIdMap.set(source.id, importedSourceId);
+      return {
+        id: importedSourceId,
+        songId: importedSongId,
+        originalFilename: source.originalFilename,
+        storageKey: source.storageKey,
+        uploadedAt: source.uploadedAt,
+        contentType: source.contentType,
+        fileSize: source.fileSize,
+        parseStatus: source.parseStatus,
+        cleanupSettings: source.cleanupSettings,
+        rawNotes: source.rawNotes,
+        cleanedNotes: source.cleanedNotes,
+        rawNoteCount: source.rawNoteCount,
+        cleanedNoteCount: source.cleanedNoteCount,
+        ignoredShortNoteCount: source.ignoredShortNoteCount,
+        parseError: source.parseError,
+      };
+    });
+
+    await db().insert(midiSources).values(importedSources);
+
+    const alignmentRows = await db()
+      .select()
+      .from(midiAlignments)
+      .where(inArray(midiAlignments.midiSourceId, Array.from(sourceIdMap.keys())));
+
+    if (alignmentRows.length === 0) {
+      return;
+    }
+
+    await db().insert(midiAlignments).values(
+      alignmentRows.map((alignment) => ({
+        id: crypto.randomUUID(),
+        songId: importedSongId,
+        midiSourceId: sourceIdMap.get(alignment.midiSourceId) ?? alignment.midiSourceId,
+        tappedStartTimesSeconds: alignment.tappedStartTimesSeconds,
+        retainedMidiNoteCount: alignment.retainedMidiNoteCount,
+        isComplete: alignment.isComplete,
+        status: alignment.status,
+        notes: alignment.notes,
+        createdAt: alignment.createdAt,
+        updatedAt: alignment.updatedAt,
+      }))
+    );
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function importSharedPlaylist(
+  token: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  options: { force?: boolean } = {}
+): Promise<{ status: "imported"; playlist: PlaylistSummary } | { status: "already_imported"; playlist: PlaylistSummary }> {
+  await ensurePlaylistSharingColumns();
+  const source = await getSharedPlaylistByToken(token);
+  if (!source) {
+    throw Object.assign(new Error("Shared playlist not found"), { code: "SHARED_PLAYLIST_NOT_FOUND" });
+  }
+
+  const existingImports = await getPlaylistImportsForSource(source.id, userId);
+  if (existingImports.length > 0 && !options.force) {
+    return { status: "already_imported", playlist: existingImports[0] };
+  }
+
+  const now = new Date();
+  const importedPlaylistId = crypto.randomUUID();
+  const playlistRows = await db()
+    .insert(playlists)
+    .values({
+      id: importedPlaylistId,
+      userId,
+      name: source.name,
+      eventDate: source.eventDate ?? null,
+      isRetired: false,
+      sourcePlaylistId: source.id,
+      sourceOwnerId: source.owner.id,
+      sourceShareToken: token,
+      importedAt: now,
+    })
+    .returning();
+
+  const importedPlaylist = playlistRows[0];
+  const sortedSongs = [...source.songs].sort((a, b) => a.position - b.position);
+  let importedSongCount = 0;
+
+  for (const item of sortedSongs) {
+    const songRows = await db()
+      .select()
+      .from(songs)
+      .where(eq(songs.id, item.id))
+      .limit(1);
+    const sourceSongRow = songRows[0];
+    if (!sourceSongRow) {
+      continue;
+    }
+
+    const importedSongId = crypto.randomUUID();
+    await db()
+      .insert(songs)
+      .values({
+        id: importedSongId,
+        userId,
+        title: sourceSongRow.title,
+        artist: sourceSongRow.artist ?? null,
+        audioKey: sourceSongRow.audioKey ?? null,
+        alternateAudioKey: sourceSongRow.alternateAudioKey ?? null,
+        pitchContourNotes: sourceSongRow.pitchContourNotes ?? [],
+        lastPracticedAt: null,
+      });
+
+    const sourceSegments = await getSegmentsBySongId(item.id);
+    if (sourceSegments.length > 0) {
+      await db().insert(segments).values(
+        sourceSegments.map((segment) => ({
+          id: crypto.randomUUID(),
+          songId: importedSongId,
+          label: segment.label,
+          order: segment.order,
+          startMs: segment.startMs,
+          endMs: segment.endMs,
+          lyricText: segment.lyricText ?? "",
+          pitchContourNotes: segment.pitchContourNotes ?? [],
+        }))
+      );
+    }
+
+    await cloneMidiDataForImportedSong(item.id, importedSongId);
+
+    await db()
+      .insert(playlistSongs)
+      .values({
+        playlistId: importedPlaylistId,
+        songId: importedSongId,
+        position: item.position,
+      });
+    importedSongCount += 1;
+  }
+
+  return { status: "imported", playlist: mapPlaylistSummary(importedPlaylist, importedSongCount) };
 }
 
 async function getRatingCountBySongIds(
