@@ -56,6 +56,11 @@ R2_SECRET_ACCESS_KEY=
 R2_BUCKET_NAME=        # Preferred bucket variable name
 R2_BUCKET=             # Legacy fallback bucket variable name
 R2_PUBLIC_URL=         # Required: public base URL for audio CDN delivery
+CANTARE_AUTH_SECRET=   # Long random secret used to hash magic-link and session tokens
+CANTARE_APP_URL=       # Public app URL used in magic-link emails
+RESEND_API_KEY=        # Resend API key for passwordless email login
+RESEND_FROM_EMAIL=     # Verified Resend sender, e.g. Cantare <login@example.com>
+CANTARE_ADMIN_EMAILS=  # Comma- or newline-separated admin email allowlist
 ```
 
 Notes:
@@ -63,6 +68,7 @@ Notes:
 - `R2_PUBLIC_URL` is required. Audio is served directly from R2's CDN to the browser.
 - If `R2_ENDPOINT` is blank and `R2_ACCOUNT_ID` is set, the app derives the standard Cloudflare R2 endpoint automatically.
 - Part and Blend audio versions are both stored as R2 objects and exposed to the browser as direct public R2 URLs.
+- Magic-link login links expire after 15 minutes and can be consumed once. Sessions persist for 90 days or until sign-out.
 
 Run database migrations before first use:
 

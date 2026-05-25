@@ -22,6 +22,12 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const [pickerOpen, setPickerOpen] = useState(false);
   const [inlineCreatePending, setInlineCreatePending] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const [publicBusy, setPublicBusy] = useState(false);
+  const [publicError, setPublicError] = useState<string | null>(null);
+  const [publicMessage, setPublicMessage] = useState<string | null>(null);
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     if (!userId) {
@@ -170,6 +176,96 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     }
   };
 
+  const shareUrl = playlist?.shareToken && typeof window !== 'undefined'
+    ? `${window.location.origin}/share/playlists/${playlist.shareToken}`
+    : playlist?.shareUrl ?? null;
+
+  const handleShare = async () => {
+    setShareBusy(true);
+    setShareError(null);
+    setShareMessage(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}/share`, { method: 'POST' });
+      if (!response.ok) {
+        throw new Error('Unable to enable sharing right now.');
+      }
+      const sharedPlaylist = (await response.json()) as Playlist;
+      setPlaylist((current) => current ? { ...current, ...sharedPlaylist } : sharedPlaylist);
+      setShareMessage('Sharing is on.');
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Unable to enable sharing right now.');
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const handleUnshare = async () => {
+    setShareBusy(true);
+    setShareError(null);
+    setShareMessage(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}/share`, { method: 'DELETE' });
+      if (!response.ok) {
+        throw new Error('Unable to disable sharing right now.');
+      }
+      setPlaylist((current) => current ? { ...current, shareToken: null, shareUrl: null, sharedAt: null } : current);
+      setShareMessage('Sharing is off.');
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Unable to disable sharing right now.');
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const handleCopyShareLink = async () => {
+    if (!shareUrl) {
+      return;
+    }
+    try {
+      await navigator.clipboard?.writeText(shareUrl);
+      setShareMessage('Share link copied.');
+    } catch {
+      setShareMessage('Share link is ready.');
+    }
+  };
+
+  const handlePublish = async () => {
+    setPublicBusy(true);
+    setPublicError(null);
+    setPublicMessage(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}/public`, { method: 'POST' });
+      if (!response.ok) {
+        throw new Error('Unable to publish this playlist right now.');
+      }
+      const publicPlaylist = (await response.json()) as Playlist;
+      setPlaylist((current) => current ? { ...current, ...publicPlaylist } : publicPlaylist);
+      setPublicMessage('Published to Shared.');
+    } catch (error) {
+      setPublicError(error instanceof Error ? error.message : 'Unable to publish this playlist right now.');
+    } finally {
+      setPublicBusy(false);
+    }
+  };
+
+  const handleUnpublish = async () => {
+    setPublicBusy(true);
+    setPublicError(null);
+    setPublicMessage(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}/public`, { method: 'DELETE' });
+      if (!response.ok) {
+        throw new Error('Unable to remove this playlist from Shared right now.');
+      }
+      setPlaylist((current) => current ? { ...current, isPublic: false, publishedAt: null } : current);
+      setPublicMessage('Removed from Shared.');
+    } catch (error) {
+      setPublicError(error instanceof Error ? error.message : 'Unable to remove this playlist from Shared right now.');
+    } finally {
+      setPublicBusy(false);
+    }
+  };
+
   const handleDrop = async (targetSongId: string) => {
     if (!playlist || !draggedSongId || draggedSongId === targetSongId) {
       setDraggedSongId(null);
@@ -244,9 +340,81 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
       </div>
 
       <div className="rounded border border-gray-200 bg-white p-4">
-        <button data-testid="playlist-add-song" className="rounded border border-indigo-300 px-3 py-1 text-indigo-700" onClick={() => void openSongPicker()}>
-          Add Song
-        </button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button data-testid="playlist-add-song" className="rounded border border-indigo-300 px-3 py-1 text-indigo-700" onClick={() => void openSongPicker()}>
+            Add Song
+          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {shareUrl ? (
+              <>
+                <a
+                  data-testid="playlist-share-link"
+                  href={shareUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="max-w-[18rem] truncate rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  {shareUrl}
+                </a>
+                <button
+                  data-testid="playlist-share-copy"
+                  className="rounded border border-indigo-300 px-3 py-1 text-sm text-indigo-700 hover:bg-indigo-50"
+                  onClick={() => void handleCopyShareLink()}
+                >
+                  Copy
+                </button>
+                <button
+                  data-testid="playlist-unshare"
+                  className="rounded border border-red-300 px-3 py-1 text-sm text-red-700 hover:bg-red-50 disabled:opacity-60"
+                  disabled={shareBusy}
+                  onClick={() => void handleUnshare()}
+                >
+                  {shareBusy ? 'Unsharing...' : 'Unshare'}
+                </button>
+              </>
+            ) : (
+              <button
+                data-testid="playlist-share"
+                className="rounded border border-emerald-300 px-3 py-1 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                disabled={shareBusy}
+                onClick={() => void handleShare()}
+              >
+                {shareBusy ? 'Sharing...' : 'Share'}
+              </button>
+            )}
+          </div>
+        </div>
+        {shareError ? <p data-testid="playlist-share-error" className="mt-2 text-sm text-red-600">{shareError}</p> : null}
+        {shareMessage ? <p data-testid="playlist-share-message" className="mt-2 text-sm text-gray-600">{shareMessage}</p> : null}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-3">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">Shared tab</p>
+            <p className="text-xs text-gray-500">
+              {playlist.isPublic ? 'This playlist appears for signed-in users.' : 'Publish this playlist for signed-in users to browse.'}
+            </p>
+          </div>
+          {playlist.isPublic ? (
+            <button
+              data-testid="playlist-unpublish-public"
+              className="rounded border border-amber-300 px-3 py-1 text-sm text-amber-800 hover:bg-amber-50 disabled:opacity-60"
+              disabled={publicBusy}
+              onClick={() => void handleUnpublish()}
+            >
+              {publicBusy ? 'Removing...' : 'Remove from Shared'}
+            </button>
+          ) : (
+            <button
+              data-testid="playlist-publish-public"
+              className="rounded border border-emerald-300 px-3 py-1 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+              disabled={publicBusy}
+              onClick={() => void handlePublish()}
+            >
+              {publicBusy ? 'Publishing...' : 'Publish to Shared'}
+            </button>
+          )}
+        </div>
+        {publicError ? <p data-testid="playlist-public-error" className="mt-2 text-sm text-red-600">{publicError}</p> : null}
+        {publicMessage ? <p data-testid="playlist-public-message" className="mt-2 text-sm text-gray-600">{publicMessage}</p> : null}
         {pickerOpen ? (
           <div className="mt-3 space-y-2">
             <div className="relative">

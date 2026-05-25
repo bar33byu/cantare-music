@@ -6,6 +6,9 @@ import {
   playlists,
   playlistSongs,
   users,
+  magicLinkTokens,
+  userSessions,
+  auditLogs,
   orphanedAudioKeys,
   tapPracticeSessions,
   tapPracticeTaps,
@@ -15,9 +18,46 @@ describe("schema tables", () => {
   it("users table has expected columns", () => {
     const cols = Object.keys(users);
     expect(cols).toContain("id");
+    expect(cols).toContain("username");
     expect(cols).toContain("name");
+    expect(cols).toContain("email");
+    expect(cols).toContain("avatarUrl");
+    expect(cols).toContain("profileVisibility");
+    expect(cols).toContain("createdAt");
+    expect(cols).toContain("updatedAt");
+  });
+  it("magic link tokens table has expected columns", () => {
+    const cols = Object.keys(magicLinkTokens);
+    expect(cols).toContain("id");
+    expect(cols).toContain("email");
+    expect(cols).toContain("tokenHash");
+    expect(cols).toContain("createdAt");
+    expect(cols).toContain("expiresAt");
+    expect(cols).toContain("consumedAt");
+  });
+
+  it("user sessions table has expected columns", () => {
+    const cols = Object.keys(userSessions);
+    expect(cols).toContain("id");
+    expect(cols).toContain("userId");
+    expect(cols).toContain("tokenHash");
+    expect(cols).toContain("createdAt");
+    expect(cols).toContain("expiresAt");
+    expect(cols).toContain("revokedAt");
+  });
+
+  it("audit logs table has expected columns", () => {
+    const cols = Object.keys(auditLogs);
+    expect(cols).toContain("id");
+    expect(cols).toContain("eventType");
+    expect(cols).toContain("actorUserId");
+    expect(cols).toContain("effectiveUserId");
+    expect(cols).toContain("resourceType");
+    expect(cols).toContain("resourceId");
+    expect(cols).toContain("metadata");
     expect(cols).toContain("createdAt");
   });
+
   it("songs table has expected columns", () => {
     const cols = Object.keys(songs);
     expect(cols).toContain("id");
@@ -25,6 +65,7 @@ describe("schema tables", () => {
     expect(cols).toContain("title");
     expect(cols).toContain("artist");
     expect(cols).toContain("audioKey");
+    expect(cols).toContain("sourceSongId");
     expect(cols).toContain("createdAt");
     expect(cols).toContain("lastPracticedAt");
   });
@@ -38,12 +79,14 @@ describe("schema tables", () => {
     expect(cols).toContain("startMs");
     expect(cols).toContain("endMs");
     expect(cols).toContain("lyricText");
+    expect(cols).toContain("sourceSegmentId");
     expect(cols).toContain("pitchContourNotes");
   });
 
   it("practiceRatings table has expected columns", () => {
     const cols = Object.keys(practiceRatings);
     expect(cols).toContain("id");
+    expect(cols).toContain("userId");
     expect(cols).toContain("segmentId");
     expect(cols).toContain("rating");
     expect(cols).toContain("ratedAt");
@@ -56,6 +99,14 @@ describe("schema tables", () => {
     expect(cols).toContain("name");
     expect(cols).toContain("eventDate");
     expect(cols).toContain("isRetired");
+    expect(cols).toContain("isPublic");
+    expect(cols).toContain("publishedAt");
+    expect(cols).toContain("shareToken");
+    expect(cols).toContain("sharedAt");
+    expect(cols).toContain("sourcePlaylistId");
+    expect(cols).toContain("sourceOwnerId");
+    expect(cols).toContain("sourceShareToken");
+    expect(cols).toContain("importedAt");
     expect(cols).toContain("createdAt");
   });
 

@@ -40,6 +40,32 @@ describe('PlaylistBrowser', () => {
     });
   });
 
+  it('shows separate indicators for public Shared publishing and URL sharing', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        playlists: [
+          {
+            ...basePlaylist,
+            isPublic: true,
+            publishedAt: '2026-05-25T12:00:00.000Z',
+            shareToken: 'share-token-1',
+            sharedAt: '2026-05-25T12:00:00.000Z',
+          },
+        ],
+      }),
+    });
+
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-public-shared-pl-1')).toHaveTextContent('Shared');
+      expect(screen.getByTestId('playlist-url-shared-pl-1')).toHaveTextContent('URL');
+    });
+    expect(screen.getByTestId('playlist-public-shared-pl-1')).toHaveAttribute('aria-label', 'Published in Shared for logged-in users');
+    expect(screen.getByTestId('playlist-url-shared-pl-1')).toHaveAttribute('aria-label', 'Shared by URL');
+  });
+
   it('clicking the playlist row opens practice', async () => {
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
     await waitFor(() => expect(screen.getByTestId('playlist-open-pl-1')).toBeInTheDocument());

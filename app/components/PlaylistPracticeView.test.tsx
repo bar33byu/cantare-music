@@ -84,6 +84,7 @@ describe('PlaylistPracticeView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    window.localStorage.clear();
     Reflect.deleteProperty(window, 'caches');
     Object.defineProperty(navigator, 'onLine', {
       configurable: true,
@@ -1102,6 +1103,38 @@ describe('PlaylistPracticeView', () => {
     const outsideLabel = screen.getByTestId('playlist-practice-mastery-label-song-2');
     expect(outsideLabel).toHaveTextContent('7%');
     expect(outsideLabel.className).toContain('text-gray-700');
+  });
+
+  it('shows clean local-only progress on guest shared playlist cards', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+    const ownerProgressPlaylist: Playlist = {
+      ...playlist,
+      songs: playlist.songs.map((song, index) => ({
+        ...song,
+        masteryPercent: index === 0 ? 91 : 40,
+        lastPracticedAt: index === 0 ? '2026-05-18T00:00:00.000Z' : '2026-05-23T00:00:00.000Z',
+      })),
+    };
+
+    render(
+      <PlaylistPracticeView
+        playlist={ownerProgressPlaylist}
+        persistProgress={false}
+        progressStorage="local"
+        revalidatePlaylist={false}
+        onExit={() => undefined}
+        onSelectSong={() => undefined}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('playlist-practice-mastery-label-song-1')).toHaveTextContent('0%');
+    expect(screen.getByTestId('playlist-practice-mastery-label-song-2')).toHaveTextContent('0%');
+    expect(screen.getByTestId('playlist-practice-song-song-1')).toHaveTextContent('Not practiced yet');
+    expect(screen.getByTestId('playlist-practice-song-song-2')).toHaveTextContent('Not practiced yet');
   });
 
   it('plays unrated Auto Drill segments five times and advances on a high rating', async () => {

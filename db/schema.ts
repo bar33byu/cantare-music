@@ -7,6 +7,7 @@ import {
   jsonb,
   primaryKey,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { InferSelectModel, sql } from "drizzle-orm";
 
@@ -53,11 +54,77 @@ export interface MidiCleanupSettingsData {
   simultaneousThresholdMs: number;
 }
 
-export const users = pgTable("users", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+export const users = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    username: text("username").notNull(),
+    name: text("name").notNull(),
+    email: text("email").notNull().default(""),
+    avatarUrl: text("avatar_url"),
+    profileVisibility: text("profile_visibility").notNull().default("private"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => ({
+    usernameUniqueIdx: uniqueIndex("users_username_unique").on(table.username),
+    emailUniqueIdx: uniqueIndex("users_email_unique").on(table.email).where(sql`${table.email} IS NOT NULL AND ${table.email} <> ''`),
+  })
+);
+
+export const magicLinkTokens = pgTable(
+  "magic_link_tokens",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    expiresAt: timestamp("expires_at").notNull(),
+    consumedAt: timestamp("consumed_at"),
+  },
+  (table) => ({
+    tokenHashUniqueIdx: uniqueIndex("magic_link_tokens_token_hash_unique").on(table.tokenHash),
+    emailCreatedAtIdx: index("idx_magic_link_tokens_email_created_at").on(table.email, table.createdAt),
+  })
+);
+
+export const userSessions = pgTable(
+  "user_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    expiresAt: timestamp("expires_at").notNull(),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => ({
+    tokenHashUniqueIdx: uniqueIndex("user_sessions_token_hash_unique").on(table.tokenHash),
+    userExpiresAtIdx: index("idx_user_sessions_user_expires_at").on(table.userId, table.expiresAt),
+  })
+);
+
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: text("id").primaryKey(),
+    eventType: text("event_type").notNull(),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    effectiveUserId: text("effective_user_id").references(() => users.id, { onDelete: "set null" }),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    eventTypeCreatedAtIdx: index("idx_audit_logs_event_type_created_at").on(table.eventType, table.createdAt),
+    actorCreatedAtIdx: index("idx_audit_logs_actor_created_at").on(table.actorUserId, table.createdAt),
+    effectiveCreatedAtIdx: index("idx_audit_logs_effective_created_at").on(table.effectiveUserId, table.createdAt),
+    resourceIdx: index("idx_audit_logs_resource").on(table.resourceType, table.resourceId),
+  })
+);
 
 export const songs = pgTable(
   "songs",
@@ -68,6 +135,7 @@ export const songs = pgTable(
     artist: text("artist"),
     audioKey: text("audio_key"),
     alternateAudioKey: text("alternate_audio_key"),
+    sourceSongId: text("source_song_id"),
     pitchContourNotes: jsonb("pitch_contour_notes")
       .$type<SongPitchContourPoint[]>()
       .notNull()
@@ -78,6 +146,7 @@ export const songs = pgTable(
   (table) => ({
     userIdIdx: index("idx_songs_user_id").on(table.userId),
     userCreatedAtIdx: index("idx_songs_user_created_at").on(table.userId, table.createdAt),
+    sourceSongIdx: index("idx_songs_source_song_id").on(table.sourceSongId),
   })
 );
 
@@ -91,6 +160,7 @@ export const segments = pgTable("segments", {
   startMs: integer("start_ms").notNull().default(0),
   endMs: integer("end_ms").notNull().default(0),
   lyricText: text("lyric_text").default(""),
+  sourceSegmentId: text("source_segment_id"),
   pitchContourNotes: jsonb("pitch_contour_notes")
     .$type<SegmentPitchContourPoint[]>()
     .notNull()
@@ -99,6 +169,7 @@ export const segments = pgTable("segments", {
 
 export const practiceRatings = pgTable("practice_ratings", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull().default("default"),
   segmentId: text("segment_id")
     .notNull()
     .references(() => segments.id, { onDelete: "cascade" }),
@@ -114,11 +185,22 @@ export const playlists = pgTable(
     name: text("name").notNull(),
     eventDate: text("event_date"),
     isRetired: boolean("is_retired").notNull().default(false),
+    isPublic: boolean("is_public").notNull().default(false),
+    publishedAt: timestamp("published_at"),
+    shareToken: text("share_token"),
+    sharedAt: timestamp("shared_at"),
+    sourcePlaylistId: text("source_playlist_id"),
+    sourceOwnerId: text("source_owner_id"),
+    sourceShareToken: text("source_share_token"),
+    importedAt: timestamp("imported_at"),
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => ({
     userIdIdx: index("idx_playlists_user_id").on(table.userId),
     userCreatedAtIdx: index("idx_playlists_user_created_at").on(table.userId, table.createdAt),
+    publicPublishedAtIdx: index("idx_playlists_public_published_at").on(table.isPublic, table.publishedAt),
+    sourceImportIdx: index("idx_playlists_user_source_playlist").on(table.userId, table.sourcePlaylistId),
+    shareTokenUniqueIdx: uniqueIndex("playlists_share_token_unique").on(table.shareToken).where(sql`${table.shareToken} IS NOT NULL`),
   })
 );
 
@@ -249,8 +331,15 @@ export const midiAlignments = pgTable(
 );
 
 export type UserRow = InferSelectModel<typeof users>;
-export type SongRow = InferSelectModel<typeof songs>;
-export type SegmentRow = InferSelectModel<typeof segments>;
+export type MagicLinkTokenRow = InferSelectModel<typeof magicLinkTokens>;
+export type UserSessionRow = InferSelectModel<typeof userSessions>;
+export type AuditLogRow = InferSelectModel<typeof auditLogs>;
+export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId"> & {
+  sourceSongId?: string | null;
+};
+export type SegmentRow = Omit<InferSelectModel<typeof segments>, "sourceSegmentId"> & {
+  sourceSegmentId?: string | null;
+};
 export type PracticeRatingRow = InferSelectModel<typeof practiceRatings>;
 export type PlaylistRow = InferSelectModel<typeof playlists>;
 export type PlaylistSongRow = InferSelectModel<typeof playlistSongs>;

@@ -21,6 +21,7 @@ export interface ContourNoteHeatStat {
 export interface Segment {
   id: string;
   songId: string;
+  sourceSegmentId?: string | null;
   order: number;
   label: string;
   lyricText: string;
@@ -31,6 +32,7 @@ export interface Segment {
 
 export interface Song {
   id: string;
+  sourceSongId?: string | null;
   title: string;
   artist?: string;
   description?: string;
@@ -73,6 +75,33 @@ export interface Playlist {
   name: string;
   eventDate?: string;
   isRetired: boolean;
+  isPublic?: boolean;
+  publishedAt?: string | null;
+  shareToken?: string | null;
+  shareUrl?: string | null;
+  sharedAt?: string | null;
+  sourcePlaylistId?: string | null;
+  sourceOwnerId?: string | null;
+  sourceShareToken?: string | null;
+  importedAt?: string | null;
   createdAt: string;
   songs: Array<Song & { position: number; masteryPercent?: number; ratingCount?: number }>;
+}
+
+export interface SharedPlaylistListItem {
+  id: string;
+  name: string;
+  eventDate?: string;
+  isRetired: boolean;
+  isPublic: boolean;
+  publishedAt?: string | null;
+  shareToken?: string | null;
+  sharedAt?: string | null;
+  createdAt: string;
+  songCount: number;
+  owner: {
+    id: string;
+    displayName: string;
+    username: string;
+  };
 }
