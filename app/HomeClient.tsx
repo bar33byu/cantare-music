@@ -16,6 +16,7 @@ import {
   hasDeclinedGuestProgressClaim,
   hasGuestProgress,
   markGuestProgressClaimDeclined,
+  markGuestSongProgress,
 } from "./lib/guestProgress";
 import type { Playlist, Song } from "./types";
 import { createPublicUsernameFromName, DEFAULT_USER_ID, normalizeUserId, normalizeUsername, type KnownUser, USER_COOKIE_NAME } from "./lib/userContext";
@@ -292,6 +293,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     [userSettings.currentUserId, userSettings.users]
   );
   const isSignedIn = Boolean((currentUser.email ?? "").trim() || (sessionActor?.email ?? "").trim());
+  const appTitle = isSignedIn ? "Cantare Music" : "Cantare Music (Guest)";
   const adminActor = sessionActor?.isAdmin ? sessionActor : currentUser.isAdmin ? currentUser : null;
 
   const applyAuthenticatedUser = useCallback((user: KnownUser) => {
@@ -930,6 +932,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   };
 
   const handleSongCreated = (songId: string) => {
+    markGuestSongProgress(songId, activeUserId);
     void openSongEditor(songId, "library");
   };
 
@@ -1230,7 +1233,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       {guestClaimPrompt}
       <div className="max-w-4xl mx-auto">
         <UnifiedHeader
-          title="Cantare Music"
+          title={appTitle}
           action={
             <button
               type="button"
@@ -1544,6 +1547,16 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
         {activeView === "library" ? (
           <>
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                data-testid="new-song-button"
+                onClick={() => setActiveView("song_add")}
+                className="rounded bg-indigo-600 px-4 py-2 text-white"
+              >
+                New Song
+              </button>
+            </div>
             <SongBrowser
               key={`songs:${activeUserId}:${refreshTrigger}`}
               onSelectSong={handleSelectSong}
@@ -1552,26 +1565,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               refreshTrigger={refreshTrigger}
               userId={activeUserId}
             />
-            {/* Plus button for adding songs */}
-            <button
-              onClick={() => setActiveView("song_add")}
-              title="Add Song"
-              className="fixed top-6 right-6 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-6 w-6"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-            </button>
           </>
         ) : null}
 
