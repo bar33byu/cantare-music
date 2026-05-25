@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { consumeMagicLinkToken, createUserSession, getOrCreateUserForEmail } from "../../../db/queries";
+import { consumeMagicLinkToken, createUserSession, getOrCreateUserForEmail, logAuditEvent } from "../../../db/queries";
 import { AUTH_SESSION_COOKIE_NAME, createOpaqueToken, getAppBaseUrl, hashAuthToken, SESSION_TTL_MS } from "../../lib/authTokens";
+import { getSafeAuthReturnPath } from "../../lib/authRedirects";
 import { USER_COOKIE_NAME } from "../../lib/userContext";
+import { isEmailAdmin } from "../../api/_user";
 
 function cookieOptions(maxAgeSeconds: number, httpOnly: boolean) {
   return {
@@ -14,7 +16,8 @@ function cookieOptions(maxAgeSeconds: number, httpOnly: boolean) {
 }
 
 export async function GET(request: NextRequest) {
-  const redirectUrl = new URL("/", getAppBaseUrl(request));
+  const appBaseUrl = getAppBaseUrl(request);
+  const redirectUrl = new URL(getSafeAuthReturnPath(request.nextUrl.searchParams.get("returnTo"), appBaseUrl), appBaseUrl);
   const rawToken = request.nextUrl.searchParams.get("token") ?? "";
 
   try {
@@ -37,6 +40,18 @@ export async function GET(request: NextRequest) {
       userId: user.id,
       tokenHash: hashAuthToken(sessionToken),
       expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+    });
+    await logAuditEvent({
+      eventType: "auth.admin_status_resolved",
+      actorUserId: user.id,
+      effectiveUserId: user.id,
+      resourceType: "user",
+      resourceId: user.id,
+      metadata: {
+        email: user.email,
+        isAdmin: isEmailAdmin(user.email),
+        source: "magic_link_login",
+      },
     });
 
     redirectUrl.searchParams.set("auth", "signed-in");

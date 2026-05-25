@@ -5,6 +5,7 @@ import PracticeView from "./components/PracticeView";
 import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
 import { PlaylistPracticeView } from "./components/PlaylistPracticeView";
+import { SharedBrowser } from "./components/SharedBrowser";
 import { SongForm } from "./components/SongForm";
 import { SongBrowser } from "./components/SongBrowser";
 import { SegmentEditor } from "./components/SegmentEditor";
@@ -35,6 +36,7 @@ type AppView =
   | "song_segment_editor"
   | "song_add"
   | "playlists"
+  | "shared"
   | "playlist_detail"
   | "playlist_practice";
 
@@ -61,7 +63,6 @@ interface BuildInfo {
 }
 
 const SETTINGS_STORAGE_KEY = "cantare:user-settings";
-const AUTH_SESSION_COOKIE_NAME = "cantare-session";
 const DEFAULT_USER_SETTINGS: UserSettings = {
   segmentPrerollMs: 500,
   preferredAudioVersion: "part",
@@ -103,6 +104,14 @@ function normalizeKnownUsers(users: Array<Partial<KnownUser>> | undefined): Know
 
 interface AuthSessionPayload {
   user?: KnownUser | null;
+  actor?: KnownUser | null;
+  effectiveUser?: KnownUser | null;
+  isImpersonating?: boolean;
+}
+
+interface ImpersonationState {
+  actor: KnownUser;
+  effectiveUser: KnownUser;
 }
 
 function clampSegmentPrerollMs(value: number): number {
@@ -180,6 +189,7 @@ function parseHashRoute(hash: string): HashRouteState {
     view === "song_segment_editor" ||
     view === "song_add" ||
     view === "playlists" ||
+    view === "shared" ||
     view === "playlist_detail" ||
     view === "playlist_practice"
       ? view
@@ -252,6 +262,8 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [activeView, setActiveView] = useState<AppView>("playlists");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+  const [playlistPracticeReturnView, setPlaylistPracticeReturnView] = useState<"playlists" | "shared">("playlists");
+  const [playlistPracticeReadOnly, setPlaylistPracticeReadOnly] = useState(false);
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
@@ -264,6 +276,13 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [guestClaimVisible, setGuestClaimVisible] = useState(false);
   const [guestClaimLoading, setGuestClaimLoading] = useState(false);
   const [guestClaimMessage, setGuestClaimMessage] = useState("");
+  const [sessionActor, setSessionActor] = useState<KnownUser | null>(null);
+  const [impersonation, setImpersonation] = useState<ImpersonationState | null>(null);
+  const [adminUsers, setAdminUsers] = useState<KnownUser[]>([]);
+  const [adminUserSearch, setAdminUserSearch] = useState("");
+  const [adminSelectedUserId, setAdminSelectedUserId] = useState("");
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminMessage, setAdminMessage] = useState("");
   const settingsLoadedRef = useRef(false);
   const usersHydratedFromDbRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
@@ -272,7 +291,8 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     () => userSettings.users.find((user) => user.id === userSettings.currentUserId) ?? DEFAULT_USER_SETTINGS.users[0],
     [userSettings.currentUserId, userSettings.users]
   );
-  const isSignedIn = (currentUser.email ?? "").trim().length > 0;
+  const isSignedIn = Boolean((currentUser.email ?? "").trim() || (sessionActor?.email ?? "").trim());
+  const adminActor = sessionActor?.isAdmin ? sessionActor : currentUser.isAdmin ? currentUser : null;
 
   const applyAuthenticatedUser = useCallback((user: KnownUser) => {
     setUserSettings((previous) => {
@@ -283,6 +303,29 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         users,
       };
     });
+  }, []);
+
+  const applyAuthSessionPayload = useCallback((payload: AuthSessionPayload) => {
+    const actor = payload.actor ?? payload.user ?? null;
+    const effectiveUser = payload.effectiveUser ?? payload.user ?? null;
+
+    setSessionActor(actor);
+    if (actor && effectiveUser && payload.isImpersonating) {
+      setImpersonation({ actor, effectiveUser });
+    } else {
+      setImpersonation(null);
+    }
+
+    if (effectiveUser) {
+      setUserSettings((previous) => {
+        const users = mergeUsersWithDatabase(previous.users, normalizeKnownUsers([actor, effectiveUser].filter(Boolean) as KnownUser[]));
+        return {
+          ...previous,
+          currentUserId: normalizeUserId(effectiveUser.id),
+          users,
+        };
+      });
+    }
   }, []);
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
@@ -338,7 +381,8 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
     const params = new URLSearchParams(window.location.search);
     const shouldCleanAuthParam = params.get("auth") === "signed-in";
-    if (!readCookieValue(AUTH_SESSION_COOKIE_NAME) && !shouldCleanAuthParam) {
+    const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
+    if (cookieUserId === DEFAULT_USER_ID && !shouldCleanAuthParam) {
       return;
     }
 
@@ -350,8 +394,8 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           return;
         }
         const payload = (await response.json()) as AuthSessionPayload;
-        if (!cancelled && payload.user) {
-          applyAuthenticatedUser(payload.user);
+        if (!cancelled && (payload.user || payload.effectiveUser)) {
+          applyAuthSessionPayload(payload);
           if (shouldCleanAuthParam) {
             window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
           }
@@ -364,7 +408,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     return () => {
       cancelled = true;
     };
-  }, [applyAuthenticatedUser]);
+  }, [applyAuthSessionPayload]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !settingsLoadedRef.current) {
@@ -443,6 +487,46 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     };
   }, [settingsOpen]);
 
+  useEffect(() => {
+    if (!settingsOpen || !adminActor?.isAdmin) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadAdminUsers = async () => {
+      setAdminLoading(true);
+      setAdminMessage("");
+      try {
+        const response = await fetch("/api/admin/users", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Failed to load users");
+        }
+        const payload = (await response.json()) as { users?: KnownUser[] };
+        if (cancelled) {
+          return;
+        }
+        const users = normalizeKnownUsers(payload.users);
+        setAdminUsers(users);
+        setAdminSelectedUserId((previous) => previous || users.find((user) => user.id !== currentUser.id)?.id || users[0]?.id || "");
+      } catch {
+        if (!cancelled) {
+          setAdminMessage("Could not load users.");
+        }
+      } finally {
+        if (!cancelled) {
+          setAdminLoading(false);
+        }
+      }
+    };
+
+    void loadAdminUsers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adminActor?.isAdmin, currentUser.id, settingsOpen]);
+
   const handleMagicLinkRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!authEmail.trim()) {
@@ -507,12 +591,65 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       // Clear local state even if the server-side revoke request cannot complete.
     } finally {
       setUserSettings((previous) => ({ ...previous, currentUserId: DEFAULT_USER_ID }));
+      setSessionActor(null);
+      setImpersonation(null);
       setSelectedSong(null);
       setSelectedPlaylist(null);
       setRefreshTrigger((previous) => previous + 1);
       setActiveView("playlists");
       setAuthMessage("Signed out.");
       setAuthLoading(false);
+    }
+  };
+
+  const handleStartImpersonation = async () => {
+    if (!adminSelectedUserId) {
+      return;
+    }
+
+    setAdminLoading(true);
+    setAdminMessage("");
+    try {
+      const response = await fetch("/api/admin/impersonation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: adminSelectedUserId }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to start impersonation");
+      }
+      const payload = (await response.json()) as AuthSessionPayload;
+      applyAuthSessionPayload(payload);
+      setSelectedSong(null);
+      setSelectedPlaylist(null);
+      setRefreshTrigger((previous) => previous + 1);
+      setActiveView("playlists");
+      setSettingsOpen(false);
+    } catch {
+      setAdminMessage("Could not start impersonation.");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const handleStopImpersonation = async () => {
+    setAdminLoading(true);
+    setAdminMessage("");
+    try {
+      const response = await fetch("/api/admin/impersonation", { method: "DELETE" });
+      if (!response.ok) {
+        throw new Error("Failed to stop impersonation");
+      }
+      const payload = (await response.json()) as AuthSessionPayload;
+      applyAuthSessionPayload(payload);
+      setSelectedSong(null);
+      setSelectedPlaylist(null);
+      setRefreshTrigger((previous) => previous + 1);
+      setActiveView("playlists");
+    } catch {
+      setAdminMessage("Could not exit impersonation.");
+    } finally {
+      setAdminLoading(false);
     }
   };
 
@@ -554,6 +691,49 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     setGuestClaimVisible(false);
     setGuestClaimMessage("");
   };
+
+  const impersonationBanner = impersonation ? (
+    <div
+      className="sticky top-0 z-30 border-b border-amber-300 bg-amber-100 px-4 py-3 text-amber-950 shadow-sm"
+      data-testid="impersonation-banner"
+      role="status"
+    >
+      <div className="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm">
+          <span className="font-bold uppercase tracking-wide">Impersonating</span>{" "}
+          <span className="font-semibold">{impersonation.actor.name}</span>
+          {impersonation.actor.email ? <span> ({impersonation.actor.email})</span> : null}
+          <span className="mx-2">acting as</span>
+          <span className="font-semibold">{impersonation.effectiveUser.name}</span>
+          {impersonation.effectiveUser.email ? <span> ({impersonation.effectiveUser.email})</span> : null}
+        </div>
+        <button
+          type="button"
+          data-testid="stop-impersonation"
+          onClick={() => {
+            void handleStopImpersonation();
+          }}
+          disabled={adminLoading}
+          className="w-fit rounded border border-amber-500 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Exit impersonation
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  const filteredAdminUsers = adminUsers.filter((user) => {
+    const query = adminUserSearch.trim().toLowerCase();
+    if (!query) {
+      return true;
+    }
+    return (
+      user.name.toLowerCase().includes(query) ||
+      user.username.toLowerCase().includes(query) ||
+      (user.email ?? "").toLowerCase().includes(query)
+    );
+  });
+  const selectedAdminUserIsVisible = filteredAdminUsers.some((user) => user.id === adminSelectedUserId);
 
   const loadSongById = useCallback(async (songId: string): Promise<Song | null> => {
     const response = await request(`/api/songs/${songId}`);
@@ -870,7 +1050,9 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       setSelectedSong(null);
       if (selectedPlaylist) {
         void (async () => {
-          await refreshSelectedPlaylist();
+          if (!playlistPracticeReadOnly) {
+            await refreshSelectedPlaylist();
+          }
           setActiveView("playlist_practice");
         })();
         return;
@@ -881,11 +1063,13 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {impersonationBanner}
         {guestClaimPrompt}
         <div className="max-w-4xl mx-auto">
           <PracticeView
             song={selectedSong}
             userId={activeUserId}
+            persistProgress={!playlistPracticeReadOnly}
             initialSession={session}
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
@@ -913,6 +1097,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {impersonationBanner}
         {guestClaimPrompt}
         <div className="max-w-4xl mx-auto">
           <UnifiedHeader
@@ -946,6 +1131,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   if (activeView === "song_add") {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {impersonationBanner}
         {guestClaimPrompt}
         <div className="max-w-2xl mx-auto">
           <UnifiedHeader
@@ -969,6 +1155,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   if (activeView === "playlist_detail" && selectedPlaylist) {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {impersonationBanner}
         {guestClaimPrompt}
         <div className="mx-auto max-w-4xl">
           <PlaylistDetail
@@ -978,6 +1165,8 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             onBack={() => setActiveView("playlists")}
             onPractice={(playlist) => {
               setSelectedPlaylist(playlist);
+              setPlaylistPracticeReturnView("playlists");
+              setPlaylistPracticeReadOnly(false);
               setActiveView("playlist_practice");
             }}
             onEditSong={(songId) => {
@@ -992,20 +1181,30 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   if (activeView === "playlist_practice" && selectedPlaylist) {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
+        {impersonationBanner}
         {guestClaimPrompt}
         <div className="mx-auto max-w-4xl">
           <PlaylistPracticeView
             playlist={selectedPlaylist}
             userId={activeUserId}
+            persistProgress={!playlistPracticeReadOnly}
             preferredAudioVersion={userSettings.preferredAudioVersion}
             onPreferredAudioVersionChange={(version) => {
               setUserSettings((previous) => ({ ...previous, preferredAudioVersion: version }));
             }}
-            onExit={() => setActiveView("playlists")}
-            onManage={() => setActiveView("playlist_detail")}
+            onExit={() => {
+              setSelectedPlaylist(null);
+              setPlaylistPracticeReadOnly(false);
+              setActiveView(playlistPracticeReturnView);
+            }}
+            onManage={playlistPracticeReadOnly ? undefined : () => setActiveView("playlist_detail")}
             onSelectSong={(song) => {
               setSelectedSong(song);
               setActiveView("song_practice");
+
+              if (playlistPracticeReadOnly) {
+                return;
+              }
 
               void (async () => {
                 try {
@@ -1027,6 +1226,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
+      {impersonationBanner}
       {guestClaimPrompt}
       <div className="max-w-4xl mx-auto">
         <UnifiedHeader
@@ -1210,6 +1410,71 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                     </p>
                   ) : null}
                 </div>
+                {adminActor?.isAdmin ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <h3 className="text-sm font-semibold text-amber-950">Admin</h3>
+                    <div className="mt-3 grid gap-2">
+                      <label htmlFor="admin-user-search" className="text-sm font-medium text-amber-950">
+                        Impersonate user
+                      </label>
+                      <input
+                        id="admin-user-search"
+                        data-testid="admin-user-search"
+                        type="search"
+                        value={adminUserSearch}
+                        onChange={(event) => setAdminUserSearch(event.target.value)}
+                        placeholder="Search name, username, or email"
+                        className="min-w-0 rounded border border-amber-300 bg-white px-2 py-1 text-sm text-gray-900"
+                      />
+                      <select
+                        data-testid="admin-impersonation-user-select"
+                        value={selectedAdminUserIsVisible ? adminSelectedUserId : ""}
+                        onChange={(event) => setAdminSelectedUserId(event.target.value)}
+                        disabled={adminLoading || filteredAdminUsers.length === 0}
+                        className="min-w-0 rounded border border-amber-300 bg-white px-2 py-1 text-sm text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {filteredAdminUsers.length === 0 ? (
+                          <option value="">No users found</option>
+                        ) : (
+                          filteredAdminUsers.map((user) => (
+                            <option key={user.id} value={user.id}>
+                              {user.name} {user.email ? `(${user.email})` : `@${user.username}`}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <button
+                        type="button"
+                        data-testid="admin-start-impersonation"
+                        onClick={() => {
+                          void handleStartImpersonation();
+                        }}
+                        disabled={adminLoading || !adminSelectedUserId || !selectedAdminUserIsVisible}
+                        className="rounded border border-amber-500 bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {adminLoading ? "Working" : "Start impersonation"}
+                      </button>
+                      {impersonation ? (
+                        <button
+                          type="button"
+                          data-testid="settings-stop-impersonation"
+                          onClick={() => {
+                            void handleStopImpersonation();
+                          }}
+                          disabled={adminLoading}
+                          className="rounded border border-amber-400 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Exit impersonation
+                        </button>
+                      ) : null}
+                      {adminMessage ? (
+                        <p className="text-xs text-amber-900" role="status">
+                          {adminMessage}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
                   <h3 className="text-sm font-semibold text-gray-800">Build</h3>
                   <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
@@ -1260,6 +1525,21 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           >
             Library
           </button>
+          <button
+            data-testid="shared-tab"
+            onClick={() => {
+              setSelectedSong(null);
+              setSelectedPlaylist(null);
+              setActiveView("shared");
+            }}
+            className={`px-4 py-3 font-medium transition-colors ${
+              activeView === "shared"
+                ? "border-b-2 border-emerald-600 text-emerald-700"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+          >
+            Shared
+          </button>
         </div>
 
         {activeView === "library" ? (
@@ -1306,6 +1586,8 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                 if (!response.ok) throw new Error("Failed to fetch playlist");
                 const fullPlaylist: Playlist = await response.json();
                 setSelectedPlaylist(fullPlaylist);
+                setPlaylistPracticeReturnView("playlists");
+                setPlaylistPracticeReadOnly(false);
                 setActiveView("playlist_practice");
               } catch (err) {
                 console.error("Failed to load playlist:", err);
@@ -1316,6 +1598,46 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               setActiveView("playlist_detail");
             }}
           />
+        ) : null}
+
+        {activeView === "shared" ? (
+          isSignedIn ? (
+            <SharedBrowser
+              onPracticeAsGuest={(playlist) => {
+                setSelectedPlaylist(playlist);
+                setPlaylistPracticeReturnView("shared");
+                setPlaylistPracticeReadOnly(true);
+                setActiveView("playlist_practice");
+              }}
+              onOpenCopiedPlaylist={async (playlistId) => {
+                try {
+                  const response = await request(`/api/playlists/${playlistId}`);
+                  if (!response.ok) throw new Error("Failed to fetch playlist");
+                  const fullPlaylist: Playlist = await response.json();
+                  setSelectedPlaylist(fullPlaylist);
+                  setPlaylistPracticeReturnView("playlists");
+                  setPlaylistPracticeReadOnly(false);
+                  setActiveView("playlist_detail");
+                } catch (err) {
+                  console.error("Failed to load copied playlist:", err);
+                }
+              }}
+            />
+          ) : (
+            <section data-testid="shared-sign-in-required" className="rounded border border-gray-200 bg-white p-6 text-gray-700">
+              <h2 className="text-lg font-semibold text-gray-950">Sign in to browse Shared</h2>
+              <p className="mt-2 text-sm text-gray-600">
+                Public shared playlists are available to signed-in users. Direct playlist share links still work without signing in.
+              </p>
+              <button
+                type="button"
+                className="mt-4 rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                onClick={() => setSettingsOpen(true)}
+              >
+                Sign in
+              </button>
+            </section>
+          )
         ) : null}
       </div>
     </div>

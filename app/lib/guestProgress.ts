@@ -1,7 +1,9 @@
 import { DEFAULT_USER_ID } from "./userContext";
+import type { SegmentRating } from "../types";
 
 export const GUEST_PROGRESS_STORAGE_KEY = "cantare:guest-progress:v1";
 const GUEST_PROGRESS_DECLINED_PREFIX = "cantare:guest-progress-declined:";
+const GUEST_RATINGS_PREFIX = "cantare:guest-ratings:v1:";
 
 interface GuestProgressSnapshot {
   songIds?: unknown;
@@ -98,5 +100,55 @@ export function markGuestProgressClaimDeclined(userId: string): void {
     storage.setItem(`${GUEST_PROGRESS_DECLINED_PREFIX}${userId}`, "1");
   } catch {
     // Ignore persistence failures.
+  }
+}
+
+function buildGuestRatingsKey(songId: string): string {
+  return `${GUEST_RATINGS_PREFIX}${songId}`;
+}
+
+export function getGuestSongRatings(songId: string): SegmentRating[] {
+  if (!songId.trim()) {
+    return [];
+  }
+
+  const storage = getLocalStorage();
+  if (!storage) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(storage.getItem(buildGuestRatingsKey(songId)) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((rating): rating is SegmentRating => (
+      Boolean(rating) &&
+      typeof rating === "object" &&
+      typeof (rating as SegmentRating).id === "string" &&
+      typeof (rating as SegmentRating).segmentId === "string" &&
+      [1, 2, 3, 4, 5].includes((rating as SegmentRating).rating) &&
+      typeof (rating as SegmentRating).ratedAt === "string"
+    ));
+  } catch {
+    return [];
+  }
+}
+
+export function saveGuestSongRatings(songId: string, ratings: SegmentRating[]): void {
+  if (!songId.trim()) {
+    return;
+  }
+
+  const storage = getLocalStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.setItem(buildGuestRatingsKey(songId), JSON.stringify(ratings));
+    markGuestSongProgress(songId, DEFAULT_USER_ID);
+  } catch {
+    // Ratings are a convenience for guests; practice must continue if storage is unavailable.
   }
 }

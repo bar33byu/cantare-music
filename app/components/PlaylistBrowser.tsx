@@ -8,6 +8,10 @@ type PlaylistListItem = {
   name: string;
   eventDate?: string;
   isRetired: boolean;
+  isPublic?: boolean;
+  publishedAt?: string | null;
+  shareToken?: string | null;
+  sharedAt?: string | null;
   createdAt: string;
   songCount: number;
   songs?: Playlist['songs'];
@@ -26,6 +30,44 @@ const EMPTY_PLAYLIST_STATS: PlaylistHealthStats = {
   songsWithSegments: 0,
   songsWithMidiContour: 0,
 };
+
+function PublicSharedIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-3.5 w-3.5"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 0 1 0 20" />
+      <path d="M12 2a15.3 15.3 0 0 0 0 20" />
+    </svg>
+  );
+}
+
+function UrlSharedIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-3.5 w-3.5"
+    >
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
 
 interface PlaylistBrowserProps {
   onSelectPlaylist: (playlist: Playlist) => void;
@@ -285,6 +327,8 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
             const knowledgePercent = Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100);
             const stats = statsByPlaylist[playlist.id] ?? EMPTY_PLAYLIST_STATS;
             const totalSongs = Math.max(playlist.songCount ?? 0, 0);
+            const isPublicShared = Boolean(playlist.isPublic);
+            const isUrlShared = Boolean(playlist.shareToken);
             return (
               <article
                 key={playlist.id}
@@ -301,7 +345,31 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                     className="min-w-0 flex-1 text-left"
                     onClick={() => onSelectPlaylist(playlistPayload)}
                   >
-                    <h3 className="font-semibold" data-testid={`playlist-name-${playlist.id}`}>{playlist.name}</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold" data-testid={`playlist-name-${playlist.id}`}>{playlist.name}</h3>
+                      {isPublicShared ? (
+                        <span
+                          data-testid={`playlist-public-shared-${playlist.id}`}
+                          title="Published in Shared for logged-in users"
+                          aria-label="Published in Shared for logged-in users"
+                          className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
+                        >
+                          <PublicSharedIcon />
+                          Shared
+                        </span>
+                      ) : null}
+                      {isUrlShared ? (
+                        <span
+                          data-testid={`playlist-url-shared-${playlist.id}`}
+                          title="Shared by URL"
+                          aria-label="Shared by URL"
+                          className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800"
+                        >
+                          <UrlSharedIcon />
+                          URL
+                        </span>
+                      ) : null}
+                    </div>
                     {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
                     <p className="text-xs text-gray-500">Songs: {totalSongs}</p>
                     <p className="text-sm font-semibold text-indigo-800" data-testid={`playlist-knowledge-${playlist.id}`}>

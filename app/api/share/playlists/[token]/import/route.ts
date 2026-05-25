@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserForSessionTokenHash, importSharedPlaylist } from "../../../../../../db/queries";
-import { AUTH_SESSION_COOKIE_NAME, hashAuthToken } from "../../../../../lib/authTokens";
-import { getRequestCookie } from "../../../../_user";
+import { importSharedPlaylist } from "../../../../../../db/queries";
+import { resolveRequestContext } from "../../../../_user";
 
 function playlistRedirectUrl(request: NextRequest, playlistId: string): URL {
   const url = new URL("/", request.url);
@@ -16,9 +15,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
-  const sessionToken = getRequestCookie(request, AUTH_SESSION_COOKIE_NAME);
-  const user = sessionToken ? await getUserForSessionTokenHash(hashAuthToken(sessionToken)) : null;
-  if (!user) {
+  const context = await resolveRequestContext(request);
+  const user = context.effectiveUser;
+  if (!context.actor || !user || !(context.actor.email ?? "").trim()) {
     return NextResponse.json({ error: "Sign in to import this playlist." }, { status: 401 });
   }
 

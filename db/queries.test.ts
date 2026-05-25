@@ -153,6 +153,37 @@ describe("users", () => {
   });
 });
 
+describe("shared playlist import title helpers", () => {
+  it("extracts leading title numbers across common hymn title punctuation", async () => {
+    const { getLeadingTitleNumber } = await getQueries();
+
+    expect(getLeadingTitleNumber("501-Child of God")).toBe("501");
+    expect(getLeadingTitleNumber("501 I Am a Child of God")).toBe("501");
+    expect(getLeadingTitleNumber("  42. Another Song")).toBe("42");
+    expect(getLeadingTitleNumber("No number here")).toBeNull();
+  });
+
+  it("appends playlist context when an imported title collides by leading number", async () => {
+    const { getImportedSongTitle } = await getQueries();
+
+    expect(getImportedSongTitle(
+      "501 I Am a Child of God",
+      "Stake Conference",
+      ["501-Child of God"]
+    )).toBe("501 I Am a Child of God (from Stake Conference)");
+  });
+
+  it("keeps imported titles unchanged when there is no leading-number collision", async () => {
+    const { getImportedSongTitle } = await getQueries();
+
+    expect(getImportedSongTitle(
+      "501 I Am a Child of God",
+      "Stake Conference",
+      ["502-Child of God"]
+    )).toBe("501 I Am a Child of God");
+  });
+});
+
 describe("getAllSongs", () => {
   it("calls select().from(songs).orderBy(desc(createdAt))", async () => {
     const chain = makeChain([]);

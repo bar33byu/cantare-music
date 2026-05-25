@@ -6,7 +6,8 @@ import { getMasteryColor } from '../lib/masteryColors';
 import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
 import { SongReadinessIcons } from './SongReadinessIcons';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
-import PracticeView from './PracticeView';
+import PracticeView, { type ProgressStorageMode } from './PracticeView';
+import { getGuestSongRatings } from '../lib/guestProgress';
 import type { Segment, SegmentRating } from '../types';
 import type { SessionState } from '../lib/sessionReducer';
 import type { AutoDrillState, PracticeMode } from '../lib/autoDrill';
@@ -111,6 +112,34 @@ function getLastPracticedLabel(value?: string | null): string {
   return 'Last practiced just now';
 }
 
+function getLocalSongPracticeSummary(
+  song: Playlist["songs"][number],
+  ratings: SegmentRating[]
+): { masteryPercent: number; lastPracticedAt: string | null } {
+  if (ratings.length === 0) {
+    return { masteryPercent: 0, lastPracticedAt: null };
+  }
+
+  const latestBySegment = new Map<string, SegmentRating>();
+  for (const rating of ratings) {
+    const previous = latestBySegment.get(rating.segmentId);
+    if (!previous || Date.parse(rating.ratedAt) > Date.parse(previous.ratedAt)) {
+      latestBySegment.set(rating.segmentId, rating);
+    }
+  }
+
+  const totalSegments = song.segments.length;
+  const scoreTotal = [...latestBySegment.values()].reduce((total, rating) => total + rating.rating * 20, 0);
+  const latestRatedAt = ratings
+    .map((rating) => rating.ratedAt)
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null;
+
+  return {
+    masteryPercent: totalSegments > 0 ? Math.round(scoreTotal / totalSegments) : 0,
+    lastPracticedAt: latestRatedAt,
+  };
+}
+
 function formatMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -121,6 +150,9 @@ function formatMs(ms: number): string {
 interface PlaylistPracticeViewProps {
   playlist: Playlist;
   userId?: string;
+  persistProgress?: boolean;
+  progressStorage?: ProgressStorageMode;
+  revalidatePlaylist?: boolean;
   segmentPrerollMs?: number;
   preferredAudioVersion?: PreferredAudioVersion;
   onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
@@ -135,6 +167,9 @@ const PLAYLIST_PRACTICE_CACHE_NAME = 'cantare-playlist-practice-v1';
 export function PlaylistPracticeView({
   playlist,
   userId,
+  persistProgress = true,
+  progressStorage: progressStorageOverride,
+  revalidatePlaylist = true,
   segmentPrerollMs = DEFAULT_FOCUS_PREROLL_MS,
   preferredAudioVersion = 'part',
   onPreferredAudioVersionChange,
@@ -177,6 +212,9 @@ export function PlaylistPracticeView({
   const userScopedHeaders = useMemo(() => {
     return userId ? { 'X-User-ID': userId } : undefined;
   }, [userId]);
+  const progressStorage = progressStorageOverride ?? (persistProgress ? 'account' : 'none');
+  const accountProgressEnabled = progressStorage === 'account';
+  const localProgressEnabled = progressStorage === 'local';
 
   const playlistDetailRequest = useMemo(() => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
@@ -193,6 +231,10 @@ export function PlaylistPracticeView({
     let cancelled = false;
 
     const loadFromCacheThenRevalidate = async () => {
+      if (!revalidatePlaylist) {
+        return;
+      }
+
       const canUseCacheStorage = typeof window !== 'undefined' && 'caches' in window;
       let cache: Cache | null = null;
 
@@ -239,11 +281,26 @@ export function PlaylistPracticeView({
     return () => {
       cancelled = true;
     };
-  }, [playlist.id, playlistDetailRequest]);
+  }, [playlist.id, playlistDetailRequest, revalidatePlaylist]);
+
+  const songsWithProgress = useMemo(() => {
+    if (accountProgressEnabled) {
+      return livePlaylist.songs;
+    }
+
+    return livePlaylist.songs.map((song) => {
+      const localSummary = getLocalSongPracticeSummary(song, ratingsBySongId[song.id] ?? []);
+      return {
+        ...song,
+        masteryPercent: localSummary.masteryPercent,
+        lastPracticedAt: localSummary.lastPracticedAt,
+      };
+    });
+  }, [accountProgressEnabled, livePlaylist.songs, ratingsBySongId]);
 
   const displayedSongs = useMemo(() => {
     const dir = sort.asc ? 1 : -1;
-    return [...livePlaylist.songs].sort((a, b) => {
+    return [...songsWithProgress].sort((a, b) => {
       switch (sort.key) {
         case 'alphabetical':
           return dir * a.title.localeCompare(b.title);
@@ -263,21 +320,30 @@ export function PlaylistPracticeView({
           return 0;
       }
     });
-  }, [livePlaylist.songs, sort]);
+  }, [songsWithProgress, sort]);
 
   useEffect(() => {
     setFocusPrerollMs(segmentPrerollMs);
   }, [segmentPrerollMs]);
 
   useEffect(() => {
+    let cancelled = false;
+    const songsWithSegments = livePlaylist.songs.filter((song) => song.segments.length > 0);
+
+    if (localProgressEnabled) {
+      setRatingsBySongId(Object.fromEntries(
+        livePlaylist.songs.map((song) => [song.id, getGuestSongRatings(song.id)] as const)
+      ));
+      setFocusRatingsLoading(false);
+      setFocusRatingsError(null);
+      return;
+    }
+
     if (mode !== 'focus' && mode !== 'auto') {
       return;
     }
 
-    let cancelled = false;
-    const songsWithSegments = livePlaylist.songs.filter((song) => song.segments.length > 0);
-
-    if (songsWithSegments.length === 0) {
+    if (songsWithSegments.length === 0 || progressStorage === 'none') {
       setRatingsBySongId({});
       setFocusRatingsLoading(false);
       setFocusRatingsError(null);
@@ -321,7 +387,7 @@ export function PlaylistPracticeView({
     return () => {
       cancelled = true;
     };
-  }, [livePlaylist.songs, mode, refetchTrigger, userScopedHeaders]);
+  }, [accountProgressEnabled, livePlaylist.songs, localProgressEnabled, mode, progressStorage, refetchTrigger, userScopedHeaders]);
 
   const focusQueue = useMemo<FocusQueueItem[]>(() => {
     const items = livePlaylist.songs.flatMap((song, songIndex) => {
@@ -924,6 +990,9 @@ export function PlaylistPracticeView({
   };
 
   useEffect(() => {
+    if (!accountProgressEnabled) {
+      return;
+    }
     const load = async () => {
       try {
         const res = await fetch(`/api/playlists/${playlist.id}/knowledge`, {
@@ -936,7 +1005,21 @@ export function PlaylistPracticeView({
       } catch { /* ignore */ }
     };
     void load();
-  }, [playlist.id, refetchTrigger, userScopedHeaders]);
+  }, [accountProgressEnabled, playlist.id, refetchTrigger, userScopedHeaders]);
+
+  useEffect(() => {
+    if (accountProgressEnabled) {
+      return;
+    }
+    const ratedSegments = Object.values(ratingsBySongId).flat();
+    if (ratedSegments.length === 0) {
+      setPlaylistScore(0);
+      return;
+    }
+    const totalSegments = livePlaylist.songs.reduce((total, song) => total + song.segments.length, 0);
+    const scoreTotal = ratedSegments.reduce((total, rating) => total + rating.rating * 20, 0);
+    setPlaylistScore(totalSegments > 0 ? Math.round(scoreTotal / totalSegments) : 0);
+  }, [accountProgressEnabled, livePlaylist.songs, ratingsBySongId]);
 
   useEffect(() => {
     const handleRatingsUpdated = () => {
@@ -950,6 +1033,9 @@ export function PlaylistPracticeView({
 
   useEffect(() => {
     const maybePrecachePlaylist = async () => {
+      if (!accountProgressEnabled) {
+        return;
+      }
       if (typeof window === 'undefined' || !('caches' in window)) {
         return;
       }
@@ -991,7 +1077,7 @@ export function PlaylistPracticeView({
     };
 
     void maybePrecachePlaylist();
-  }, [livePlaylist.songs, userScopedHeaders]);
+  }, [accountProgressEnabled, livePlaylist.songs, userScopedHeaders]);
 
   if (livePlaylist.songs.length === 0) {
     return (
@@ -1346,6 +1432,8 @@ export function PlaylistPracticeView({
                     key={`${currentFocusItem.song.id}:${currentFocusItem.segment.id}`}
                     song={currentFocusItem.song}
                     userId={userId}
+                    persistProgress={persistProgress}
+                    progressStorage={progressStorage}
                     initialSession={focusPracticeSession}
                     onSessionChange={handleFocusSessionChange}
                     onRatingsSaved={handleFocusRatingsSaved}
@@ -1478,6 +1566,8 @@ export function PlaylistPracticeView({
                     key={currentAutoDrillItem.song.id}
                     song={currentAutoDrillItem.song}
                     userId={userId}
+                    persistProgress={persistProgress}
+                    progressStorage={progressStorage}
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel="Auto Drill"

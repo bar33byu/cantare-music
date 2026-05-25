@@ -106,6 +106,26 @@ export const userSessions = pgTable(
   })
 );
 
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: text("id").primaryKey(),
+    eventType: text("event_type").notNull(),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    effectiveUserId: text("effective_user_id").references(() => users.id, { onDelete: "set null" }),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    eventTypeCreatedAtIdx: index("idx_audit_logs_event_type_created_at").on(table.eventType, table.createdAt),
+    actorCreatedAtIdx: index("idx_audit_logs_actor_created_at").on(table.actorUserId, table.createdAt),
+    effectiveCreatedAtIdx: index("idx_audit_logs_effective_created_at").on(table.effectiveUserId, table.createdAt),
+    resourceIdx: index("idx_audit_logs_resource").on(table.resourceType, table.resourceId),
+  })
+);
+
 export const songs = pgTable(
   "songs",
   {
@@ -165,6 +185,8 @@ export const playlists = pgTable(
     name: text("name").notNull(),
     eventDate: text("event_date"),
     isRetired: boolean("is_retired").notNull().default(false),
+    isPublic: boolean("is_public").notNull().default(false),
+    publishedAt: timestamp("published_at"),
     shareToken: text("share_token"),
     sharedAt: timestamp("shared_at"),
     sourcePlaylistId: text("source_playlist_id"),
@@ -176,6 +198,7 @@ export const playlists = pgTable(
   (table) => ({
     userIdIdx: index("idx_playlists_user_id").on(table.userId),
     userCreatedAtIdx: index("idx_playlists_user_created_at").on(table.userId, table.createdAt),
+    publicPublishedAtIdx: index("idx_playlists_public_published_at").on(table.isPublic, table.publishedAt),
     sourceImportIdx: index("idx_playlists_user_source_playlist").on(table.userId, table.sourcePlaylistId),
     shareTokenUniqueIdx: uniqueIndex("playlists_share_token_unique").on(table.shareToken).where(sql`${table.shareToken} IS NOT NULL`),
   })
@@ -310,6 +333,7 @@ export const midiAlignments = pgTable(
 export type UserRow = InferSelectModel<typeof users>;
 export type MagicLinkTokenRow = InferSelectModel<typeof magicLinkTokens>;
 export type UserSessionRow = InferSelectModel<typeof userSessions>;
+export type AuditLogRow = InferSelectModel<typeof auditLogs>;
 export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId"> & {
   sourceSongId?: string | null;
 };

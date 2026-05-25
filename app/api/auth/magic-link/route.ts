@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createMagicLinkToken } from "../../../../db/queries";
 import { createOpaqueToken, getAppBaseUrl, hashAuthToken, MAGIC_LINK_TTL_MS } from "../../../lib/authTokens";
+import { getSafeAuthReturnPath } from "../../../lib/authRedirects";
 import { sendMagicLinkEmail } from "../../../lib/resend";
 
 const NEUTRAL_RESPONSE = {
@@ -19,6 +20,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const email = normalizeEmail(body?.email);
+    const appBaseUrl = getAppBaseUrl(request);
+    const returnTo = getSafeAuthReturnPath(body?.returnTo, appBaseUrl);
 
     if (isLikelyEmail(email)) {
       const token = createOpaqueToken();
@@ -29,8 +32,12 @@ export async function POST(request: NextRequest) {
         expiresAt,
       });
 
-      const loginUrl = `${getAppBaseUrl(request)}/auth/verify?token=${encodeURIComponent(token)}`;
-      await sendMagicLinkEmail({ to: email, loginUrl });
+      const loginUrl = new URL("/auth/verify", appBaseUrl);
+      loginUrl.searchParams.set("token", token);
+      if (returnTo !== "/") {
+        loginUrl.searchParams.set("returnTo", returnTo);
+      }
+      await sendMagicLinkEmail({ to: email, loginUrl: loginUrl.toString() });
     }
   } catch (error) {
     console.error("Error requesting magic link:", error);

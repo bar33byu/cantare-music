@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserForSessionTokenHash } from "../../../../db/queries";
-import { getRequestCookie, isEmailAdmin } from "../../_user";
-import { AUTH_SESSION_COOKIE_NAME, hashAuthToken } from "../../../lib/authTokens";
+import { AUTH_SESSION_COOKIE_NAME } from "../../../lib/authTokens";
+import { getRequestCookie, resolveRequestContext } from "../../_user";
 
 export async function GET(request: NextRequest) {
-  const token = getRequestCookie(request, AUTH_SESSION_COOKIE_NAME);
-  if (!token) {
-    return NextResponse.json({ user: null });
+  if (!getRequestCookie(request, AUTH_SESSION_COOKIE_NAME)) {
+    return NextResponse.json({ user: null, actor: null, effectiveUser: null, isImpersonating: false });
   }
 
-  const user = await getUserForSessionTokenHash(hashAuthToken(token));
+  const context = await resolveRequestContext(request);
   return NextResponse.json({
-    user: user ? { ...user, isAdmin: isEmailAdmin(user.email) } : null,
+    user: context.effectiveUser,
+    actor: context.actor,
+    effectiveUser: context.effectiveUser,
+    isImpersonating: context.isImpersonating,
   });
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("../../../../../../db/queries", () => ({
+  getUserById: vi.fn(),
   getUserForSessionTokenHash: vi.fn(),
   importSharedPlaylist: vi.fn(),
 }));
@@ -19,7 +20,7 @@ describe("POST /api/share/playlists/[token]/import", () => {
   });
 
   it("imports a shared playlist for the signed-in user", async () => {
-    vi.mocked(getUserForSessionTokenHash).mockResolvedValue({ id: "user-1" } as any);
+    vi.mocked(getUserForSessionTokenHash).mockResolvedValue({ id: "user-1", email: "user@example.com" } as any);
     vi.mocked(importSharedPlaylist).mockResolvedValue({
       status: "imported",
       playlist: { id: "imported-1" },
@@ -41,7 +42,7 @@ describe("POST /api/share/playlists/[token]/import", () => {
   });
 
   it("passes force when importing again", async () => {
-    vi.mocked(getUserForSessionTokenHash).mockResolvedValue({ id: "user-1" } as any);
+    vi.mocked(getUserForSessionTokenHash).mockResolvedValue({ id: "user-1", email: "user@example.com" } as any);
     vi.mocked(importSharedPlaylist).mockResolvedValue({
       status: "imported",
       playlist: { id: "imported-2" },

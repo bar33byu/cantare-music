@@ -5,6 +5,7 @@ import { vi } from "vitest";
 import PracticeView from "./PracticeView";
 import { Song, MemoryRating } from "../types/index";
 import { SessionState } from "../lib/sessionReducer";
+import { getGuestSongRatings } from "../lib/guestProgress";
 
 const mockPlay = vi.fn();
 const mockPause = vi.fn();
@@ -265,6 +266,35 @@ describe("PracticeView", () => {
       expect(ratingsCall).toBeTruthy();
       expect(new Headers(ratingsCall?.[1]?.headers).get("X-User-ID")).toBe("test-user");
     });
+  });
+
+  it("stores guest ratings locally without calling account rating APIs", async () => {
+    const song = makeSong();
+    render(
+      <PracticeView
+        song={song}
+        persistProgress={false}
+        progressStorage="local"
+        initialSession={makeSession(song)}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("ratings-loading-skeleton")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("rate-btn"));
+
+    await waitFor(() => {
+      expect(getGuestSongRatings(song.id)).toEqual([
+        expect.objectContaining({ segmentId: "seg-0", rating: 4 }),
+      ]);
+    });
+    expect(mockFetch).not.toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`);
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      `/api/songs/${song.id}/ratings`,
+      expect.objectContaining({ method: "POST" })
+    );
   });
 
   it("can default play to the current segment with preroll", async () => {

@@ -2,6 +2,9 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { getPlaylistImportsForSource, getSharedPlaylistByToken, getUserForSessionTokenHash } from "../../../../db/queries";
 import { AUTH_SESSION_COOKIE_NAME, hashAuthToken } from "../../../lib/authTokens";
+import type { Playlist } from "../../../types";
+import { SharedPlaylistGuestPractice } from "./SharedPlaylistGuestPractice";
+import { SharedPlaylistSignIn } from "./SharedPlaylistSignIn";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +40,16 @@ export default async function SharedPlaylistPage({
   }
 
   const sortedSongs = [...playlist.songs].sort((a, b) => a.position - b.position);
+  const practicePlaylist: Playlist = {
+    ...playlist,
+    songs: sortedSongs.map((song) => ({
+      ...song,
+      segments: song.segments.map((segment) => ({
+        ...segment,
+        lyricText: segment.lyricText ?? "",
+      })),
+    })),
+  };
 
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-8">
@@ -75,9 +88,7 @@ export default async function SharedPlaylistPage({
                 ) : null}
               </>
             ) : (
-              <Link href="/" className="inline-flex rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
-                Sign in to import
-              </Link>
+              <SharedPlaylistSignIn returnTo={`/share/playlists/${encodeURIComponent(token)}`} />
             )}
           </div>
           {priorImports.length > 0 ? (
@@ -95,6 +106,8 @@ export default async function SharedPlaylistPage({
             </div>
           ) : null}
         </header>
+
+        <SharedPlaylistGuestPractice playlist={practicePlaylist} />
 
         <ul className="space-y-3" data-testid="shared-playlist-song-list">
           {sortedSongs.length > 0 ? (

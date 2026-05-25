@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllUsers, upsertUser } from '../../../db/queries';
-import { isEmailAdmin } from '../_user';
+import { getAllUsers, getUserById, logAuditEvent, upsertUser } from '../../../db/queries';
+import { isEmailAdmin, resolveRequestContext } from '../_user';
 import { createPublicUsernameFromName, DEFAULT_USER_ID, normalizeUserId, normalizeUsername } from '../../lib/userContext';
 
 function formatError(error: unknown) {
@@ -49,7 +49,40 @@ export async function POST(request: NextRequest) {
     }
 
     const id = normalizeUserId(requestedId ?? name) || DEFAULT_USER_ID;
+    const context = await resolveRequestContext(request);
+    const existing = await getUserById(id);
     const user = await upsertUser({ id, username, name, email, avatarUrl, profileVisibility });
+
+    const actorUserId = context.actor?.id ?? user.id;
+    const effectiveUserId = context.effectiveUser?.id ?? user.id;
+    if (existing && existing.email !== user.email) {
+      await logAuditEvent({
+        eventType: 'user.email_changed',
+        actorUserId,
+        effectiveUserId,
+        resourceType: 'user',
+        resourceId: user.id,
+        metadata: {
+          previousEmail: existing.email,
+          newEmail: user.email,
+        },
+      });
+    }
+
+    if (existing && existing.username !== user.username) {
+      await logAuditEvent({
+        eventType: 'user.username_changed',
+        actorUserId,
+        effectiveUserId,
+        resourceType: 'user',
+        resourceId: user.id,
+        metadata: {
+          previousUsername: existing.username,
+          newUsername: user.username,
+        },
+      });
+    }
+
     return NextResponse.json({ ...user, isAdmin: isEmailAdmin(user.email) }, { status: 200 });
   } catch (error) {
     if (error instanceof Error && error.message.toLowerCase().includes('users_username_unique')) {

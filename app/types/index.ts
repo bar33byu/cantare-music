@@ -75,6 +75,8 @@ export interface Playlist {
   name: string;
   eventDate?: string;
   isRetired: boolean;
+  isPublic?: boolean;
+  publishedAt?: string | null;
   shareToken?: string | null;
   shareUrl?: string | null;
   sharedAt?: string | null;
@@ -84,4 +86,22 @@ export interface Playlist {
   importedAt?: string | null;
   createdAt: string;
   songs: Array<Song & { position: number; masteryPercent?: number; ratingCount?: number }>;
+}
+
+export interface SharedPlaylistListItem {
+  id: string;
+  name: string;
+  eventDate?: string;
+  isRetired: boolean;
+  isPublic: boolean;
+  publishedAt?: string | null;
+  shareToken?: string | null;
+  sharedAt?: string | null;
+  createdAt: string;
+  songCount: number;
+  owner: {
+    id: string;
+    displayName: string;
+    username: string;
+  };
 }

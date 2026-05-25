@@ -8,6 +8,7 @@ import {
   users,
   magicLinkTokens,
   userSessions,
+  auditLogs,
   orphanedAudioKeys,
   tapPracticeSessions,
   tapPracticeTaps,
@@ -43,6 +44,18 @@ describe("schema tables", () => {
     expect(cols).toContain("createdAt");
     expect(cols).toContain("expiresAt");
     expect(cols).toContain("revokedAt");
+  });
+
+  it("audit logs table has expected columns", () => {
+    const cols = Object.keys(auditLogs);
+    expect(cols).toContain("id");
+    expect(cols).toContain("eventType");
+    expect(cols).toContain("actorUserId");
+    expect(cols).toContain("effectiveUserId");
+    expect(cols).toContain("resourceType");
+    expect(cols).toContain("resourceId");
+    expect(cols).toContain("metadata");
+    expect(cols).toContain("createdAt");
   });
 
   it("songs table has expected columns", () => {
@@ -86,6 +99,8 @@ describe("schema tables", () => {
     expect(cols).toContain("name");
     expect(cols).toContain("eventDate");
     expect(cols).toContain("isRetired");
+    expect(cols).toContain("isPublic");
+    expect(cols).toContain("publishedAt");
     expect(cols).toContain("shareToken");
     expect(cols).toContain("sharedAt");
     expect(cols).toContain("sourcePlaylistId");

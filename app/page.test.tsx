@@ -112,6 +112,10 @@ vi.mock('./components/PlaylistBrowser', () => ({
   },
 }));
 
+vi.mock('./components/SharedBrowser', () => ({
+  SharedBrowser: () => <div data-testid="mock-shared-browser">Shared playlists</div>,
+}));
+
 vi.mock('./components/PlaylistDetail', () => ({
   PlaylistDetail: ({ onPractice, onBack }: { onPractice: (playlist: any) => void; onBack: () => void; onEditSong?: (songId: string) => void }) => (
     <div data-testid="mock-playlist-detail">
@@ -550,5 +554,57 @@ describe('Home page', () => {
     expect(screen.getByTestId('profile-display-name')).toHaveValue('Test User');
     expect(screen.queryByText('Add')).not.toBeInTheDocument();
     expect(screen.queryByTestId('active-user-select')).not.toBeInTheDocument();
+  });
+
+  it('allows impersonated sessions to browse Shared even when the effective user has no email', async () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      currentUserId: 'test-user',
+      users: [
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: '' },
+      ],
+    }));
+    document.cookie = 'cantare-user-id=test-user; path=/';
+
+    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/auth/session') {
+        return {
+          ok: true,
+          json: async () => ({
+            actor: {
+              id: 'admin-user',
+              username: 'admin',
+              name: 'Admin User',
+              email: 'admin@example.com',
+              isAdmin: true,
+            },
+            effectiveUser: {
+              id: 'test-user',
+              username: 'test-user',
+              name: 'Test User',
+              email: '',
+            },
+            isImpersonating: true,
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+      };
+    }) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('impersonation-banner')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('shared-tab'));
+
+    expect(await screen.findByTestId('mock-shared-browser')).toBeInTheDocument();
+    expect(screen.queryByTestId('shared-sign-in-required')).not.toBeInTheDocument();
   });
 });
