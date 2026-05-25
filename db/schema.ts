@@ -115,6 +115,7 @@ export const songs = pgTable(
     artist: text("artist"),
     audioKey: text("audio_key"),
     alternateAudioKey: text("alternate_audio_key"),
+    sourceSongId: text("source_song_id"),
     pitchContourNotes: jsonb("pitch_contour_notes")
       .$type<SongPitchContourPoint[]>()
       .notNull()
@@ -125,6 +126,7 @@ export const songs = pgTable(
   (table) => ({
     userIdIdx: index("idx_songs_user_id").on(table.userId),
     userCreatedAtIdx: index("idx_songs_user_created_at").on(table.userId, table.createdAt),
+    sourceSongIdx: index("idx_songs_source_song_id").on(table.sourceSongId),
   })
 );
 
@@ -138,6 +140,7 @@ export const segments = pgTable("segments", {
   startMs: integer("start_ms").notNull().default(0),
   endMs: integer("end_ms").notNull().default(0),
   lyricText: text("lyric_text").default(""),
+  sourceSegmentId: text("source_segment_id"),
   pitchContourNotes: jsonb("pitch_contour_notes")
     .$type<SegmentPitchContourPoint[]>()
     .notNull()
@@ -146,6 +149,7 @@ export const segments = pgTable("segments", {
 
 export const practiceRatings = pgTable("practice_ratings", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull().default("default"),
   segmentId: text("segment_id")
     .notNull()
     .references(() => segments.id, { onDelete: "cascade" }),
@@ -306,8 +310,12 @@ export const midiAlignments = pgTable(
 export type UserRow = InferSelectModel<typeof users>;
 export type MagicLinkTokenRow = InferSelectModel<typeof magicLinkTokens>;
 export type UserSessionRow = InferSelectModel<typeof userSessions>;
-export type SongRow = InferSelectModel<typeof songs>;
-export type SegmentRow = InferSelectModel<typeof segments>;
+export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId"> & {
+  sourceSongId?: string | null;
+};
+export type SegmentRow = Omit<InferSelectModel<typeof segments>, "sourceSegmentId"> & {
+  sourceSegmentId?: string | null;
+};
 export type PracticeRatingRow = InferSelectModel<typeof practiceRatings>;
 export type PlaylistRow = InferSelectModel<typeof playlists>;
 export type PlaylistSongRow = InferSelectModel<typeof playlistSongs>;

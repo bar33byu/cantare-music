@@ -1169,6 +1169,7 @@ export async function createSong(data: {
         artist: data.artist ?? null,
         audioKey: data.audioKey ?? null,
         alternateAudioKey: data.alternateAudioKey ?? null,
+        sourceSongId: data.id,
       })
       .returning();
     return rows[0];
@@ -1354,6 +1355,7 @@ export async function upsertSegments(
         newSegments.map((s) => ({
           ...s,
           songId,
+          sourceSegmentId: s.id,
           pitchContourNotes: s.pitchContourNotes ?? [],
         }))
       );
@@ -1366,6 +1368,7 @@ export async function upsertSegments(
         newSegments.map(({ pitchContourNotes: _pitchContourNotes, ...segment }) => ({
           ...segment,
           songId,
+          sourceSegmentId: segment.id,
         }))
       );
     }
@@ -1387,6 +1390,7 @@ export async function createSegment(data: {
       .insert(segments)
       .values({
         ...data,
+        sourceSegmentId: data.id,
         pitchContourNotes: data.pitchContourNotes ?? [],
       })
       .returning();
@@ -1454,6 +1458,11 @@ export async function getRatingsForSong(
   songId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedSegmentRating[]> {
+  const segmentGroups = await getScoreSegmentGroupsForSong(songId, userId);
+  if (segmentGroups.currentSegments.length === 0 || segmentGroups.allScoreSegmentIds.length === 0) {
+    return [];
+  }
+
   const rows = await db()
     .select({
       id: practiceRatings.id,
@@ -1462,52 +1471,128 @@ export async function getRatingsForSong(
       ratedAt: practiceRatings.ratedAt,
     })
     .from(practiceRatings)
-    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
-    .innerJoin(songs, eq(segments.songId, songs.id))
-    .where(and(eq(segments.songId, songId), eq(songs.userId, userId)))
+    .where(and(eq(practiceRatings.userId, userId), inArray(practiceRatings.segmentId, segmentGroups.allScoreSegmentIds)))
     .orderBy(desc(practiceRatings.ratedAt));
 
   // Keep only the latest rating per segment.
   const latestBySegment: Record<string, PersistedSegmentRating> = {};
   for (const row of rows) {
-    if (!latestBySegment[row.segmentId]) {
-      latestBySegment[row.segmentId] = {
+    const scoreSegmentId = segmentGroups.scoreSegmentIdBySegmentId.get(row.segmentId);
+    const currentSegmentId = scoreSegmentId ? segmentGroups.currentSegmentIdByScoreSegmentId.get(scoreSegmentId) : undefined;
+    if (!scoreSegmentId || !currentSegmentId || latestBySegment[currentSegmentId]) {
+      continue;
+    }
+    latestBySegment[currentSegmentId] = {
         id: row.id,
-        segmentId: row.segmentId,
+        segmentId: currentSegmentId,
         rating: row.rating as PersistedMemoryRating,
         ratedAt: row.ratedAt.toISOString(),
-      };
-    }
+    };
   }
 
   return Object.values(latestBySegment).sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt));
+}
+
+type ScoreSegmentGroups = {
+  currentSegments: SegmentRow[];
+  allScoreSegmentIds: string[];
+  scoreSegmentIdBySegmentId: Map<string, string>;
+  currentSegmentIdByScoreSegmentId: Map<string, string>;
+  scoreGroupSegmentIdsByCurrentSegmentId: Map<string, string[]>;
+};
+
+function scoreId(id: string | null | undefined, fallbackId: string): string {
+  return id ?? fallbackId;
+}
+
+async function getScoreSegmentGroupsForSong(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<ScoreSegmentGroups> {
+  const [songRows, currentSegments] = await Promise.all([
+    db()
+      .select({ id: songs.id, sourceSongId: songs.sourceSongId })
+      .from(songs)
+      .where(and(eq(songs.id, songId), eq(songs.userId, userId)))
+      .limit(1),
+    getSegmentsBySongId(songId),
+  ]);
+
+  const song = songRows[0];
+  if (!song) {
+    return {
+      currentSegments: [],
+      allScoreSegmentIds: [],
+      scoreSegmentIdBySegmentId: new Map(),
+      currentSegmentIdByScoreSegmentId: new Map(),
+      scoreGroupSegmentIdsByCurrentSegmentId: new Map(),
+    };
+  }
+
+  const scoreSongId = scoreId(song.sourceSongId, song.id);
+  const currentSegmentIdByScoreSegmentId = new Map<string, string>();
+  for (const segment of currentSegments) {
+    currentSegmentIdByScoreSegmentId.set(scoreId(segment.sourceSegmentId, segment.id), segment.id);
+  }
+
+  if (currentSegmentIdByScoreSegmentId.size === 0) {
+    return {
+      currentSegments,
+      allScoreSegmentIds: [],
+      scoreSegmentIdBySegmentId: new Map(),
+      currentSegmentIdByScoreSegmentId,
+      scoreGroupSegmentIdsByCurrentSegmentId: new Map(),
+    };
+  }
+
+  const siblingSegments = await db()
+    .select({
+      id: segments.id,
+      sourceSegmentId: segments.sourceSegmentId,
+    })
+    .from(segments)
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(eq(songs.userId, userId), sql`COALESCE(${songs.sourceSongId}, ${songs.id}) = ${scoreSongId}`));
+
+  const scoreSegmentIdBySegmentId = new Map<string, string>();
+  const scoreGroupSegmentIdsByCurrentSegmentId = new Map<string, string[]>();
+
+  for (const segment of siblingSegments) {
+    const currentScoreSegmentId = scoreId(segment.sourceSegmentId, segment.id);
+    const currentSegmentId = currentSegmentIdByScoreSegmentId.get(currentScoreSegmentId);
+    if (!currentSegmentId) {
+      continue;
+    }
+
+    scoreSegmentIdBySegmentId.set(segment.id, currentScoreSegmentId);
+    const group = scoreGroupSegmentIdsByCurrentSegmentId.get(currentSegmentId) ?? [];
+    if (!scoreGroupSegmentIdsByCurrentSegmentId.has(currentSegmentId)) {
+      scoreGroupSegmentIdsByCurrentSegmentId.set(currentSegmentId, group);
+    }
+    group.push(segment.id);
+  }
+
+  return {
+    currentSegments,
+    allScoreSegmentIds: Array.from(scoreSegmentIdBySegmentId.keys()),
+    scoreSegmentIdBySegmentId,
+    currentSegmentIdByScoreSegmentId,
+    scoreGroupSegmentIdsByCurrentSegmentId,
+  };
 }
 
 export async function getLatestRatingTimeBySongIds(
   songIds: string[],
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<Record<string, Date>> {
-  if (songIds.length === 0) {
-    return {};
-  }
-
-  const rows = await db()
-    .select({
-      songId: segments.songId,
-      ratedAt: practiceRatings.ratedAt,
-    })
-    .from(practiceRatings)
-    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
-    .innerJoin(songs, eq(segments.songId, songs.id))
-    .where(and(inArray(segments.songId, songIds), eq(songs.userId, userId)))
-    .orderBy(desc(practiceRatings.ratedAt));
-
   const bySong: Record<string, Date> = {};
-  for (const row of rows) {
-    if (!bySong[row.songId]) {
-      bySong[row.songId] = row.ratedAt;
+  await Promise.all(songIds.map(async (id) => {
+    const ratings = await getRatingsForSong(id, userId);
+    const latest = ratings[0];
+    if (latest) {
+      bySong[id] = new Date(latest.ratedAt);
     }
-  }
+  }));
 
   return bySong;
 }
@@ -1516,68 +1601,23 @@ export async function getSongKnowledgeBySongIds(
   songIds: string[],
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<Record<string, number>> {
-  if (songIds.length === 0) {
-    return {};
-  }
-
-  // Get all segments for these songs (including unrated)
-  const allSegmentRows = await db()
-    .select({
-      songId: segments.songId,
-      segmentId: segments.id,
-    })
-    .from(segments)
-    .innerJoin(songs, eq(segments.songId, songs.id))
-    .where(and(inArray(segments.songId, songIds), eq(songs.userId, userId)));
-
-  const allSegmentsBySong: Record<string, Set<string>> = {};
-  for (const row of allSegmentRows) {
-    if (!allSegmentsBySong[row.songId]) {
-      allSegmentsBySong[row.songId] = new Set();
-    }
-    allSegmentsBySong[row.songId].add(row.segmentId);
-  }
-
-  // Get ratings for segments in these songs
-  const rows = await db()
-    .select({
-      songId: segments.songId,
-      segmentId: segments.id,
-      rating: practiceRatings.rating,
-      ratedAt: practiceRatings.ratedAt,
-    })
-    .from(practiceRatings)
-    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
-    .innerJoin(songs, eq(segments.songId, songs.id))
-    .where(and(inArray(segments.songId, songIds), eq(songs.userId, userId)))
-    .orderBy(desc(practiceRatings.ratedAt));
-
-  const latestBySongSegment: Record<string, Record<string, number>> = {};
-
-  for (const row of rows) {
-    if (!latestBySongSegment[row.songId]) {
-      latestBySongSegment[row.songId] = {};
-    }
-    if (latestBySongSegment[row.songId][row.segmentId] !== undefined) {
-      continue;
-    }
-    latestBySongSegment[row.songId][row.segmentId] = row.rating;
-  }
-
   const knowledgeBySong: Record<string, number> = {};
-  for (const songId of songIds) {
-    const segments = allSegmentsBySong[songId];
-    if (!segments || segments.size === 0) {
+  await Promise.all(songIds.map(async (songId) => {
+    const [songSegments, ratings] = await Promise.all([
+      getSegmentsBySongId(songId),
+      getRatingsForSong(songId, userId),
+    ]);
+    if (songSegments.length === 0) {
       knowledgeBySong[songId] = 0;
-      continue;
+      return;
     }
-    // Calculate average rating across ALL segments (including unrated as 0)
-    const totalRating = Array.from(segments).reduce((sum, segmentId) => {
-      return sum + (latestBySongSegment[songId]?.[segmentId] ?? 0);
+    const ratingBySegmentId = new Map(ratings.map((rating) => [rating.segmentId, rating.rating]));
+    const totalRating = songSegments.reduce((sum, segment) => {
+      return sum + (ratingBySegmentId.get(segment.id) ?? 0);
     }, 0);
-    const averageRating = totalRating / segments.size;
+    const averageRating = totalRating / songSegments.length;
     knowledgeBySong[songId] = Math.round(averageRating * 20);
-  }
+  }));
 
   return knowledgeBySong;
 }
@@ -1628,33 +1668,32 @@ export async function saveRatings(
   }
 
   const uniqueRatings = Array.from(latestBySegment.values());
-  const segmentIds = uniqueRatings.map((rating) => rating.segmentId);
-
   let filteredRatings = uniqueRatings;
+  let deleteSegmentIdsByCurrentSegmentId = new Map<string, string[]>();
   if (songId) {
-    const allowedSegments = await db()
-      .select({ id: segments.id })
-      .from(segments)
-      .innerJoin(songs, eq(segments.songId, songs.id))
-      .where(and(eq(segments.songId, songId), eq(songs.userId, userId), inArray(segments.id, segmentIds)));
-
-    const allowedSegmentIds = new Set(allowedSegments.map((segment) => segment.id));
-    filteredRatings = uniqueRatings.filter((rating) => allowedSegmentIds.has(rating.segmentId));
+    const segmentGroups = await getScoreSegmentGroupsForSong(songId, userId);
+    deleteSegmentIdsByCurrentSegmentId = segmentGroups.scoreGroupSegmentIdsByCurrentSegmentId;
+    filteredRatings = uniqueRatings.filter((rating) => deleteSegmentIdsByCurrentSegmentId.has(rating.segmentId));
   }
 
   if (filteredRatings.length === 0) {
     return;
   }
 
+  const deleteSegmentIds = Array.from(new Set(
+    filteredRatings.flatMap((rating) => deleteSegmentIdsByCurrentSegmentId.get(rating.segmentId) ?? [rating.segmentId])
+  ));
+
   await db()
     .delete(practiceRatings)
-    .where(inArray(practiceRatings.segmentId, filteredRatings.map((rating) => rating.segmentId)));
+    .where(and(eq(practiceRatings.userId, userId), inArray(practiceRatings.segmentId, deleteSegmentIds)));
 
   await db()
     .insert(practiceRatings)
     .values(
       filteredRatings.map((rating) => ({
         id: crypto.randomUUID(),
+        userId,
         segmentId: rating.segmentId,
         rating: rating.rating,
         ratedAt: rating.ratedAt,
@@ -1666,11 +1705,8 @@ export async function deleteRatingsForSong(
   songId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
-  const songSegments = await db()
-    .select({ id: segments.id })
-    .from(segments)
-    .innerJoin(songs, eq(segments.songId, songs.id))
-    .where(and(eq(segments.songId, songId), eq(songs.userId, userId)));
+  const segmentGroups = await getScoreSegmentGroupsForSong(songId, userId);
+  const songSegments = segmentGroups.allScoreSegmentIds;
 
   if (songSegments.length === 0) {
     return;
@@ -1678,7 +1714,7 @@ export async function deleteRatingsForSong(
 
   await db()
     .delete(practiceRatings)
-    .where(inArray(practiceRatings.segmentId, songSegments.map((segment) => segment.id)));
+    .where(and(eq(practiceRatings.userId, userId), inArray(practiceRatings.segmentId, songSegments)));
 }
 
 // ── Tap Practice ─────────────────────────────────────────────────────────
@@ -3285,6 +3321,27 @@ export async function importSharedPlaylist(
       continue;
     }
 
+    const sourceSongId = sourceSongRow.sourceSongId ?? sourceSongRow.id;
+    const existingSongRows = await db()
+      .select({ id: songs.id })
+      .from(songs)
+      .where(and(eq(songs.userId, userId), sql`COALESCE(${songs.sourceSongId}, ${songs.id}) = ${sourceSongId}`))
+      .orderBy(asc(songs.createdAt))
+      .limit(1);
+
+    const existingSong = existingSongRows[0];
+    if (existingSong) {
+      await db()
+        .insert(playlistSongs)
+        .values({
+          playlistId: importedPlaylistId,
+          songId: existingSong.id,
+          position: item.position,
+        });
+      importedSongCount += 1;
+      continue;
+    }
+
     const importedSongId = crypto.randomUUID();
     await db()
       .insert(songs)
@@ -3296,6 +3353,7 @@ export async function importSharedPlaylist(
         audioKey: sourceSongRow.audioKey ?? null,
         alternateAudioKey: sourceSongRow.alternateAudioKey ?? null,
         pitchContourNotes: sourceSongRow.pitchContourNotes ?? [],
+        sourceSongId,
         lastPracticedAt: null,
       });
 
@@ -3310,6 +3368,7 @@ export async function importSharedPlaylist(
           startMs: segment.startMs,
           endMs: segment.endMs,
           lyricText: segment.lyricText ?? "",
+          sourceSegmentId: segment.sourceSegmentId ?? segment.id,
           pitchContourNotes: segment.pitchContourNotes ?? [],
         }))
       );
@@ -3334,38 +3393,10 @@ async function getRatingCountBySongIds(
   songIds: string[],
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<Record<string, number>> {
-  if (songIds.length === 0) {
-    return {};
-  }
-
-  const rows = await db()
-    .select({
-      songId: segments.songId,
-      segmentId: segments.id,
-      ratedAt: practiceRatings.ratedAt,
-    })
-    .from(practiceRatings)
-    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
-    .innerJoin(songs, eq(segments.songId, songs.id))
-    .where(and(inArray(segments.songId, songIds), eq(songs.userId, userId)))
-    .orderBy(desc(practiceRatings.ratedAt));
-
   const bySong: Record<string, number> = {};
-  const seenBySong = new Map<string, Set<string>>();
-
-  for (const row of rows) {
-    const seenSegments = seenBySong.get(row.songId) ?? new Set<string>();
-    if (!seenBySong.has(row.songId)) {
-      seenBySong.set(row.songId, seenSegments);
-    }
-
-    if (seenSegments.has(row.segmentId)) {
-      continue;
-    }
-
-    seenSegments.add(row.segmentId);
-    bySong[row.songId] = (bySong[row.songId] ?? 0) + 1;
-  }
+  await Promise.all(songIds.map(async (songId) => {
+    bySong[songId] = (await getRatingsForSong(songId, userId)).length;
+  }));
 
   return bySong;
 }

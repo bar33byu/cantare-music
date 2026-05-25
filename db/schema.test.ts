@@ -52,6 +52,7 @@ describe("schema tables", () => {
     expect(cols).toContain("title");
     expect(cols).toContain("artist");
     expect(cols).toContain("audioKey");
+    expect(cols).toContain("sourceSongId");
     expect(cols).toContain("createdAt");
     expect(cols).toContain("lastPracticedAt");
   });
@@ -65,12 +66,14 @@ describe("schema tables", () => {
     expect(cols).toContain("startMs");
     expect(cols).toContain("endMs");
     expect(cols).toContain("lyricText");
+    expect(cols).toContain("sourceSegmentId");
     expect(cols).toContain("pitchContourNotes");
   });
 
   it("practiceRatings table has expected columns", () => {
     const cols = Object.keys(practiceRatings);
     expect(cols).toContain("id");
+    expect(cols).toContain("userId");
     expect(cols).toContain("segmentId");
     expect(cols).toContain("rating");
     expect(cols).toContain("ratedAt");

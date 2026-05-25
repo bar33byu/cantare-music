@@ -21,6 +21,7 @@ export interface ContourNoteHeatStat {
 export interface Segment {
   id: string;
   songId: string;
+  sourceSegmentId?: string | null;
   order: number;
   label: string;
   lyricText: string;
@@ -31,6 +32,7 @@ export interface Segment {
 
 export interface Song {
   id: string;
+  sourceSongId?: string | null;
   title: string;
   artist?: string;
   description?: string;
