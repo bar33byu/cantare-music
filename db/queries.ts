@@ -1,7 +1,7 @@
 import { eq, asc, desc, inArray, and, count, lte, sql } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow } from "./schema";
 import { getPublicUrl } from "../lib/r2";
 import type { SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
 import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
@@ -9,6 +9,7 @@ import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
 const DEFAULT_QUERY_USER_ID = "default";
 let ensureTapPracticeTablesPromise: Promise<void> | null = null;
 let ensureMidiTablesPromise: Promise<void> | null = null;
+let ensureDraftRecordingTablesPromise: Promise<void> | null = null;
 
 function normalizeDbUserId(value: string | null | undefined): string {
   if (!value) {
@@ -122,6 +123,23 @@ export interface PersistedMidiSource {
   cleanedNoteCount: number;
   ignoredShortNoteCount: number;
   parseError?: string | null;
+}
+
+export interface PersistedDraftRecording {
+  id: string;
+  songId: string;
+  title?: string | null;
+  audioKey: string;
+  status: "draft" | "archived";
+  trimStartMs?: number | null;
+  trimEndMs?: number | null;
+  createdAt: string;
+  archivedAt?: string | null;
+}
+
+export interface PromoteDraftRecordingResult {
+  draftRecording: PersistedDraftRecording;
+  previousAudioKey?: string | null;
 }
 
 export interface PlaylistSongItem {
@@ -495,6 +513,32 @@ function isMissingTapPracticeTableError(error: unknown): boolean {
   return false;
 }
 
+function isMissingDraftRecordingTableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("draft_recordings") && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (causeCode === "42P01" && causeMessage.includes("draft_recordings")) {
+      return true;
+    }
+    if (causeMessage.includes("draft_recordings") && causeMessage.includes("does not exist")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function isMissingMidiTableError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -642,6 +686,51 @@ async function ensureTapPracticeTables(): Promise<void> {
   }
 
   await ensureTapPracticeTablesPromise;
+}
+
+async function ensureDraftRecordingTables(): Promise<void> {
+  if (!ensureDraftRecordingTablesPromise) {
+    ensureDraftRecordingTablesPromise = (async () => {
+      await db().execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS "draft_recordings" (
+          "id" text PRIMARY KEY NOT NULL,
+          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
+          "title" text,
+          "audio_key" text NOT NULL,
+          "status" text NOT NULL DEFAULT 'draft',
+          "trim_start_ms" integer,
+          "trim_end_ms" integer,
+          "created_at" timestamp NOT NULL DEFAULT now()
+        )
+      `));
+
+      await db().execute(sql.raw(`
+        ALTER TABLE "draft_recordings" ADD COLUMN IF NOT EXISTS "trim_start_ms" integer
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "draft_recordings" ADD COLUMN IF NOT EXISTS "trim_end_ms" integer
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "draft_recordings" ADD COLUMN IF NOT EXISTS "archived_at" timestamp
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "songs" ADD COLUMN IF NOT EXISTS "audio_trim_start_ms" integer
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "songs" ADD COLUMN IF NOT EXISTS "audio_trim_end_ms" integer
+      `));
+
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_draft_recordings_song_status_created_at"
+          ON "draft_recordings" ("song_id", "status", "created_at")
+      `));
+    })().catch((error) => {
+      ensureDraftRecordingTablesPromise = null;
+      throw error;
+    });
+  }
+
+  await ensureDraftRecordingTablesPromise;
 }
 
 // Audit logs are intentionally lightweight: high-risk auth/account events only.
@@ -1468,6 +1557,162 @@ export async function deleteOrphanedAudioKey(id: string, userId: string = DEFAUL
   await db()
     .delete(orphanedAudioKeys)
     .where(and(eq(orphanedAudioKeys.id, id), eq(orphanedAudioKeys.userId, userId)));
+}
+
+function mapDraftRecording(row: DraftRecordingRow): PersistedDraftRecording {
+  return {
+    id: row.id,
+    songId: row.songId,
+    title: row.title,
+    audioKey: row.audioKey,
+    status: row.status === "archived" ? "archived" : "draft",
+    trimStartMs: row.trimStartMs,
+    trimEndMs: row.trimEndMs,
+    createdAt: row.createdAt.toISOString(),
+    archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
+  };
+}
+
+export async function createDraftRecording(data: {
+  songId: string;
+  audioKey: string;
+  title?: string | null;
+  createdAt?: Date;
+}, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedDraftRecording> {
+  await ensureDraftRecordingTables();
+  const song = await getSongById(data.songId, userId);
+  if (!song) {
+    throw Object.assign(new Error("Song not found"), { code: "SONG_NOT_FOUND" });
+  }
+
+  const rows = await db()
+    .insert(draftRecordings)
+    .values({
+      id: crypto.randomUUID(),
+      songId: data.songId,
+      audioKey: data.audioKey,
+      title: data.title ?? null,
+      status: "draft",
+      trimStartMs: null,
+      trimEndMs: null,
+      createdAt: data.createdAt ?? new Date(),
+    })
+    .returning();
+
+  return mapDraftRecording(rows[0]);
+}
+
+export async function updateDraftRecordingTrim(
+  songId: string,
+  draftRecordingId: string,
+  data: { trimStartMs: number; trimEndMs: number },
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedDraftRecording | null> {
+  await ensureDraftRecordingTables();
+  const song = await getSongById(songId, userId);
+  if (!song) {
+    return null;
+  }
+
+  const rows = await db()
+    .update(draftRecordings)
+    .set({
+      trimStartMs: data.trimStartMs,
+      trimEndMs: data.trimEndMs,
+    })
+    .where(and(eq(draftRecordings.id, draftRecordingId), eq(draftRecordings.songId, songId), eq(draftRecordings.status, "draft")))
+    .returning();
+
+  return rows[0] ? mapDraftRecording(rows[0]) : null;
+}
+
+export async function promoteDraftRecordingToSongVersion(
+  songId: string,
+  draftRecordingId: string,
+  data: { trimStartMs?: number | null; trimEndMs?: number | null } = {},
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PromoteDraftRecordingResult | null> {
+  await ensureDraftRecordingTables();
+  const song = await getSongById(songId, userId);
+  if (!song) {
+    return null;
+  }
+
+  const draftRows = await db()
+    .select()
+    .from(draftRecordings)
+    .where(and(eq(draftRecordings.id, draftRecordingId), eq(draftRecordings.songId, songId), eq(draftRecordings.status, "draft")))
+    .limit(1);
+
+  const draft = draftRows[0];
+  if (!draft) {
+    return null;
+  }
+  const trimStartMs = data.trimStartMs !== undefined ? data.trimStartMs : draft.trimStartMs;
+  const trimEndMs = data.trimEndMs !== undefined ? data.trimEndMs : draft.trimEndMs;
+
+  await db()
+    .update(songs)
+    .set({
+      audioKey: draft.audioKey,
+      audioTrimStartMs: trimStartMs,
+      audioTrimEndMs: trimEndMs,
+    })
+    .where(and(eq(songs.id, songId), eq(songs.userId, userId)));
+
+  const archivedAt = new Date();
+  const archivedRows = await db()
+    .update(draftRecordings)
+    .set({
+      status: "archived",
+      trimStartMs,
+      trimEndMs,
+      archivedAt,
+    })
+    .where(and(eq(draftRecordings.id, draftRecordingId), eq(draftRecordings.songId, songId)))
+    .returning();
+
+  return {
+    draftRecording: mapDraftRecording(archivedRows[0] ?? { ...draft, status: "archived", archivedAt }),
+    previousAudioKey: song.audioKey,
+  };
+}
+
+export async function getDraftRecordingsForSong(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedDraftRecording[]> {
+  return getDraftRecordingsForSongByStatus(songId, "draft", userId);
+}
+
+export async function getArchivedDraftRecordingsForSong(
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedDraftRecording[]> {
+  return getDraftRecordingsForSongByStatus(songId, "archived", userId);
+}
+
+async function getDraftRecordingsForSongByStatus(
+  songId: string,
+  status: "draft" | "archived",
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedDraftRecording[]> {
+  try {
+    await ensureDraftRecordingTables();
+    const rows = await db()
+      .select({ draftRecording: draftRecordings })
+      .from(draftRecordings)
+      .innerJoin(songs, eq(draftRecordings.songId, songs.id))
+      .where(and(eq(draftRecordings.songId, songId), eq(draftRecordings.status, status), eq(songs.userId, userId)))
+      .orderBy(desc(draftRecordings.createdAt));
+
+    return rows.map((row) => mapDraftRecording(row.draftRecording));
+  } catch (error) {
+    if (isMissingDraftRecordingTableError(error)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 // ── Segments ───────────────────────────────────────────────────────────────

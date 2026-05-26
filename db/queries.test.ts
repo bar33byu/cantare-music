@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { eq, desc } from "drizzle-orm";
-import { songs, segments, practiceRatings, playlists, playlistSongs, tapPracticeSessions, tapPracticeTaps, users, magicLinkTokens, userSessions } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, draftRecordings, tapPracticeSessions, tapPracticeTaps, users, magicLinkTokens, userSessions } from "./schema";
 
 // ── chainable mock builder ─────────────────────────────────────────────────────
 // Creates a fluent mock object where every method returns itself and
@@ -280,6 +280,154 @@ describe("deleteSong", () => {
     expect(deleteSpy).toHaveBeenCalledWith(songs);
     const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
     expect(whereSpy).toHaveBeenCalled();
+  });
+});
+
+describe("getDraftRecordingsForSong", () => {
+  it("returns draft recordings for a song scoped by user", async () => {
+    const row = {
+      id: "draft-1",
+      songId: "song-1",
+      title: null,
+      audioKey: "audio/drafts/draft-1.mp3",
+      status: "draft",
+      trimStartMs: 500,
+      trimEndMs: 4200,
+      createdAt: new Date("2026-05-25T14:30:00.000Z"),
+    };
+    const chain = makeChain([{ draftRecording: row }]);
+    selectSpy.mockReturnValue(chain);
+
+    const { getDraftRecordingsForSong } = await getQueries();
+    const result = await getDraftRecordingsForSong("song-1", "user-1");
+
+    expect(selectSpy).toHaveBeenCalledWith({ draftRecording: draftRecordings });
+    const fromSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["from"];
+    expect(fromSpy).toHaveBeenCalledWith(draftRecordings);
+    const innerJoinSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["innerJoin"];
+    expect(innerJoinSpy).toHaveBeenCalledWith(songs, eq(draftRecordings.songId, songs.id));
+    expect(result).toEqual([{
+      id: "draft-1",
+      songId: "song-1",
+      title: null,
+      audioKey: "audio/drafts/draft-1.mp3",
+      status: "draft",
+      trimStartMs: 500,
+      trimEndMs: 4200,
+      createdAt: "2026-05-25T14:30:00.000Z",
+      archivedAt: null,
+    }]);
+  });
+});
+
+describe("getArchivedDraftRecordingsForSong", () => {
+  it("returns archived drafts for a song scoped by user", async () => {
+    const row = {
+      id: "draft-2",
+      songId: "song-1",
+      title: null,
+      audioKey: "audio/drafts/draft-2.mp3",
+      status: "archived",
+      trimStartMs: 0,
+      trimEndMs: 5000,
+      createdAt: new Date("2026-05-24T14:30:00.000Z"),
+      archivedAt: new Date("2026-05-25T14:30:00.000Z"),
+    };
+    const chain = makeChain([{ draftRecording: row }]);
+    selectSpy.mockReturnValue(chain);
+
+    const { getArchivedDraftRecordingsForSong } = await getQueries();
+    const result = await getArchivedDraftRecordingsForSong("song-1", "user-1");
+
+    expect(selectSpy).toHaveBeenCalledWith({ draftRecording: draftRecordings });
+    const innerJoinSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["innerJoin"];
+    expect(innerJoinSpy).toHaveBeenCalledWith(songs, eq(draftRecordings.songId, songs.id));
+    expect(result).toEqual([{
+      id: "draft-2",
+      songId: "song-1",
+      title: null,
+      audioKey: "audio/drafts/draft-2.mp3",
+      status: "archived",
+      trimStartMs: 0,
+      trimEndMs: 5000,
+      createdAt: "2026-05-24T14:30:00.000Z",
+      archivedAt: "2026-05-25T14:30:00.000Z",
+    }]);
+  });
+});
+
+describe("promoteDraftRecordingToSongVersion", () => {
+  it("uses draft trim metadata for the song version and archives the draft", async () => {
+    const songRow = {
+      id: "song-1",
+      userId: "user-1",
+      title: "Song 1",
+      artist: null,
+      audioKey: "audio/song-1/old.mp3",
+      alternateAudioKey: null,
+      audioTrimStartMs: null,
+      audioTrimEndMs: null,
+      pitchContourNotes: [],
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      lastPracticedAt: null,
+    };
+    const draftRow = {
+      id: "draft-1",
+      songId: "song-1",
+      title: null,
+      audioKey: "audio/song-1/draft.webm",
+      status: "draft",
+      trimStartMs: 500,
+      trimEndMs: 4200,
+      createdAt: new Date("2026-05-25T14:30:00.000Z"),
+      archivedAt: null,
+    };
+    const archivedRow = {
+      ...draftRow,
+      status: "archived",
+      archivedAt: new Date("2026-05-25T15:00:00.000Z"),
+    };
+    const songSelectChain = makeChain([songRow]);
+    const draftSelectChain = makeChain([draftRow]);
+    const songUpdateChain = makeChain([]);
+    const draftUpdateChain = makeChain([archivedRow]);
+    selectSpy
+      .mockReturnValueOnce(songSelectChain)
+      .mockReturnValueOnce(draftSelectChain);
+    updateSpy
+      .mockReturnValueOnce(songUpdateChain)
+      .mockReturnValueOnce(draftUpdateChain);
+
+    const { promoteDraftRecordingToSongVersion } = await getQueries();
+    const result = await promoteDraftRecordingToSongVersion("song-1", "draft-1", {}, "user-1");
+
+    expect(updateSpy).toHaveBeenCalledWith(songs);
+    const songSetSpy = (songUpdateChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
+    expect(songSetSpy).toHaveBeenCalledWith({
+      audioKey: "audio/song-1/draft.webm",
+      audioTrimStartMs: 500,
+      audioTrimEndMs: 4200,
+    });
+    expect(updateSpy).toHaveBeenCalledWith(draftRecordings);
+    const draftSetSpy = (draftUpdateChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
+    expect(draftSetSpy).toHaveBeenCalledWith(expect.objectContaining({
+      status: "archived",
+      archivedAt: expect.any(Date),
+    }));
+    expect(result).toEqual({
+      previousAudioKey: "audio/song-1/old.mp3",
+      draftRecording: {
+        id: "draft-1",
+        songId: "song-1",
+        title: null,
+        audioKey: "audio/song-1/draft.webm",
+        status: "archived",
+        trimStartMs: 500,
+        trimEndMs: 4200,
+        createdAt: "2026-05-25T14:30:00.000Z",
+        archivedAt: "2026-05-25T15:00:00.000Z",
+      },
+    });
   });
 });
 

@@ -1159,6 +1159,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             userId={activeUserId}
             persistProgress={!playlistPracticeReadOnly}
             initialSession={session}
+            onDraftRecordingSaved={refreshSelectedSong}
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
             segmentPrerollMs={userSettings.segmentPrerollMs}

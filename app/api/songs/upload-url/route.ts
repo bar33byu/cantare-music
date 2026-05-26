@@ -10,11 +10,23 @@ type UploadRequestBody = {
   filename?: string;
   contentType?: string;
   size?: number;
-  audioVersion?: 'prominent' | 'blend';
+  audioVersion?: 'prominent' | 'blend' | 'draft';
 };
 
 const MAX_FILE_SIZE = 15_000_000;
 const ALLOWED_CONTENT_TYPES = new Set(['audio/mpeg', 'audio/mp3']);
+const ALLOWED_DRAFT_CONTENT_TYPES = new Set([
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/mp4',
+  'audio/ogg',
+  'audio/webm',
+  'audio/wav',
+]);
+
+function getBaseContentType(contentType: string): string {
+  return contentType.split(';')[0].trim().toLowerCase();
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,16 +47,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'File too large' }, { status: 400 });
     }
 
-    if (!ALLOWED_CONTENT_TYPES.has(body.contentType)) {
-      return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
-    }
-
     if (
       body.audioVersion !== undefined &&
       body.audioVersion !== 'prominent' &&
-      body.audioVersion !== 'blend'
+      body.audioVersion !== 'blend' &&
+      body.audioVersion !== 'draft'
     ) {
       return NextResponse.json({ error: 'Invalid audio version' }, { status: 400 });
+    }
+
+    const audioVersion = body.audioVersion === 'blend' ? 'blend' : body.audioVersion === 'draft' ? 'draft' : 'prominent';
+    const allowedContentTypes = audioVersion === 'draft' ? ALLOWED_DRAFT_CONTENT_TYPES : ALLOWED_CONTENT_TYPES;
+    if (!allowedContentTypes.has(getBaseContentType(body.contentType))) {
+      return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
     const song = await getSongById(body.songId, userId);
@@ -52,7 +67,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
-    const audioVersion = body.audioVersion === 'blend' ? 'blend' : 'prominent';
     const key = generateUploadKey(body.songId, body.filename, audioVersion);
 
     const command = new PutObjectCommand({

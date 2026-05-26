@@ -30,6 +30,19 @@ export interface Segment {
   pitchContourNotes?: PitchContourNote[];
 }
 
+export interface DraftRecording {
+  id: string;
+  songId: string;
+  title?: string | null;
+  audioKey: string;
+  audioUrl?: string;
+  status: "draft" | "archived";
+  trimStartMs?: number | null;
+  trimEndMs?: number | null;
+  createdAt: string;
+  archivedAt?: string | null;
+}
+
 export interface Song {
   id: string;
   sourceSongId?: string | null;
@@ -38,8 +51,12 @@ export interface Song {
   description?: string;
   audioUrl: string;
   alternateAudioUrl?: string;
+  audioTrimStartMs?: number | null;
+  audioTrimEndMs?: number | null;
   pitchContourNotes?: SongPitchContourNote[];
   hasMidiContour?: boolean;
+  draftRecordings?: DraftRecording[];
+  archivedDraftRecordings?: DraftRecording[];
   segments: Segment[];
   createdAt: string;
   lastPracticedAt?: string | null;

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useReducer } from "react";
-import { Song, MemoryRating, PitchContourNote, ContourNoteHeatStat } from "../types/index";
+import { Song, MemoryRating, PitchContourNote, ContourNoteHeatStat, DraftRecording } from "../types/index";
 import { sessionReducer, SessionState } from "../lib/sessionReducer";
 import { computeKnowledgeScore } from "../lib/knowledgeUtils";
 import SegmentCard from "./SegmentCard";
@@ -51,6 +51,7 @@ interface PracticeViewProps {
   initialSession: SessionState;
   onSessionChange?: (session: SessionState) => void;
   onRatingsSaved?: (ratings: SessionState["ratings"]) => void;
+  onDraftRecordingSaved?: () => void | Promise<void>;
   breadcrumbRootLabel?: string;
   onBreadcrumbRootClick?: () => void;
   onEditSongClick?: () => void;
@@ -77,6 +78,8 @@ interface PracticeViewProps {
 type LyricVisibilityMode = "full" | "hint" | "hidden";
 type AudioVersion = TapAudioVersion;
 export type ProgressStorageMode = "account" | "local" | "none";
+type DraftRecordingStatus = "idle" | "recording" | "saving" | "saved" | "error";
+type DraftTrimState = { startMs: number; endMs: number };
 
 const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
   full: "Full",
@@ -100,6 +103,106 @@ const TAP_MATCH_OPTIONS = {
   sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   durationToleranceRatio: 0.6,
 } as const;
+const DRAFT_RECORDING_MIME_TYPES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg;codecs=opus",
+  "audio/ogg",
+] as const;
+const MIN_DRAFT_TRIM_MS = 1000;
+const DRAFT_TRIM_AUTOSAVE_DELAY_MS = 500;
+const DRAFT_LABELS = {
+  activeSection: "Draft recording",
+  activeStatus: "Draft recording",
+  archivedSection: "Archived Drafts",
+  archivedStatus: "Archived draft",
+  review: "Review",
+  trim: "Trim",
+  promote: "Promote to song version",
+  saved: "Saved",
+} as const;
+
+function formatDraftRecordingCreatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function formatMs(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function getDraftRecordingMimeType(): string {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+
+  return DRAFT_RECORDING_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
+}
+
+function getDraftRecordingExtension(contentType: string): string {
+  const baseType = contentType.split(";")[0].trim().toLowerCase();
+  if (baseType === "audio/mp4") {
+    return "m4a";
+  }
+  if (baseType === "audio/ogg") {
+    return "ogg";
+  }
+  if (baseType === "audio/wav") {
+    return "wav";
+  }
+  if (baseType === "audio/mpeg" || baseType === "audio/mp3") {
+    return "mp3";
+  }
+  return "webm";
+}
+
+function clampTrimValue(value: number, durationMs: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(Math.max(0, durationMs), Math.round(value)));
+}
+
+function normalizeDraftTrimState(draft: DraftRecording, durationMs: number): DraftTrimState {
+  const safeDurationMs = Math.max(durationMs, draft.trimEndMs ?? 0, MIN_DRAFT_TRIM_MS);
+  const rawStartMs = clampTrimValue(draft.trimStartMs ?? 0, safeDurationMs);
+  const rawEndMs = clampTrimValue(draft.trimEndMs ?? safeDurationMs, safeDurationMs);
+  const startMs = Math.min(rawStartMs, Math.max(0, safeDurationMs - MIN_DRAFT_TRIM_MS));
+  const endMs = Math.min(safeDurationMs, Math.max(startMs + MIN_DRAFT_TRIM_MS, rawEndMs));
+  return { startMs, endMs };
+}
+
+function normalizeDraftRecordingError(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+  if (error.name === "NotAllowedError" || error.name === "SecurityError") {
+    return "Microphone permission was denied.";
+  }
+  if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+    return "No microphone was found.";
+  }
+  if (error.name === "NotReadableError") {
+    return "The microphone is already in use.";
+  }
+  return error.message || fallback;
+}
+
+function getDraftRecordingFallbackTitle(draft: DraftRecording, index: number): string {
+  const safeIndex = Math.max(0, index);
+  return draft.title?.trim() || (draft.status === "archived" ? `Archived draft ${safeIndex + 1}` : `Draft recording ${safeIndex + 1}`);
+}
 
 function toDirectionLetter(direction: "up" | "down" | "same"): "U" | "D" | "S" {
   if (direction === "up") {
@@ -139,6 +242,383 @@ interface TapSessionSummaryPayload {
   autoScorePercent?: number;
   scoreDetails?: TapScoreResult;
   tapCount: number;
+}
+
+function DraftRecordingListItem({
+  draft,
+  index,
+  archived = false,
+  isPlaying,
+  onPause,
+  onReview,
+}: {
+  draft: DraftRecording;
+  index: number;
+  archived?: boolean;
+  isPlaying: boolean;
+  onPause: () => void;
+  onReview: (draftId: string) => void;
+}) {
+  const title = getDraftRecordingFallbackTitle(draft, index);
+  const secondaryText = archived && draft.archivedAt
+    ? `Archived ${formatDraftRecordingCreatedAt(draft.archivedAt)}`
+    : formatDraftRecordingCreatedAt(draft.createdAt);
+
+  return (
+    <li className="flex items-center justify-between gap-3 py-2">
+      <div className="min-w-0">
+        <p className={`truncate text-sm font-medium ${archived ? "text-slate-800" : "text-slate-900"}`}>
+          {title}
+        </p>
+        <p className="text-xs text-slate-500">{secondaryText}</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          if (isPlaying) {
+            onPause();
+          }
+          onReview(draft.id);
+        }}
+        className={
+          archived
+            ? "shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            : "shrink-0 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700"
+        }
+      >
+        {DRAFT_LABELS.review}
+      </button>
+    </li>
+  );
+}
+
+function DraftRecordingReview({
+  draft,
+  fallbackTitle,
+  request,
+  onTrimSaved,
+  onPromoted,
+  onBack,
+}: {
+  draft: DraftRecording;
+  fallbackTitle: string;
+  request: (url: string, init?: RequestInit) => Promise<Response>;
+  onTrimSaved?: () => void | Promise<void>;
+  onPromoted?: () => void | Promise<void>;
+  onBack: () => void;
+}) {
+  const isArchived = draft.status === "archived";
+  const audioUrl = useMemo(() => toPlayableAudioUrl(draft.audioUrl ?? ""), [draft.audioUrl]);
+  const hasAudio = audioUrl.trim().length > 0;
+  const { isPlaying, isReady, currentMs, durationMs, playbackError, debugInfo, play, pause, seek } = useAudioPlayer(audioUrl);
+  const title = draft.title?.trim() || fallbackTitle;
+  const safeDurationMs = Math.max(durationMs, currentMs, 0);
+  const trimDurationMs = Math.max(durationMs, draft.trimEndMs ?? 0, MIN_DRAFT_TRIM_MS);
+  const [trimStartMs, setTrimStartMs] = React.useState(() => normalizeDraftTrimState(draft, trimDurationMs).startMs);
+  const [trimEndMs, setTrimEndMs] = React.useState(() => normalizeDraftTrimState(draft, trimDurationMs).endMs);
+  const [trimStatus, setTrimStatus] = React.useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [trimMessage, setTrimMessage] = React.useState<string | null>(null);
+  const [promoteStatus, setPromoteStatus] = React.useState<"idle" | "promoting" | "error">("idle");
+  const [promoteMessage, setPromoteMessage] = React.useState<string | null>(null);
+  const trimSaveTimerRef = React.useRef<number | null>(null);
+  const trimSaveRequestRef = React.useRef(0);
+  const hasEditedTrimRef = React.useRef(false);
+  const lastSavedTrimRef = React.useRef({
+    trimStartMs: normalizeDraftTrimState(draft, trimDurationMs).startMs,
+    trimEndMs: normalizeDraftTrimState(draft, trimDurationMs).endMs,
+  });
+  const trimStartPct = trimDurationMs > 0 ? (trimStartMs / trimDurationMs) * 100 : 0;
+  const trimEndPct = trimDurationMs > 0 ? (trimEndMs / trimDurationMs) * 100 : 100;
+  const trimWidthPct = Math.max(0, trimEndPct - trimStartPct);
+
+  React.useEffect(() => {
+    const nextDurationMs = Math.max(durationMs, draft.trimEndMs ?? 0, MIN_DRAFT_TRIM_MS);
+    const nextTrim = normalizeDraftTrimState(draft, nextDurationMs);
+    setTrimStartMs(nextTrim.startMs);
+    setTrimEndMs(nextTrim.endMs);
+    lastSavedTrimRef.current = {
+      trimStartMs: nextTrim.startMs,
+      trimEndMs: nextTrim.endMs,
+    };
+    hasEditedTrimRef.current = false;
+    setTrimStatus("idle");
+    setTrimMessage(null);
+    if (trimSaveTimerRef.current !== null) {
+      window.clearTimeout(trimSaveTimerRef.current);
+      trimSaveTimerRef.current = null;
+    }
+  }, [draft.id, durationMs]);
+
+  React.useEffect(() => {
+    if (isArchived || !hasEditedTrimRef.current || trimDurationMs <= 0) {
+      return;
+    }
+
+    const nextTrim = { trimStartMs, trimEndMs };
+    if (
+      nextTrim.trimStartMs === lastSavedTrimRef.current.trimStartMs &&
+      nextTrim.trimEndMs === lastSavedTrimRef.current.trimEndMs
+    ) {
+      setTrimStatus("saved");
+      setTrimMessage(DRAFT_LABELS.saved);
+      return;
+    }
+
+    setTrimStatus("saving");
+    setTrimMessage("Saving...");
+    if (trimSaveTimerRef.current !== null) {
+      window.clearTimeout(trimSaveTimerRef.current);
+    }
+
+    const requestId = trimSaveRequestRef.current + 1;
+    trimSaveRequestRef.current = requestId;
+    trimSaveTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await request(`/api/songs/${draft.songId}/draft-recordings/${draft.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(nextTrim),
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({ error: "Failed to save trim" }));
+            throw new Error(payload.error ?? `Failed to save trim (${response.status})`);
+          }
+          if (trimSaveRequestRef.current !== requestId) {
+            return;
+          }
+          lastSavedTrimRef.current = nextTrim;
+          await onTrimSaved?.();
+          setTrimStatus("saved");
+          setTrimMessage(DRAFT_LABELS.saved);
+        } catch (error) {
+          if (trimSaveRequestRef.current !== requestId) {
+            return;
+          }
+          setTrimStatus("error");
+          setTrimMessage(error instanceof Error ? error.message : "Failed to save trim.");
+        }
+      })();
+    }, DRAFT_TRIM_AUTOSAVE_DELAY_MS);
+
+    return () => {
+      if (trimSaveTimerRef.current !== null) {
+        window.clearTimeout(trimSaveTimerRef.current);
+        trimSaveTimerRef.current = null;
+      }
+    };
+  }, [draft.id, draft.songId, isArchived, onTrimSaved, request, trimDurationMs, trimEndMs, trimStartMs]);
+
+  React.useEffect(() => {
+    return () => {
+      if (trimSaveTimerRef.current !== null) {
+        window.clearTimeout(trimSaveTimerRef.current);
+      }
+      trimSaveRequestRef.current += 1;
+    };
+  }, []);
+
+  const handlePlayPause = () => {
+    if (!hasAudio) {
+      return;
+    }
+    if (isPlaying) {
+      pause();
+      return;
+    }
+    const playStartMs = currentMs < trimStartMs || currentMs >= trimEndMs ? trimStartMs : currentMs;
+    play(playStartMs, trimEndMs);
+  };
+
+  const handleSkip = (deltaMs: number) => {
+    seek(Math.max(0, Math.min(safeDurationMs || currentMs + deltaMs, currentMs + deltaMs)));
+  };
+
+  const handleTrimStartChange = (value: number) => {
+    hasEditedTrimRef.current = true;
+    const nextStart = Math.min(
+      clampTrimValue(value, trimDurationMs),
+      Math.max(0, trimEndMs - MIN_DRAFT_TRIM_MS)
+    );
+    setTrimStartMs(nextStart);
+    if (currentMs < nextStart) {
+      seek(nextStart);
+    }
+  };
+
+  const handleTrimEndChange = (value: number) => {
+    hasEditedTrimRef.current = true;
+    const nextEnd = Math.max(
+      Math.min(trimDurationMs, clampTrimValue(value, trimDurationMs)),
+      Math.min(trimDurationMs, trimStartMs + MIN_DRAFT_TRIM_MS)
+    );
+    setTrimEndMs(nextEnd);
+    if (currentMs > nextEnd) {
+      seek(nextEnd);
+    }
+  };
+
+  const handlePromote = async () => {
+    if (!hasAudio) {
+      setPromoteStatus("error");
+      setPromoteMessage("Draft recording audio is unavailable.");
+      return;
+    }
+    setPromoteStatus("promoting");
+    setPromoteMessage(null);
+    try {
+      const response = await request(`/api/songs/${draft.songId}/draft-recordings/${draft.id}/promote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trimStartMs, trimEndMs }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: "Failed to promote draft recording" }));
+        throw new Error(payload.error ?? `Failed to promote draft recording (${response.status})`);
+      }
+      await onPromoted?.();
+      onBack();
+    } catch (error) {
+      setPromoteStatus("error");
+      setPromoteMessage(error instanceof Error ? error.message : "Failed to promote draft recording.");
+    }
+  };
+
+  return (
+    <section
+      data-testid="draft-review-screen"
+      className="mx-auto flex w-full max-w-2xl flex-col gap-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{DRAFT_LABELS.activeSection}</p>
+          <h2 className="mt-1 truncate text-xl font-bold text-slate-950">{title}</h2>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm text-slate-600">
+            <dt className="font-medium text-slate-700">Created</dt>
+            <dd>{formatDraftRecordingCreatedAt(draft.createdAt)}</dd>
+            <dt className="font-medium text-slate-700">Status</dt>
+            <dd>{isArchived ? DRAFT_LABELS.archivedStatus : DRAFT_LABELS.activeStatus}</dd>
+            {draft.archivedAt ? (
+              <>
+                <dt className="font-medium text-slate-700">Archived</dt>
+                <dd>{formatDraftRecordingCreatedAt(draft.archivedAt)}</dd>
+              </>
+            ) : null}
+          </dl>
+        </div>
+        <button
+          type="button"
+          onClick={onBack}
+          className="shrink-0 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          Back
+        </button>
+      </div>
+
+      <AudioPlayer
+        audioUrl={draft.audioUrl ?? ""}
+        currentMs={currentMs}
+        durationMs={safeDurationMs}
+        segmentStartMs={0}
+        segmentEndMs={safeDurationMs}
+        isPlaying={isPlaying}
+        isReady={isReady}
+        playbackError={playbackError}
+        debugInfo={debugInfo}
+        onPlayPause={handlePlayPause}
+        onSkipBack={() => handleSkip(-5000)}
+        onSkipForward={() => handleSkip(5000)}
+        onSeekSong={seek}
+      />
+      {!hasAudio ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert" data-testid="draft-missing-audio">
+          Draft recording audio is unavailable.
+        </p>
+      ) : null}
+
+      <section data-testid="draft-trim-panel" className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-indigo-950">{DRAFT_LABELS.trim}</h3>
+          <span className="text-xs font-medium text-indigo-800">
+            {formatMs(trimStartMs)} - {formatMs(trimEndMs)}
+          </span>
+        </div>
+        <div className="relative h-9 rounded-xl border border-indigo-200 bg-white" data-testid="draft-trim-bar">
+          <div
+            className="absolute inset-y-0 rounded-lg border-x-2 border-indigo-700 bg-indigo-300/45"
+            style={{ left: `${trimStartPct}%`, width: `${trimWidthPct}%` }}
+          />
+          <div
+            className="absolute inset-y-0 w-1 rounded-full bg-slate-900"
+            style={{ left: `calc(${trimDurationMs > 0 ? (Math.min(currentMs, trimDurationMs) / trimDurationMs) * 100 : 0}% - 2px)` }}
+          />
+        </div>
+        <label className="mt-3 block text-xs font-medium text-slate-700">
+          Start
+          <input
+            type="range"
+            min={0}
+            max={Math.max(0, trimEndMs - MIN_DRAFT_TRIM_MS)}
+            step={100}
+            value={trimStartMs}
+            onChange={(event) => handleTrimStartChange(Number(event.currentTarget.value))}
+            disabled={isArchived}
+            className="mt-1 w-full"
+            data-testid="draft-trim-start"
+          />
+        </label>
+        <label className="mt-3 block text-xs font-medium text-slate-700">
+          End
+          <input
+            type="range"
+            min={Math.min(trimDurationMs, trimStartMs + MIN_DRAFT_TRIM_MS)}
+            max={trimDurationMs}
+            step={100}
+            value={trimEndMs}
+            onChange={(event) => handleTrimEndChange(Number(event.currentTarget.value))}
+            disabled={isArchived}
+            className="mt-1 w-full"
+            data-testid="draft-trim-end"
+          />
+        </label>
+        {trimMessage ? (
+          <p
+            className={`mt-2 text-xs ${trimStatus === "error" ? "text-red-700" : trimStatus === "saved" ? "text-emerald-700" : "text-slate-600"}`}
+            role={trimStatus === "error" ? "alert" : "status"}
+            data-testid="draft-trim-status"
+          >
+            {trimMessage}
+          </p>
+        ) : null}
+      </section>
+
+      {isArchived ? (
+        <p className="border-t border-slate-200 pt-3 text-xs text-slate-500">
+          Archived drafts are review-only.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-col gap-2 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-slate-500">Uses the current trim and archives this draft.</p>
+            <button
+              type="button"
+              onClick={() => void handlePromote()}
+              disabled={promoteStatus === "promoting" || !hasAudio}
+              className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              data-testid="draft-promote"
+            >
+              {promoteStatus === "promoting" ? "Promoting..." : DRAFT_LABELS.promote}
+            </button>
+          </div>
+          {promoteMessage ? (
+            <p className="text-sm text-red-700" role="alert" data-testid="draft-promote-status">
+              {promoteMessage}
+            </p>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
 }
 
 function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
@@ -183,6 +663,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   initialSession,
   onSessionChange,
   onRatingsSaved,
+  onDraftRecordingSaved,
   breadcrumbRootLabel,
   onBreadcrumbRootClick,
   onEditSongClick,
@@ -239,6 +720,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [transitionToken, setTransitionToken] = React.useState(0);
   const [ratingsLoading, setRatingsLoading] = React.useState(true);
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
+  const [draftRecordingStatus, setDraftRecordingStatus] = React.useState<DraftRecordingStatus>("idle");
+  const [draftRecordingMessage, setDraftRecordingMessage] = React.useState<string | null>(null);
+  const [reviewingDraftId, setReviewingDraftId] = React.useState<string | null>(null);
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(defaultLooping);
   const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
@@ -318,6 +802,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const tapWarningTimerRef = React.useRef<number | null>(null);
   const tapCountInIntervalRef = React.useRef<number | null>(null);
   const tapCountInTimeoutRef = React.useRef<number | null>(null);
+  const draftRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const draftRecordingStreamRef = React.useRef<MediaStream | null>(null);
+  const draftRecordingChunksRef = React.useRef<Blob[]>([]);
   const loopHandledRef = React.useRef<string | null>(null);
   const autoPlayHandledKeyRef = React.useRef<string | null>(null);
   const autoPlayTokenHandledRef = React.useRef<number>(0);
@@ -343,6 +830,144 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     return `/debug-tap-practice?${params.toString()}`;
   }, [song.id, tapSessionId]);
+  const draftRecordings = song.draftRecordings ?? [];
+  const archivedDraftRecordings = song.archivedDraftRecordings ?? [];
+  const allReviewableDraftRecordings = [...draftRecordings, ...archivedDraftRecordings];
+  const reviewingDraft = allReviewableDraftRecordings.find((draft) => draft.id === reviewingDraftId) ?? null;
+
+  const stopDraftRecordingStream = React.useCallback(() => {
+    draftRecordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    draftRecordingStreamRef.current = null;
+  }, []);
+
+  const saveDraftRecordingBlob = React.useCallback(async (blob: Blob) => {
+    const contentType = blob.type || "audio/webm";
+    const extension = getDraftRecordingExtension(contentType);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `draft-recording-${timestamp}.${extension}`;
+
+    const uploadUrlResponse = await request("/api/songs/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        songId: song.id,
+        filename,
+        contentType,
+        size: blob.size,
+        audioVersion: "draft",
+      }),
+    });
+
+    if (!uploadUrlResponse.ok) {
+      const payload = await uploadUrlResponse.json().catch(() => ({ error: "Failed to prepare draft upload" }));
+      throw new Error(payload.error ?? `Failed to prepare draft upload (${uploadUrlResponse.status})`);
+    }
+
+    const { uploadUrl, key } = await uploadUrlResponse.json() as { uploadUrl?: string; key?: string };
+    if (!uploadUrl || !key) {
+      throw new Error("Draft upload response did not include an upload URL.");
+    }
+
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: blob,
+    });
+    if (!uploadResponse.ok) {
+      throw new Error(`Draft upload failed (${uploadResponse.status})`);
+    }
+
+    const saveResponse = await request(`/api/songs/${song.id}/draft-recordings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ audioKey: key }),
+    });
+    if (!saveResponse.ok) {
+      const payload = await saveResponse.json().catch(() => ({ error: "Failed to save draft recording" }));
+      throw new Error(payload.error ?? `Failed to save draft recording (${saveResponse.status})`);
+    }
+
+    await onDraftRecordingSaved?.();
+  }, [onDraftRecordingSaved, request, song.id]);
+
+  const handleStartDraftRecording = React.useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setDraftRecordingStatus("error");
+      setDraftRecordingMessage("Recording is not available in this browser.");
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      setDraftRecordingStatus("error");
+      setDraftRecordingMessage("Recording is not available in this browser.");
+      return;
+    }
+
+    try {
+      if (isPlaying) {
+        pause();
+      }
+      setDraftRecordingMessage(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = getDraftRecordingMimeType();
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      draftRecordingStreamRef.current = stream;
+      draftRecordingChunksRef.current = [];
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          draftRecordingChunksRef.current.push(event.data);
+        }
+      });
+
+      recorder.addEventListener("stop", () => {
+        const chunks = [...draftRecordingChunksRef.current];
+        draftRecordingChunksRef.current = [];
+        const recordedType = recorder.mimeType || mimeType || "audio/webm";
+        stopDraftRecordingStream();
+        draftRecorderRef.current = null;
+
+        void (async () => {
+          try {
+            if (chunks.length === 0) {
+              throw new Error("No audio was captured.");
+            }
+            const blob = new Blob(chunks, { type: recordedType });
+            if (blob.size === 0) {
+              throw new Error("No audio was captured.");
+            }
+            await saveDraftRecordingBlob(blob);
+            setDraftRecordingStatus("saved");
+            setDraftRecordingMessage("Draft recording saved.");
+          } catch (error) {
+            console.error("Failed to save draft recording:", error);
+            setDraftRecordingStatus("error");
+            setDraftRecordingMessage(normalizeDraftRecordingError(error, "Failed to save draft recording."));
+          }
+        })();
+      });
+
+      draftRecorderRef.current = recorder;
+      recorder.start();
+      setDraftRecordingStatus("recording");
+      setDraftRecordingMessage("Recording...");
+    } catch (error) {
+      stopDraftRecordingStream();
+      draftRecorderRef.current = null;
+      setDraftRecordingStatus("error");
+      setDraftRecordingMessage(normalizeDraftRecordingError(error, "Could not start recording."));
+    }
+  }, [isPlaying, pause, saveDraftRecordingBlob, stopDraftRecordingStream]);
+
+  const handleStopDraftRecording = React.useCallback(() => {
+    const recorder = draftRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      return;
+    }
+    setDraftRecordingStatus("saving");
+    setDraftRecordingMessage("Saving draft recording...");
+    recorder.requestData();
+    recorder.stop();
+  }, []);
 
   React.useEffect(() => {
     onSegmentPlaybackCompleteRef.current = onSegmentPlaybackComplete;
@@ -1760,13 +2385,28 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = null;
     }
-  }, [cancelTapPracticeCountIn, clearTapPersistenceWarning, song.id]);
+    if (draftRecorderRef.current && draftRecorderRef.current.state !== "inactive") {
+      draftRecorderRef.current.stop();
+    } else {
+      stopDraftRecordingStream();
+    }
+    draftRecorderRef.current = null;
+    draftRecordingChunksRef.current = [];
+    setDraftRecordingStatus("idle");
+    setDraftRecordingMessage(null);
+    setReviewingDraftId(null);
+  }, [cancelTapPracticeCountIn, clearTapPersistenceWarning, song.id, stopDraftRecordingStream]);
 
   useEffect(() => {
     return () => {
       cancelTapPracticeCountIn();
+      if (draftRecorderRef.current && draftRecorderRef.current.state !== "inactive") {
+        draftRecorderRef.current.stop();
+      } else {
+        stopDraftRecordingStream();
+      }
     };
-  }, [cancelTapPracticeCountIn]);
+  }, [cancelTapPracticeCountIn, stopDraftRecordingStream]);
 
   useEffect(() => {
     return () => {
@@ -2046,6 +2686,49 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               ))}
             </div>
           ) : null}
+          {!isTapPracticeMode ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="draft-recording-toggle"
+                aria-pressed={draftRecordingStatus === "recording"}
+                onClick={() => {
+                  if (draftRecordingStatus === "recording") {
+                    handleStopDraftRecording();
+                  } else {
+                    void handleStartDraftRecording();
+                  }
+                }}
+                disabled={draftRecordingStatus === "saving"}
+                className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                  draftRecordingStatus === "recording"
+                    ? "border-red-600 bg-red-600 text-white hover:bg-red-700"
+                    : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+                }`}
+              >
+                {draftRecordingStatus === "recording"
+                  ? "Stop"
+                  : draftRecordingStatus === "saving"
+                    ? "Saving..."
+                    : "Record"}
+              </button>
+              {draftRecordingMessage ? (
+                <span
+                  data-testid="draft-recording-status"
+                  role={draftRecordingStatus === "error" ? "alert" : "status"}
+                  className={`text-xs ${
+                    draftRecordingStatus === "error"
+                      ? "text-red-700"
+                      : draftRecordingStatus === "saved"
+                        ? "text-emerald-700"
+                        : "text-slate-600"
+                  }`}
+                >
+                  {draftRecordingMessage}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {hasSegments && currentSegment && hasCardContourData ? (
             <button
               type="button"
@@ -2160,9 +2843,56 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       </div>
       ) : null}
 
+      {!isTapPracticeMode && !reviewingDraft && draftRecordings.length > 0 ? (
+        <section
+          data-testid="draft-recordings"
+          className="mx-4 mb-3 rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-sm md:mx-8"
+        >
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-slate-900">{DRAFT_LABELS.activeSection}</h2>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+              {draftRecordings.length}
+            </span>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {draftRecordings.map((draft, index) => (
+              <DraftRecordingListItem
+                key={draft.id}
+                draft={draft}
+                index={index}
+                isPlaying={isPlaying}
+                onPause={pause}
+                onReview={setReviewingDraftId}
+              />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {!isTapPracticeMode && reviewingDraft ? (
+        <main
+          data-testid="draft-review-main"
+          className="flex flex-1 justify-center overflow-y-auto px-4 pt-2 md:px-8"
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)" }}
+        >
+          <DraftRecordingReview
+            draft={reviewingDraft}
+            fallbackTitle={
+              reviewingDraft.status === "archived"
+                ? getDraftRecordingFallbackTitle(reviewingDraft, archivedDraftRecordings.findIndex((draft) => draft.id === reviewingDraft.id))
+                : getDraftRecordingFallbackTitle(reviewingDraft, draftRecordings.findIndex((draft) => draft.id === reviewingDraft.id))
+            }
+            request={request}
+            onTrimSaved={onDraftRecordingSaved}
+            onPromoted={onDraftRecordingSaved}
+            onBack={() => setReviewingDraftId(null)}
+          />
+        </main>
+      ) : null}
+
       <main
         data-testid="practice-main"
-        className={`flex flex-1 justify-center px-4 pt-2 md:px-8 ${isTapPracticeMode ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
+        className={`${reviewingDraft ? "hidden" : "flex"} flex-1 justify-center px-4 pt-2 md:px-8 ${isTapPracticeMode ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
         style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
       >
         <section data-testid="practice-focus" className={`flex h-full min-h-0 w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
@@ -2502,37 +3232,74 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         </section>
       </main>
 
-      <section
-        data-testid="practice-transport"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
-        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
-      >
-        <AudioPlayer
-          audioUrl={activeAudioUrl}
-          currentMs={currentMs}
-          durationMs={totalDurationMs}
-          segmentStartMs={activeStartMs}
-          segmentEndMs={activeEndMs}
-          isPlaying={isPlaying}
-          isReady={isReady}
-          playbackError={playbackError}
-          debugInfo={debugInfo}
-          transportDebug={transportDebug}
-          onPlayPause={handleTogglePlay}
-          onSkipBack={() => handleSkipBy(-5000)}
-          onSkipForward={() => handleSkipBy(5000)}
-          onSeekSong={handleSeekSong}
-          onDebugPlayTest={handleDebugPlayTest}
-          segments={song.segments}
-          masteryBySegment={knowledgeScore.bySegment}
-          currentSegmentIndex={session.currentSegmentIndex}
-          isLooping={isLooping}
-          onToggleLoop={handleToggleLoop}
-          lyricModeLabel={LYRIC_MODE_LABELS[lyricVisibilityMode]}
-          onToggleLyricMode={() => setLyricVisibilityMode((previous) => getNextLyricMode(previous))}
-          reducedControls={reducedControls}
-        />
-      </section>
+      {!isTapPracticeMode && !reviewingDraft && archivedDraftRecordings.length > 0 ? (
+        <details
+          data-testid="archived-drafts"
+          className="group mx-4 mb-3 rounded-lg border border-slate-200 bg-slate-50/70 text-slate-700 md:mx-8"
+        >
+          <summary
+            data-testid="archived-drafts-toggle"
+            className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-semibold"
+          >
+            <span>{DRAFT_LABELS.archivedSection}</span>
+            <span className="flex items-center gap-2">
+              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                {archivedDraftRecordings.length}
+              </span>
+              <span aria-hidden="true" className="transition-transform group-open:rotate-90">
+                &gt;
+              </span>
+            </span>
+          </summary>
+          <ul className="divide-y divide-slate-200 border-t border-slate-200 px-3 py-1">
+            {archivedDraftRecordings.map((draft, index) => (
+              <DraftRecordingListItem
+                key={draft.id}
+                draft={draft}
+                index={index}
+                archived
+                isPlaying={isPlaying}
+                onPause={pause}
+                onReview={setReviewingDraftId}
+              />
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
+      {!reviewingDraft ? (
+        <section
+          data-testid="practice-transport"
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
+        >
+          <AudioPlayer
+            audioUrl={activeAudioUrl}
+            currentMs={currentMs}
+            durationMs={totalDurationMs}
+            segmentStartMs={activeStartMs}
+            segmentEndMs={activeEndMs}
+            isPlaying={isPlaying}
+            isReady={isReady}
+            playbackError={playbackError}
+            debugInfo={debugInfo}
+            transportDebug={transportDebug}
+            onPlayPause={handleTogglePlay}
+            onSkipBack={() => handleSkipBy(-5000)}
+            onSkipForward={() => handleSkipBy(5000)}
+            onSeekSong={handleSeekSong}
+            onDebugPlayTest={handleDebugPlayTest}
+            segments={song.segments}
+            masteryBySegment={knowledgeScore.bySegment}
+            currentSegmentIndex={session.currentSegmentIndex}
+            isLooping={isLooping}
+            onToggleLoop={handleToggleLoop}
+            lyricModeLabel={LYRIC_MODE_LABELS[lyricVisibilityMode]}
+            onToggleLyricMode={() => setLyricVisibilityMode((previous) => getNextLyricMode(previous))}
+            reducedControls={reducedControls}
+          />
+        </section>
+      ) : null}
     </div>
   );
 };
