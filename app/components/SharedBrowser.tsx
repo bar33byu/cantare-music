@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { buildUserScopedCacheKey, readCachedJson, writeCachedJson } from "../lib/localJsonCache";
 import type { Playlist, SharedPlaylistListItem } from "../types";
 
 interface SharedBrowserProps {
   onPracticeAsGuest: (playlist: Playlist) => void;
   onOpenCopiedPlaylist: (playlistId: string) => void;
+  userId?: string;
 }
 
-export function SharedBrowser({ onPracticeAsGuest, onOpenCopiedPlaylist }: SharedBrowserProps) {
+export function SharedBrowser({ onPracticeAsGuest, onOpenCopiedPlaylist, userId }: SharedBrowserProps) {
   const [playlists, setPlaylists] = useState<SharedPlaylistListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +18,16 @@ export function SharedBrowser({ onPracticeAsGuest, onOpenCopiedPlaylist }: Share
   const [copiedPlaylistId, setCopiedPlaylistId] = useState<string | null>(null);
 
   const fetchShared = useCallback(async () => {
-    setLoading(true);
+    const cacheKey = buildUserScopedCacheKey("shared-playlists", userId);
+    const cached = readCachedJson<SharedPlaylistListItem[]>(cacheKey);
+    const hasCachedPlaylists = cached !== null && Array.isArray(cached.value);
+    if (cached && hasCachedPlaylists) {
+      setPlaylists(cached.value);
+      setLoading(false);
+      setError(null);
+    }
+
+    setLoading(!hasCachedPlaylists);
     setError(null);
     try {
       const response = await fetch("/api/shared/playlists", { cache: "no-store" });
@@ -29,14 +40,18 @@ export function SharedBrowser({ onPracticeAsGuest, onOpenCopiedPlaylist }: Share
         throw new Error("Failed to load shared playlists");
       }
       const payload = (await response.json()) as { playlists?: SharedPlaylistListItem[] };
-      setPlaylists(Array.isArray(payload.playlists) ? payload.playlists : []);
+      const list = Array.isArray(payload.playlists) ? payload.playlists : [];
+      setPlaylists(list);
+      writeCachedJson(cacheKey, list);
     } catch {
-      setError("Unable to load shared playlists right now.");
-      setPlaylists([]);
+      if (!hasCachedPlaylists) {
+        setError("Unable to load shared playlists right now.");
+        setPlaylists([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     void fetchShared();

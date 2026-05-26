@@ -173,6 +173,13 @@ export interface PlaylistSummary {
   importedAt?: string | null;
   createdAt: string;
   songCount: number;
+  knowledgePercent?: number;
+  healthStats?: {
+    songsWithPartAudio: number;
+    songsWithBlendAudio: number;
+    songsWithSegments: number;
+    songsWithMidiContour: number;
+  };
 }
 
 export interface SharedPlaylistDetail extends PlaylistDetail {
@@ -3032,6 +3039,15 @@ function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSu
   };
 }
 
+function emptyPlaylistHealthStats() {
+  return {
+    songsWithPartAudio: 0,
+    songsWithBlendAudio: 0,
+    songsWithSegments: 0,
+    songsWithMidiContour: 0,
+  };
+}
+
 async function ensurePlaylistSharingColumns(): Promise<void> {
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "share_token" text`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "shared_at" timestamp`));
@@ -3141,7 +3157,89 @@ export async function getAllPlaylists(
     songCounts.map((row) => [row.playlistId, row.count])
   );
 
-  return rows.map((row) => mapPlaylistSummary(row, countMap[row.id] ?? 0));
+  const summaries = rows.map((row) => mapPlaylistSummary(row, countMap[row.id] ?? 0));
+  const playlistIds = summaries.map((playlist) => playlist.id);
+  if (playlistIds.length === 0) {
+    return summaries;
+  }
+
+  const linkedSongs = await db()
+    .select({
+      playlistId: playlistSongs.playlistId,
+      songId: playlistSongs.songId,
+      audioKey: songs.audioKey,
+      alternateAudioKey: songs.alternateAudioKey,
+    })
+    .from(playlistSongs)
+    .innerJoin(songs, eq(playlistSongs.songId, songs.id))
+    .where(legacyMode ? inArray(playlistSongs.playlistId, playlistIds) : and(inArray(playlistSongs.playlistId, playlistIds), eq(songs.userId, userId)));
+
+  const songIds = Array.from(new Set(linkedSongs.map((song) => song.songId)));
+  const [segmentCountRows, midiContourRows, knowledgeBySong] = await Promise.all([
+    songIds.length > 0
+      ? db()
+          .select({
+            songId: segments.songId,
+            count: count(segments.id),
+          })
+          .from(segments)
+          .where(inArray(segments.songId, songIds))
+          .groupBy(segments.songId)
+      : Promise.resolve([]),
+    songIds.length > 0
+      ? db()
+          .select({
+            songId: midiSources.songId,
+            count: count(midiSources.id),
+          })
+          .from(midiSources)
+          .where(and(inArray(midiSources.songId, songIds), sql`${midiSources.cleanedNoteCount} > 0`))
+          .groupBy(midiSources.songId)
+      : Promise.resolve([]),
+    getSongKnowledgeBySongIds(songIds, userId),
+  ]);
+
+  const segmentCountBySong = new Map(segmentCountRows.map((row) => [row.songId, Number(row.count)]));
+  const midiSongIds = new Set(midiContourRows.map((row) => row.songId));
+  const statsByPlaylist = new Map<string, ReturnType<typeof emptyPlaylistHealthStats>>();
+  const knowledgeNumeratorByPlaylist = new Map<string, number>();
+  const knowledgeSegmentCountByPlaylist = new Map<string, number>();
+
+  for (const linkedSong of linkedSongs) {
+    const stats = statsByPlaylist.get(linkedSong.playlistId) ?? emptyPlaylistHealthStats();
+    if (linkedSong.audioKey?.trim()) {
+      stats.songsWithPartAudio += 1;
+    }
+    if (linkedSong.alternateAudioKey?.trim()) {
+      stats.songsWithBlendAudio += 1;
+    }
+
+    const segmentCount = segmentCountBySong.get(linkedSong.songId) ?? 0;
+    if (segmentCount > 0) {
+      stats.songsWithSegments += 1;
+      knowledgeNumeratorByPlaylist.set(
+        linkedSong.playlistId,
+        (knowledgeNumeratorByPlaylist.get(linkedSong.playlistId) ?? 0) + (knowledgeBySong[linkedSong.songId] ?? 0) * segmentCount
+      );
+      knowledgeSegmentCountByPlaylist.set(
+        linkedSong.playlistId,
+        (knowledgeSegmentCountByPlaylist.get(linkedSong.playlistId) ?? 0) + segmentCount
+      );
+    }
+    if (midiSongIds.has(linkedSong.songId)) {
+      stats.songsWithMidiContour += 1;
+    }
+    statsByPlaylist.set(linkedSong.playlistId, stats);
+  }
+
+  return summaries.map((playlist) => {
+    const segmentCount = knowledgeSegmentCountByPlaylist.get(playlist.id) ?? 0;
+    return {
+      ...playlist,
+      knowledgePercent: segmentCount > 0 ? Math.round((knowledgeNumeratorByPlaylist.get(playlist.id) ?? 0) / segmentCount) : 0,
+      healthStats: statsByPlaylist.get(playlist.id) ?? emptyPlaylistHealthStats(),
+    };
+  });
 }
 
 export async function getPlaylistById(

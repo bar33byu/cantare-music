@@ -2,6 +2,7 @@
 
 import { useCallback, useState, useEffect, useMemo } from 'react';
 import { getMasteryColor } from '../lib/masteryColors';
+import { buildUserScopedCacheKey, readCachedJson, writeCachedJson } from '../lib/localJsonCache';
 import { SongReadinessIcons } from './SongReadinessIcons';
 
 interface SongListItem {
@@ -61,6 +62,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
 
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const cacheKey = useMemo(() => buildUserScopedCacheKey('songs', userId), [userId]);
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     if (!userId) {
@@ -166,8 +168,16 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   }, [songs, filterText, missingFilters, sort]);
 
   const fetchSongs = useCallback(async () => {
+    const cached = readCachedJson<SongListItem[]>(cacheKey);
+    const hasCachedSongs = cached !== null && Array.isArray(cached.value);
+    if (cached && hasCachedSongs) {
+      setSongs(cached.value);
+      setLoading(false);
+      setError(null);
+    }
+
     try {
-      setLoading(true);
+      setLoading(!hasCachedSongs);
       setError(null);
       const cacheVersion = refreshTrigger ?? 0;
       const response = await fetch(`/api/songs?v=${cacheVersion}`, withUserHeader());
@@ -176,20 +186,26 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           .json()
           .catch(() => ({ error: response.statusText || 'Unknown error' }));
         console.error('Song fetch failed', response.status, serverError);
-        setSongs([]);
-        setError('Unable to load song list right now.');
+        if (!hasCachedSongs) {
+          setSongs([]);
+          setError('Unable to load song list right now.');
+        }
         return;
       }
       const data = await response.json();
-      setSongs(data);
+      const list = Array.isArray(data) ? data : [];
+      setSongs(list);
+      writeCachedJson(cacheKey, list);
     } catch (err) {
       console.error('Song fetch error', err);
-      setSongs([]);
-      setError('Unable to load song list right now.');
+      if (!hasCachedSongs) {
+        setSongs([]);
+        setError('Unable to load song list right now.');
+      }
     } finally {
       setLoading(false);
     }
-  }, [refreshTrigger, withUserHeader]);
+  }, [cacheKey, refreshTrigger, withUserHeader]);
 
   useEffect(() => {
     void fetchSongs();

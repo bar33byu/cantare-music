@@ -1645,6 +1645,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         {activeView === "shared" ? (
           isSignedIn ? (
             <SharedBrowser
+              userId={activeUserId}
               onPracticeAsGuest={(playlist) => {
                 setSelectedPlaylist(playlist);
                 setPlaylistPracticeReturnView("shared");
