@@ -332,6 +332,39 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("draft-discard-status")).toHaveTextContent("Draft recording discarded.");
   });
 
+  it("numbers generated draft recording labels by creation order", async () => {
+    const song: Song = {
+      ...makeSong(),
+      draftRecordings: [
+        {
+          id: "draft-new",
+          songId: "song-1",
+          title: null,
+          audioKey: "audio/drafts/new.webm",
+          audioUrl: "https://cdn.example.com/audio/drafts/new.webm",
+          status: "draft",
+          createdAt: "2026-05-25T22:44:00.000Z",
+        },
+        {
+          id: "draft-old",
+          songId: "song-1",
+          title: null,
+          audioKey: "audio/drafts/old.webm",
+          audioUrl: "https://cdn.example.com/audio/drafts/old.webm",
+          status: "draft",
+          createdAt: "2026-05-25T21:41:00.000Z",
+        },
+      ],
+    };
+
+    await renderAndWaitForRatings(song);
+
+    const drafts = screen.getByTestId("draft-recordings");
+    const items = within(drafts).getAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("Draft recording 2");
+    expect(items[1]).toHaveTextContent("Draft recording 1");
+  });
+
   it("shows archived drafts collapsed near the bottom and keeps them reviewable", async () => {
     const song: Song = {
       ...makeSong(),
@@ -555,18 +588,18 @@ describe("PracticeView", () => {
   it("saves a draft recording immediately after stop", async () => {
     const onDraftRecordingSaved = vi.fn();
     const stopTrack = vi.fn();
-    let startInterval: number | undefined;
+    const startSpy = vi.fn();
     class MockMediaRecorder extends EventTarget {
       static isTypeSupported = vi.fn(() => true);
       state: RecordingState = "inactive";
       mimeType = "audio/webm";
 
-      start(interval?: number) {
-        startInterval = interval;
+      start() {
+        startSpy();
         this.state = "recording";
       }
 
-      requestData() {
+      emitAudio() {
         const event = new Event("dataavailable") as Event & { data: Blob };
         event.data = new Blob(["draft-audio"], { type: "audio/webm" });
         this.dispatchEvent(event);
@@ -574,6 +607,7 @@ describe("PracticeView", () => {
 
       stop() {
         this.state = "inactive";
+        this.emitAudio();
         this.dispatchEvent(new Event("stop"));
       }
     }
@@ -620,7 +654,7 @@ describe("PracticeView", () => {
       expect(screen.getByTestId("draft-recording-status")).toHaveTextContent("Recording...");
     });
     expect(screen.getByTestId("draft-recording-level")).toBeInTheDocument();
-    expect(startInterval).toBe(1000);
+    expect(startSpy).toHaveBeenCalledWith();
 
     fireEvent.click(screen.getByTestId("draft-recording-toggle"));
 

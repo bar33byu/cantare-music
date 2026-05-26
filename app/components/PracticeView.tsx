@@ -112,7 +112,6 @@ const DRAFT_RECORDING_MIME_TYPES = [
 ] as const;
 const MIN_DRAFT_TRIM_MS = 1000;
 const DRAFT_TRIM_AUTOSAVE_DELAY_MS = 500;
-const DRAFT_RECORDING_CHUNK_INTERVAL_MS = 1000;
 const DRAFT_LABELS = {
   activeSection: "Draft recording",
   activeStatus: "Draft recording",
@@ -201,9 +200,23 @@ function normalizeDraftRecordingError(error: unknown, fallback: string): string 
   return error.message || fallback;
 }
 
-function getDraftRecordingFallbackTitle(draft: DraftRecording, index: number): string {
-  const safeIndex = Math.max(0, index);
-  return draft.title?.trim() || (draft.status === "archived" ? `Archived draft ${safeIndex + 1}` : `Draft recording ${safeIndex + 1}`);
+function getDraftRecordingCreatedAtMs(draft: DraftRecording): number {
+  const createdAtMs = new Date(draft.createdAt).getTime();
+  return Number.isFinite(createdAtMs) ? createdAtMs : 0;
+}
+
+function getDraftRecordingSequence(draft: DraftRecording, drafts: DraftRecording[]): number {
+  const orderedDrafts = [...drafts].sort((a, b) => {
+    const createdAtDifference = getDraftRecordingCreatedAtMs(a) - getDraftRecordingCreatedAtMs(b);
+    return createdAtDifference !== 0 ? createdAtDifference : a.id.localeCompare(b.id);
+  });
+  const index = orderedDrafts.findIndex((item) => item.id === draft.id);
+  return index >= 0 ? index + 1 : drafts.indexOf(draft) + 1;
+}
+
+function getDraftRecordingFallbackTitle(draft: DraftRecording, sequence: number): string {
+  const safeSequence = Math.max(1, sequence);
+  return draft.title?.trim() || (draft.status === "archived" ? `Archived draft ${safeSequence}` : `Draft recording ${safeSequence}`);
 }
 
 function toDirectionLetter(direction: "up" | "down" | "same"): "U" | "D" | "S" {
@@ -248,7 +261,7 @@ interface TapSessionSummaryPayload {
 
 function DraftRecordingListItem({
   draft,
-  index,
+  sequence,
   archived = false,
   isPlaying,
   onPause,
@@ -256,14 +269,14 @@ function DraftRecordingListItem({
   onDiscard,
 }: {
   draft: DraftRecording;
-  index: number;
+  sequence: number;
   archived?: boolean;
   isPlaying: boolean;
   onPause: () => void;
   onReview: (draftId: string) => void;
   onDiscard?: (draftId: string) => void;
 }) {
-  const title = getDraftRecordingFallbackTitle(draft, index);
+  const title = getDraftRecordingFallbackTitle(draft, sequence);
   const secondaryText = archived && draft.archivedAt
     ? `Archived ${formatDraftRecordingCreatedAt(draft.archivedAt)}`
     : formatDraftRecordingCreatedAt(draft.createdAt);
@@ -1031,7 +1044,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       });
 
       draftRecorderRef.current = recorder;
-      recorder.start(DRAFT_RECORDING_CHUNK_INTERVAL_MS);
+      recorder.start();
       setDraftRecordingStatus("recording");
       setDraftRecordingMessage("Recording...");
     } catch (error) {
@@ -1049,11 +1062,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     setDraftRecordingStatus("saving");
     setDraftRecordingMessage("Saving draft recording...");
-    try {
-      recorder.requestData();
-    } catch {
-      // Some mobile browsers flush chunks on stop without allowing requestData.
-    }
     recorder.stop();
   }, []);
 
@@ -2975,11 +2983,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             </span>
           </div>
           <ul className="divide-y divide-slate-100">
-            {draftRecordings.map((draft, index) => (
+            {draftRecordings.map((draft) => (
               <DraftRecordingListItem
                 key={draft.id}
                 draft={draft}
-                index={index}
+                sequence={getDraftRecordingSequence(draft, draftRecordings)}
                 isPlaying={isPlaying}
                 onPause={pause}
                 onReview={setReviewingDraftId}
@@ -3009,8 +3017,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             draft={reviewingDraft}
             fallbackTitle={
               reviewingDraft.status === "archived"
-                ? getDraftRecordingFallbackTitle(reviewingDraft, archivedDraftRecordings.findIndex((draft) => draft.id === reviewingDraft.id))
-                : getDraftRecordingFallbackTitle(reviewingDraft, draftRecordings.findIndex((draft) => draft.id === reviewingDraft.id))
+                ? getDraftRecordingFallbackTitle(reviewingDraft, getDraftRecordingSequence(reviewingDraft, archivedDraftRecordings))
+                : getDraftRecordingFallbackTitle(reviewingDraft, getDraftRecordingSequence(reviewingDraft, draftRecordings))
             }
             request={request}
             onTrimSaved={onDraftRecordingSaved}
@@ -3383,11 +3391,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             </span>
           </summary>
           <ul className="divide-y divide-slate-200 border-t border-slate-200 px-3 py-1">
-            {archivedDraftRecordings.map((draft, index) => (
+            {archivedDraftRecordings.map((draft) => (
               <DraftRecordingListItem
                 key={draft.id}
                 draft={draft}
-                index={index}
+                sequence={getDraftRecordingSequence(draft, archivedDraftRecordings)}
                 archived
                 isPlaying={isPlaying}
                 onPause={pause}
