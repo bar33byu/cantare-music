@@ -188,6 +188,41 @@ describe('Home page', () => {
     });
   });
 
+  it('does not use a cached non-guest user while the tab is unauthenticated', async () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      currentUserId: 'test-user',
+      users: [
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: '' },
+      ],
+    }));
+    document.cookie = 'cantare-user-id=test-user; path=/';
+    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') {
+        return {
+          ok: true,
+          json: async () => ({ user: null, actor: null, effectiveUser: null, isImpersonating: false }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    expect(screen.getByText('Cantare Music (Guest)')).toBeInTheDocument();
+    await waitFor(() => {
+      const lastCall = playlistBrowserMock.mock.calls.at(-1)?.[0] as { userId?: string } | undefined;
+      expect(lastCall?.userId).toMatch(/^guest-/);
+    });
+    expect(
+      playlistBrowserMock.mock.calls.some(([call]) => (call as { userId?: string }).userId === 'test-user')
+    ).toBe(false);
+  });
+
   it('falls back to playlists when the hash view is missing or invalid', async () => {
     window.history.replaceState(null, '', '/#view=unknown');
 
@@ -553,8 +588,29 @@ describe('Home page', () => {
       ],
     }));
     document.cookie = 'cantare-user-id=test-user; path=/';
+    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') {
+        return {
+          ok: true,
+          json: async () => ({
+            user: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+            actor: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+            effectiveUser: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+            isImpersonating: false,
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as Response;
+    }) as unknown as typeof fetch;
 
     render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Cantare Music (Guest)')).not.toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
     fireEvent.click(screen.getByTestId('settings-section-account-toggle'));

@@ -186,6 +186,19 @@ function parseStoredSettings(raw: string | null): UserSettings {
   }
 }
 
+function getGuestUserSettings(storedSettings: UserSettings, storage: Storage): UserSettings {
+  const guestUserId = getOrCreateAnonymousUserId(storage);
+  const users = storedSettings.users.some((user) => user.id === guestUserId)
+    ? storedSettings.users
+    : [...storedSettings.users, makeAnonymousKnownUser(guestUserId)];
+
+  return {
+    ...storedSettings,
+    currentUserId: guestUserId,
+    users,
+  };
+}
+
 function mergeUsersWithDatabase(cachedUsers: KnownUser[], dbUsers: KnownUser[]): KnownUser[] {
   const merged = new Map<string, KnownUser>();
 
@@ -779,19 +792,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
-    if (cookieUserId !== DEFAULT_USER_ID) {
-      const users = storedSettings.users.some((user) => user.id === cookieUserId)
-        ? storedSettings.users
-        : [...storedSettings.users, isAnonymousUserId(cookieUserId) ? makeAnonymousKnownUser(cookieUserId) : { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" }];
-      return { ...storedSettings, currentUserId: cookieUserId, users };
-    }
-
-    const guestUserId = getOrCreateAnonymousUserId(window.localStorage);
-    const users = storedSettings.users.some((user) => user.id === guestUserId)
-      ? storedSettings.users
-      : [...storedSettings.users, makeAnonymousKnownUser(guestUserId)];
-    return { ...storedSettings, currentUserId: guestUserId, users };
+    return getGuestUserSettings(storedSettings, window.localStorage);
   });
   const [authEmail, setAuthEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
@@ -882,25 +883,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    let cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
-    if (cookieUserId === DEFAULT_USER_ID) {
-      cookieUserId = getOrCreateAnonymousUserId(window.localStorage);
-    }
-    if (cookieUserId !== DEFAULT_USER_ID && !storedSettings.users.some((user) => user.id === cookieUserId)) {
-      setUserSettings({
-        ...storedSettings,
-        currentUserId: cookieUserId,
-        users: [
-          ...storedSettings.users,
-          isAnonymousUserId(cookieUserId) ? makeAnonymousKnownUser(cookieUserId) : { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" },
-        ],
-      });
-    } else {
-      setUserSettings({
-        ...storedSettings,
-        currentUserId: storedSettings.users.some((user) => user.id === cookieUserId) ? cookieUserId : storedSettings.currentUserId,
-      });
-    }
+    setUserSettings(getGuestUserSettings(storedSettings, window.localStorage));
     settingsLoadedRef.current = true;
   }, []);
 
