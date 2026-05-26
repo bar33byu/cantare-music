@@ -263,15 +263,15 @@ export function AudioPlayer({
             onClick={onSkipBack}
             data-testid="audio-skip-back"
             disabled={!isReady}
-            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+            className="flex h-9 w-12 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
           >
-            <span className="inline-flex items-center gap-1 text-sm font-semibold">
-              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 8c-4 0-7.5 1.8-10 5" />
-                <path d="M8 13l4-4" />
-                <path d="M8 13l4 4" />
+            <span className="inline-flex items-center justify-center">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 5H5v4" />
+                <path d="M5.4 9A7.5 7.5 0 1 1 4.8 16" />
+                <text x="12" y="15" textAnchor="middle" className="fill-current text-[9px] font-bold" stroke="none">5</text>
               </svg>
-              <span>-5</span>
+              <span className="sr-only">-5</span>
             </span>
           </button>
         ) : null}
@@ -300,15 +300,15 @@ export function AudioPlayer({
             onClick={onSkipForward}
             data-testid="audio-skip-forward"
             disabled={!isReady}
-            className="flex h-9 w-[84px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+            className="flex h-9 w-12 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
           >
-            <span className="inline-flex items-center gap-1 text-sm font-semibold">
-              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 8c4 0 7.5 1.8 10 5" />
-                <path d="M16 13l-4-4" />
-                <path d="M16 13l-4 4" />
+            <span className="inline-flex items-center justify-center">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 5h4v4" />
+                <path d="M18.6 9a7.5 7.5 0 1 0 .6 7" />
+                <text x="12" y="15" textAnchor="middle" className="fill-current text-[9px] font-bold" stroke="none">5</text>
               </svg>
-              <span>+5</span>
+              <span className="sr-only">+5</span>
             </span>
           </button>
         ) : null}

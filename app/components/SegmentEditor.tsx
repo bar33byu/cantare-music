@@ -939,15 +939,15 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
                   onClick={() => handleSkipBy(-5000)}
                   aria-label="Skip backward 5 seconds"
                   disabled={!isReady}
-                  className="flex h-8 w-[76px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
+                  className="flex h-8 w-10 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
                 >
-                  <span className="inline-flex items-center gap-1 font-semibold">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M18 8c-4 0-7.5 1.8-10 5" />
-                      <path d="M8 13l4-4" />
-                      <path d="M8 13l4 4" />
+                  <span className="inline-flex items-center justify-center">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 5H5v4" />
+                      <path d="M5.4 9A7.5 7.5 0 1 1 4.8 16" />
+                      <text x="12" y="15" textAnchor="middle" className="fill-current text-[9px] font-bold" stroke="none">5</text>
                     </svg>
-                    <span>-5s</span>
+                    <span className="sr-only">-5s</span>
                   </span>
                 </button>
                 <button
@@ -965,15 +965,15 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
                   onClick={() => handleSkipBy(5000)}
                   aria-label="Skip forward 5 seconds"
                   disabled={!isReady}
-                  className="flex h-8 w-[76px] items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
+                  className="flex h-8 w-10 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
                 >
-                  <span className="inline-flex items-center gap-1 font-semibold">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M6 8c4 0 7.5 1.8 10 5" />
-                      <path d="M16 13l-4-4" />
-                      <path d="M16 13l-4 4" />
+                  <span className="inline-flex items-center justify-center">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15 5h4v4" />
+                      <path d="M18.6 9a7.5 7.5 0 1 0 .6 7" />
+                      <text x="12" y="15" textAnchor="middle" className="fill-current text-[9px] font-bold" stroke="none">5</text>
                     </svg>
-                    <span>+5s</span>
+                    <span className="sr-only">+5s</span>
                   </span>
                 </button>
               </div>
