@@ -200,6 +200,269 @@ function normalizeDraftRecordingError(error: unknown, fallback: string): string 
   return error.message || fallback;
 }
 
+function getAudioContextConstructor(): typeof AudioContext | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  return window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+}
+
+async function loadWaveformPeaks(audioUrl: string, peakCount = 180): Promise<number[]> {
+  const AudioContextConstructor = getAudioContextConstructor();
+  if (!AudioContextConstructor) {
+    throw new Error("Waveform preview is unavailable in this browser.");
+  }
+
+  const response = await fetch(audioUrl, { cache: "force-cache" });
+  if (!response.ok) {
+    throw new Error("Waveform preview could not load audio.");
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const audioContext = new AudioContextConstructor();
+  try {
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    const channelData = audioBuffer.getChannelData(0);
+    const samplesPerPeak = Math.max(1, Math.floor(channelData.length / peakCount));
+    const peaks: number[] = [];
+
+    for (let peakIndex = 0; peakIndex < peakCount; peakIndex += 1) {
+      const start = peakIndex * samplesPerPeak;
+      const end = Math.min(channelData.length, start + samplesPerPeak);
+      let max = 0;
+      for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+        max = Math.max(max, Math.abs(channelData[sampleIndex] ?? 0));
+      }
+      peaks.push(max);
+    }
+
+    const maxPeak = Math.max(...peaks, 0.01);
+    return peaks.map((peak) => Math.max(0.04, peak / maxPeak));
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
+}
+
+function DraftWaveformTrim({
+  audioUrl,
+  currentMs,
+  durationMs,
+  trimStartMs,
+  trimEndMs,
+  isArchived,
+  onSeek,
+  onTrimStartChange,
+  onTrimEndChange,
+}: {
+  audioUrl: string;
+  currentMs: number;
+  durationMs: number;
+  trimStartMs: number;
+  trimEndMs: number;
+  isArchived: boolean;
+  onSeek: (ms: number) => void;
+  onTrimStartChange: (ms: number) => void;
+  onTrimEndChange: (ms: number) => void;
+}) {
+  const [peaks, setPeaks] = React.useState<number[] | null>(null);
+  const [waveformStatus, setWaveformStatus] = React.useState<"loading" | "ready" | "fallback">("loading");
+  const [zoom, setZoom] = React.useState(1);
+  const timelineRef = React.useRef<HTMLDivElement | null>(null);
+  const safeDurationMs = Math.max(durationMs, trimEndMs, MIN_DRAFT_TRIM_MS);
+  const trimStartPct = safeDurationMs > 0 ? (trimStartMs / safeDurationMs) * 100 : 0;
+  const trimEndPct = safeDurationMs > 0 ? (trimEndMs / safeDurationMs) * 100 : 100;
+  const trimWidthPct = Math.max(0, trimEndPct - trimStartPct);
+  const currentPct = safeDurationMs > 0 ? (Math.min(currentMs, safeDurationMs) / safeDurationMs) * 100 : 0;
+  const fallbackPeaks = React.useMemo(
+    () => Array.from({ length: 80 }, (_, index) => 0.18 + ((index * 17) % 23) / 100),
+    []
+  );
+  const displayedPeaks = peaks ?? fallbackPeaks;
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setPeaks(null);
+    setWaveformStatus(audioUrl ? "loading" : "fallback");
+
+    if (!audioUrl) {
+      return;
+    }
+
+    void loadWaveformPeaks(audioUrl)
+      .then((nextPeaks) => {
+        if (cancelled) {
+          return;
+        }
+        setPeaks(nextPeaks);
+        setWaveformStatus("ready");
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setPeaks(null);
+        setWaveformStatus("fallback");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [audioUrl]);
+
+  const handleTimelineClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("input")) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return;
+    }
+
+    const pct = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    onSeek(pct * safeDurationMs);
+  };
+
+  const updateTrimFromClientX = React.useCallback((clientX: number, handle: "start" | "end") => {
+    const timeline = timelineRef.current;
+    if (!timeline) {
+      return;
+    }
+
+    const rect = timeline.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return;
+    }
+
+    const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const nextMs = pct * safeDurationMs;
+    if (handle === "start") {
+      onTrimStartChange(nextMs);
+    } else {
+      onTrimEndChange(nextMs);
+    }
+  }, [onTrimEndChange, onTrimStartChange, safeDurationMs]);
+
+  const handleTrimPointerDown = (handle: "start" | "end") => (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (isArchived) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    updateTrimFromClientX(event.clientX, handle);
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      updateTrimFromClientX(moveEvent.clientX, handle);
+    };
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto rounded-xl border border-indigo-200 bg-white p-2" data-testid="draft-waveform-scroll">
+        <div
+          ref={timelineRef}
+          className="relative h-28 min-w-full touch-pan-x"
+          style={{ width: `${zoom * 100}%` }}
+          data-testid="draft-trim-bar"
+          onClick={handleTimelineClick}
+        >
+          <div className="absolute inset-0 flex items-center gap-px px-2">
+            {displayedPeaks.map((peak, index) => (
+              <div
+                key={index}
+                className={`flex-1 rounded-full ${waveformStatus === "ready" ? "bg-indigo-300" : "bg-slate-200"}`}
+                style={{ height: `${Math.max(8, peak * 88)}px` }}
+              />
+            ))}
+          </div>
+          <div className="absolute inset-y-0 left-0 bg-slate-100/75" style={{ width: `${trimStartPct}%` }} />
+          <div className="absolute inset-y-0 right-0 bg-slate-100/75" style={{ left: `${trimEndPct}%` }} />
+          <div
+            className="absolute inset-y-1 rounded-lg border-2 border-indigo-700 bg-indigo-400/20"
+            style={{ left: `${trimStartPct}%`, width: `${trimWidthPct}%` }}
+          />
+          <div
+            className="absolute inset-y-0 w-0.5 rounded-full bg-slate-950"
+            style={{ left: `calc(${currentPct}% - 1px)` }}
+          />
+          <button
+            type="button"
+            aria-label="Trim start"
+            disabled={isArchived}
+            onPointerDown={handleTrimPointerDown("start")}
+            className="absolute top-1/2 z-20 flex h-20 w-8 -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-full border border-indigo-800 bg-white shadow-sm disabled:opacity-50"
+            style={{ left: `${trimStartPct}%` }}
+          >
+            <span className="h-14 w-1.5 rounded-full bg-indigo-700" />
+          </button>
+          <button
+            type="button"
+            aria-label="Trim end"
+            disabled={isArchived}
+            onPointerDown={handleTrimPointerDown("end")}
+            className="absolute top-1/2 z-20 flex h-20 w-8 -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-full border border-indigo-950 bg-white shadow-sm disabled:opacity-50"
+            style={{ left: `${trimEndPct}%` }}
+          >
+            <span className="h-14 w-1.5 rounded-full bg-indigo-950" />
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(0, trimEndMs - MIN_DRAFT_TRIM_MS)}
+            step={50}
+            value={trimStartMs}
+            onChange={(event) => onTrimStartChange(Number(event.currentTarget.value))}
+            disabled={isArchived}
+            aria-label="Trim start"
+            className="sr-only"
+            data-testid="draft-trim-start"
+          />
+          <input
+            type="range"
+            min={Math.min(safeDurationMs, trimStartMs + MIN_DRAFT_TRIM_MS)}
+            max={safeDurationMs}
+            step={50}
+            value={trimEndMs}
+            onChange={(event) => onTrimEndChange(Number(event.currentTarget.value))}
+            disabled={isArchived}
+            aria-label="Trim end"
+            className="sr-only"
+            data-testid="draft-trim-end"
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-slate-600">
+          {waveformStatus === "loading" ? "Loading waveform..." : waveformStatus === "fallback" ? "Waveform preview unavailable." : "Drag handles on the waveform."}
+        </p>
+        <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+          Zoom
+          <input
+            type="range"
+            min={1}
+            max={8}
+            step={0.5}
+            value={zoom}
+            onChange={(event) => setZoom(Number(event.currentTarget.value))}
+            className="w-36 accent-indigo-700"
+            data-testid="draft-waveform-zoom"
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function getDraftRecordingCreatedAtMs(draft: DraftRecording): number {
   const createdAtMs = new Date(draft.createdAt).getTime();
   return Number.isFinite(createdAtMs) ? createdAtMs : 0;
@@ -357,10 +620,6 @@ function DraftRecordingReview({
     trimStartMs: normalizeDraftTrimState(draft, trimDurationMs).startMs,
     trimEndMs: normalizeDraftTrimState(draft, trimDurationMs).endMs,
   });
-  const trimStartPct = trimDurationMs > 0 ? (trimStartMs / trimDurationMs) * 100 : 0;
-  const trimEndPct = trimDurationMs > 0 ? (trimEndMs / trimDurationMs) * 100 : 100;
-  const trimWidthPct = Math.max(0, trimEndPct - trimStartPct);
-
   React.useEffect(() => {
     const nextDurationMs = Math.max(durationMs, draft.trimEndMs ?? 0, MIN_DRAFT_TRIM_MS);
     const nextTrim = normalizeDraftTrimState(draft, nextDurationMs);
@@ -573,44 +832,17 @@ function DraftRecordingReview({
             {formatMs(trimStartMs)} - {formatMs(trimEndMs)}
           </span>
         </div>
-        <div className="relative h-9 rounded-xl border border-indigo-200 bg-white" data-testid="draft-trim-bar">
-          <div
-            className="absolute inset-y-0 rounded-lg border-x-2 border-indigo-700 bg-indigo-300/45"
-            style={{ left: `${trimStartPct}%`, width: `${trimWidthPct}%` }}
-          />
-          <div
-            className="absolute inset-y-0 w-1 rounded-full bg-slate-900"
-            style={{ left: `calc(${trimDurationMs > 0 ? (Math.min(currentMs, trimDurationMs) / trimDurationMs) * 100 : 0}% - 2px)` }}
-          />
-        </div>
-        <label className="mt-3 block text-xs font-medium text-slate-700">
-          Start
-          <input
-            type="range"
-            min={0}
-            max={Math.max(0, trimEndMs - MIN_DRAFT_TRIM_MS)}
-            step={100}
-            value={trimStartMs}
-            onChange={(event) => handleTrimStartChange(Number(event.currentTarget.value))}
-            disabled={isArchived}
-            className="mt-1 w-full"
-            data-testid="draft-trim-start"
-          />
-        </label>
-        <label className="mt-3 block text-xs font-medium text-slate-700">
-          End
-          <input
-            type="range"
-            min={Math.min(trimDurationMs, trimStartMs + MIN_DRAFT_TRIM_MS)}
-            max={trimDurationMs}
-            step={100}
-            value={trimEndMs}
-            onChange={(event) => handleTrimEndChange(Number(event.currentTarget.value))}
-            disabled={isArchived}
-            className="mt-1 w-full"
-            data-testid="draft-trim-end"
-          />
-        </label>
+        <DraftWaveformTrim
+          audioUrl={audioUrl}
+          currentMs={currentMs}
+          durationMs={trimDurationMs}
+          trimStartMs={trimStartMs}
+          trimEndMs={trimEndMs}
+          isArchived={isArchived}
+          onSeek={seek}
+          onTrimStartChange={handleTrimStartChange}
+          onTrimEndChange={handleTrimEndChange}
+        />
         {trimMessage ? (
           <p
             className={`mt-2 text-xs ${trimStatus === "error" ? "text-red-700" : trimStatus === "saved" ? "text-emerald-700" : "text-slate-600"}`}

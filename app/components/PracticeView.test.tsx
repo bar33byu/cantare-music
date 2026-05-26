@@ -447,8 +447,13 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
 
+    expect(screen.getByTestId("draft-trim-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("draft-waveform-zoom")).toHaveValue("1");
     expect(screen.getByTestId("draft-trim-start")).toHaveValue("1000");
     expect(screen.getByTestId("draft-trim-end")).toHaveValue("6000");
+
+    fireEvent.change(screen.getByTestId("draft-waveform-zoom"), { target: { value: "4" } });
+    expect(screen.getByTestId("draft-waveform-zoom")).toHaveValue("4");
 
     fireEvent.change(screen.getByTestId("draft-trim-start"), { target: { value: "2000" } });
     fireEvent.change(screen.getByTestId("draft-trim-end"), { target: { value: "7000" } });

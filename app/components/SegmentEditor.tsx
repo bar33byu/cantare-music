@@ -943,8 +943,9 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
                 >
                   <span className="inline-flex items-center gap-1 font-semibold">
                     <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9 8H5v4" />
-                      <path d="M5 12a7 7 0 1 0 2-5" />
+                      <path d="M18 8c-4 0-7.5 1.8-10 5" />
+                      <path d="M8 13l4-4" />
+                      <path d="M8 13l4 4" />
                     </svg>
                     <span>-5s</span>
                   </span>
@@ -968,8 +969,9 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
                 >
                   <span className="inline-flex items-center gap-1 font-semibold">
                     <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M15 8h4v4" />
-                      <path d="M19 12a7 7 0 1 1-2-5" />
+                      <path d="M6 8c4 0 7.5 1.8 10 5" />
+                      <path d="M16 13l-4-4" />
+                      <path d="M16 13l-4 4" />
                     </svg>
                     <span>+5s</span>
                   </span>

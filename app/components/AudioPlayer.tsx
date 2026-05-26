@@ -267,8 +267,9 @@ export function AudioPlayer({
           >
             <span className="inline-flex items-center gap-1 text-sm font-semibold">
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 7L5 11l4 4" />
-                <path d="M6 12a8 8 0 1 0 3.2-6.4" />
+                <path d="M18 8c-4 0-7.5 1.8-10 5" />
+                <path d="M8 13l4-4" />
+                <path d="M8 13l4 4" />
               </svg>
               <span>-5</span>
             </span>
@@ -303,8 +304,9 @@ export function AudioPlayer({
           >
             <span className="inline-flex items-center gap-1 text-sm font-semibold">
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M15 7l4 4-4 4" />
-                <path d="M18 12a8 8 0 1 1-3.2-6.4" />
+                <path d="M6 8c4 0 7.5 1.8 10 5" />
+                <path d="M16 13l-4-4" />
+                <path d="M16 13l-4 4" />
               </svg>
               <span>+5</span>
             </span>
