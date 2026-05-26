@@ -19,7 +19,8 @@ describe('POST /api/playlists/[id]/public', () => {
       name: 'Set',
       isRetired: false,
       isPublic: true,
-      shareAudioMode: 'blend',
+      shareAudioMode: 'both',
+      publicShareAudioMode: 'blend',
       createdAt: '2026-01-01T00:00:00.000Z',
       songCount: 0,
     } as any);
@@ -27,7 +28,7 @@ describe('POST /api/playlists/[id]/public', () => {
     const request = new Request('http://localhost/api/playlists/pl-1/public', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shareAudioMode: 'blend' }),
+      body: JSON.stringify({ publicShareAudioMode: 'blend' }),
     });
 
     const response = await POST(request as any, { params: Promise.resolve({ id: 'pl-1' }) });

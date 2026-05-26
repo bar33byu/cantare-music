@@ -98,6 +98,7 @@ export interface Playlist {
   shareUrl?: string | null;
   sharedAt?: string | null;
   shareAudioMode?: "part" | "blend" | "both";
+  publicShareAudioMode?: "part" | "blend" | "both";
   sourcePlaylistId?: string | null;
   sourceOwnerId?: string | null;
   sourceShareToken?: string | null;
@@ -116,6 +117,7 @@ export interface SharedPlaylistListItem {
   shareToken?: string | null;
   sharedAt?: string | null;
   shareAudioMode?: "part" | "blend" | "both";
+  publicShareAudioMode?: "part" | "blend" | "both";
   createdAt: string;
   songCount: number;
   owner: {

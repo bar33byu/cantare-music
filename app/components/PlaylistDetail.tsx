@@ -29,6 +29,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const [publicError, setPublicError] = useState<string | null>(null);
   const [publicMessage, setPublicMessage] = useState<string | null>(null);
   const [shareAudioMode, setShareAudioMode] = useState<'part' | 'blend' | 'both'>('both');
+  const [publicShareAudioMode, setPublicShareAudioMode] = useState<'part' | 'blend' | 'both'>('both');
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     if (!userId) {
@@ -59,6 +60,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     const data = (await response.json()) as Playlist;
     setPlaylist(data);
     setShareAudioMode(data.shareAudioMode ?? 'both');
+    setPublicShareAudioMode(data.publicShareAudioMode ?? 'both');
     setLoading(false);
   }, [playlistId, request]);
 
@@ -243,14 +245,14 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
       const response = await request(`/api/playlists/${playlistId}/public`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shareAudioMode }),
+        body: JSON.stringify({ publicShareAudioMode }),
       });
       if (!response.ok) {
         throw new Error('Unable to publish this playlist right now.');
       }
       const publicPlaylist = (await response.json()) as Playlist;
       setPlaylist((current) => current ? { ...current, ...publicPlaylist } : publicPlaylist);
-      setPublicMessage('Published to Shared.');
+      setPublicMessage(playlist?.isPublic ? 'Shared settings updated.' : 'Published to Shared.');
     } catch (error) {
       setPublicError(error instanceof Error ? error.message : 'Unable to publish this playlist right now.');
     } finally {
@@ -356,7 +358,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
           </button>
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-sm text-gray-700">
-              <span className="font-medium">Shared audio</span>
+              <span className="font-medium">Link audio</span>
               <select
                 data-testid="playlist-share-audio-mode"
                 value={shareAudioMode}
@@ -416,15 +418,38 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
               {playlist.isPublic ? 'This playlist appears for signed-in users.' : 'Publish this playlist for signed-in users to browse.'}
             </p>
           </div>
-          {playlist.isPublic ? (
-            <button
-              data-testid="playlist-unpublish-public"
-              className="rounded border border-amber-300 px-3 py-1 text-sm text-amber-800 hover:bg-amber-50 disabled:opacity-60"
-              disabled={publicBusy}
-              onClick={() => void handleUnpublish()}
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <span className="font-medium">Shared tab audio</span>
+            <select
+              data-testid="playlist-public-share-audio-mode"
+              value={publicShareAudioMode}
+              onChange={(event) => setPublicShareAudioMode(event.target.value as 'part' | 'blend' | 'both')}
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm"
             >
-              {publicBusy ? 'Removing...' : 'Remove from Shared'}
-            </button>
+              <option value="both">Part and blend</option>
+              <option value="blend">Blend only</option>
+              <option value="part">Part only</option>
+            </select>
+          </label>
+          {playlist.isPublic ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                data-testid="playlist-update-public"
+                className="rounded border border-emerald-300 px-3 py-1 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                disabled={publicBusy}
+                onClick={() => void handlePublish()}
+              >
+                {publicBusy ? 'Updating...' : 'Update Shared'}
+              </button>
+              <button
+                data-testid="playlist-unpublish-public"
+                className="rounded border border-amber-300 px-3 py-1 text-sm text-amber-800 hover:bg-amber-50 disabled:opacity-60"
+                disabled={publicBusy}
+                onClick={() => void handleUnpublish()}
+              >
+                {publicBusy ? 'Removing...' : 'Remove from Shared'}
+              </button>
+            </div>
           ) : (
             <button
               data-testid="playlist-publish-public"

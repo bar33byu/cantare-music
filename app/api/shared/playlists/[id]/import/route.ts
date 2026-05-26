@@ -33,7 +33,10 @@ export async function POST(
     }
 
     const body = await request.json().catch(() => ({})) as { force?: unknown };
-    const result = await importSharedPlaylist(playlist.shareToken, user.id, { force: body.force === true });
+    const result = await importSharedPlaylist(playlist.shareToken, user.id, {
+      force: body.force === true,
+      shareAudioMode: playlist.publicShareAudioMode,
+    });
     return NextResponse.json(result, { headers: sharedHeaders });
   } catch (error) {
     const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;

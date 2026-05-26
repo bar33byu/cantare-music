@@ -192,6 +192,7 @@ export const playlists = pgTable(
     shareToken: text("share_token"),
     sharedAt: timestamp("shared_at"),
     shareAudioMode: text("share_audio_mode").notNull().default("both"),
+    publicShareAudioMode: text("public_share_audio_mode").notNull().default("both"),
     sourcePlaylistId: text("source_playlist_id"),
     sourceOwnerId: text("source_owner_id"),
     sourceShareToken: text("source_share_token"),

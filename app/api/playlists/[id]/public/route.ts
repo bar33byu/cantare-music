@@ -31,9 +31,9 @@ export async function POST(
     if (!existing) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
-    const body = (await request.json().catch(() => ({}))) as { shareAudioMode?: unknown };
+    const body = (await request.json().catch(() => ({}))) as { publicShareAudioMode?: unknown; shareAudioMode?: unknown };
 
-    const playlist = await enablePlaylistPublicSharing(id, userId, parseShareAudioMode(body.shareAudioMode));
+    const playlist = await enablePlaylistPublicSharing(id, userId, parseShareAudioMode(body.publicShareAudioMode ?? body.shareAudioMode));
     if (!playlist) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }

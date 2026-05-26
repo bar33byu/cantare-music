@@ -1036,6 +1036,105 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
+  it('keeps listen playback position when switching between part and blend audio', async () => {
+    let started = false;
+    const play = vi.fn(() => {
+      started = true;
+    });
+    const pause = vi.fn(() => {
+      started = false;
+    });
+    const seek = vi.fn();
+    const useAudioPlayerSpy = vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: started,
+      isReady: true,
+      currentMs: started ? 4200 : 0,
+      durationMs: 12000,
+      endedCount: 0,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: true,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'playing',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause,
+      seek,
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+    const mixedAudioPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          alternateAudioUrl: 'https://example.com/alpha-blend.mp3',
+        },
+      ],
+    };
+    let preferredAudioVersion: 'part' | 'blend' = 'part';
+    const onPreferredAudioVersionChange = vi.fn((version: 'part' | 'blend') => {
+      preferredAudioVersion = version;
+    });
+
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    const view = render(
+      <PlaylistPracticeView
+        playlist={mixedAudioPlaylist}
+        preferredAudioVersion={preferredAudioVersion}
+        onPreferredAudioVersionChange={onPreferredAudioVersionChange}
+        onExit={() => undefined}
+        onSelectSong={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('playlist-mode-listen'));
+    fireEvent.click(screen.getByRole('button', { name: 'Play playlist' }));
+    expect(play).toHaveBeenCalledWith(0, 0);
+
+    view.rerender(
+      <PlaylistPracticeView
+        playlist={mixedAudioPlaylist}
+        preferredAudioVersion={preferredAudioVersion}
+        onPreferredAudioVersionChange={onPreferredAudioVersionChange}
+        onExit={() => undefined}
+        onSelectSong={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('playlist-audio-preference-blend'));
+    expect(pause).toHaveBeenCalled();
+    expect(onPreferredAudioVersionChange).toHaveBeenCalledWith('blend');
+
+    view.rerender(
+      <PlaylistPracticeView
+        playlist={mixedAudioPlaylist}
+        preferredAudioVersion={preferredAudioVersion}
+        onPreferredAudioVersionChange={onPreferredAudioVersionChange}
+        onExit={() => undefined}
+        onSelectSong={() => undefined}
+      />
+    );
+
+    await waitFor(() => {
+      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://example.com/alpha-blend.mp3');
+      expect(seek).toHaveBeenCalledWith(4200);
+      expect(play).toHaveBeenLastCalledWith(4200, 0);
+    });
+  });
+
   it('does not fall back to the proxy URL when direct listen playback reports an error', async () => {
     const useAudioPlayerSpy = vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
       isPlaying: false,

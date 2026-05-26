@@ -169,6 +169,7 @@ export interface PlaylistDetail {
   shareToken?: string | null;
   sharedAt?: string | null;
   shareAudioMode?: PlaylistShareAudioMode;
+  publicShareAudioMode?: PlaylistShareAudioMode;
   sourcePlaylistId?: string | null;
   sourceOwnerId?: string | null;
   sourceShareToken?: string | null;
@@ -187,6 +188,7 @@ export interface PlaylistSummary {
   shareToken?: string | null;
   sharedAt?: string | null;
   shareAudioMode?: PlaylistShareAudioMode;
+  publicShareAudioMode?: PlaylistShareAudioMode;
   sourcePlaylistId?: string | null;
   sourceOwnerId?: string | null;
   sourceShareToken?: string | null;
@@ -429,7 +431,7 @@ function isMissingPlaylistSharingColumnError(error: unknown): boolean {
     return false;
   }
 
-  const columns = ["share_token", "shared_at", "source_playlist_id", "source_owner_id", "source_share_token", "imported_at", "is_public", "published_at"];
+  const columns = ["share_token", "shared_at", "share_audio_mode", "public_share_audio_mode", "source_playlist_id", "source_owner_id", "source_share_token", "imported_at", "is_public", "published_at"];
   const message = error.message.toLowerCase();
   if (columns.some((column) => message.includes(column)) && message.includes("does not exist")) {
     return true;
@@ -3375,6 +3377,7 @@ function toIso(value: Date | null): string {
 
 function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSummary {
   const shareAudioMode = row.shareAudioMode === "part" || row.shareAudioMode === "blend" ? row.shareAudioMode : "both";
+  const publicShareAudioMode = row.publicShareAudioMode === "part" || row.publicShareAudioMode === "blend" ? row.publicShareAudioMode : "both";
   return {
     id: row.id,
     name: row.name,
@@ -3385,6 +3388,7 @@ function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSu
     shareToken: row.shareToken ?? null,
     sharedAt: row.sharedAt ? row.sharedAt.toISOString() : null,
     shareAudioMode,
+    publicShareAudioMode,
     sourcePlaylistId: row.sourcePlaylistId ?? null,
     sourceOwnerId: row.sourceOwnerId ?? null,
     sourceShareToken: row.sourceShareToken ?? null,
@@ -3407,6 +3411,7 @@ async function ensurePlaylistSharingColumns(): Promise<void> {
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "share_token" text`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "shared_at" timestamp`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "share_audio_mode" text NOT NULL DEFAULT 'both'`));
+  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "public_share_audio_mode" text NOT NULL DEFAULT 'both'`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "is_public" boolean NOT NULL DEFAULT false`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "published_at" timestamp`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "source_playlist_id" text`));
@@ -3432,8 +3437,8 @@ function normalizeShareAudioMode(mode: unknown): PlaylistShareAudioMode {
   return mode === "part" || mode === "blend" || mode === "both" ? mode : "both";
 }
 
-function applyShareAudioModeToPlaylist(detail: PlaylistDetail): PlaylistDetail {
-  const mode = normalizeShareAudioMode(detail.shareAudioMode);
+function applyShareAudioModeToPlaylist(detail: PlaylistDetail, requestedMode?: PlaylistShareAudioMode): PlaylistDetail {
+  const mode = normalizeShareAudioMode(requestedMode ?? detail.shareAudioMode);
   return {
     ...detail,
     shareAudioMode: mode,
@@ -3492,7 +3497,7 @@ export async function getAllPlaylists(
           ? await legacyBaseQuery.where(eq(playlists.userId, userId))
           : await legacyBaseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
 
-      rows = legacyRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both" } as PlaylistRow));
+      rows = legacyRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
     } catch (legacyError) {
       if (!isMissingUserIdColumnError(legacyError)) {
         throw legacyError;
@@ -3513,7 +3518,7 @@ export async function getAllPlaylists(
         ? await userlessBaseQuery
         : await userlessBaseQuery.where(eq(playlists.isRetired, false));
 
-      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both" } as PlaylistRow));
+      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
     }
   }
 
@@ -3645,7 +3650,7 @@ export async function getPlaylistById(
         .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
         .limit(1);
 
-      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both" } as PlaylistRow));
+      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
     } catch (legacyError) {
       if (!isMissingUserIdColumnError(legacyError)) {
         throw legacyError;
@@ -3663,7 +3668,7 @@ export async function getPlaylistById(
         .where(eq(playlists.id, id))
         .limit(1);
 
-      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both" } as PlaylistRow));
+      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
     }
   }
 
@@ -3840,7 +3845,7 @@ export async function enablePlaylistPublicSharing(
   }
 
   const mode = normalizeShareAudioMode(shareAudioMode);
-  if (existing.isPublic && normalizeShareAudioMode(existing.shareAudioMode) === mode) {
+  if (existing.isPublic && normalizeShareAudioMode(existing.publicShareAudioMode) === mode) {
     return mapPlaylistSummary(existing);
   }
 
@@ -3850,7 +3855,7 @@ export async function enablePlaylistPublicSharing(
     .set({
       isPublic: true,
       publishedAt: existing.publishedAt ?? now,
-      shareAudioMode: mode,
+      publicShareAudioMode: mode,
     })
     .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
     .returning();
@@ -4004,7 +4009,7 @@ export async function getPublicPlaylistById(id: string, viewerUserId?: string): 
   }
 
   return {
-    ...applyShareAudioModeToPlaylist(detail),
+    ...applyShareAudioModeToPlaylist(detail, detail.publicShareAudioMode),
     owner: {
       id: row.ownerId,
       displayName: row.ownerName,
@@ -4070,7 +4075,7 @@ export async function getSharedPlaylistByToken(token: string): Promise<SharedPla
   }
 
   return {
-    ...applyShareAudioModeToPlaylist(detail),
+    ...applyShareAudioModeToPlaylist(detail, detail.shareAudioMode),
     owner: {
       id: row.ownerId,
       displayName: row.ownerName,
@@ -4177,7 +4182,7 @@ async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId
 export async function importSharedPlaylist(
   token: string,
   userId: string = DEFAULT_QUERY_USER_ID,
-  options: { force?: boolean } = {}
+  options: { force?: boolean; shareAudioMode?: PlaylistShareAudioMode } = {}
 ): Promise<{ status: "imported"; playlist: PlaylistSummary } | { status: "already_imported"; playlist: PlaylistSummary }> {
   await ensurePlaylistSharingColumns();
   const source = await getSharedPlaylistByToken(token);
@@ -4209,7 +4214,7 @@ export async function importSharedPlaylist(
 
   const importedPlaylist = playlistRows[0];
   const sortedSongs = [...source.songs].sort((a, b) => a.position - b.position);
-  const shareAudioMode = normalizeShareAudioMode(source.shareAudioMode);
+  const shareAudioMode = normalizeShareAudioMode(options.shareAudioMode ?? source.shareAudioMode);
   let importedSongCount = 0;
 
   for (const item of sortedSongs) {

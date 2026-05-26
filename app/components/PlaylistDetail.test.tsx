@@ -180,16 +180,17 @@ describe('PlaylistDetail', () => {
     });
   });
 
-  it('publishes and unpublishes public sharing separately from URL sharing', async () => {
+  it('publishes and unpublishes public sharing with independent audio settings', async () => {
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...playlistResponse, shareToken: 'share-token-1', shareAudioMode: 'both' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...playlistResponse, shareToken: 'share-token-1', shareAudioMode: 'blend', publicShareAudioMode: 'both' }) })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           ...playlistResponse,
           isPublic: true,
           shareToken: 'share-token-1',
-          shareAudioMode: 'part',
+          shareAudioMode: 'blend',
+          publicShareAudioMode: 'part',
         }),
       })
       .mockResolvedValueOnce({ ok: true });
@@ -197,7 +198,10 @@ describe('PlaylistDetail', () => {
     render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
     await waitFor(() => expect(screen.getByTestId('playlist-publish-public')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByTestId('playlist-share-audio-mode'), { target: { value: 'part' } });
+    expect(screen.getByTestId('playlist-share-audio-mode')).toHaveValue('blend');
+    expect(screen.getByTestId('playlist-public-share-audio-mode')).toHaveValue('both');
+
+    fireEvent.change(screen.getByTestId('playlist-public-share-audio-mode'), { target: { value: 'part' } });
     fireEvent.click(screen.getByTestId('playlist-publish-public'));
 
     await waitFor(() => {
@@ -205,7 +209,8 @@ describe('PlaylistDetail', () => {
       expect(screen.getByTestId('playlist-share-link')).toHaveAttribute('href', expect.stringContaining('/share/playlists/share-token-1'));
     });
     const publicCall = mockFetch.mock.calls.find(([url, init]) => url === '/api/playlists/pl-1/public' && init?.method === 'POST');
-    expect(JSON.parse(String(publicCall?.[1]?.body))).toEqual({ shareAudioMode: 'part' });
+    expect(JSON.parse(String(publicCall?.[1]?.body))).toEqual({ publicShareAudioMode: 'part' });
+    expect(screen.getByTestId('playlist-share-audio-mode')).toHaveValue('blend');
 
     fireEvent.click(screen.getByTestId('playlist-unpublish-public'));
 
