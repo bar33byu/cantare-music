@@ -201,6 +201,10 @@ describe('Home page', () => {
     render(<Home />);
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    expect(screen.getByTestId('settings-panel')).toHaveClass('overflow-hidden');
+    expect(screen.getByTestId('settings-scroll-body')).toHaveClass('overflow-y-auto');
+    expect(screen.getByTestId('settings-section-playback')).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByTestId('settings-section-playback-toggle'));
     const slider = screen.getByTestId('segment-preroll-slider');
     fireEvent.change(slider, { target: { value: '1000' } });
 
@@ -219,6 +223,7 @@ describe('Home page', () => {
     render(<Home />);
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    fireEvent.click(screen.getByTestId('settings-section-playback-toggle'));
     fireEvent.click(screen.getByTestId('settings-audio-preference-blend'));
 
     fireEvent.click(screen.getByTestId('library-tab'));
@@ -238,6 +243,8 @@ describe('Home page', () => {
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
 
     expect(screen.queryByTestId('settings-collapse-line-breaks-toggle')).not.toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-build')).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByTestId('settings-section-build-toggle'));
     expect(screen.getByTestId('settings-build-version')).toHaveTextContent(/^v\d+\.\d+\.\d+/);
     expect(screen.getByTestId('settings-build-branch')).toBeInTheDocument();
   });
@@ -548,6 +555,7 @@ describe('Home page', () => {
     render(<Home />);
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    fireEvent.click(screen.getByTestId('settings-section-account-toggle'));
 
     await waitFor(() => {
       expect(screen.getByTestId('settings-current-email')).toHaveTextContent('test@example.com');

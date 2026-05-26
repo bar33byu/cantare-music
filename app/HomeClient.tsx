@@ -278,6 +278,42 @@ function UnifiedHeader({
   );
 }
 
+function SettingsSection({
+  title,
+  children,
+  tone = "default",
+  testId,
+}: {
+  title: string;
+  children: ReactNode;
+  tone?: "default" | "admin" | "muted";
+  testId: string;
+}) {
+  const toneClass =
+    tone === "admin"
+      ? "border-amber-200 bg-amber-50 text-amber-950"
+      : tone === "muted"
+        ? "border-gray-200 bg-gray-50 text-gray-800"
+        : "border-gray-200 bg-white text-gray-800";
+
+  return (
+    <details data-testid={testId} className={`group rounded-lg border ${toneClass}`}>
+      <summary
+        data-testid={`${testId}-toggle`}
+        className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-semibold"
+      >
+        <span>{title}</span>
+        <span aria-hidden="true" className="transition-transform group-open:rotate-90">
+          &gt;
+        </span>
+      </summary>
+      <div className="border-t border-current/10 px-3 pb-3 pt-3">
+        {children}
+      </div>
+    </details>
+  );
+}
+
 export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [activeView, setActiveView] = useState<AppView>("playlists");
@@ -1319,10 +1355,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             />
             <section
               aria-label="Settings"
-              className="absolute right-4 top-20 w-[min(92vw,24rem)] rounded-xl border border-gray-200 bg-white p-4 shadow-xl"
+              className="absolute inset-x-4 bottom-4 top-16 flex w-auto flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-xl sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-20 sm:max-h-[calc(100dvh-6rem)] sm:w-[min(92vw,24rem)]"
               data-testid="settings-panel"
             >
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex shrink-0 items-center justify-between">
                 <h2 className="text-lg font-semibold text-gray-900">Settings</h2>
                 <button
                   type="button"
@@ -1333,10 +1369,9 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                 </button>
               </div>
 
-              <div className="space-y-4">
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                  <h3 className="text-sm font-semibold text-gray-800">Playback</h3>
-                  <div className="mt-3">
+              <div data-testid="settings-scroll-body" className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-2 pr-1">
+                <SettingsSection title="Playback" tone="muted" testId="settings-section-playback">
+                  <div>
                     <p className="text-sm text-gray-700">Default audio</p>
                     <div
                       className="mt-1 inline-flex rounded border border-gray-300 bg-white p-0.5"
@@ -1384,10 +1419,9 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                     Starts segment playback slightly early to avoid clipped phrase starts on some devices.
                   </p>
 
-                </div>
+                </SettingsSection>
 
-                <div className="rounded-lg border border-gray-200 bg-white p-3">
-                  <h3 className="text-sm font-semibold text-gray-800">Account</h3>
+                <SettingsSection title="Account" testId="settings-section-account">
                   {isSignedIn ? (
                     <>
                       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded border border-gray-200 bg-gray-50 p-2 text-sm">
@@ -1461,11 +1495,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                       {profileMessage}
                     </p>
                   ) : null}
-                </div>
+                </SettingsSection>
                 {adminActor?.isAdmin ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                    <h3 className="text-sm font-semibold text-amber-950">Admin</h3>
-                    <div className="mt-3 grid gap-2">
+                  <SettingsSection title="Admin" tone="admin" testId="settings-section-admin">
+                    <div className="grid gap-2">
                       <label htmlFor="admin-user-search" className="text-sm font-medium text-amber-950">
                         Impersonate user
                       </label>
@@ -1525,11 +1558,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                         </p>
                       ) : null}
                     </div>
-                  </div>
+                  </SettingsSection>
                 ) : null}
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
-                  <h3 className="text-sm font-semibold text-gray-800">Build</h3>
-                  <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                <SettingsSection title="Build" tone="muted" testId="settings-section-build">
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm text-gray-600">
                     <dt className="font-medium text-gray-700">Version</dt>
                     <dd data-testid="settings-build-version">v{buildInfo.version}</dd>
                     <dt className="font-medium text-gray-700">Branch</dt>
@@ -1541,7 +1573,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                       </>
                     ) : null}
                   </dl>
-                </div>
+                </SettingsSection>
               </div>
             </section>
           </div>
