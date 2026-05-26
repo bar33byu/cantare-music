@@ -177,7 +177,7 @@ describe('Home page', () => {
   it('shows playlists by default and opens song practice when selecting a song from library', async () => {
     render(<Home />);
 
-    expect(screen.getByText('Cantare Music')).toBeInTheDocument();
+    expect(screen.getByText('Cantare Music (Guest)')).toBeInTheDocument();
     expect(screen.queryByText('Cantare')).not.toBeInTheDocument();
     expect(screen.getByTestId('mock-playlist-browser')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('library-tab'));
@@ -201,6 +201,10 @@ describe('Home page', () => {
     render(<Home />);
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    expect(screen.getByTestId('settings-panel')).toHaveClass('overflow-hidden');
+    expect(screen.getByTestId('settings-scroll-body')).toHaveClass('overflow-y-auto');
+    expect(screen.getByTestId('settings-section-playback')).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByTestId('settings-section-playback-toggle'));
     const slider = screen.getByTestId('segment-preroll-slider');
     fireEvent.change(slider, { target: { value: '1000' } });
 
@@ -219,6 +223,7 @@ describe('Home page', () => {
     render(<Home />);
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    fireEvent.click(screen.getByTestId('settings-section-playback-toggle'));
     fireEvent.click(screen.getByTestId('settings-audio-preference-blend'));
 
     fireEvent.click(screen.getByTestId('library-tab'));
@@ -238,6 +243,8 @@ describe('Home page', () => {
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
 
     expect(screen.queryByTestId('settings-collapse-line-breaks-toggle')).not.toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-build')).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByTestId('settings-section-build-toggle'));
     expect(screen.getByTestId('settings-build-version')).toHaveTextContent(/^v\d+\.\d+\.\d+/);
     expect(screen.getByTestId('settings-build-branch')).toBeInTheDocument();
   });
@@ -340,10 +347,10 @@ describe('Home page', () => {
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/songs/song-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/songs/song-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
   });
 
@@ -362,7 +369,7 @@ describe('Home page', () => {
     render(<Home />);
 
     fireEvent.click(screen.getByTestId('library-tab'));
-    fireEvent.click(screen.getByTitle('Add Song'));
+    fireEvent.click(screen.getByTestId('new-song-button'));
     expect(await screen.findByTestId('mock-song-form-success')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('mock-song-form-success'));
@@ -372,8 +379,10 @@ describe('Home page', () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith('/api/songs/song-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
+    expect(window.localStorage.getItem('cantare:guest-progress:v1')).toContain('song-1');
+    expect(window.localStorage.getItem('cantare:guest-progress:v1')).toContain('guest-');
   });
 
   it('writes hash route on navigation and keeps tabs navigable', async () => {
@@ -470,7 +479,7 @@ describe('Home page', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith('/api/playlists/playlist-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
   });
 
@@ -546,6 +555,7 @@ describe('Home page', () => {
     render(<Home />);
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
+    fireEvent.click(screen.getByTestId('settings-section-account-toggle'));
 
     await waitFor(() => {
       expect(screen.getByTestId('settings-current-email')).toHaveTextContent('test@example.com');

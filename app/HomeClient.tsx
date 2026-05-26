@@ -12,13 +12,24 @@ import { SegmentEditor } from "./components/SegmentEditor";
 import { makeSession } from "./lib/factories";
 import {
   clearGuestProgress,
+  getGuestProgressUserId,
   getGuestProgressSongIds,
   hasDeclinedGuestProgressClaim,
   hasGuestProgress,
   markGuestProgressClaimDeclined,
+  markGuestSongProgress,
 } from "./lib/guestProgress";
 import type { Playlist, Song } from "./types";
-import { createPublicUsernameFromName, DEFAULT_USER_ID, normalizeUserId, normalizeUsername, type KnownUser, USER_COOKIE_NAME } from "./lib/userContext";
+import {
+  createPublicUsernameFromName,
+  DEFAULT_USER_ID,
+  getOrCreateAnonymousUserId,
+  isAnonymousUserId,
+  normalizeUserId,
+  normalizeUsername,
+  type KnownUser,
+  USER_COOKIE_NAME,
+} from "./lib/userContext";
 import type { PreferredAudioVersion } from "./lib/audioUrls";
 
 interface SongListItem {
@@ -69,6 +80,16 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
   currentUserId: DEFAULT_USER_ID,
   users: [{ id: DEFAULT_USER_ID, username: "default", name: "Default User", email: "", profileVisibility: "private" }],
 };
+
+function makeAnonymousKnownUser(id: string): KnownUser {
+  return {
+    id,
+    username: id,
+    name: "Guest",
+    email: "",
+    profileVisibility: "private",
+  };
+}
 
 function normalizeKnownUsers(users: Array<Partial<KnownUser>> | undefined): KnownUser[] {
   if (!Array.isArray(users)) {
@@ -257,6 +278,42 @@ function UnifiedHeader({
   );
 }
 
+function SettingsSection({
+  title,
+  children,
+  tone = "default",
+  testId,
+}: {
+  title: string;
+  children: ReactNode;
+  tone?: "default" | "admin" | "muted";
+  testId: string;
+}) {
+  const toneClass =
+    tone === "admin"
+      ? "border-amber-200 bg-amber-50 text-amber-950"
+      : tone === "muted"
+        ? "border-gray-200 bg-gray-50 text-gray-800"
+        : "border-gray-200 bg-white text-gray-800";
+
+  return (
+    <details data-testid={testId} className={`group rounded-lg border ${toneClass}`}>
+      <summary
+        data-testid={`${testId}-toggle`}
+        className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-semibold"
+      >
+        <span>{title}</span>
+        <span aria-hidden="true" className="transition-transform group-open:rotate-90">
+          &gt;
+        </span>
+      </summary>
+      <div className="border-t border-current/10 px-3 pb-3 pt-3">
+        {children}
+      </div>
+    </details>
+  );
+}
+
 export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [activeView, setActiveView] = useState<AppView>("playlists");
@@ -266,7 +323,26 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [playlistPracticeReadOnly, setPlaylistPracticeReadOnly] = useState(false);
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [userSettings, setUserSettings] = useState<UserSettings>(() => {
+    if (typeof window === "undefined") {
+      return DEFAULT_USER_SETTINGS;
+    }
+
+    const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
+    const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
+    if (cookieUserId !== DEFAULT_USER_ID) {
+      const users = storedSettings.users.some((user) => user.id === cookieUserId)
+        ? storedSettings.users
+        : [...storedSettings.users, isAnonymousUserId(cookieUserId) ? makeAnonymousKnownUser(cookieUserId) : { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" }];
+      return { ...storedSettings, currentUserId: cookieUserId, users };
+    }
+
+    const guestUserId = getOrCreateAnonymousUserId(window.localStorage);
+    const users = storedSettings.users.some((user) => user.id === guestUserId)
+      ? storedSettings.users
+      : [...storedSettings.users, makeAnonymousKnownUser(guestUserId)];
+    return { ...storedSettings, currentUserId: guestUserId, users };
+  });
   const [authEmail, setAuthEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -292,6 +368,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     [userSettings.currentUserId, userSettings.users]
   );
   const isSignedIn = Boolean((currentUser.email ?? "").trim() || (sessionActor?.email ?? "").trim());
+  const appTitle = isSignedIn ? "Cantare Music" : "Cantare Music (Guest)";
   const adminActor = sessionActor?.isAdmin ? sessionActor : currentUser.isAdmin ? currentUser : null;
 
   const applyAuthenticatedUser = useCallback((user: KnownUser) => {
@@ -355,14 +432,17 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
+    let cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
+    if (cookieUserId === DEFAULT_USER_ID) {
+      cookieUserId = getOrCreateAnonymousUserId(window.localStorage);
+    }
     if (cookieUserId !== DEFAULT_USER_ID && !storedSettings.users.some((user) => user.id === cookieUserId)) {
       setUserSettings({
         ...storedSettings,
         currentUserId: cookieUserId,
         users: [
           ...storedSettings.users,
-          { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" },
+          isAnonymousUserId(cookieUserId) ? makeAnonymousKnownUser(cookieUserId) : { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" },
         ],
       });
     } else {
@@ -382,7 +462,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     const params = new URLSearchParams(window.location.search);
     const shouldCleanAuthParam = params.get("auth") === "signed-in";
     const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
-    if (cookieUserId === DEFAULT_USER_ID && !shouldCleanAuthParam) {
+    if ((cookieUserId === DEFAULT_USER_ID || isAnonymousUserId(cookieUserId)) && !shouldCleanAuthParam) {
       return;
     }
 
@@ -590,7 +670,14 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     } catch {
       // Clear local state even if the server-side revoke request cannot complete.
     } finally {
-      setUserSettings((previous) => ({ ...previous, currentUserId: DEFAULT_USER_ID }));
+      const guestUserId = typeof window === "undefined" ? DEFAULT_USER_ID : getOrCreateAnonymousUserId(window.localStorage);
+      setUserSettings((previous) => ({
+        ...previous,
+        currentUserId: guestUserId,
+        users: previous.users.some((user) => user.id === guestUserId)
+          ? previous.users
+          : [...previous.users, makeAnonymousKnownUser(guestUserId)],
+      }));
       setSessionActor(null);
       setImpersonation(null);
       setSelectedSong(null);
@@ -667,7 +754,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       const response = await fetch("/api/guest-progress/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ songIds }),
+        body: JSON.stringify({ songIds, guestUserId: getGuestProgressUserId() ?? activeUserId }),
       });
       if (!response.ok) {
         throw new Error("Failed to import guest progress");
@@ -930,6 +1017,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   };
 
   const handleSongCreated = (songId: string) => {
+    markGuestSongProgress(songId, activeUserId);
     void openSongEditor(songId, "library");
   };
 
@@ -1230,7 +1318,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       {guestClaimPrompt}
       <div className="max-w-4xl mx-auto">
         <UnifiedHeader
-          title="Cantare Music"
+          title={appTitle}
           action={
             <button
               type="button"
@@ -1267,10 +1355,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             />
             <section
               aria-label="Settings"
-              className="absolute right-4 top-20 w-[min(92vw,24rem)] rounded-xl border border-gray-200 bg-white p-4 shadow-xl"
+              className="absolute inset-x-4 bottom-4 top-16 flex w-auto flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-xl sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-20 sm:max-h-[calc(100dvh-6rem)] sm:w-[min(92vw,24rem)]"
               data-testid="settings-panel"
             >
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex shrink-0 items-center justify-between">
                 <h2 className="text-lg font-semibold text-gray-900">Settings</h2>
                 <button
                   type="button"
@@ -1281,10 +1369,9 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                 </button>
               </div>
 
-              <div className="space-y-4">
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                  <h3 className="text-sm font-semibold text-gray-800">Playback</h3>
-                  <div className="mt-3">
+              <div data-testid="settings-scroll-body" className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-2 pr-1">
+                <SettingsSection title="Playback" tone="muted" testId="settings-section-playback">
+                  <div>
                     <p className="text-sm text-gray-700">Default audio</p>
                     <div
                       className="mt-1 inline-flex rounded border border-gray-300 bg-white p-0.5"
@@ -1332,10 +1419,9 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                     Starts segment playback slightly early to avoid clipped phrase starts on some devices.
                   </p>
 
-                </div>
+                </SettingsSection>
 
-                <div className="rounded-lg border border-gray-200 bg-white p-3">
-                  <h3 className="text-sm font-semibold text-gray-800">Account</h3>
+                <SettingsSection title="Account" testId="settings-section-account">
                   {isSignedIn ? (
                     <>
                       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded border border-gray-200 bg-gray-50 p-2 text-sm">
@@ -1409,11 +1495,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                       {profileMessage}
                     </p>
                   ) : null}
-                </div>
+                </SettingsSection>
                 {adminActor?.isAdmin ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                    <h3 className="text-sm font-semibold text-amber-950">Admin</h3>
-                    <div className="mt-3 grid gap-2">
+                  <SettingsSection title="Admin" tone="admin" testId="settings-section-admin">
+                    <div className="grid gap-2">
                       <label htmlFor="admin-user-search" className="text-sm font-medium text-amber-950">
                         Impersonate user
                       </label>
@@ -1473,11 +1558,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                         </p>
                       ) : null}
                     </div>
-                  </div>
+                  </SettingsSection>
                 ) : null}
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
-                  <h3 className="text-sm font-semibold text-gray-800">Build</h3>
-                  <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                <SettingsSection title="Build" tone="muted" testId="settings-section-build">
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm text-gray-600">
                     <dt className="font-medium text-gray-700">Version</dt>
                     <dd data-testid="settings-build-version">v{buildInfo.version}</dd>
                     <dt className="font-medium text-gray-700">Branch</dt>
@@ -1489,7 +1573,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                       </>
                     ) : null}
                   </dl>
-                </div>
+                </SettingsSection>
               </div>
             </section>
           </div>
@@ -1544,6 +1628,16 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
         {activeView === "library" ? (
           <>
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                data-testid="new-song-button"
+                onClick={() => setActiveView("song_add")}
+                className="rounded bg-indigo-600 px-4 py-2 text-white"
+              >
+                New Song
+              </button>
+            </div>
             <SongBrowser
               key={`songs:${activeUserId}:${refreshTrigger}`}
               onSelectSong={handleSelectSong}
@@ -1552,26 +1646,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               refreshTrigger={refreshTrigger}
               userId={activeUserId}
             />
-            {/* Plus button for adding songs */}
-            <button
-              onClick={() => setActiveView("song_add")}
-              title="Add Song"
-              className="fixed top-6 right-6 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-6 w-6"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-            </button>
           </>
         ) : null}
 
@@ -1603,6 +1677,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         {activeView === "shared" ? (
           isSignedIn ? (
             <SharedBrowser
+              userId={activeUserId}
               onPracticeAsGuest={(playlist) => {
                 setSelectedPlaylist(playlist);
                 setPlaylistPracticeReturnView("shared");

@@ -1,4 +1,4 @@
-import { DEFAULT_USER_ID } from "./userContext";
+import { DEFAULT_USER_ID, isAnonymousUserId } from "./userContext";
 import type { SegmentRating } from "../types";
 
 export const GUEST_PROGRESS_STORAGE_KEY = "cantare:guest-progress:v1";
@@ -7,6 +7,7 @@ const GUEST_RATINGS_PREFIX = "cantare:guest-ratings:v1:";
 
 interface GuestProgressSnapshot {
   songIds?: unknown;
+  guestUserId?: unknown;
   updatedAt?: unknown;
 }
 
@@ -42,8 +43,16 @@ export function hasGuestProgress(): boolean {
   return getGuestProgressSongIds().length > 0;
 }
 
+export function getGuestProgressUserId(): string | null {
+  const snapshot = readGuestProgressSnapshot();
+  return typeof snapshot.guestUserId === "string" && snapshot.guestUserId.trim().length > 0
+    ? snapshot.guestUserId
+    : null;
+}
+
 export function markGuestSongProgress(songId: string, userId: string | undefined): void {
-  if (userId && userId !== DEFAULT_USER_ID) {
+  const guestUserId = userId && isAnonymousUserId(userId) ? userId : DEFAULT_USER_ID;
+  if (userId && userId !== DEFAULT_USER_ID && !isAnonymousUserId(userId)) {
     return;
   }
   if (!songId.trim()) {
@@ -60,6 +69,7 @@ export function markGuestSongProgress(songId: string, userId: string | undefined
     songIds.add(songId);
     storage.setItem(GUEST_PROGRESS_STORAGE_KEY, JSON.stringify({
       songIds: Array.from(songIds),
+      guestUserId,
       updatedAt: new Date().toISOString(),
     }));
   } catch {

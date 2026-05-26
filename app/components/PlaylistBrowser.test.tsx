@@ -21,6 +21,7 @@ describe('PlaylistBrowser', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ playlists: [basePlaylist] }),
@@ -168,26 +169,21 @@ describe('PlaylistBrowser', () => {
   });
 
   it('renders playlist health metrics when detail data is available', async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ playlists: [basePlaylist] }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ score: 85 }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: 'pl-1',
-          songs: [
-            { id: 's1', audioUrl: '/a1.mp3', alternateAudioUrl: '/b1.mp3', pitchContourNotes: [{ id: 'n1' }], segments: [{ id: 'seg-1' }] },
-            { id: 's2', audioUrl: '/a2.mp3', hasMidiContour: true, segments: [{ id: 'seg-2', pitchContourNotes: [] }] },
-            { id: 's3', audioUrl: '', alternateAudioUrl: '/b3.mp3', segments: [] },
-          ],
-        }),
-      });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        playlists: [{
+          ...basePlaylist,
+          knowledgePercent: 85,
+          healthStats: {
+            songsWithPartAudio: 2,
+            songsWithBlendAudio: 2,
+            songsWithSegments: 2,
+            songsWithMidiContour: 1,
+          },
+        }],
+      }),
+    });
 
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
 
@@ -198,6 +194,7 @@ describe('PlaylistBrowser', () => {
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Sections 2/3');
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('MIDI contour 1/3');
     expect(screen.getByTestId('playlist-knowledge-pl-1')).toHaveTextContent('Knowledge: 85%');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('refetches playlists when userId changes', async () => {

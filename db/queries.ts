@@ -10,6 +10,15 @@ const DEFAULT_QUERY_USER_ID = "default";
 let ensureTapPracticeTablesPromise: Promise<void> | null = null;
 let ensureMidiTablesPromise: Promise<void> | null = null;
 
+function normalizeDbUserId(value: string | null | undefined): string {
+  if (!value) {
+    return DEFAULT_QUERY_USER_ID;
+  }
+
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").slice(0, 48);
+  return normalized.length > 0 ? normalized : DEFAULT_QUERY_USER_ID;
+}
+
 export function getLeadingTitleNumber(title: string): string | null {
   const match = title.match(/^\s*(\d+)/);
   return match ? match[1] : null;
@@ -164,6 +173,13 @@ export interface PlaylistSummary {
   importedAt?: string | null;
   createdAt: string;
   songCount: number;
+  knowledgePercent?: number;
+  healthStats?: {
+    songsWithPartAudio: number;
+    songsWithBlendAudio: number;
+    songsWithSegments: number;
+    songsWithMidiContour: number;
+  };
 }
 
 export interface SharedPlaylistDetail extends PlaylistDetail {
@@ -1975,10 +1991,11 @@ async function copyGuestRatingsToTarget(
   guestSongId: string,
   targetSongId: string,
   targetUserId: string,
-  segmentIdMap: Map<string, string>
+  segmentIdMap: Map<string, string>,
+  sourceGuestUserId: string = DEFAULT_QUERY_USER_ID
 ): Promise<number> {
   const [guestRatings, targetRatings] = await Promise.all([
-    getRatingsForSong(guestSongId, DEFAULT_QUERY_USER_ID),
+    getRatingsForSong(guestSongId, sourceGuestUserId),
     getRatingsForSong(targetSongId, targetUserId),
   ]);
   const mergedBySegment = new Map<string, { segmentId: string; rating: PersistedMemoryRating; ratedAt: Date }>();
@@ -2021,13 +2038,14 @@ async function copyGuestTapSessionsToTarget(
   guestSongId: string,
   targetSongId: string,
   targetUserId: string,
-  segmentIdMap: Map<string, string>
+  segmentIdMap: Map<string, string>,
+  sourceGuestUserId: string = DEFAULT_QUERY_USER_ID
 ): Promise<number> {
-  const sessions = await listTapPracticeSessionsForSong(guestSongId, DEFAULT_QUERY_USER_ID, 100);
+  const sessions = await listTapPracticeSessionsForSong(guestSongId, sourceGuestUserId, 100);
   let importedCount = 0;
 
   for (const session of sessions) {
-    const detail = await getTapPracticeSessionDetail(session.id, DEFAULT_QUERY_USER_ID);
+    const detail = await getTapPracticeSessionDetail(session.id, sourceGuestUserId);
     if (!detail) {
       continue;
     }
@@ -2080,8 +2098,10 @@ async function copyGuestTapSessionsToTarget(
 
 export async function claimGuestProgressForUser(
   targetUserId: string,
-  guestSongIds: string[]
+  guestSongIds: string[],
+  sourceGuestUserId: string = DEFAULT_QUERY_USER_ID
 ): Promise<GuestProgressClaimResult> {
+  const guestUserId = normalizeDbUserId(sourceGuestUserId);
   const uniqueGuestSongIds = Array.from(new Set(guestSongIds.filter((id) => typeof id === "string" && id.trim().length > 0)));
   const result: GuestProgressClaimResult = {
     claimedSongIds: [],
@@ -2100,7 +2120,7 @@ export async function claimGuestProgressForUser(
     db()
       .select()
       .from(songs)
-      .where(and(eq(songs.userId, DEFAULT_QUERY_USER_ID), inArray(songs.id, uniqueGuestSongIds))),
+      .where(and(eq(songs.userId, guestUserId), inArray(songs.id, uniqueGuestSongIds))),
     getAllSongs(targetUserId),
   ]);
 
@@ -2118,12 +2138,12 @@ export async function claimGuestProgressForUser(
       await db()
         .update(songs)
         .set({ userId: targetUserId })
-        .where(and(eq(songs.id, guestSong.id), eq(songs.userId, DEFAULT_QUERY_USER_ID)));
+        .where(and(eq(songs.id, guestSong.id), eq(songs.userId, guestUserId)));
       try {
         await db()
           .update(tapPracticeSessions)
           .set({ userId: targetUserId })
-          .where(and(eq(tapPracticeSessions.songId, guestSong.id), eq(tapPracticeSessions.userId, DEFAULT_QUERY_USER_ID)));
+          .where(and(eq(tapPracticeSessions.songId, guestSong.id), eq(tapPracticeSessions.userId, guestUserId)));
       } catch (error) {
         if (!isMissingTapPracticeTableError(error)) {
           throw error;
@@ -2145,8 +2165,8 @@ export async function claimGuestProgressForUser(
       continue;
     }
 
-    result.importedRatingCount += await copyGuestRatingsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap);
-    result.importedTapSessionCount += await copyGuestTapSessionsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap);
+    result.importedRatingCount += await copyGuestRatingsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap, guestUserId);
+    result.importedTapSessionCount += await copyGuestTapSessionsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap, guestUserId);
 
     const guestPracticedAt = guestSong.lastPracticedAt?.getTime() ?? 0;
     const targetPracticedAt = targetSong.lastPracticedAt?.getTime() ?? 0;
@@ -2154,7 +2174,7 @@ export async function claimGuestProgressForUser(
       await markSongPracticed(targetSong.id, targetUserId, guestSong.lastPracticedAt);
     }
 
-    await deleteSong(guestSong.id, DEFAULT_QUERY_USER_ID);
+    await deleteSong(guestSong.id, guestUserId);
     result.claimedSongIds.push(targetSong.id);
     result.mergedSongIds.push(targetSong.id);
   }
@@ -3019,6 +3039,15 @@ function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSu
   };
 }
 
+function emptyPlaylistHealthStats() {
+  return {
+    songsWithPartAudio: 0,
+    songsWithBlendAudio: 0,
+    songsWithSegments: 0,
+    songsWithMidiContour: 0,
+  };
+}
+
 async function ensurePlaylistSharingColumns(): Promise<void> {
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "share_token" text`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "shared_at" timestamp`));
@@ -3128,7 +3157,89 @@ export async function getAllPlaylists(
     songCounts.map((row) => [row.playlistId, row.count])
   );
 
-  return rows.map((row) => mapPlaylistSummary(row, countMap[row.id] ?? 0));
+  const summaries = rows.map((row) => mapPlaylistSummary(row, countMap[row.id] ?? 0));
+  const playlistIds = summaries.map((playlist) => playlist.id);
+  if (playlistIds.length === 0) {
+    return summaries;
+  }
+
+  const linkedSongs = await db()
+    .select({
+      playlistId: playlistSongs.playlistId,
+      songId: playlistSongs.songId,
+      audioKey: songs.audioKey,
+      alternateAudioKey: songs.alternateAudioKey,
+    })
+    .from(playlistSongs)
+    .innerJoin(songs, eq(playlistSongs.songId, songs.id))
+    .where(legacyMode ? inArray(playlistSongs.playlistId, playlistIds) : and(inArray(playlistSongs.playlistId, playlistIds), eq(songs.userId, userId)));
+
+  const songIds = Array.from(new Set(linkedSongs.map((song) => song.songId)));
+  const [segmentCountRows, midiContourRows, knowledgeBySong] = await Promise.all([
+    songIds.length > 0
+      ? db()
+          .select({
+            songId: segments.songId,
+            count: count(segments.id),
+          })
+          .from(segments)
+          .where(inArray(segments.songId, songIds))
+          .groupBy(segments.songId)
+      : Promise.resolve([]),
+    songIds.length > 0
+      ? db()
+          .select({
+            songId: midiSources.songId,
+            count: count(midiSources.id),
+          })
+          .from(midiSources)
+          .where(and(inArray(midiSources.songId, songIds), sql`${midiSources.cleanedNoteCount} > 0`))
+          .groupBy(midiSources.songId)
+      : Promise.resolve([]),
+    getSongKnowledgeBySongIds(songIds, userId),
+  ]);
+
+  const segmentCountBySong = new Map(segmentCountRows.map((row) => [row.songId, Number(row.count)]));
+  const midiSongIds = new Set(midiContourRows.map((row) => row.songId));
+  const statsByPlaylist = new Map<string, ReturnType<typeof emptyPlaylistHealthStats>>();
+  const knowledgeNumeratorByPlaylist = new Map<string, number>();
+  const knowledgeSegmentCountByPlaylist = new Map<string, number>();
+
+  for (const linkedSong of linkedSongs) {
+    const stats = statsByPlaylist.get(linkedSong.playlistId) ?? emptyPlaylistHealthStats();
+    if (linkedSong.audioKey?.trim()) {
+      stats.songsWithPartAudio += 1;
+    }
+    if (linkedSong.alternateAudioKey?.trim()) {
+      stats.songsWithBlendAudio += 1;
+    }
+
+    const segmentCount = segmentCountBySong.get(linkedSong.songId) ?? 0;
+    if (segmentCount > 0) {
+      stats.songsWithSegments += 1;
+      knowledgeNumeratorByPlaylist.set(
+        linkedSong.playlistId,
+        (knowledgeNumeratorByPlaylist.get(linkedSong.playlistId) ?? 0) + (knowledgeBySong[linkedSong.songId] ?? 0) * segmentCount
+      );
+      knowledgeSegmentCountByPlaylist.set(
+        linkedSong.playlistId,
+        (knowledgeSegmentCountByPlaylist.get(linkedSong.playlistId) ?? 0) + segmentCount
+      );
+    }
+    if (midiSongIds.has(linkedSong.songId)) {
+      stats.songsWithMidiContour += 1;
+    }
+    statsByPlaylist.set(linkedSong.playlistId, stats);
+  }
+
+  return summaries.map((playlist) => {
+    const segmentCount = knowledgeSegmentCountByPlaylist.get(playlist.id) ?? 0;
+    return {
+      ...playlist,
+      knowledgePercent: segmentCount > 0 ? Math.round((knowledgeNumeratorByPlaylist.get(playlist.id) ?? 0) / segmentCount) : 0,
+      healthStats: statsByPlaylist.get(playlist.id) ?? emptyPlaylistHealthStats(),
+    };
+  });
 }
 
 export async function getPlaylistById(

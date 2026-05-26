@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { buildUserScopedCacheKey, readCachedJson, writeCachedJson } from '../lib/localJsonCache';
 import type { Playlist } from '../types';
 
 type PlaylistListItem = {
@@ -14,6 +15,8 @@ type PlaylistListItem = {
   sharedAt?: string | null;
   createdAt: string;
   songCount: number;
+  knowledgePercent?: number;
+  healthStats?: PlaylistHealthStats;
   songs?: Playlist['songs'];
 };
 
@@ -22,6 +25,12 @@ type PlaylistHealthStats = {
   songsWithBlendAudio: number;
   songsWithSegments: number;
   songsWithMidiContour: number;
+};
+
+type CachedPlaylistListPayload = {
+  playlists: PlaylistListItem[];
+  knowledgeByPlaylist: Record<string, number>;
+  statsByPlaylist: Record<string, PlaylistHealthStats>;
 };
 
 const EMPTY_PLAYLIST_STATS: PlaylistHealthStats = {
@@ -120,7 +129,18 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
     fetchControllerRef.current?.abort();
     const controller = new AbortController();
     fetchControllerRef.current = controller;
-    setLoading(true);
+    const cacheKey = buildUserScopedCacheKey('playlists', userId, includeRetired ? 'retired' : 'active');
+    const cached = readCachedJson<CachedPlaylistListPayload>(cacheKey);
+    const hasCachedPlaylists = cached !== null && Array.isArray(cached.value.playlists);
+    if (cached && hasCachedPlaylists) {
+      setPlaylists(cached.value.playlists);
+      setKnowledgeByPlaylist(cached.value.knowledgeByPlaylist ?? {});
+      setStatsByPlaylist(cached.value.statsByPlaylist ?? {});
+      setLoading(false);
+      setError(null);
+    }
+
+    setLoading(!hasCachedPlaylists);
     setError(null);
     try {
       const query = includeRetired ? '?includeRetired=true' : '';
@@ -134,42 +154,11 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
         return;
       }
       setPlaylists(list);
-
-      const [knowledgeEntries, statsEntries] = await Promise.all([
-        Promise.all(
-        list.map(async (playlist) => {
-          const knowledgeResponse = await request(`/api/playlists/${playlist.id}/knowledge`, { signal: controller.signal });
-          if (!knowledgeResponse.ok) {
-            return [playlist.id, 0] as const;
-          }
-          const payload = (await knowledgeResponse.json()) as { score?: number };
-          return [playlist.id, Math.min(Math.round(payload.score ?? 0), 100)] as const;
-        })
-        ),
-        Promise.all(
-          list.map(async (playlist) => {
-            const detailResponse = await request(`/api/playlists/${playlist.id}`, { signal: controller.signal });
-            if (!detailResponse.ok) {
-              return [playlist.id, EMPTY_PLAYLIST_STATS] as const;
-            }
-            const detail = (await detailResponse.json()) as Playlist;
-            const songs = Array.isArray(detail.songs) ? detail.songs : [];
-
-            const songsWithPartAudio = songs.filter((song) => Boolean(song.audioUrl?.trim())).length;
-            const songsWithBlendAudio = songs.filter((song) => Boolean(song.alternateAudioUrl?.trim())).length;
-            const songsWithSegments = songs.filter((song) => (song.segments?.length ?? 0) > 0).length;
-            const songsWithMidiContour = songs.filter((song) => song.hasMidiContour).length;
-
-            return [playlist.id, { songsWithPartAudio, songsWithBlendAudio, songsWithSegments, songsWithMidiContour }] as const;
-          })
-        ),
-      ]);
-
-      if (latestFetchIdRef.current !== fetchId) {
-        return;
-      }
-      setKnowledgeByPlaylist(Object.fromEntries(knowledgeEntries));
-      setStatsByPlaylist(Object.fromEntries(statsEntries));
+      const knowledge = Object.fromEntries(list.map((playlist) => [playlist.id, Math.min(Math.round(playlist.knowledgePercent ?? 0), 100)]));
+      const stats = Object.fromEntries(list.map((playlist) => [playlist.id, playlist.healthStats ?? EMPTY_PLAYLIST_STATS]));
+      setKnowledgeByPlaylist(knowledge);
+      setStatsByPlaylist(stats);
+      writeCachedJson(cacheKey, { playlists: list, knowledgeByPlaylist: knowledge, statsByPlaylist: stats });
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         return;
@@ -177,16 +166,18 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
       if (latestFetchIdRef.current !== fetchId) {
         return;
       }
-      setError('Unable to load playlists right now.');
-      setPlaylists([]);
-      setKnowledgeByPlaylist({});
-      setStatsByPlaylist({});
+      if (!hasCachedPlaylists) {
+        setError('Unable to load playlists right now.');
+        setPlaylists([]);
+        setKnowledgeByPlaylist({});
+        setStatsByPlaylist({});
+      }
     } finally {
       if (latestFetchIdRef.current === fetchId) {
         setLoading(false);
       }
     }
-  }, [request]);
+  }, [request, userId]);
 
   useEffect(() => {
     void fetchPlaylists(showArchived);
