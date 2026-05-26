@@ -4190,6 +4190,28 @@ export async function importSharedPlaylist(
     throw Object.assign(new Error("Shared playlist not found"), { code: "SHARED_PLAYLIST_NOT_FOUND" });
   }
 
+  return importPlaylistSource(source, userId, { ...options, sourceShareToken: token });
+}
+
+export async function importPublicPlaylist(
+  playlistId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  options: { force?: boolean; shareAudioMode?: PlaylistShareAudioMode } = {}
+): Promise<{ status: "imported"; playlist: PlaylistSummary } | { status: "already_imported"; playlist: PlaylistSummary }> {
+  await ensurePlaylistSharingColumns();
+  const source = await getPublicPlaylistById(playlistId, userId);
+  if (!source) {
+    throw Object.assign(new Error("Shared playlist not found"), { code: "SHARED_PLAYLIST_NOT_FOUND" });
+  }
+
+  return importPlaylistSource(source, userId, options);
+}
+
+async function importPlaylistSource(
+  source: SharedPlaylistDetail,
+  userId: string,
+  options: { force?: boolean; shareAudioMode?: PlaylistShareAudioMode; sourceShareToken?: string | null } = {}
+): Promise<{ status: "imported"; playlist: PlaylistSummary } | { status: "already_imported"; playlist: PlaylistSummary }> {
   const existingImports = await getPlaylistImportsForSource(source.id, userId);
   if (existingImports.length > 0 && !options.force) {
     return { status: "already_imported", playlist: existingImports[0] };
@@ -4207,7 +4229,7 @@ export async function importSharedPlaylist(
       isRetired: false,
       sourcePlaylistId: source.id,
       sourceOwnerId: source.owner.id,
-      sourceShareToken: token,
+      sourceShareToken: options.sourceShareToken ?? source.shareToken ?? null,
       importedAt: now,
     })
     .returning();

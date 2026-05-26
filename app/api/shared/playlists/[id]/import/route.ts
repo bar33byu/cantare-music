@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getPublicPlaylistById, importSharedPlaylist } from '../../../../../../db/queries';
+import { getPublicPlaylistById, importPublicPlaylist } from '../../../../../../db/queries';
 import { resolveRequestContext } from '../../../../_user';
 
 const sharedHeaders = {
@@ -28,12 +28,12 @@ export async function POST(
 
     const { id } = await params;
     const playlist = await getPublicPlaylistById(id, user.id);
-    if (!playlist?.shareToken) {
+    if (!playlist) {
       return NextResponse.json({ error: 'Shared playlist not found.' }, { status: 404, headers: sharedHeaders });
     }
 
     const body = await request.json().catch(() => ({})) as { force?: unknown };
-    const result = await importSharedPlaylist(playlist.shareToken, user.id, {
+    const result = await importPublicPlaylist(id, user.id, {
       force: body.force === true,
       shareAudioMode: playlist.publicShareAudioMode,
     });
