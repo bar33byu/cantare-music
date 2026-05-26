@@ -107,6 +107,7 @@ describe("schema tables", () => {
     expect(cols).toContain("publishedAt");
     expect(cols).toContain("shareToken");
     expect(cols).toContain("sharedAt");
+    expect(cols).toContain("shareAudioMode");
     expect(cols).toContain("sourcePlaylistId");
     expect(cols).toContain("sourceOwnerId");
     expect(cols).toContain("sourceShareToken");

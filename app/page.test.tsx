@@ -275,58 +275,62 @@ describe('Home page', () => {
   });
 
   it('refreshes the selected song before returning from edit mode', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: 'song-1',
-          title: 'Song One',
-          artist: 'Artist One',
-          audioUrl: 'https://example.com/one.mp3',
-          segments: [
-            {
-              id: 'seg-1',
-              songId: 'song-1',
-              order: 0,
-              label: 'Section 1',
-              lyricText: 'Verse 1',
-              startMs: 0,
-              endMs: 10000,
-            },
-          ],
-          createdAt: '2025-01-01T00:00:00.000Z',
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: 'song-1',
-          title: 'Song One',
-          artist: 'Artist One',
-          audioUrl: 'https://example.com/one.mp3',
-          segments: [
-            {
-              id: 'seg-1',
-              songId: 'song-1',
-              order: 0,
-              label: 'Section 1',
-              lyricText: 'Verse 1',
-              startMs: 0,
-              endMs: 10000,
-            },
-            {
-              id: 'seg-2',
-              songId: 'song-1',
-              order: 1,
-              label: 'Section 2',
-              lyricText: 'Verse 2',
-              startMs: 10000,
-              endMs: 20000,
-            },
-          ],
-          createdAt: '2025-01-01T00:00:00.000Z',
-        }),
-      });
+    let songFetchCount = 0;
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/draft-recordings') {
+        return { ok: true, json: async () => ({ draftRecordings: [] }) };
+      }
+      if (url === '/api/songs') {
+        return { ok: true, json: async () => [] };
+      }
+      if (url === '/api/songs/song-1') {
+        songFetchCount += 1;
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'song-1',
+            title: 'Song One',
+            artist: 'Artist One',
+            audioUrl: 'https://example.com/one.mp3',
+            segments: songFetchCount === 1
+              ? [
+                  {
+                    id: 'seg-1',
+                    songId: 'song-1',
+                    order: 0,
+                    label: 'Section 1',
+                    lyricText: 'Verse 1',
+                    startMs: 0,
+                    endMs: 10000,
+                  },
+                ]
+              : [
+                  {
+                    id: 'seg-1',
+                    songId: 'song-1',
+                    order: 0,
+                    label: 'Section 1',
+                    lyricText: 'Verse 1',
+                    startMs: 0,
+                    endMs: 10000,
+                  },
+                  {
+                    id: 'seg-2',
+                    songId: 'song-1',
+                    order: 1,
+                    label: 'Section 2',
+                    lyricText: 'Verse 2',
+                    startMs: 10000,
+                    endMs: 20000,
+                  },
+                ],
+            createdAt: '2025-01-01T00:00:00.000Z',
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
 
     global.fetch = fetchMock as unknown as typeof fetch;
 
@@ -346,12 +350,10 @@ describe('Home page', () => {
       expect(screen.getByTestId('mock-practice-view')).toHaveTextContent('Segments: 2');
     });
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/songs/song-1', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/songs/song-1', expect.objectContaining({
       headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/songs/song-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
-    }));
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/songs/song-1')).toHaveLength(2);
   });
 
   it('shows breadcrumb root as Songs in song practice and returns to library when clicked', async () => {

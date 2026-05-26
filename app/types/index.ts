@@ -32,7 +32,7 @@ export interface Segment {
 
 export interface DraftRecording {
   id: string;
-  songId: string;
+  songId: string | null;
   title?: string | null;
   audioKey: string;
   audioUrl?: string;
@@ -97,6 +97,7 @@ export interface Playlist {
   shareToken?: string | null;
   shareUrl?: string | null;
   sharedAt?: string | null;
+  shareAudioMode?: "part" | "blend" | "both";
   sourcePlaylistId?: string | null;
   sourceOwnerId?: string | null;
   sourceShareToken?: string | null;
@@ -114,6 +115,7 @@ export interface SharedPlaylistListItem {
   publishedAt?: string | null;
   shareToken?: string | null;
   sharedAt?: string | null;
+  shareAudioMode?: "part" | "blend" | "both";
   createdAt: string;
   songCount: number;
   owner: {

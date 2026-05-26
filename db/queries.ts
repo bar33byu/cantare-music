@@ -1,4 +1,4 @@
-import { eq, asc, desc, inArray, and, count, lte, sql } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, count, lte, sql, isNull } from "drizzle-orm";
 import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow } from "./schema";
@@ -127,7 +127,7 @@ export interface PersistedMidiSource {
 
 export interface PersistedDraftRecording {
   id: string;
-  songId: string;
+  songId: string | null;
   title?: string | null;
   audioKey: string;
   status: "draft" | "archived" | "discarded";
@@ -168,6 +168,7 @@ export interface PlaylistDetail {
   publishedAt?: string | null;
   shareToken?: string | null;
   sharedAt?: string | null;
+  shareAudioMode?: PlaylistShareAudioMode;
   sourcePlaylistId?: string | null;
   sourceOwnerId?: string | null;
   sourceShareToken?: string | null;
@@ -185,6 +186,7 @@ export interface PlaylistSummary {
   publishedAt?: string | null;
   shareToken?: string | null;
   sharedAt?: string | null;
+  shareAudioMode?: PlaylistShareAudioMode;
   sourcePlaylistId?: string | null;
   sourceOwnerId?: string | null;
   sourceShareToken?: string | null;
@@ -694,7 +696,8 @@ async function ensureDraftRecordingTables(): Promise<void> {
       await db().execute(sql.raw(`
         CREATE TABLE IF NOT EXISTS "draft_recordings" (
           "id" text PRIMARY KEY NOT NULL,
-          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
+          "user_id" text NOT NULL DEFAULT 'default',
+          "song_id" text REFERENCES "songs"("id") ON DELETE cascade,
           "title" text,
           "audio_key" text NOT NULL,
           "status" text NOT NULL DEFAULT 'draft',
@@ -704,6 +707,12 @@ async function ensureDraftRecordingTables(): Promise<void> {
         )
       `));
 
+      await db().execute(sql.raw(`
+        ALTER TABLE "draft_recordings" ADD COLUMN IF NOT EXISTS "user_id" text NOT NULL DEFAULT 'default'
+      `));
+      await db().execute(sql.raw(`
+        ALTER TABLE "draft_recordings" ALTER COLUMN "song_id" DROP NOT NULL
+      `));
       await db().execute(sql.raw(`
         ALTER TABLE "draft_recordings" ADD COLUMN IF NOT EXISTS "trim_start_ms" integer
       `));
@@ -723,6 +732,10 @@ async function ensureDraftRecordingTables(): Promise<void> {
       await db().execute(sql.raw(`
         CREATE INDEX IF NOT EXISTS "idx_draft_recordings_song_status_created_at"
           ON "draft_recordings" ("song_id", "status", "created_at")
+      `));
+      await db().execute(sql.raw(`
+        CREATE INDEX IF NOT EXISTS "idx_draft_recordings_user_status_created_at"
+          ON "draft_recordings" ("user_id", "status", "created_at")
       `));
     })().catch((error) => {
       ensureDraftRecordingTablesPromise = null;
@@ -1574,22 +1587,25 @@ function mapDraftRecording(row: DraftRecordingRow): PersistedDraftRecording {
 }
 
 export async function createDraftRecording(data: {
-  songId: string;
+  songId?: string | null;
   audioKey: string;
   title?: string | null;
   createdAt?: Date;
 }, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedDraftRecording> {
   await ensureDraftRecordingTables();
-  const song = await getSongById(data.songId, userId);
-  if (!song) {
-    throw Object.assign(new Error("Song not found"), { code: "SONG_NOT_FOUND" });
+  if (data.songId) {
+    const song = await getSongById(data.songId, userId);
+    if (!song) {
+      throw Object.assign(new Error("Song not found"), { code: "SONG_NOT_FOUND" });
+    }
   }
 
   const rows = await db()
     .insert(draftRecordings)
     .values({
       id: crypto.randomUUID(),
-      songId: data.songId,
+      userId,
+      songId: data.songId ?? null,
       audioKey: data.audioKey,
       title: data.title ?? null,
       status: "draft",
@@ -1600,6 +1616,75 @@ export async function createDraftRecording(data: {
     .returning();
 
   return mapDraftRecording(rows[0]);
+}
+
+export type PlaylistShareAudioMode = "part" | "blend" | "both";
+
+export async function getUnassignedDraftRecordings(
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedDraftRecording[]> {
+  try {
+    await ensureDraftRecordingTables();
+    const rows = await db()
+      .select()
+      .from(draftRecordings)
+      .where(and(eq(draftRecordings.userId, userId), isNull(draftRecordings.songId), eq(draftRecordings.status, "draft")))
+      .orderBy(desc(draftRecordings.createdAt));
+
+    return rows.map(mapDraftRecording);
+  } catch (error) {
+    if (isMissingDraftRecordingTableError(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export async function assignDraftRecordingToSong(
+  draftRecordingId: string,
+  songId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedDraftRecording | null> {
+  await ensureDraftRecordingTables();
+  const song = await getSongById(songId, userId);
+  if (!song) {
+    return null;
+  }
+
+  const rows = await db()
+    .update(draftRecordings)
+    .set({ songId })
+    .where(and(
+      eq(draftRecordings.id, draftRecordingId),
+      eq(draftRecordings.userId, userId),
+      isNull(draftRecordings.songId),
+      eq(draftRecordings.status, "draft")
+    ))
+    .returning();
+
+  return rows[0] ? mapDraftRecording(rows[0]) : null;
+}
+
+export async function discardUnassignedDraftRecording(
+  draftRecordingId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedDraftRecording | null> {
+  await ensureDraftRecordingTables();
+  const rows = await db()
+    .update(draftRecordings)
+    .set({
+      status: "discarded",
+      archivedAt: new Date(),
+    })
+    .where(and(
+      eq(draftRecordings.id, draftRecordingId),
+      eq(draftRecordings.userId, userId),
+      isNull(draftRecordings.songId),
+      eq(draftRecordings.status, "draft")
+    ))
+    .returning();
+
+  return rows[0] ? mapDraftRecording(rows[0]) : null;
 }
 
 export async function updateDraftRecordingTrim(
@@ -3289,6 +3374,7 @@ function toIso(value: Date | null): string {
 }
 
 function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSummary {
+  const shareAudioMode = row.shareAudioMode === "part" || row.shareAudioMode === "blend" ? row.shareAudioMode : "both";
   return {
     id: row.id,
     name: row.name,
@@ -3298,6 +3384,7 @@ function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSu
     publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
     shareToken: row.shareToken ?? null,
     sharedAt: row.sharedAt ? row.sharedAt.toISOString() : null,
+    shareAudioMode,
     sourcePlaylistId: row.sourcePlaylistId ?? null,
     sourceOwnerId: row.sourceOwnerId ?? null,
     sourceShareToken: row.sourceShareToken ?? null,
@@ -3319,6 +3406,7 @@ function emptyPlaylistHealthStats() {
 async function ensurePlaylistSharingColumns(): Promise<void> {
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "share_token" text`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "shared_at" timestamp`));
+  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "share_audio_mode" text NOT NULL DEFAULT 'both'`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "is_public" boolean NOT NULL DEFAULT false`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "published_at" timestamp`));
   await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "source_playlist_id" text`));
@@ -3338,6 +3426,23 @@ async function ensurePlaylistSharingColumns(): Promise<void> {
     CREATE INDEX IF NOT EXISTS "idx_playlists_user_source_playlist"
       ON "playlists" ("user_id", "source_playlist_id")
   `));
+}
+
+function normalizeShareAudioMode(mode: unknown): PlaylistShareAudioMode {
+  return mode === "part" || mode === "blend" || mode === "both" ? mode : "both";
+}
+
+function applyShareAudioModeToPlaylist(detail: PlaylistDetail): PlaylistDetail {
+  const mode = normalizeShareAudioMode(detail.shareAudioMode);
+  return {
+    ...detail,
+    shareAudioMode: mode,
+    songs: detail.songs.map((song) => ({
+      ...song,
+      audioUrl: mode === "blend" ? "" : song.audioUrl,
+      alternateAudioUrl: mode === "part" ? undefined : song.alternateAudioUrl,
+    })),
+  };
 }
 
 function createShareToken(): string {
@@ -3387,7 +3492,7 @@ export async function getAllPlaylists(
           ? await legacyBaseQuery.where(eq(playlists.userId, userId))
           : await legacyBaseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
 
-      rows = legacyRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null } as PlaylistRow));
+      rows = legacyRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both" } as PlaylistRow));
     } catch (legacyError) {
       if (!isMissingUserIdColumnError(legacyError)) {
         throw legacyError;
@@ -3408,7 +3513,7 @@ export async function getAllPlaylists(
         ? await userlessBaseQuery
         : await userlessBaseQuery.where(eq(playlists.isRetired, false));
 
-      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null } as PlaylistRow));
+      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both" } as PlaylistRow));
     }
   }
 
@@ -3540,7 +3645,7 @@ export async function getPlaylistById(
         .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
         .limit(1);
 
-      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null } as PlaylistRow));
+      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both" } as PlaylistRow));
     } catch (legacyError) {
       if (!isMissingUserIdColumnError(legacyError)) {
         throw legacyError;
@@ -3558,7 +3663,7 @@ export async function getPlaylistById(
         .where(eq(playlists.id, id))
         .limit(1);
 
-      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null } as PlaylistRow));
+      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both" } as PlaylistRow));
     }
   }
 
@@ -3665,7 +3770,8 @@ export async function getPlaylistById(
 
 export async function enablePlaylistSharing(
   id: string,
-  userId: string = DEFAULT_QUERY_USER_ID
+  userId: string = DEFAULT_QUERY_USER_ID,
+  shareAudioMode: PlaylistShareAudioMode = "both"
 ): Promise<PlaylistSummary | null> {
   await ensurePlaylistSharingColumns();
   const existingRows = await db()
@@ -3679,14 +3785,23 @@ export async function enablePlaylistSharing(
     return null;
   }
 
+  const mode = normalizeShareAudioMode(shareAudioMode);
   if (existing.shareToken) {
-    return mapPlaylistSummary(existing);
+    if (normalizeShareAudioMode(existing.shareAudioMode) === mode) {
+      return mapPlaylistSummary(existing);
+    }
+    const rows = await db()
+      .update(playlists)
+      .set({ shareAudioMode: mode })
+      .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
+      .returning();
+    return rows[0] ? mapPlaylistSummary(rows[0]) : null;
   }
 
   const sharedAt = new Date();
   const rows = await db()
     .update(playlists)
-    .set({ shareToken: createShareToken(), sharedAt })
+    .set({ shareToken: createShareToken(), sharedAt, shareAudioMode: mode })
     .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
     .returning();
 
@@ -3709,7 +3824,8 @@ export async function disablePlaylistSharing(
 
 export async function enablePlaylistPublicSharing(
   id: string,
-  userId: string = DEFAULT_QUERY_USER_ID
+  userId: string = DEFAULT_QUERY_USER_ID,
+  shareAudioMode: PlaylistShareAudioMode = "both"
 ): Promise<PlaylistSummary | null> {
   await ensurePlaylistSharingColumns();
   const existingRows = await db()
@@ -3723,7 +3839,8 @@ export async function enablePlaylistPublicSharing(
     return null;
   }
 
-  if (existing.isPublic && existing.shareToken) {
+  const mode = normalizeShareAudioMode(shareAudioMode);
+  if (existing.isPublic && normalizeShareAudioMode(existing.shareAudioMode) === mode) {
     return mapPlaylistSummary(existing);
   }
 
@@ -3733,8 +3850,7 @@ export async function enablePlaylistPublicSharing(
     .set({
       isPublic: true,
       publishedAt: existing.publishedAt ?? now,
-      shareToken: existing.shareToken ?? createShareToken(),
-      sharedAt: existing.sharedAt ?? now,
+      shareAudioMode: mode,
     })
     .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
     .returning();
@@ -3888,7 +4004,7 @@ export async function getPublicPlaylistById(id: string, viewerUserId?: string): 
   }
 
   return {
-    ...detail,
+    ...applyShareAudioModeToPlaylist(detail),
     owner: {
       id: row.ownerId,
       displayName: row.ownerName,
@@ -3954,7 +4070,7 @@ export async function getSharedPlaylistByToken(token: string): Promise<SharedPla
   }
 
   return {
-    ...detail,
+    ...applyShareAudioModeToPlaylist(detail),
     owner: {
       id: row.ownerId,
       displayName: row.ownerName,
@@ -4093,6 +4209,7 @@ export async function importSharedPlaylist(
 
   const importedPlaylist = playlistRows[0];
   const sortedSongs = [...source.songs].sort((a, b) => a.position - b.position);
+  const shareAudioMode = normalizeShareAudioMode(source.shareAudioMode);
   let importedSongCount = 0;
 
   for (const item of sortedSongs) {
@@ -4145,8 +4262,8 @@ export async function importSharedPlaylist(
         userId,
         title: importedTitle,
         artist: sourceSongRow.artist ?? null,
-        audioKey: sourceSongRow.audioKey ?? null,
-        alternateAudioKey: sourceSongRow.alternateAudioKey ?? null,
+        audioKey: shareAudioMode === "blend" ? null : sourceSongRow.audioKey ?? null,
+        alternateAudioKey: shareAudioMode === "part" ? null : sourceSongRow.alternateAudioKey ?? null,
         pitchContourNotes: sourceSongRow.pitchContourNotes ?? [],
         sourceSongId,
         lastPracticedAt: null,
@@ -4236,10 +4353,18 @@ export async function updatePlaylist(
   data: { name?: string; eventDate?: string; isRetired?: boolean },
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
-  const updates: Partial<Pick<PlaylistRow, "name" | "eventDate" | "isRetired">> = {};
+  const updates: Partial<Pick<PlaylistRow, "name" | "eventDate" | "isRetired" | "isPublic" | "publishedAt" | "shareToken" | "sharedAt">> = {};
   if (data.name !== undefined) updates.name = data.name;
   if (data.eventDate !== undefined) updates.eventDate = data.eventDate;
-  if (data.isRetired !== undefined) updates.isRetired = data.isRetired;
+  if (data.isRetired !== undefined) {
+    updates.isRetired = data.isRetired;
+    if (data.isRetired) {
+      updates.isPublic = false;
+      updates.publishedAt = null;
+      updates.shareToken = null;
+      updates.sharedAt = null;
+    }
+  }
 
   if (Object.keys(updates).length === 0) {
     return;

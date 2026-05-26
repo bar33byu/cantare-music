@@ -191,6 +191,7 @@ export const playlists = pgTable(
     publishedAt: timestamp("published_at"),
     shareToken: text("share_token"),
     sharedAt: timestamp("shared_at"),
+    shareAudioMode: text("share_audio_mode").notNull().default("both"),
     sourcePlaylistId: text("source_playlist_id"),
     sourceOwnerId: text("source_owner_id"),
     sourceShareToken: text("source_share_token"),
@@ -233,8 +234,8 @@ export const draftRecordings = pgTable(
   "draft_recordings",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull().default("default"),
     songId: text("song_id")
-      .notNull()
       .references(() => songs.id, { onDelete: "cascade" }),
     title: text("title"),
     audioKey: text("audio_key").notNull(),
@@ -246,6 +247,7 @@ export const draftRecordings = pgTable(
   },
   (table) => ({
     songStatusCreatedAtIdx: index("idx_draft_recordings_song_status_created_at").on(table.songId, table.status, table.createdAt),
+    userStatusCreatedAtIdx: index("idx_draft_recordings_user_status_created_at").on(table.userId, table.status, table.createdAt),
   })
 );
 

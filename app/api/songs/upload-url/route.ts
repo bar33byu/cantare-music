@@ -33,13 +33,7 @@ export async function POST(request: NextRequest) {
     const userId = resolveRequestUserId(request);
     const body = (await request.json().catch(() => null)) as UploadRequestBody | null;
 
-    if (
-      !body ||
-      typeof body.songId !== 'string' ||
-      typeof body.filename !== 'string' ||
-      typeof body.contentType !== 'string' ||
-      typeof body.size !== 'number'
-    ) {
+    if (!body || typeof body.filename !== 'string' || typeof body.contentType !== 'string' || typeof body.size !== 'number') {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -62,12 +56,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
-    const song = await getSongById(body.songId, userId);
-    if (!song) {
-      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+    const hasSongId = typeof body.songId === 'string' && body.songId.trim().length > 0;
+    if (audioVersion !== 'draft' && !hasSongId) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const key = generateUploadKey(body.songId, body.filename, audioVersion);
+    if (hasSongId) {
+      const song = await getSongById(body.songId!.trim(), userId);
+      if (!song) {
+        return NextResponse.json({ error: 'Song not found' }, { status: 404 });
+      }
+    }
+
+    const uploadScope = hasSongId ? body.songId!.trim() : `unassigned/${userId}`;
+    const key = generateUploadKey(uploadScope, body.filename, audioVersion);
 
     const command = new PutObjectCommand({
       Bucket: BUCKET,

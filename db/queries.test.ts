@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, isNull, and } from "drizzle-orm";
 import { songs, segments, practiceRatings, playlists, playlistSongs, draftRecordings, tapPracticeSessions, tapPracticeTaps, users, magicLinkTokens, userSessions } from "./schema";
 
 // ── chainable mock builder ─────────────────────────────────────────────────────
@@ -315,6 +315,43 @@ describe("getDraftRecordingsForSong", () => {
       trimStartMs: 500,
       trimEndMs: 4200,
       createdAt: "2026-05-25T14:30:00.000Z",
+      archivedAt: null,
+    }]);
+  });
+});
+
+describe("getUnassignedDraftRecordings", () => {
+  it("returns unassigned active draft recordings scoped by user", async () => {
+    const row = {
+      id: "draft-1",
+      userId: "user-1",
+      songId: null,
+      title: null,
+      audioKey: "audio/unassigned/user-1/draft.webm",
+      status: "draft",
+      trimStartMs: null,
+      trimEndMs: null,
+      createdAt: new Date("2026-05-26T14:30:00.000Z"),
+      archivedAt: null,
+    };
+    const chain = makeChain([row]);
+    selectSpy.mockReturnValue(chain);
+
+    const { getUnassignedDraftRecordings } = await getQueries();
+    const result = await getUnassignedDraftRecordings("user-1");
+
+    expect(selectSpy).toHaveBeenCalled();
+    const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).toHaveBeenCalledWith(and(eq(draftRecordings.userId, "user-1"), isNull(draftRecordings.songId), eq(draftRecordings.status, "draft")));
+    expect(result).toEqual([{
+      id: "draft-1",
+      songId: null,
+      title: null,
+      audioKey: "audio/unassigned/user-1/draft.webm",
+      status: "draft",
+      trimStartMs: null,
+      trimEndMs: null,
+      createdAt: "2026-05-26T14:30:00.000Z",
       archivedAt: null,
     }]);
   });
