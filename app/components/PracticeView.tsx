@@ -112,6 +112,7 @@ const DRAFT_RECORDING_MIME_TYPES = [
 ] as const;
 const MIN_DRAFT_TRIM_MS = 1000;
 const DRAFT_TRIM_AUTOSAVE_DELAY_MS = 500;
+const DRAFT_RECORDING_CHUNK_INTERVAL_MS = 1000;
 const DRAFT_LABELS = {
   activeSection: "Draft recording",
   activeStatus: "Draft recording",
@@ -120,6 +121,7 @@ const DRAFT_LABELS = {
   review: "Review",
   trim: "Trim",
   promote: "Promote to song version",
+  discard: "Discard",
   saved: "Saved",
 } as const;
 
@@ -251,6 +253,7 @@ function DraftRecordingListItem({
   isPlaying,
   onPause,
   onReview,
+  onDiscard,
 }: {
   draft: DraftRecording;
   index: number;
@@ -258,6 +261,7 @@ function DraftRecordingListItem({
   isPlaying: boolean;
   onPause: () => void;
   onReview: (draftId: string) => void;
+  onDiscard?: (draftId: string) => void;
 }) {
   const title = getDraftRecordingFallbackTitle(draft, index);
   const secondaryText = archived && draft.archivedAt
@@ -272,22 +276,33 @@ function DraftRecordingListItem({
         </p>
         <p className="text-xs text-slate-500">{secondaryText}</p>
       </div>
-      <button
-        type="button"
-        onClick={() => {
-          if (isPlaying) {
-            onPause();
+      <div className="flex shrink-0 items-center gap-2">
+        {!archived && onDiscard ? (
+          <button
+            type="button"
+            onClick={() => onDiscard(draft.id)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+          >
+            {DRAFT_LABELS.discard}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            if (isPlaying) {
+              onPause();
+            }
+            onReview(draft.id);
+          }}
+          className={
+            archived
+              ? "rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              : "rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700"
           }
-          onReview(draft.id);
-        }}
-        className={
-          archived
-            ? "shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-            : "shrink-0 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700"
-        }
-      >
-        {DRAFT_LABELS.review}
-      </button>
+        >
+          {DRAFT_LABELS.review}
+        </button>
+      </div>
     </li>
   );
 }
@@ -298,6 +313,7 @@ function DraftRecordingReview({
   request,
   onTrimSaved,
   onPromoted,
+  onDiscard,
   onBack,
 }: {
   draft: DraftRecording;
@@ -305,6 +321,7 @@ function DraftRecordingReview({
   request: (url: string, init?: RequestInit) => Promise<Response>;
   onTrimSaved?: () => void | Promise<void>;
   onPromoted?: () => void | Promise<void>;
+  onDiscard?: (draftId: string) => void;
   onBack: () => void;
 }) {
   const isArchived = draft.status === "archived";
@@ -600,15 +617,27 @@ function DraftRecordingReview({
         <>
           <div className="flex flex-col gap-2 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-slate-500">Uses the current trim and archives this draft.</p>
-            <button
-              type="button"
-              onClick={() => void handlePromote()}
-              disabled={promoteStatus === "promoting" || !hasAudio}
-              className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              data-testid="draft-promote"
-            >
-              {promoteStatus === "promoting" ? "Promoting..." : DRAFT_LABELS.promote}
-            </button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {onDiscard ? (
+                <button
+                  type="button"
+                  onClick={() => onDiscard(draft.id)}
+                  className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  data-testid="draft-discard"
+                >
+                  {DRAFT_LABELS.discard}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void handlePromote()}
+                disabled={promoteStatus === "promoting" || !hasAudio}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                data-testid="draft-promote"
+              >
+                {promoteStatus === "promoting" ? "Promoting..." : DRAFT_LABELS.promote}
+              </button>
+            </div>
           </div>
           {promoteMessage ? (
             <p className="text-sm text-red-700" role="alert" data-testid="draft-promote-status">
@@ -722,6 +751,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
   const [draftRecordingStatus, setDraftRecordingStatus] = React.useState<DraftRecordingStatus>("idle");
   const [draftRecordingMessage, setDraftRecordingMessage] = React.useState<string | null>(null);
+  const [draftRecordingLevel, setDraftRecordingLevel] = React.useState(0);
+  const [draftDiscardMessage, setDraftDiscardMessage] = React.useState<string | null>(null);
   const [reviewingDraftId, setReviewingDraftId] = React.useState<string | null>(null);
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(defaultLooping);
@@ -805,6 +836,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const draftRecorderRef = React.useRef<MediaRecorder | null>(null);
   const draftRecordingStreamRef = React.useRef<MediaStream | null>(null);
   const draftRecordingChunksRef = React.useRef<Blob[]>([]);
+  const draftRecordingAudioContextRef = React.useRef<AudioContext | null>(null);
+  const draftRecordingAnalyserRef = React.useRef<AnalyserNode | null>(null);
+  const draftRecordingSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
+  const draftRecordingLevelFrameRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
   const autoPlayHandledKeyRef = React.useRef<string | null>(null);
   const autoPlayTokenHandledRef = React.useRef<number>(0);
@@ -835,9 +870,57 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const allReviewableDraftRecordings = [...draftRecordings, ...archivedDraftRecordings];
   const reviewingDraft = allReviewableDraftRecordings.find((draft) => draft.id === reviewingDraftId) ?? null;
 
+  const stopDraftRecordingLevelMeter = React.useCallback(() => {
+    if (draftRecordingLevelFrameRef.current !== null) {
+      window.cancelAnimationFrame(draftRecordingLevelFrameRef.current);
+      draftRecordingLevelFrameRef.current = null;
+    }
+    void draftRecordingAudioContextRef.current?.close().catch(() => undefined);
+    draftRecordingAudioContextRef.current = null;
+    draftRecordingAnalyserRef.current = null;
+    draftRecordingSourceRef.current = null;
+    setDraftRecordingLevel(0);
+  }, []);
+
   const stopDraftRecordingStream = React.useCallback(() => {
+    stopDraftRecordingLevelMeter();
     draftRecordingStreamRef.current?.getTracks().forEach((track) => track.stop());
     draftRecordingStreamRef.current = null;
+  }, [stopDraftRecordingLevelMeter]);
+
+  const startDraftRecordingLevelMeter = React.useCallback((stream: MediaStream) => {
+    const AudioContextCtor = window.AudioContext ?? (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) {
+      setDraftRecordingLevel(0);
+      return;
+    }
+
+    try {
+      const audioContext = new AudioContextCtor();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      draftRecordingAudioContextRef.current = audioContext;
+      draftRecordingAnalyserRef.current = analyser;
+      draftRecordingSourceRef.current = source;
+
+      const updateLevel = () => {
+        analyser.getByteTimeDomainData(samples);
+        let total = 0;
+        for (const sample of samples) {
+          const centered = sample - 128;
+          total += centered * centered;
+        }
+        const rms = Math.sqrt(total / samples.length);
+        setDraftRecordingLevel(Math.min(1, rms / 36));
+        draftRecordingLevelFrameRef.current = window.requestAnimationFrame(updateLevel);
+      };
+      updateLevel();
+    } catch {
+      setDraftRecordingLevel(0);
+    }
   }, []);
 
   const saveDraftRecordingBlob = React.useCallback(async (blob: Blob) => {
@@ -912,6 +995,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       draftRecordingStreamRef.current = stream;
       draftRecordingChunksRef.current = [];
+      startDraftRecordingLevelMeter(stream);
 
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) {
@@ -920,13 +1004,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       });
 
       recorder.addEventListener("stop", () => {
-        const chunks = [...draftRecordingChunksRef.current];
-        draftRecordingChunksRef.current = [];
         const recordedType = recorder.mimeType || mimeType || "audio/webm";
         stopDraftRecordingStream();
         draftRecorderRef.current = null;
 
-        void (async () => {
+        window.setTimeout(() => void (async () => {
+          const chunks = [...draftRecordingChunksRef.current];
+          draftRecordingChunksRef.current = [];
           try {
             if (chunks.length === 0) {
               throw new Error("No audio was captured.");
@@ -943,11 +1027,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             setDraftRecordingStatus("error");
             setDraftRecordingMessage(normalizeDraftRecordingError(error, "Failed to save draft recording."));
           }
-        })();
+        })(), 0);
       });
 
       draftRecorderRef.current = recorder;
-      recorder.start();
+      recorder.start(DRAFT_RECORDING_CHUNK_INTERVAL_MS);
       setDraftRecordingStatus("recording");
       setDraftRecordingMessage("Recording...");
     } catch (error) {
@@ -956,7 +1040,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       setDraftRecordingStatus("error");
       setDraftRecordingMessage(normalizeDraftRecordingError(error, "Could not start recording."));
     }
-  }, [isPlaying, pause, saveDraftRecordingBlob, stopDraftRecordingStream]);
+  }, [isPlaying, pause, saveDraftRecordingBlob, startDraftRecordingLevelMeter, stopDraftRecordingStream]);
 
   const handleStopDraftRecording = React.useCallback(() => {
     const recorder = draftRecorderRef.current;
@@ -965,9 +1049,33 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     setDraftRecordingStatus("saving");
     setDraftRecordingMessage("Saving draft recording...");
-    recorder.requestData();
+    try {
+      recorder.requestData();
+    } catch {
+      // Some mobile browsers flush chunks on stop without allowing requestData.
+    }
     recorder.stop();
   }, []);
+
+  const handleDiscardDraftRecording = React.useCallback(async (draftId: string) => {
+    setDraftDiscardMessage(null);
+    try {
+      const response = await request(`/api/songs/${song.id}/draft-recordings/${draftId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: "Failed to discard draft recording" }));
+        throw new Error(payload.error ?? `Failed to discard draft recording (${response.status})`);
+      }
+      if (reviewingDraftId === draftId) {
+        setReviewingDraftId(null);
+      }
+      setDraftDiscardMessage("Draft recording discarded.");
+      await onDraftRecordingSaved?.();
+    } catch (error) {
+      setDraftDiscardMessage(error instanceof Error ? error.message : "Failed to discard draft recording.");
+    }
+  }, [onDraftRecordingSaved, request, reviewingDraftId, song.id]);
 
   React.useEffect(() => {
     onSegmentPlaybackCompleteRef.current = onSegmentPlaybackComplete;
@@ -2394,6 +2502,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     draftRecordingChunksRef.current = [];
     setDraftRecordingStatus("idle");
     setDraftRecordingMessage(null);
+    setDraftRecordingLevel(0);
     setReviewingDraftId(null);
   }, [cancelTapPracticeCountIn, clearTapPersistenceWarning, song.id, stopDraftRecordingStream]);
 
@@ -2727,6 +2836,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   {draftRecordingMessage}
                 </span>
               ) : null}
+              {draftRecordingStatus === "recording" ? (
+                <div className="flex min-w-[96px] items-center gap-2" aria-label="Microphone input level" data-testid="draft-recording-level">
+                  <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-[width] duration-75"
+                      style={{ width: `${Math.max(4, Math.round(draftRecordingLevel * 100))}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-slate-500">Input</span>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {hasSegments && currentSegment && hasCardContourData ? (
@@ -2863,9 +2983,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 isPlaying={isPlaying}
                 onPause={pause}
                 onReview={setReviewingDraftId}
+                onDiscard={(draftId) => void handleDiscardDraftRecording(draftId)}
               />
             ))}
           </ul>
+          {draftDiscardMessage ? (
+            <p
+              className={`mt-2 text-xs ${draftDiscardMessage.includes("discarded") ? "text-emerald-700" : "text-red-700"}`}
+              role={draftDiscardMessage.includes("discarded") ? "status" : "alert"}
+              data-testid="draft-discard-status"
+            >
+              {draftDiscardMessage}
+            </p>
+          ) : null}
         </section>
       ) : null}
 
@@ -2885,6 +3015,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             request={request}
             onTrimSaved={onDraftRecordingSaved}
             onPromoted={onDraftRecordingSaved}
+            onDiscard={(draftId) => void handleDiscardDraftRecording(draftId)}
             onBack={() => setReviewingDraftId(null)}
           />
         </main>

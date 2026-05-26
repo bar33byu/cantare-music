@@ -286,6 +286,7 @@ describe("PracticeView", () => {
     const drafts = screen.getByTestId("draft-recordings");
     expect(within(drafts).getByText("Draft recording")).toBeInTheDocument();
     expect(within(drafts).getByText("Draft recording 1")).toBeInTheDocument();
+    expect(within(drafts).getByRole("button", { name: "Discard" })).toBeInTheDocument();
     fireEvent.click(within(drafts).getByRole("button", { name: "Review" }));
 
     const review = screen.getByTestId("draft-review-screen");
@@ -294,6 +295,41 @@ describe("PracticeView", () => {
     expect(within(review).getByText("Trim")).toBeInTheDocument();
     expect(screen.queryByTestId("draft-review-trim")).not.toBeInTheDocument();
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", "https://cdn.example.com/audio/drafts/draft-1.webm");
+  });
+
+  it("discards an active draft recording without opening review", async () => {
+    const onDraftRecordingSaved = vi.fn();
+    const song: Song = {
+      ...makeSong(),
+      draftRecordings: [
+        {
+          id: "draft-1",
+          songId: "song-1",
+          title: null,
+          audioKey: "audio/drafts/draft-1.webm",
+          audioUrl: "https://cdn.example.com/audio/drafts/draft-1.webm",
+          status: "draft",
+          createdAt: "2026-05-25T14:30:00.000Z",
+        },
+      ],
+    };
+
+    render(
+      <PracticeView
+        song={song}
+        initialSession={makeSession(song)}
+        onDraftRecordingSaved={onDraftRecordingSaved}
+      />
+    );
+
+    const drafts = screen.getByTestId("draft-recordings");
+    fireEvent.click(within(drafts).getByRole("button", { name: "Discard" }));
+
+    await waitFor(() => {
+      expect(onDraftRecordingSaved).toHaveBeenCalled();
+    });
+    expect(mockFetch).toHaveBeenCalledWith("/api/songs/song-1/draft-recordings/draft-1", expect.objectContaining({ method: "DELETE" }));
+    expect(screen.getByTestId("draft-discard-status")).toHaveTextContent("Draft recording discarded.");
   });
 
   it("shows archived drafts collapsed near the bottom and keeps them reviewable", async () => {
@@ -519,12 +555,14 @@ describe("PracticeView", () => {
   it("saves a draft recording immediately after stop", async () => {
     const onDraftRecordingSaved = vi.fn();
     const stopTrack = vi.fn();
+    let startInterval: number | undefined;
     class MockMediaRecorder extends EventTarget {
       static isTypeSupported = vi.fn(() => true);
       state: RecordingState = "inactive";
       mimeType = "audio/webm";
 
-      start() {
+      start(interval?: number) {
+        startInterval = interval;
         this.state = "recording";
       }
 
@@ -581,6 +619,8 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("draft-recording-status")).toHaveTextContent("Recording...");
     });
+    expect(screen.getByTestId("draft-recording-level")).toBeInTheDocument();
+    expect(startInterval).toBe(1000);
 
     fireEvent.click(screen.getByTestId("draft-recording-toggle"));
 

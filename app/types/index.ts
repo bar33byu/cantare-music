@@ -36,7 +36,7 @@ export interface DraftRecording {
   title?: string | null;
   audioKey: string;
   audioUrl?: string;
-  status: "draft" | "archived";
+  status: "draft" | "archived" | "discarded";
   trimStartMs?: number | null;
   trimEndMs?: number | null;
   createdAt: string;

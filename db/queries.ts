@@ -130,7 +130,7 @@ export interface PersistedDraftRecording {
   songId: string;
   title?: string | null;
   audioKey: string;
-  status: "draft" | "archived";
+  status: "draft" | "archived" | "discarded";
   trimStartMs?: number | null;
   trimEndMs?: number | null;
   createdAt: string;
@@ -1565,7 +1565,7 @@ function mapDraftRecording(row: DraftRecordingRow): PersistedDraftRecording {
     songId: row.songId,
     title: row.title,
     audioKey: row.audioKey,
-    status: row.status === "archived" ? "archived" : "draft",
+    status: row.status === "archived" ? "archived" : row.status === "discarded" ? "discarded" : "draft",
     trimStartMs: row.trimStartMs,
     trimEndMs: row.trimEndMs,
     createdAt: row.createdAt.toISOString(),
@@ -1676,6 +1676,29 @@ export async function promoteDraftRecordingToSongVersion(
     draftRecording: mapDraftRecording(archivedRows[0] ?? { ...draft, status: "archived", archivedAt }),
     previousAudioKey: song.audioKey,
   };
+}
+
+export async function discardDraftRecording(
+  songId: string,
+  draftRecordingId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PersistedDraftRecording | null> {
+  await ensureDraftRecordingTables();
+  const song = await getSongById(songId, userId);
+  if (!song) {
+    return null;
+  }
+
+  const rows = await db()
+    .update(draftRecordings)
+    .set({
+      status: "discarded",
+      archivedAt: new Date(),
+    })
+    .where(and(eq(draftRecordings.id, draftRecordingId), eq(draftRecordings.songId, songId), eq(draftRecordings.status, "draft")))
+    .returning();
+
+  return rows[0] ? mapDraftRecording(rows[0]) : null;
 }
 
 export async function getDraftRecordingsForSong(
