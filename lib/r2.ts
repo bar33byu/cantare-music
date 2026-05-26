@@ -73,7 +73,7 @@ export function getPublicUrl(key: string): string {
   return `${configuredPublicUrl.replace(/\/$/, '')}/${encodedKey}`;
 }
 
-export type AudioUploadVersion = 'prominent' | 'blend';
+export type AudioUploadVersion = 'prominent' | 'blend' | 'draft';
 
 export function generateUploadKey(
   songId: string,

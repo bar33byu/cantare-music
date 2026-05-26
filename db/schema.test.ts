@@ -10,6 +10,7 @@ import {
   userSessions,
   auditLogs,
   orphanedAudioKeys,
+  draftRecordings,
   tapPracticeSessions,
   tapPracticeTaps,
 } from "./schema";
@@ -65,6 +66,9 @@ describe("schema tables", () => {
     expect(cols).toContain("title");
     expect(cols).toContain("artist");
     expect(cols).toContain("audioKey");
+    expect(cols).toContain("alternateAudioKey");
+    expect(cols).toContain("audioTrimStartMs");
+    expect(cols).toContain("audioTrimEndMs");
     expect(cols).toContain("sourceSongId");
     expect(cols).toContain("createdAt");
     expect(cols).toContain("lastPracticedAt");
@@ -123,6 +127,19 @@ describe("schema tables", () => {
     expect(cols).toContain("userId");
     expect(cols).toContain("audioKey");
     expect(cols).toContain("failedAt");
+  });
+
+  it("draftRecordings table has expected columns", () => {
+    const cols = Object.keys(draftRecordings);
+    expect(cols).toContain("id");
+    expect(cols).toContain("songId");
+    expect(cols).toContain("title");
+    expect(cols).toContain("audioKey");
+    expect(cols).toContain("status");
+    expect(cols).toContain("trimStartMs");
+    expect(cols).toContain("trimEndMs");
+    expect(cols).toContain("createdAt");
+    expect(cols).toContain("archivedAt");
   });
 
   it("tapPracticeSessions table has expected columns", () => {

@@ -75,6 +75,29 @@ describe('POST /api/songs/upload-url', () => {
     expect(generateUploadKey).toHaveBeenCalledWith('song-123', 'test.mp3', 'blend');
   });
 
+  it('accepts recorder audio for draft recordings', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: 'song-123' } as any);
+    vi.mocked(generateUploadKey).mockReturnValue('audio/song-123/draft/1234567-draft.webm');
+    vi.mocked(getSignedUrl).mockResolvedValue('https://example.r2.dev/presigned-url');
+
+    const request = new Request('http://localhost/api/songs/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        songId: 'song-123',
+        filename: 'draft.webm',
+        contentType: 'audio/webm;codecs=opus',
+        size: 1024,
+        audioVersion: 'draft',
+      }),
+    });
+
+    const response = await POST(request as any);
+
+    expect(response.status).toBe(200);
+    expect(generateUploadKey).toHaveBeenCalledWith('song-123', 'draft.webm', 'draft');
+  });
+
   it('returns 400 when size is greater than 15 MB', async () => {
     vi.mocked(getSongById).mockResolvedValue({ id: 'song-123' } as any);
     const request = new Request('http://localhost/api/songs/upload-url', {

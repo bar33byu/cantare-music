@@ -135,6 +135,8 @@ export const songs = pgTable(
     artist: text("artist"),
     audioKey: text("audio_key"),
     alternateAudioKey: text("alternate_audio_key"),
+    audioTrimStartMs: integer("audio_trim_start_ms"),
+    audioTrimEndMs: integer("audio_trim_end_ms"),
     sourceSongId: text("source_song_id"),
     pitchContourNotes: jsonb("pitch_contour_notes")
       .$type<SongPitchContourPoint[]>()
@@ -226,6 +228,26 @@ export const orphanedAudioKeys = pgTable("orphaned_audio_keys", {
   audioKey: text("audio_key").notNull(),
   failedAt: timestamp("failed_at").defaultNow(),
 });
+
+export const draftRecordings = pgTable(
+  "draft_recordings",
+  {
+    id: text("id").primaryKey(),
+    songId: text("song_id")
+      .notNull()
+      .references(() => songs.id, { onDelete: "cascade" }),
+    title: text("title"),
+    audioKey: text("audio_key").notNull(),
+    status: text("status").notNull().default("draft"),
+    trimStartMs: integer("trim_start_ms"),
+    trimEndMs: integer("trim_end_ms"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    archivedAt: timestamp("archived_at"),
+  },
+  (table) => ({
+    songStatusCreatedAtIdx: index("idx_draft_recordings_song_status_created_at").on(table.songId, table.status, table.createdAt),
+  })
+);
 
 export const tapPracticeSessions = pgTable(
   "tap_practice_sessions",
@@ -334,8 +356,10 @@ export type UserRow = InferSelectModel<typeof users>;
 export type MagicLinkTokenRow = InferSelectModel<typeof magicLinkTokens>;
 export type UserSessionRow = InferSelectModel<typeof userSessions>;
 export type AuditLogRow = InferSelectModel<typeof auditLogs>;
-export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId"> & {
+export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId" | "audioTrimStartMs" | "audioTrimEndMs"> & {
   sourceSongId?: string | null;
+  audioTrimStartMs?: number | null;
+  audioTrimEndMs?: number | null;
 };
 export type SegmentRow = Omit<InferSelectModel<typeof segments>, "sourceSegmentId"> & {
   sourceSegmentId?: string | null;
@@ -344,6 +368,7 @@ export type PracticeRatingRow = InferSelectModel<typeof practiceRatings>;
 export type PlaylistRow = InferSelectModel<typeof playlists>;
 export type PlaylistSongRow = InferSelectModel<typeof playlistSongs>;
 export type OrphanedAudioKeyRow = InferSelectModel<typeof orphanedAudioKeys>;
+export type DraftRecordingRow = InferSelectModel<typeof draftRecordings>;
 export type TapPracticeSessionRow = InferSelectModel<typeof tapPracticeSessions>;
 export type TapPracticeTapRow = InferSelectModel<typeof tapPracticeTaps>;
 export type MidiSourceRow = InferSelectModel<typeof midiSources>;

@@ -4,6 +4,8 @@ import {
   deleteSong,
   updateSong,
   getSegmentsBySongId,
+  getDraftRecordingsForSong,
+  getArchivedDraftRecordingsForSong,
   recordOrphanedAudioKey,
 } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
@@ -31,7 +33,11 @@ export async function GET(
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
-    const segments = await getSegmentsBySongId(id);
+    const [segments, draftRecordings, archivedDraftRecordings] = await Promise.all([
+      getSegmentsBySongId(id),
+      getDraftRecordingsForSong(id, userId),
+      getArchivedDraftRecordingsForSong(id, userId),
+    ]);
 
     // Construct full song object with segments
     const fullSong = {
@@ -40,7 +46,17 @@ export async function GET(
       artist: song.artist,
       audioUrl: song.audioKey ? getPublicUrl(song.audioKey) : '',
       alternateAudioUrl: song.alternateAudioKey ? getPublicUrl(song.alternateAudioKey) : undefined,
+      audioTrimStartMs: song.audioTrimStartMs ?? null,
+      audioTrimEndMs: song.audioTrimEndMs ?? null,
       pitchContourNotes: [],
+      draftRecordings: draftRecordings.map((draft) => ({
+        ...draft,
+        audioUrl: getPublicUrl(draft.audioKey),
+      })),
+      archivedDraftRecordings: archivedDraftRecordings.map((draft) => ({
+        ...draft,
+        audioUrl: getPublicUrl(draft.audioKey),
+      })),
       segments: segments.map(segment => ({
         id: segment.id,
         songId: segment.songId,

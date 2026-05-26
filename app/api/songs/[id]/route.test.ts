@@ -14,6 +14,8 @@ vi.mock('../../../../db/queries', () => ({
   deleteSong: vi.fn(),
   updateSong: vi.fn(),
   getSegmentsBySongId: vi.fn(),
+  getDraftRecordingsForSong: vi.fn(),
+  getArchivedDraftRecordingsForSong: vi.fn(),
   recordOrphanedAudioKey: vi.fn(),
 }));
 
@@ -28,8 +30,16 @@ import {
   deleteSong,
   updateSong,
   getSegmentsBySongId,
+  getDraftRecordingsForSong,
+  getArchivedDraftRecordingsForSong,
 } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(getDraftRecordingsForSong).mockResolvedValue([]);
+  vi.mocked(getArchivedDraftRecordingsForSong).mockResolvedValue([]);
+});
 
 describe('GET /api/songs/[id]', () => {
   it('returns song by id', async () => {
@@ -45,8 +55,12 @@ describe('GET /api/songs/[id]', () => {
       userId: 'default',
     };
     const mockSegments = [{ id: 'seg1', songId: '123', label: 'Verse', order: 0, startMs: 0, endMs: 1000, lyricText: 'lyrics', pitchContourNotes: [] }];
+    const mockDraftRecordings = [{ id: 'draft-1', songId: '123', title: null, audioKey: 'draft-key.mp3', status: 'draft' as const, createdAt: '2026-05-25T12:00:00.000Z' }];
+    const mockArchivedDraftRecordings = [{ id: 'draft-2', songId: '123', title: null, audioKey: 'archived-key.mp3', status: 'archived' as const, createdAt: '2026-05-24T12:00:00.000Z', archivedAt: '2026-05-25T12:00:00.000Z' }];
     vi.mocked(getSongById).mockResolvedValue(mockSong);
     vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments);
+    vi.mocked(getDraftRecordingsForSong).mockResolvedValue(mockDraftRecordings);
+    vi.mocked(getArchivedDraftRecordingsForSong).mockResolvedValue(mockArchivedDraftRecordings);
     vi.mocked(getPublicUrl).mockReturnValue('https://example.com/key.mp3');
 
     const request = new Request('http://localhost/api/songs/123');
@@ -60,7 +74,11 @@ describe('GET /api/songs/[id]', () => {
       artist: 'Artist',
       audioUrl: 'https://example.com/key.mp3',
       alternateAudioUrl: 'https://example.com/key.mp3',
+      audioTrimStartMs: null,
+      audioTrimEndMs: null,
       pitchContourNotes: [],
+      draftRecordings: mockDraftRecordings.map((draft) => ({ ...draft, audioUrl: 'https://example.com/key.mp3' })),
+      archivedDraftRecordings: mockArchivedDraftRecordings.map((draft) => ({ ...draft, audioUrl: 'https://example.com/key.mp3' })),
       segments: [{
         id: 'seg1',
         songId: '123',
@@ -77,6 +95,8 @@ describe('GET /api/songs/[id]', () => {
     });
     expect(getSongById).toHaveBeenCalledWith('123', 'default');
     expect(getSegmentsBySongId).toHaveBeenCalledWith('123');
+    expect(getDraftRecordingsForSong).toHaveBeenCalledWith('123', 'default');
+    expect(getArchivedDraftRecordingsForSong).toHaveBeenCalledWith('123', 'default');
   });
 
   it('returns 404 if song not found', async () => {
