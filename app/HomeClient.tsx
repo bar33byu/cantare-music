@@ -12,6 +12,7 @@ import { SegmentEditor } from "./components/SegmentEditor";
 import { makeSession } from "./lib/factories";
 import {
   clearGuestProgress,
+  getGuestProgressUserId,
   getGuestProgressSongIds,
   hasDeclinedGuestProgressClaim,
   hasGuestProgress,
@@ -19,7 +20,16 @@ import {
   markGuestSongProgress,
 } from "./lib/guestProgress";
 import type { Playlist, Song } from "./types";
-import { createPublicUsernameFromName, DEFAULT_USER_ID, normalizeUserId, normalizeUsername, type KnownUser, USER_COOKIE_NAME } from "./lib/userContext";
+import {
+  createPublicUsernameFromName,
+  DEFAULT_USER_ID,
+  getOrCreateAnonymousUserId,
+  isAnonymousUserId,
+  normalizeUserId,
+  normalizeUsername,
+  type KnownUser,
+  USER_COOKIE_NAME,
+} from "./lib/userContext";
 import type { PreferredAudioVersion } from "./lib/audioUrls";
 
 interface SongListItem {
@@ -70,6 +80,16 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
   currentUserId: DEFAULT_USER_ID,
   users: [{ id: DEFAULT_USER_ID, username: "default", name: "Default User", email: "", profileVisibility: "private" }],
 };
+
+function makeAnonymousKnownUser(id: string): KnownUser {
+  return {
+    id,
+    username: id,
+    name: "Guest",
+    email: "",
+    profileVisibility: "private",
+  };
+}
 
 function normalizeKnownUsers(users: Array<Partial<KnownUser>> | undefined): KnownUser[] {
   if (!Array.isArray(users)) {
@@ -267,7 +287,26 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [playlistPracticeReadOnly, setPlaylistPracticeReadOnly] = useState(false);
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [userSettings, setUserSettings] = useState<UserSettings>(() => {
+    if (typeof window === "undefined") {
+      return DEFAULT_USER_SETTINGS;
+    }
+
+    const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
+    const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
+    if (cookieUserId !== DEFAULT_USER_ID) {
+      const users = storedSettings.users.some((user) => user.id === cookieUserId)
+        ? storedSettings.users
+        : [...storedSettings.users, isAnonymousUserId(cookieUserId) ? makeAnonymousKnownUser(cookieUserId) : { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" }];
+      return { ...storedSettings, currentUserId: cookieUserId, users };
+    }
+
+    const guestUserId = getOrCreateAnonymousUserId(window.localStorage);
+    const users = storedSettings.users.some((user) => user.id === guestUserId)
+      ? storedSettings.users
+      : [...storedSettings.users, makeAnonymousKnownUser(guestUserId)];
+    return { ...storedSettings, currentUserId: guestUserId, users };
+  });
   const [authEmail, setAuthEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -357,14 +396,17 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
+    let cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
+    if (cookieUserId === DEFAULT_USER_ID) {
+      cookieUserId = getOrCreateAnonymousUserId(window.localStorage);
+    }
     if (cookieUserId !== DEFAULT_USER_ID && !storedSettings.users.some((user) => user.id === cookieUserId)) {
       setUserSettings({
         ...storedSettings,
         currentUserId: cookieUserId,
         users: [
           ...storedSettings.users,
-          { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" },
+          isAnonymousUserId(cookieUserId) ? makeAnonymousKnownUser(cookieUserId) : { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" },
         ],
       });
     } else {
@@ -384,7 +426,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     const params = new URLSearchParams(window.location.search);
     const shouldCleanAuthParam = params.get("auth") === "signed-in";
     const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
-    if (cookieUserId === DEFAULT_USER_ID && !shouldCleanAuthParam) {
+    if ((cookieUserId === DEFAULT_USER_ID || isAnonymousUserId(cookieUserId)) && !shouldCleanAuthParam) {
       return;
     }
 
@@ -592,7 +634,14 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     } catch {
       // Clear local state even if the server-side revoke request cannot complete.
     } finally {
-      setUserSettings((previous) => ({ ...previous, currentUserId: DEFAULT_USER_ID }));
+      const guestUserId = typeof window === "undefined" ? DEFAULT_USER_ID : getOrCreateAnonymousUserId(window.localStorage);
+      setUserSettings((previous) => ({
+        ...previous,
+        currentUserId: guestUserId,
+        users: previous.users.some((user) => user.id === guestUserId)
+          ? previous.users
+          : [...previous.users, makeAnonymousKnownUser(guestUserId)],
+      }));
       setSessionActor(null);
       setImpersonation(null);
       setSelectedSong(null);
@@ -669,7 +718,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       const response = await fetch("/api/guest-progress/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ songIds }),
+        body: JSON.stringify({ songIds, guestUserId: getGuestProgressUserId() ?? activeUserId }),
       });
       if (!response.ok) {
         throw new Error("Failed to import guest progress");

@@ -340,10 +340,10 @@ describe('Home page', () => {
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/songs/song-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/songs/song-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
   });
 
@@ -372,9 +372,10 @@ describe('Home page', () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith('/api/songs/song-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
     expect(window.localStorage.getItem('cantare:guest-progress:v1')).toContain('song-1');
+    expect(window.localStorage.getItem('cantare:guest-progress:v1')).toContain('guest-');
   });
 
   it('writes hash route on navigation and keeps tabs navigable', async () => {
@@ -471,7 +472,7 @@ describe('Home page', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith('/api/playlists/playlist-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': 'default' }),
+      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
   });
 

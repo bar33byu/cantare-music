@@ -10,6 +10,15 @@ const DEFAULT_QUERY_USER_ID = "default";
 let ensureTapPracticeTablesPromise: Promise<void> | null = null;
 let ensureMidiTablesPromise: Promise<void> | null = null;
 
+function normalizeDbUserId(value: string | null | undefined): string {
+  if (!value) {
+    return DEFAULT_QUERY_USER_ID;
+  }
+
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").slice(0, 48);
+  return normalized.length > 0 ? normalized : DEFAULT_QUERY_USER_ID;
+}
+
 export function getLeadingTitleNumber(title: string): string | null {
   const match = title.match(/^\s*(\d+)/);
   return match ? match[1] : null;
@@ -1975,10 +1984,11 @@ async function copyGuestRatingsToTarget(
   guestSongId: string,
   targetSongId: string,
   targetUserId: string,
-  segmentIdMap: Map<string, string>
+  segmentIdMap: Map<string, string>,
+  sourceGuestUserId: string = DEFAULT_QUERY_USER_ID
 ): Promise<number> {
   const [guestRatings, targetRatings] = await Promise.all([
-    getRatingsForSong(guestSongId, DEFAULT_QUERY_USER_ID),
+    getRatingsForSong(guestSongId, sourceGuestUserId),
     getRatingsForSong(targetSongId, targetUserId),
   ]);
   const mergedBySegment = new Map<string, { segmentId: string; rating: PersistedMemoryRating; ratedAt: Date }>();
@@ -2021,13 +2031,14 @@ async function copyGuestTapSessionsToTarget(
   guestSongId: string,
   targetSongId: string,
   targetUserId: string,
-  segmentIdMap: Map<string, string>
+  segmentIdMap: Map<string, string>,
+  sourceGuestUserId: string = DEFAULT_QUERY_USER_ID
 ): Promise<number> {
-  const sessions = await listTapPracticeSessionsForSong(guestSongId, DEFAULT_QUERY_USER_ID, 100);
+  const sessions = await listTapPracticeSessionsForSong(guestSongId, sourceGuestUserId, 100);
   let importedCount = 0;
 
   for (const session of sessions) {
-    const detail = await getTapPracticeSessionDetail(session.id, DEFAULT_QUERY_USER_ID);
+    const detail = await getTapPracticeSessionDetail(session.id, sourceGuestUserId);
     if (!detail) {
       continue;
     }
@@ -2080,8 +2091,10 @@ async function copyGuestTapSessionsToTarget(
 
 export async function claimGuestProgressForUser(
   targetUserId: string,
-  guestSongIds: string[]
+  guestSongIds: string[],
+  sourceGuestUserId: string = DEFAULT_QUERY_USER_ID
 ): Promise<GuestProgressClaimResult> {
+  const guestUserId = normalizeDbUserId(sourceGuestUserId);
   const uniqueGuestSongIds = Array.from(new Set(guestSongIds.filter((id) => typeof id === "string" && id.trim().length > 0)));
   const result: GuestProgressClaimResult = {
     claimedSongIds: [],
@@ -2100,7 +2113,7 @@ export async function claimGuestProgressForUser(
     db()
       .select()
       .from(songs)
-      .where(and(eq(songs.userId, DEFAULT_QUERY_USER_ID), inArray(songs.id, uniqueGuestSongIds))),
+      .where(and(eq(songs.userId, guestUserId), inArray(songs.id, uniqueGuestSongIds))),
     getAllSongs(targetUserId),
   ]);
 
@@ -2118,12 +2131,12 @@ export async function claimGuestProgressForUser(
       await db()
         .update(songs)
         .set({ userId: targetUserId })
-        .where(and(eq(songs.id, guestSong.id), eq(songs.userId, DEFAULT_QUERY_USER_ID)));
+        .where(and(eq(songs.id, guestSong.id), eq(songs.userId, guestUserId)));
       try {
         await db()
           .update(tapPracticeSessions)
           .set({ userId: targetUserId })
-          .where(and(eq(tapPracticeSessions.songId, guestSong.id), eq(tapPracticeSessions.userId, DEFAULT_QUERY_USER_ID)));
+          .where(and(eq(tapPracticeSessions.songId, guestSong.id), eq(tapPracticeSessions.userId, guestUserId)));
       } catch (error) {
         if (!isMissingTapPracticeTableError(error)) {
           throw error;
@@ -2145,8 +2158,8 @@ export async function claimGuestProgressForUser(
       continue;
     }
 
-    result.importedRatingCount += await copyGuestRatingsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap);
-    result.importedTapSessionCount += await copyGuestTapSessionsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap);
+    result.importedRatingCount += await copyGuestRatingsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap, guestUserId);
+    result.importedTapSessionCount += await copyGuestTapSessionsToTarget(guestSong.id, targetSong.id, targetUserId, segmentIdMap, guestUserId);
 
     const guestPracticedAt = guestSong.lastPracticedAt?.getTime() ?? 0;
     const targetPracticedAt = targetSong.lastPracticedAt?.getTime() ?? 0;
@@ -2154,7 +2167,7 @@ export async function claimGuestProgressForUser(
       await markSongPracticed(targetSong.id, targetUserId, guestSong.lastPracticedAt);
     }
 
-    await deleteSong(guestSong.id, DEFAULT_QUERY_USER_ID);
+    await deleteSong(guestSong.id, guestUserId);
     result.claimedSongIds.push(targetSong.id);
     result.mergedSongIds.push(targetSong.id);
   }
