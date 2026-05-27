@@ -58,6 +58,7 @@ interface PracticeViewProps {
   segmentPrerollMs?: number;
   preferredAudioVersion?: PreferredAudioVersion;
   onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
+  readOnlyDataUserId?: string;
   collapseLyricLineBreaks?: boolean;
   defaultLooping?: boolean;
   playScope?: "song" | "segment";
@@ -944,6 +945,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   segmentPrerollMs = 500,
   preferredAudioVersion = "part",
   onPreferredAudioVersionChange,
+  readOnlyDataUserId,
   collapseLyricLineBreaks = false,
   defaultLooping = false,
   playScope = "song",
@@ -977,6 +979,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const scopedInit = withUserHeader(init);
     return scopedInit ? fetch(url, scopedInit) : fetch(url);
   }, [withUserHeader]);
+
+  const withReadOnlyDataUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
+    const dataUserId = readOnlyDataUserId ?? userId;
+    if (!dataUserId) {
+      return init;
+    }
+
+    const headers = new Headers(init?.headers);
+    headers.set("X-User-ID", dataUserId);
+    return {
+      ...init,
+      headers,
+    };
+  }, [readOnlyDataUserId, userId]);
+
+  const readOnlyDataRequest = React.useCallback((url: string, init?: RequestInit) => {
+    const scopedInit = withReadOnlyDataUserHeader(init);
+    return scopedInit ? fetch(url, scopedInit) : fetch(url);
+  }, [withReadOnlyDataUserHeader]);
 
   const effectiveSegmentPrerollMs = Math.max(0, segmentPrerollMs);
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
@@ -1067,7 +1088,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     () => song.segments.map((segment) => `${segment.id}:${segment.startMs}-${segment.endMs}`).join("|"),
     [song.segments]
   );
-  const hasMidiTapAnswers = accountProgressEnabled && (
+  const hasMidiTapAnswers = (
     Object.values(midiSegmentAnswerKeys).some((key) => key.taps.length > 0) ||
     (song.pitchContourNotes?.length ?? 0) > 0
   );
@@ -2820,7 +2841,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [session, onSessionChange]);
 
   useEffect(() => {
-    if (!accountProgressEnabled) {
+    const shouldLoadMidiData = accountProgressEnabled || Boolean(song.hasMidiContour) || (song.pitchContourNotes?.length ?? 0) > 0;
+    if (!shouldLoadMidiData) {
       setTapSessionSummaries([]);
       setMidiSegmentAnswerKeys({});
       return;
@@ -2831,13 +2853,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const loadEnhancedTapData = async () => {
       try {
         const [response, midiResponse] = await Promise.all([
-          request(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }),
-          request(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
+          accountProgressEnabled ? request(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }) : Promise.resolve(null),
+          readOnlyDataRequest(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
         ]);
-        if (!response.ok) {
+        if (response && !response.ok) {
           throw new Error(`Failed to load tap sessions (${response.status})`);
         }
-        const payload = await response.json() as { sessions?: TapSessionSummaryPayload[] };
+        const payload = response ? await response.json() as { sessions?: TapSessionSummaryPayload[] } : { sessions: [] };
         const midiPayload = midiResponse.ok
           ? await midiResponse.json() as { segmentAnswerKeys?: Record<string, MidiSegmentAnswerKey> }
           : { segmentAnswerKeys: {} };
@@ -2864,7 +2886,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [accountProgressEnabled, request, segmentTimingSignature, song.id, tapHeatMapRefreshToken, userId]);
+  }, [accountProgressEnabled, readOnlyDataRequest, request, segmentTimingSignature, song.hasMidiContour, song.id, song.pitchContourNotes, tapHeatMapRefreshToken, userId]);
 
   useEffect(() => {
     let cancelled = false;

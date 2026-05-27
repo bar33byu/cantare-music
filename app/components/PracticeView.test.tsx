@@ -265,6 +265,31 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
   });
 
+  it("loads MIDI contour controls for read-only shared playlist songs using the owner data user", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+    const sharedSong = { ...makeSong(), hasMidiContour: true };
+
+    render(
+      <PracticeView
+        song={sharedSong}
+        userId="viewer-user"
+        readOnlyDataUserId="owner-user"
+        persistProgress={false}
+        initialSession={makeSession(sharedSong)}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("practice-tap-mode-toggle")).toBeInTheDocument();
+    });
+
+    const midiCall = mockFetch.mock.calls.find(([url]) => String(url).endsWith("/midi"));
+    expect(midiCall).toBeTruthy();
+    expect(new Headers(midiCall?.[1]?.headers).get("X-User-ID")).toBe("owner-user");
+    expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith("/tap-sessions"))).toBe(false);
+  });
+
   it("shows draft recordings for the song", async () => {
     const song: Song = {
       ...makeSong(),

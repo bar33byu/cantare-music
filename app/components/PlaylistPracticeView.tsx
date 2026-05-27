@@ -216,6 +216,7 @@ export function PlaylistPracticeView({
   const progressStorage = progressStorageOverride ?? (persistProgress ? 'account' : 'none');
   const accountProgressEnabled = progressStorage === 'account';
   const localProgressEnabled = progressStorage === 'local';
+  const readOnlyDataUserId = !persistProgress ? livePlaylist.owner?.id : undefined;
 
   const playlistDetailRequest = useMemo(() => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
@@ -1475,6 +1476,7 @@ export function PlaylistPracticeView({
                     userId={userId}
                     persistProgress={persistProgress}
                     progressStorage={progressStorage}
+                    readOnlyDataUserId={readOnlyDataUserId}
                     initialSession={focusPracticeSession}
                     onSessionChange={handleFocusSessionChange}
                     onRatingsSaved={handleFocusRatingsSaved}
@@ -1609,6 +1611,7 @@ export function PlaylistPracticeView({
                     userId={userId}
                     persistProgress={persistProgress}
                     progressStorage={progressStorage}
+                    readOnlyDataUserId={readOnlyDataUserId}
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel="Auto Drill"

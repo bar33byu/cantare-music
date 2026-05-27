@@ -104,6 +104,11 @@ export interface Playlist {
   sourceShareToken?: string | null;
   importedAt?: string | null;
   createdAt: string;
+  owner?: {
+    id: string;
+    displayName: string;
+    username: string;
+  };
   songs: Array<Song & { position: number; masteryPercent?: number; ratingCount?: number }>;
 }
 

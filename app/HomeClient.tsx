@@ -1591,6 +1591,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             song={selectedSong}
             userId={activeUserId}
             persistProgress={!playlistPracticeReadOnly}
+            readOnlyDataUserId={playlistPracticeReadOnly ? selectedPlaylist?.owner?.id : undefined}
             initialSession={session}
             onDraftRecordingSaved={refreshSelectedSong}
             breadcrumbRootLabel={breadcrumbRootLabel}
