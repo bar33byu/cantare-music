@@ -265,6 +265,31 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
   });
 
+  it("loads MIDI contour controls for read-only shared playlist songs using the owner data user", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+    const sharedSong = { ...makeSong(), hasMidiContour: true };
+
+    render(
+      <PracticeView
+        song={sharedSong}
+        userId="viewer-user"
+        readOnlyDataUserId="owner-user"
+        persistProgress={false}
+        initialSession={makeSession(sharedSong)}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("practice-tap-mode-toggle")).toBeInTheDocument();
+    });
+
+    const midiCall = mockFetch.mock.calls.find(([url]) => String(url).endsWith("/midi"));
+    expect(midiCall).toBeTruthy();
+    expect(new Headers(midiCall?.[1]?.headers).get("X-User-ID")).toBe("owner-user");
+    expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith("/tap-sessions"))).toBe(false);
+  });
+
   it("shows draft recordings for the song", async () => {
     const song: Song = {
       ...makeSong(),
@@ -286,6 +311,7 @@ describe("PracticeView", () => {
     const drafts = screen.getByTestId("draft-recordings");
     expect(within(drafts).getByText("Draft recording")).toBeInTheDocument();
     expect(within(drafts).getByText("Draft recording 1")).toBeInTheDocument();
+    expect(within(drafts).getByRole("button", { name: "Discard" })).toBeInTheDocument();
     fireEvent.click(within(drafts).getByRole("button", { name: "Review" }));
 
     const review = screen.getByTestId("draft-review-screen");
@@ -294,6 +320,74 @@ describe("PracticeView", () => {
     expect(within(review).getByText("Trim")).toBeInTheDocument();
     expect(screen.queryByTestId("draft-review-trim")).not.toBeInTheDocument();
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", "https://cdn.example.com/audio/drafts/draft-1.webm");
+  });
+
+  it("discards an active draft recording without opening review", async () => {
+    const onDraftRecordingSaved = vi.fn();
+    const song: Song = {
+      ...makeSong(),
+      draftRecordings: [
+        {
+          id: "draft-1",
+          songId: "song-1",
+          title: null,
+          audioKey: "audio/drafts/draft-1.webm",
+          audioUrl: "https://cdn.example.com/audio/drafts/draft-1.webm",
+          status: "draft",
+          createdAt: "2026-05-25T14:30:00.000Z",
+        },
+      ],
+    };
+
+    render(
+      <PracticeView
+        song={song}
+        initialSession={makeSession(song)}
+        onDraftRecordingSaved={onDraftRecordingSaved}
+      />
+    );
+
+    const drafts = screen.getByTestId("draft-recordings");
+    fireEvent.click(within(drafts).getByRole("button", { name: "Discard" }));
+
+    await waitFor(() => {
+      expect(onDraftRecordingSaved).toHaveBeenCalled();
+    });
+    expect(mockFetch).toHaveBeenCalledWith("/api/songs/song-1/draft-recordings/draft-1", expect.objectContaining({ method: "DELETE" }));
+    expect(screen.getByTestId("draft-discard-status")).toHaveTextContent("Draft recording discarded.");
+  });
+
+  it("numbers generated draft recording labels by creation order", async () => {
+    const song: Song = {
+      ...makeSong(),
+      draftRecordings: [
+        {
+          id: "draft-new",
+          songId: "song-1",
+          title: null,
+          audioKey: "audio/drafts/new.webm",
+          audioUrl: "https://cdn.example.com/audio/drafts/new.webm",
+          status: "draft",
+          createdAt: "2026-05-25T22:44:00.000Z",
+        },
+        {
+          id: "draft-old",
+          songId: "song-1",
+          title: null,
+          audioKey: "audio/drafts/old.webm",
+          audioUrl: "https://cdn.example.com/audio/drafts/old.webm",
+          status: "draft",
+          createdAt: "2026-05-25T21:41:00.000Z",
+        },
+      ],
+    };
+
+    await renderAndWaitForRatings(song);
+
+    const drafts = screen.getByTestId("draft-recordings");
+    const items = within(drafts).getAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("Draft recording 2");
+    expect(items[1]).toHaveTextContent("Draft recording 1");
   });
 
   it("shows archived drafts collapsed near the bottom and keeps them reviewable", async () => {
@@ -378,8 +472,13 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
 
+    expect(screen.getByTestId("draft-trim-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("draft-waveform-zoom")).toHaveValue("1");
     expect(screen.getByTestId("draft-trim-start")).toHaveValue("1000");
     expect(screen.getByTestId("draft-trim-end")).toHaveValue("6000");
+
+    fireEvent.change(screen.getByTestId("draft-waveform-zoom"), { target: { value: "4" } });
+    expect(screen.getByTestId("draft-waveform-zoom")).toHaveValue("4");
 
     fireEvent.change(screen.getByTestId("draft-trim-start"), { target: { value: "2000" } });
     fireEvent.change(screen.getByTestId("draft-trim-end"), { target: { value: "7000" } });
@@ -519,16 +618,18 @@ describe("PracticeView", () => {
   it("saves a draft recording immediately after stop", async () => {
     const onDraftRecordingSaved = vi.fn();
     const stopTrack = vi.fn();
+    const startSpy = vi.fn();
     class MockMediaRecorder extends EventTarget {
       static isTypeSupported = vi.fn(() => true);
       state: RecordingState = "inactive";
       mimeType = "audio/webm";
 
       start() {
+        startSpy();
         this.state = "recording";
       }
 
-      requestData() {
+      emitAudio() {
         const event = new Event("dataavailable") as Event & { data: Blob };
         event.data = new Blob(["draft-audio"], { type: "audio/webm" });
         this.dispatchEvent(event);
@@ -536,6 +637,7 @@ describe("PracticeView", () => {
 
       stop() {
         this.state = "inactive";
+        this.emitAudio();
         this.dispatchEvent(new Event("stop"));
       }
     }
@@ -581,6 +683,8 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("draft-recording-status")).toHaveTextContent("Recording...");
     });
+    expect(screen.getByTestId("draft-recording-level")).toBeInTheDocument();
+    expect(startSpy).toHaveBeenCalledWith();
 
     fireEvent.click(screen.getByTestId("draft-recording-toggle"));
 

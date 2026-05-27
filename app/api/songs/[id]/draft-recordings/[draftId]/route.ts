@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateDraftRecordingTrim } from '../../../../../../db/queries';
+import { discardDraftRecording, updateDraftRecordingTrim } from '../../../../../../db/queries';
 import { resolveRequestUserId } from '../../../../_user';
 
 type UpdateDraftRecordingBody = {
@@ -47,6 +47,25 @@ export async function PATCH(
     return NextResponse.json({ draftRecording });
   } catch (error) {
     console.error('Error updating draft recording:', error);
+    return NextResponse.json(formatError(error), { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string; draftId: string }> }
+) {
+  try {
+    const userId = resolveRequestUserId(request);
+    const { id, draftId } = await params;
+    const draftRecording = await discardDraftRecording(id, draftId, userId);
+    if (!draftRecording) {
+      return NextResponse.json({ error: 'Draft recording not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ draftRecording });
+  } catch (error) {
+    console.error('Error discarding draft recording:', error);
     return NextResponse.json(formatError(error), { status: 500 });
   }
 }

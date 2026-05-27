@@ -58,6 +58,7 @@ interface PracticeViewProps {
   segmentPrerollMs?: number;
   preferredAudioVersion?: PreferredAudioVersion;
   onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
+  readOnlyDataUserId?: string;
   collapseLyricLineBreaks?: boolean;
   defaultLooping?: boolean;
   playScope?: "song" | "segment";
@@ -120,6 +121,7 @@ const DRAFT_LABELS = {
   review: "Review",
   trim: "Trim",
   promote: "Promote to song version",
+  discard: "Discard",
   saved: "Saved",
 } as const;
 
@@ -199,9 +201,286 @@ function normalizeDraftRecordingError(error: unknown, fallback: string): string 
   return error.message || fallback;
 }
 
-function getDraftRecordingFallbackTitle(draft: DraftRecording, index: number): string {
-  const safeIndex = Math.max(0, index);
-  return draft.title?.trim() || (draft.status === "archived" ? `Archived draft ${safeIndex + 1}` : `Draft recording ${safeIndex + 1}`);
+function getAudioContextConstructor(): typeof AudioContext | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  return window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+}
+
+async function loadWaveformPeaks(audioUrl: string, peakCount = 180): Promise<number[]> {
+  const AudioContextConstructor = getAudioContextConstructor();
+  if (!AudioContextConstructor) {
+    throw new Error("Waveform preview is unavailable in this browser.");
+  }
+
+  const response = await fetch(audioUrl, { cache: "force-cache" });
+  if (!response.ok) {
+    throw new Error("Waveform preview could not load audio.");
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const audioContext = new AudioContextConstructor();
+  try {
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    const channelData = audioBuffer.getChannelData(0);
+    const samplesPerPeak = Math.max(1, Math.floor(channelData.length / peakCount));
+    const peaks: number[] = [];
+
+    for (let peakIndex = 0; peakIndex < peakCount; peakIndex += 1) {
+      const start = peakIndex * samplesPerPeak;
+      const end = Math.min(channelData.length, start + samplesPerPeak);
+      let max = 0;
+      for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+        max = Math.max(max, Math.abs(channelData[sampleIndex] ?? 0));
+      }
+      peaks.push(max);
+    }
+
+    const maxPeak = Math.max(...peaks, 0.01);
+    return peaks.map((peak) => Math.max(0.04, peak / maxPeak));
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
+}
+
+function DraftWaveformTrim({
+  audioUrl,
+  currentMs,
+  durationMs,
+  trimStartMs,
+  trimEndMs,
+  isArchived,
+  onSeek,
+  onTrimStartChange,
+  onTrimEndChange,
+}: {
+  audioUrl: string;
+  currentMs: number;
+  durationMs: number;
+  trimStartMs: number;
+  trimEndMs: number;
+  isArchived: boolean;
+  onSeek: (ms: number) => void;
+  onTrimStartChange: (ms: number) => void;
+  onTrimEndChange: (ms: number) => void;
+}) {
+  const [peaks, setPeaks] = React.useState<number[] | null>(null);
+  const [waveformStatus, setWaveformStatus] = React.useState<"loading" | "ready" | "fallback">("loading");
+  const [zoom, setZoom] = React.useState(1);
+  const timelineRef = React.useRef<HTMLDivElement | null>(null);
+  const safeDurationMs = Math.max(durationMs, trimEndMs, MIN_DRAFT_TRIM_MS);
+  const trimStartPct = safeDurationMs > 0 ? (trimStartMs / safeDurationMs) * 100 : 0;
+  const trimEndPct = safeDurationMs > 0 ? (trimEndMs / safeDurationMs) * 100 : 100;
+  const trimWidthPct = Math.max(0, trimEndPct - trimStartPct);
+  const currentPct = safeDurationMs > 0 ? (Math.min(currentMs, safeDurationMs) / safeDurationMs) * 100 : 0;
+  const fallbackPeaks = React.useMemo(
+    () => Array.from({ length: 80 }, (_, index) => 0.18 + ((index * 17) % 23) / 100),
+    []
+  );
+  const displayedPeaks = peaks ?? fallbackPeaks;
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setPeaks(null);
+    setWaveformStatus(audioUrl ? "loading" : "fallback");
+
+    if (!audioUrl) {
+      return;
+    }
+
+    void loadWaveformPeaks(audioUrl)
+      .then((nextPeaks) => {
+        if (cancelled) {
+          return;
+        }
+        setPeaks(nextPeaks);
+        setWaveformStatus("ready");
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setPeaks(null);
+        setWaveformStatus("fallback");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [audioUrl]);
+
+  const handleTimelineClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("input")) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return;
+    }
+
+    const pct = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    onSeek(pct * safeDurationMs);
+  };
+
+  const updateTrimFromClientX = React.useCallback((clientX: number, handle: "start" | "end") => {
+    const timeline = timelineRef.current;
+    if (!timeline) {
+      return;
+    }
+
+    const rect = timeline.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return;
+    }
+
+    const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const nextMs = pct * safeDurationMs;
+    if (handle === "start") {
+      onTrimStartChange(nextMs);
+    } else {
+      onTrimEndChange(nextMs);
+    }
+  }, [onTrimEndChange, onTrimStartChange, safeDurationMs]);
+
+  const handleTrimPointerDown = (handle: "start" | "end") => (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (isArchived) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    updateTrimFromClientX(event.clientX, handle);
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      updateTrimFromClientX(moveEvent.clientX, handle);
+    };
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto rounded-xl border border-indigo-200 bg-white p-2" data-testid="draft-waveform-scroll">
+        <div
+          ref={timelineRef}
+          className="relative h-28 min-w-full touch-pan-x"
+          style={{ width: `${zoom * 100}%` }}
+          data-testid="draft-trim-bar"
+          onClick={handleTimelineClick}
+        >
+          <div className="absolute inset-0 flex items-center gap-px px-2">
+            {displayedPeaks.map((peak, index) => (
+              <div
+                key={index}
+                className={`flex-1 rounded-full ${waveformStatus === "ready" ? "bg-indigo-300" : "bg-slate-200"}`}
+                style={{ height: `${Math.max(8, peak * 88)}px` }}
+              />
+            ))}
+          </div>
+          <div className="absolute inset-y-0 left-0 bg-slate-100/75" style={{ width: `${trimStartPct}%` }} />
+          <div className="absolute inset-y-0 right-0 bg-slate-100/75" style={{ left: `${trimEndPct}%` }} />
+          <div
+            className="absolute inset-y-1 rounded-lg border-2 border-indigo-700 bg-indigo-400/20"
+            style={{ left: `${trimStartPct}%`, width: `${trimWidthPct}%` }}
+          />
+          <div
+            className="absolute inset-y-0 w-0.5 rounded-full bg-slate-950"
+            style={{ left: `calc(${currentPct}% - 1px)` }}
+          />
+          <button
+            type="button"
+            aria-label="Trim start"
+            disabled={isArchived}
+            onPointerDown={handleTrimPointerDown("start")}
+            className="absolute top-1/2 z-20 flex h-20 w-8 -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-full border border-indigo-800 bg-white shadow-sm disabled:opacity-50"
+            style={{ left: `${trimStartPct}%` }}
+          >
+            <span className="h-14 w-1.5 rounded-full bg-indigo-700" />
+          </button>
+          <button
+            type="button"
+            aria-label="Trim end"
+            disabled={isArchived}
+            onPointerDown={handleTrimPointerDown("end")}
+            className="absolute top-1/2 z-20 flex h-20 w-8 -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-full border border-indigo-950 bg-white shadow-sm disabled:opacity-50"
+            style={{ left: `${trimEndPct}%` }}
+          >
+            <span className="h-14 w-1.5 rounded-full bg-indigo-950" />
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(0, trimEndMs - MIN_DRAFT_TRIM_MS)}
+            step={50}
+            value={trimStartMs}
+            onChange={(event) => onTrimStartChange(Number(event.currentTarget.value))}
+            disabled={isArchived}
+            aria-label="Trim start"
+            className="sr-only"
+            data-testid="draft-trim-start"
+          />
+          <input
+            type="range"
+            min={Math.min(safeDurationMs, trimStartMs + MIN_DRAFT_TRIM_MS)}
+            max={safeDurationMs}
+            step={50}
+            value={trimEndMs}
+            onChange={(event) => onTrimEndChange(Number(event.currentTarget.value))}
+            disabled={isArchived}
+            aria-label="Trim end"
+            className="sr-only"
+            data-testid="draft-trim-end"
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-slate-600">
+          {waveformStatus === "loading" ? "Loading waveform..." : waveformStatus === "fallback" ? "Waveform preview unavailable." : "Drag handles on the waveform."}
+        </p>
+        <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+          Zoom
+          <input
+            type="range"
+            min={1}
+            max={8}
+            step={0.5}
+            value={zoom}
+            onChange={(event) => setZoom(Number(event.currentTarget.value))}
+            className="w-36 accent-indigo-700"
+            data-testid="draft-waveform-zoom"
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function getDraftRecordingCreatedAtMs(draft: DraftRecording): number {
+  const createdAtMs = new Date(draft.createdAt).getTime();
+  return Number.isFinite(createdAtMs) ? createdAtMs : 0;
+}
+
+function getDraftRecordingSequence(draft: DraftRecording, drafts: DraftRecording[]): number {
+  const orderedDrafts = [...drafts].sort((a, b) => {
+    const createdAtDifference = getDraftRecordingCreatedAtMs(a) - getDraftRecordingCreatedAtMs(b);
+    return createdAtDifference !== 0 ? createdAtDifference : a.id.localeCompare(b.id);
+  });
+  const index = orderedDrafts.findIndex((item) => item.id === draft.id);
+  return index >= 0 ? index + 1 : drafts.indexOf(draft) + 1;
+}
+
+function getDraftRecordingFallbackTitle(draft: DraftRecording, sequence: number): string {
+  const safeSequence = Math.max(1, sequence);
+  return draft.title?.trim() || (draft.status === "archived" ? `Archived draft ${safeSequence}` : `Draft recording ${safeSequence}`);
 }
 
 function toDirectionLetter(direction: "up" | "down" | "same"): "U" | "D" | "S" {
@@ -246,20 +525,22 @@ interface TapSessionSummaryPayload {
 
 function DraftRecordingListItem({
   draft,
-  index,
+  sequence,
   archived = false,
   isPlaying,
   onPause,
   onReview,
+  onDiscard,
 }: {
   draft: DraftRecording;
-  index: number;
+  sequence: number;
   archived?: boolean;
   isPlaying: boolean;
   onPause: () => void;
   onReview: (draftId: string) => void;
+  onDiscard?: (draftId: string) => void;
 }) {
-  const title = getDraftRecordingFallbackTitle(draft, index);
+  const title = getDraftRecordingFallbackTitle(draft, sequence);
   const secondaryText = archived && draft.archivedAt
     ? `Archived ${formatDraftRecordingCreatedAt(draft.archivedAt)}`
     : formatDraftRecordingCreatedAt(draft.createdAt);
@@ -272,22 +553,33 @@ function DraftRecordingListItem({
         </p>
         <p className="text-xs text-slate-500">{secondaryText}</p>
       </div>
-      <button
-        type="button"
-        onClick={() => {
-          if (isPlaying) {
-            onPause();
+      <div className="flex shrink-0 items-center gap-2">
+        {!archived && onDiscard ? (
+          <button
+            type="button"
+            onClick={() => onDiscard(draft.id)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+          >
+            {DRAFT_LABELS.discard}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            if (isPlaying) {
+              onPause();
+            }
+            onReview(draft.id);
+          }}
+          className={
+            archived
+              ? "rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              : "rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700"
           }
-          onReview(draft.id);
-        }}
-        className={
-          archived
-            ? "shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-            : "shrink-0 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700"
-        }
-      >
-        {DRAFT_LABELS.review}
-      </button>
+        >
+          {DRAFT_LABELS.review}
+        </button>
+      </div>
     </li>
   );
 }
@@ -298,6 +590,7 @@ function DraftRecordingReview({
   request,
   onTrimSaved,
   onPromoted,
+  onDiscard,
   onBack,
 }: {
   draft: DraftRecording;
@@ -305,6 +598,7 @@ function DraftRecordingReview({
   request: (url: string, init?: RequestInit) => Promise<Response>;
   onTrimSaved?: () => void | Promise<void>;
   onPromoted?: () => void | Promise<void>;
+  onDiscard?: (draftId: string) => void;
   onBack: () => void;
 }) {
   const isArchived = draft.status === "archived";
@@ -327,10 +621,6 @@ function DraftRecordingReview({
     trimStartMs: normalizeDraftTrimState(draft, trimDurationMs).startMs,
     trimEndMs: normalizeDraftTrimState(draft, trimDurationMs).endMs,
   });
-  const trimStartPct = trimDurationMs > 0 ? (trimStartMs / trimDurationMs) * 100 : 0;
-  const trimEndPct = trimDurationMs > 0 ? (trimEndMs / trimDurationMs) * 100 : 100;
-  const trimWidthPct = Math.max(0, trimEndPct - trimStartPct);
-
   React.useEffect(() => {
     const nextDurationMs = Math.max(durationMs, draft.trimEndMs ?? 0, MIN_DRAFT_TRIM_MS);
     const nextTrim = normalizeDraftTrimState(draft, nextDurationMs);
@@ -543,44 +833,17 @@ function DraftRecordingReview({
             {formatMs(trimStartMs)} - {formatMs(trimEndMs)}
           </span>
         </div>
-        <div className="relative h-9 rounded-xl border border-indigo-200 bg-white" data-testid="draft-trim-bar">
-          <div
-            className="absolute inset-y-0 rounded-lg border-x-2 border-indigo-700 bg-indigo-300/45"
-            style={{ left: `${trimStartPct}%`, width: `${trimWidthPct}%` }}
-          />
-          <div
-            className="absolute inset-y-0 w-1 rounded-full bg-slate-900"
-            style={{ left: `calc(${trimDurationMs > 0 ? (Math.min(currentMs, trimDurationMs) / trimDurationMs) * 100 : 0}% - 2px)` }}
-          />
-        </div>
-        <label className="mt-3 block text-xs font-medium text-slate-700">
-          Start
-          <input
-            type="range"
-            min={0}
-            max={Math.max(0, trimEndMs - MIN_DRAFT_TRIM_MS)}
-            step={100}
-            value={trimStartMs}
-            onChange={(event) => handleTrimStartChange(Number(event.currentTarget.value))}
-            disabled={isArchived}
-            className="mt-1 w-full"
-            data-testid="draft-trim-start"
-          />
-        </label>
-        <label className="mt-3 block text-xs font-medium text-slate-700">
-          End
-          <input
-            type="range"
-            min={Math.min(trimDurationMs, trimStartMs + MIN_DRAFT_TRIM_MS)}
-            max={trimDurationMs}
-            step={100}
-            value={trimEndMs}
-            onChange={(event) => handleTrimEndChange(Number(event.currentTarget.value))}
-            disabled={isArchived}
-            className="mt-1 w-full"
-            data-testid="draft-trim-end"
-          />
-        </label>
+        <DraftWaveformTrim
+          audioUrl={audioUrl}
+          currentMs={currentMs}
+          durationMs={trimDurationMs}
+          trimStartMs={trimStartMs}
+          trimEndMs={trimEndMs}
+          isArchived={isArchived}
+          onSeek={seek}
+          onTrimStartChange={handleTrimStartChange}
+          onTrimEndChange={handleTrimEndChange}
+        />
         {trimMessage ? (
           <p
             className={`mt-2 text-xs ${trimStatus === "error" ? "text-red-700" : trimStatus === "saved" ? "text-emerald-700" : "text-slate-600"}`}
@@ -600,15 +863,27 @@ function DraftRecordingReview({
         <>
           <div className="flex flex-col gap-2 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-slate-500">Uses the current trim and archives this draft.</p>
-            <button
-              type="button"
-              onClick={() => void handlePromote()}
-              disabled={promoteStatus === "promoting" || !hasAudio}
-              className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              data-testid="draft-promote"
-            >
-              {promoteStatus === "promoting" ? "Promoting..." : DRAFT_LABELS.promote}
-            </button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {onDiscard ? (
+                <button
+                  type="button"
+                  onClick={() => onDiscard(draft.id)}
+                  className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  data-testid="draft-discard"
+                >
+                  {DRAFT_LABELS.discard}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void handlePromote()}
+                disabled={promoteStatus === "promoting" || !hasAudio}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                data-testid="draft-promote"
+              >
+                {promoteStatus === "promoting" ? "Promoting..." : DRAFT_LABELS.promote}
+              </button>
+            </div>
           </div>
           {promoteMessage ? (
             <p className="text-sm text-red-700" role="alert" data-testid="draft-promote-status">
@@ -670,6 +945,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   segmentPrerollMs = 500,
   preferredAudioVersion = "part",
   onPreferredAudioVersionChange,
+  readOnlyDataUserId,
   collapseLyricLineBreaks = false,
   defaultLooping = false,
   playScope = "song",
@@ -704,6 +980,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return scopedInit ? fetch(url, scopedInit) : fetch(url);
   }, [withUserHeader]);
 
+  const withReadOnlyDataUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
+    const dataUserId = readOnlyDataUserId ?? userId;
+    if (!dataUserId) {
+      return init;
+    }
+
+    const headers = new Headers(init?.headers);
+    headers.set("X-User-ID", dataUserId);
+    return {
+      ...init,
+      headers,
+    };
+  }, [readOnlyDataUserId, userId]);
+
+  const readOnlyDataRequest = React.useCallback((url: string, init?: RequestInit) => {
+    const scopedInit = withReadOnlyDataUserHeader(init);
+    return scopedInit ? fetch(url, scopedInit) : fetch(url);
+  }, [withReadOnlyDataUserHeader]);
+
   const effectiveSegmentPrerollMs = Math.max(0, segmentPrerollMs);
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const progressStorage = progressStorageOverride ?? (persistProgress ? "account" : "none");
@@ -722,6 +1017,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
   const [draftRecordingStatus, setDraftRecordingStatus] = React.useState<DraftRecordingStatus>("idle");
   const [draftRecordingMessage, setDraftRecordingMessage] = React.useState<string | null>(null);
+  const [draftRecordingLevel, setDraftRecordingLevel] = React.useState(0);
+  const [draftDiscardMessage, setDraftDiscardMessage] = React.useState<string | null>(null);
   const [reviewingDraftId, setReviewingDraftId] = React.useState<string | null>(null);
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
   const [isLooping, setIsLooping] = React.useState(defaultLooping);
@@ -791,7 +1088,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     () => song.segments.map((segment) => `${segment.id}:${segment.startMs}-${segment.endMs}`).join("|"),
     [song.segments]
   );
-  const hasMidiTapAnswers = accountProgressEnabled && (
+  const hasMidiTapAnswers = (
     Object.values(midiSegmentAnswerKeys).some((key) => key.taps.length > 0) ||
     (song.pitchContourNotes?.length ?? 0) > 0
   );
@@ -805,6 +1102,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const draftRecorderRef = React.useRef<MediaRecorder | null>(null);
   const draftRecordingStreamRef = React.useRef<MediaStream | null>(null);
   const draftRecordingChunksRef = React.useRef<Blob[]>([]);
+  const draftRecordingAudioContextRef = React.useRef<AudioContext | null>(null);
+  const draftRecordingAnalyserRef = React.useRef<AnalyserNode | null>(null);
+  const draftRecordingSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
+  const draftRecordingLevelFrameRef = React.useRef<number | null>(null);
   const loopHandledRef = React.useRef<string | null>(null);
   const autoPlayHandledKeyRef = React.useRef<string | null>(null);
   const autoPlayTokenHandledRef = React.useRef<number>(0);
@@ -835,9 +1136,57 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const allReviewableDraftRecordings = [...draftRecordings, ...archivedDraftRecordings];
   const reviewingDraft = allReviewableDraftRecordings.find((draft) => draft.id === reviewingDraftId) ?? null;
 
+  const stopDraftRecordingLevelMeter = React.useCallback(() => {
+    if (draftRecordingLevelFrameRef.current !== null) {
+      window.cancelAnimationFrame(draftRecordingLevelFrameRef.current);
+      draftRecordingLevelFrameRef.current = null;
+    }
+    void draftRecordingAudioContextRef.current?.close().catch(() => undefined);
+    draftRecordingAudioContextRef.current = null;
+    draftRecordingAnalyserRef.current = null;
+    draftRecordingSourceRef.current = null;
+    setDraftRecordingLevel(0);
+  }, []);
+
   const stopDraftRecordingStream = React.useCallback(() => {
+    stopDraftRecordingLevelMeter();
     draftRecordingStreamRef.current?.getTracks().forEach((track) => track.stop());
     draftRecordingStreamRef.current = null;
+  }, [stopDraftRecordingLevelMeter]);
+
+  const startDraftRecordingLevelMeter = React.useCallback((stream: MediaStream) => {
+    const AudioContextCtor = window.AudioContext ?? (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) {
+      setDraftRecordingLevel(0);
+      return;
+    }
+
+    try {
+      const audioContext = new AudioContextCtor();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      draftRecordingAudioContextRef.current = audioContext;
+      draftRecordingAnalyserRef.current = analyser;
+      draftRecordingSourceRef.current = source;
+
+      const updateLevel = () => {
+        analyser.getByteTimeDomainData(samples);
+        let total = 0;
+        for (const sample of samples) {
+          const centered = sample - 128;
+          total += centered * centered;
+        }
+        const rms = Math.sqrt(total / samples.length);
+        setDraftRecordingLevel(Math.min(1, rms / 36));
+        draftRecordingLevelFrameRef.current = window.requestAnimationFrame(updateLevel);
+      };
+      updateLevel();
+    } catch {
+      setDraftRecordingLevel(0);
+    }
   }, []);
 
   const saveDraftRecordingBlob = React.useCallback(async (blob: Blob) => {
@@ -912,6 +1261,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       draftRecordingStreamRef.current = stream;
       draftRecordingChunksRef.current = [];
+      startDraftRecordingLevelMeter(stream);
 
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) {
@@ -920,13 +1270,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       });
 
       recorder.addEventListener("stop", () => {
-        const chunks = [...draftRecordingChunksRef.current];
-        draftRecordingChunksRef.current = [];
         const recordedType = recorder.mimeType || mimeType || "audio/webm";
         stopDraftRecordingStream();
         draftRecorderRef.current = null;
 
-        void (async () => {
+        window.setTimeout(() => void (async () => {
+          const chunks = [...draftRecordingChunksRef.current];
+          draftRecordingChunksRef.current = [];
           try {
             if (chunks.length === 0) {
               throw new Error("No audio was captured.");
@@ -943,7 +1293,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             setDraftRecordingStatus("error");
             setDraftRecordingMessage(normalizeDraftRecordingError(error, "Failed to save draft recording."));
           }
-        })();
+        })(), 0);
       });
 
       draftRecorderRef.current = recorder;
@@ -956,7 +1306,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       setDraftRecordingStatus("error");
       setDraftRecordingMessage(normalizeDraftRecordingError(error, "Could not start recording."));
     }
-  }, [isPlaying, pause, saveDraftRecordingBlob, stopDraftRecordingStream]);
+  }, [isPlaying, pause, saveDraftRecordingBlob, startDraftRecordingLevelMeter, stopDraftRecordingStream]);
 
   const handleStopDraftRecording = React.useCallback(() => {
     const recorder = draftRecorderRef.current;
@@ -965,9 +1315,28 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     setDraftRecordingStatus("saving");
     setDraftRecordingMessage("Saving draft recording...");
-    recorder.requestData();
     recorder.stop();
   }, []);
+
+  const handleDiscardDraftRecording = React.useCallback(async (draftId: string) => {
+    setDraftDiscardMessage(null);
+    try {
+      const response = await request(`/api/songs/${song.id}/draft-recordings/${draftId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: "Failed to discard draft recording" }));
+        throw new Error(payload.error ?? `Failed to discard draft recording (${response.status})`);
+      }
+      if (reviewingDraftId === draftId) {
+        setReviewingDraftId(null);
+      }
+      setDraftDiscardMessage("Draft recording discarded.");
+      await onDraftRecordingSaved?.();
+    } catch (error) {
+      setDraftDiscardMessage(error instanceof Error ? error.message : "Failed to discard draft recording.");
+    }
+  }, [onDraftRecordingSaved, request, reviewingDraftId, song.id]);
 
   React.useEffect(() => {
     onSegmentPlaybackCompleteRef.current = onSegmentPlaybackComplete;
@@ -2394,6 +2763,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     draftRecordingChunksRef.current = [];
     setDraftRecordingStatus("idle");
     setDraftRecordingMessage(null);
+    setDraftRecordingLevel(0);
     setReviewingDraftId(null);
   }, [cancelTapPracticeCountIn, clearTapPersistenceWarning, song.id, stopDraftRecordingStream]);
 
@@ -2471,7 +2841,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [session, onSessionChange]);
 
   useEffect(() => {
-    if (!accountProgressEnabled) {
+    const shouldLoadMidiData = accountProgressEnabled || Boolean(song.hasMidiContour) || (song.pitchContourNotes?.length ?? 0) > 0;
+    if (!shouldLoadMidiData) {
       setTapSessionSummaries([]);
       setMidiSegmentAnswerKeys({});
       return;
@@ -2482,13 +2853,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const loadEnhancedTapData = async () => {
       try {
         const [response, midiResponse] = await Promise.all([
-          request(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }),
-          request(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
+          accountProgressEnabled ? request(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }) : Promise.resolve(null),
+          readOnlyDataRequest(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
         ]);
-        if (!response.ok) {
+        if (response && !response.ok) {
           throw new Error(`Failed to load tap sessions (${response.status})`);
         }
-        const payload = await response.json() as { sessions?: TapSessionSummaryPayload[] };
+        const payload = response ? await response.json() as { sessions?: TapSessionSummaryPayload[] } : { sessions: [] };
         const midiPayload = midiResponse.ok
           ? await midiResponse.json() as { segmentAnswerKeys?: Record<string, MidiSegmentAnswerKey> }
           : { segmentAnswerKeys: {} };
@@ -2515,7 +2886,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [accountProgressEnabled, request, segmentTimingSignature, song.id, tapHeatMapRefreshToken, userId]);
+  }, [accountProgressEnabled, readOnlyDataRequest, request, segmentTimingSignature, song.hasMidiContour, song.id, song.pitchContourNotes, tapHeatMapRefreshToken, userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2727,6 +3098,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   {draftRecordingMessage}
                 </span>
               ) : null}
+              {draftRecordingStatus === "recording" ? (
+                <div className="flex min-w-[96px] items-center gap-2" aria-label="Microphone input level" data-testid="draft-recording-level">
+                  <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-[width] duration-75"
+                      style={{ width: `${Math.max(4, Math.round(draftRecordingLevel * 100))}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-slate-500">Input</span>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {hasSegments && currentSegment && hasCardContourData ? (
@@ -2855,17 +3237,27 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             </span>
           </div>
           <ul className="divide-y divide-slate-100">
-            {draftRecordings.map((draft, index) => (
+            {draftRecordings.map((draft) => (
               <DraftRecordingListItem
                 key={draft.id}
                 draft={draft}
-                index={index}
+                sequence={getDraftRecordingSequence(draft, draftRecordings)}
                 isPlaying={isPlaying}
                 onPause={pause}
                 onReview={setReviewingDraftId}
+                onDiscard={(draftId) => void handleDiscardDraftRecording(draftId)}
               />
             ))}
           </ul>
+          {draftDiscardMessage ? (
+            <p
+              className={`mt-2 text-xs ${draftDiscardMessage.includes("discarded") ? "text-emerald-700" : "text-red-700"}`}
+              role={draftDiscardMessage.includes("discarded") ? "status" : "alert"}
+              data-testid="draft-discard-status"
+            >
+              {draftDiscardMessage}
+            </p>
+          ) : null}
         </section>
       ) : null}
 
@@ -2879,12 +3271,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             draft={reviewingDraft}
             fallbackTitle={
               reviewingDraft.status === "archived"
-                ? getDraftRecordingFallbackTitle(reviewingDraft, archivedDraftRecordings.findIndex((draft) => draft.id === reviewingDraft.id))
-                : getDraftRecordingFallbackTitle(reviewingDraft, draftRecordings.findIndex((draft) => draft.id === reviewingDraft.id))
+                ? getDraftRecordingFallbackTitle(reviewingDraft, getDraftRecordingSequence(reviewingDraft, archivedDraftRecordings))
+                : getDraftRecordingFallbackTitle(reviewingDraft, getDraftRecordingSequence(reviewingDraft, draftRecordings))
             }
             request={request}
             onTrimSaved={onDraftRecordingSaved}
             onPromoted={onDraftRecordingSaved}
+            onDiscard={(draftId) => void handleDiscardDraftRecording(draftId)}
             onBack={() => setReviewingDraftId(null)}
           />
         </main>
@@ -3252,11 +3645,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             </span>
           </summary>
           <ul className="divide-y divide-slate-200 border-t border-slate-200 px-3 py-1">
-            {archivedDraftRecordings.map((draft, index) => (
+            {archivedDraftRecordings.map((draft) => (
               <DraftRecordingListItem
                 key={draft.id}
                 draft={draft}
-                index={index}
+                sequence={getDraftRecordingSequence(draft, archivedDraftRecordings)}
                 archived
                 isPlaying={isPlaying}
                 onPause={pause}

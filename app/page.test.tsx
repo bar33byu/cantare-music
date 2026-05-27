@@ -188,6 +188,41 @@ describe('Home page', () => {
     });
   });
 
+  it('does not use a cached non-guest user while the tab is unauthenticated', async () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      currentUserId: 'test-user',
+      users: [
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: '' },
+      ],
+    }));
+    document.cookie = 'cantare-user-id=test-user; path=/';
+    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') {
+        return {
+          ok: true,
+          json: async () => ({ user: null, actor: null, effectiveUser: null, isImpersonating: false }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    expect(screen.getByText('Cantare Music (Guest)')).toBeInTheDocument();
+    await waitFor(() => {
+      const lastCall = playlistBrowserMock.mock.calls.at(-1)?.[0] as { userId?: string } | undefined;
+      expect(lastCall?.userId).toMatch(/^guest-/);
+    });
+    expect(
+      playlistBrowserMock.mock.calls.some(([call]) => (call as { userId?: string }).userId === 'test-user')
+    ).toBe(false);
+  });
+
   it('falls back to playlists when the hash view is missing or invalid', async () => {
     window.history.replaceState(null, '', '/#view=unknown');
 
@@ -275,58 +310,62 @@ describe('Home page', () => {
   });
 
   it('refreshes the selected song before returning from edit mode', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: 'song-1',
-          title: 'Song One',
-          artist: 'Artist One',
-          audioUrl: 'https://example.com/one.mp3',
-          segments: [
-            {
-              id: 'seg-1',
-              songId: 'song-1',
-              order: 0,
-              label: 'Section 1',
-              lyricText: 'Verse 1',
-              startMs: 0,
-              endMs: 10000,
-            },
-          ],
-          createdAt: '2025-01-01T00:00:00.000Z',
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: 'song-1',
-          title: 'Song One',
-          artist: 'Artist One',
-          audioUrl: 'https://example.com/one.mp3',
-          segments: [
-            {
-              id: 'seg-1',
-              songId: 'song-1',
-              order: 0,
-              label: 'Section 1',
-              lyricText: 'Verse 1',
-              startMs: 0,
-              endMs: 10000,
-            },
-            {
-              id: 'seg-2',
-              songId: 'song-1',
-              order: 1,
-              label: 'Section 2',
-              lyricText: 'Verse 2',
-              startMs: 10000,
-              endMs: 20000,
-            },
-          ],
-          createdAt: '2025-01-01T00:00:00.000Z',
-        }),
-      });
+    let songFetchCount = 0;
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/draft-recordings') {
+        return { ok: true, json: async () => ({ draftRecordings: [] }) };
+      }
+      if (url === '/api/songs') {
+        return { ok: true, json: async () => [] };
+      }
+      if (url === '/api/songs/song-1') {
+        songFetchCount += 1;
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'song-1',
+            title: 'Song One',
+            artist: 'Artist One',
+            audioUrl: 'https://example.com/one.mp3',
+            segments: songFetchCount === 1
+              ? [
+                  {
+                    id: 'seg-1',
+                    songId: 'song-1',
+                    order: 0,
+                    label: 'Section 1',
+                    lyricText: 'Verse 1',
+                    startMs: 0,
+                    endMs: 10000,
+                  },
+                ]
+              : [
+                  {
+                    id: 'seg-1',
+                    songId: 'song-1',
+                    order: 0,
+                    label: 'Section 1',
+                    lyricText: 'Verse 1',
+                    startMs: 0,
+                    endMs: 10000,
+                  },
+                  {
+                    id: 'seg-2',
+                    songId: 'song-1',
+                    order: 1,
+                    label: 'Section 2',
+                    lyricText: 'Verse 2',
+                    startMs: 10000,
+                    endMs: 20000,
+                  },
+                ],
+            createdAt: '2025-01-01T00:00:00.000Z',
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
 
     global.fetch = fetchMock as unknown as typeof fetch;
 
@@ -346,12 +385,10 @@ describe('Home page', () => {
       expect(screen.getByTestId('mock-practice-view')).toHaveTextContent('Segments: 2');
     });
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/songs/song-1', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/songs/song-1', expect.objectContaining({
       headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
     }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/songs/song-1', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-User-ID': expect.stringMatching(/^guest-/) }),
-    }));
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/songs/song-1')).toHaveLength(2);
   });
 
   it('shows breadcrumb root as Songs in song practice and returns to library when clicked', async () => {
@@ -551,8 +588,29 @@ describe('Home page', () => {
       ],
     }));
     document.cookie = 'cantare-user-id=test-user; path=/';
+    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') {
+        return {
+          ok: true,
+          json: async () => ({
+            user: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+            actor: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+            effectiveUser: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+            isImpersonating: false,
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as Response;
+    }) as unknown as typeof fetch;
 
     render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Cantare Music (Guest)')).not.toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByTestId('home-settings-toggle'));
     fireEvent.click(screen.getByTestId('settings-section-account-toggle'));

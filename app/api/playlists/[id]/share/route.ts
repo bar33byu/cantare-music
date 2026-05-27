@@ -20,6 +20,10 @@ function shareUrlForRequest(request: NextRequest, token: string): string {
   return new URL(`/share/playlists/${token}`, request.url).toString();
 }
 
+function parseShareAudioMode(value: unknown): 'part' | 'blend' | 'both' {
+  return value === 'part' || value === 'blend' || value === 'both' ? value : 'both';
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -31,8 +35,9 @@ export async function POST(
     if (!existing) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
+    const body = (await request.json().catch(() => ({}))) as { shareAudioMode?: unknown };
 
-    const playlist = await enablePlaylistSharing(id, userId);
+    const playlist = await enablePlaylistSharing(id, userId, parseShareAudioMode(body.shareAudioMode));
     if (!playlist?.shareToken) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }

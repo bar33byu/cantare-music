@@ -205,6 +205,7 @@ export function PlaylistPracticeView({
   const lastObservedFocusItemIdRef = useRef<string | null>(null);
   const lastObservedFocusRatingRef = useRef<string | null>(null);
   const listenStartedSongIdRef = useRef<string | null>(null);
+  const pendingListenAudioSwitchRef = useRef<{ songId: string; currentMs: number; wasPlaying: boolean } | null>(null);
   const autoDrillRunIdRef = useRef(0);
   const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
@@ -215,6 +216,7 @@ export function PlaylistPracticeView({
   const progressStorage = progressStorageOverride ?? (persistProgress ? 'account' : 'none');
   const accountProgressEnabled = progressStorage === 'account';
   const localProgressEnabled = progressStorage === 'local';
+  const readOnlyDataUserId = !persistProgress ? livePlaylist.owner?.id : undefined;
 
   const playlistDetailRequest = useMemo(() => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
@@ -586,6 +588,7 @@ export function PlaylistPracticeView({
     if (mode !== 'listen') {
       setIsListenPlaying(false);
       listenStartedSongIdRef.current = null;
+      pendingListenAudioSwitchRef.current = null;
       return;
     }
 
@@ -593,7 +596,26 @@ export function PlaylistPracticeView({
   }, [listenQueue.length, mode]);
 
   useLayoutEffect(() => {
+    const pendingSwitch = pendingListenAudioSwitchRef.current;
+    if (!pendingSwitch || mode !== 'listen' || currentSongId !== pendingSwitch.songId) {
+      return;
+    }
+
+    pendingListenAudioSwitchRef.current = null;
+    listenStartedSongIdRef.current = currentSongId;
+    audioPlayer.seek(pendingSwitch.currentMs);
+    if (pendingSwitch.wasPlaying) {
+      setIsListenPlaying(true);
+      requestPlay(pendingSwitch.currentMs, 0);
+    }
+  }, [audioPlayer, currentSongId, mode, playbackAudioUrl, requestPlay]);
+
+  useLayoutEffect(() => {
     if (mode !== 'listen' || !isListenPlaying || !currentSongId) {
+      return;
+    }
+
+    if (pendingListenAudioSwitchRef.current?.songId === currentSongId) {
       return;
     }
 
@@ -659,6 +681,26 @@ export function PlaylistPracticeView({
     }
     listenStartedSongIdRef.current = null;
     setIsListenPlaying(true);
+  };
+
+  const handlePlaylistAudioPreferenceChange = (nextVersion: PreferredAudioVersion) => {
+    if (nextVersion === preferredAudioVersion) {
+      return;
+    }
+
+    if (mode === 'listen' && currentSongId && hasCurrentSongAudio) {
+      const currentMs = Number.isFinite(audioPlayer.currentMs) ? Math.max(0, audioPlayer.currentMs) : 0;
+      const durationMs = Number.isFinite(audioPlayer.durationMs) ? audioPlayer.durationMs : 0;
+      pendingListenAudioSwitchRef.current = {
+        songId: currentSongId,
+        currentMs: durationMs > 0 && currentMs >= durationMs ? 0 : currentMs,
+        wasPlaying: audioPlayer.isPlaying || isListenPlaying,
+      };
+      listenStartedSongIdRef.current = null;
+      pauseAudio();
+    }
+
+    onPreferredAudioVersionChange?.(nextVersion);
   };
 
   const handleNextSong = () => {
@@ -1197,7 +1239,7 @@ export function PlaylistPracticeView({
                 type="button"
                 data-testid={`playlist-audio-preference-${version}`}
                 aria-pressed={preferredAudioVersion === version}
-                onClick={() => onPreferredAudioVersionChange?.(version)}
+                onClick={() => handlePlaylistAudioPreferenceChange(version)}
                 className={`rounded px-3 text-sm font-semibold ${
                   preferredAudioVersion === version
                     ? 'bg-slate-800 text-white'
@@ -1434,6 +1476,7 @@ export function PlaylistPracticeView({
                     userId={userId}
                     persistProgress={persistProgress}
                     progressStorage={progressStorage}
+                    readOnlyDataUserId={readOnlyDataUserId}
                     initialSession={focusPracticeSession}
                     onSessionChange={handleFocusSessionChange}
                     onRatingsSaved={handleFocusRatingsSaved}
@@ -1568,6 +1611,7 @@ export function PlaylistPracticeView({
                     userId={userId}
                     persistProgress={persistProgress}
                     progressStorage={progressStorage}
+                    readOnlyDataUserId={readOnlyDataUserId}
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel="Auto Drill"

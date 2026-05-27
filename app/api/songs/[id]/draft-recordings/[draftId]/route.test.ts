@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../../../../db/queries', () => ({
+  discardDraftRecording: vi.fn(),
   updateDraftRecordingTrim: vi.fn(),
 }));
 
-import { PATCH } from './route';
-import { updateDraftRecordingTrim } from '../../../../../../db/queries';
+import { DELETE, PATCH } from './route';
+import { discardDraftRecording, updateDraftRecordingTrim } from '../../../../../../db/queries';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -63,6 +64,48 @@ describe('PATCH /api/songs/[id]/draft-recordings/[draftId]', () => {
     });
 
     const response = await PATCH(request as any, { params: Promise.resolve({ id: 'song-1', draftId: 'missing' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data.error).toBe('Draft recording not found');
+  });
+});
+
+describe('DELETE /api/songs/[id]/draft-recordings/[draftId]', () => {
+  it('discards an active draft recording without deleting the source audio', async () => {
+    const draftRecording = {
+      id: 'draft-1',
+      songId: 'song-1',
+      title: null,
+      audioKey: 'audio/song-1/draft.webm',
+      status: 'discarded' as const,
+      trimStartMs: null,
+      trimEndMs: null,
+      createdAt: '2026-05-25T14:30:00.000Z',
+      archivedAt: '2026-05-25T15:00:00.000Z',
+    };
+    vi.mocked(discardDraftRecording).mockResolvedValue(draftRecording);
+
+    const request = new Request('http://localhost/api/songs/song-1/draft-recordings/draft-1', {
+      method: 'DELETE',
+    });
+
+    const response = await DELETE(request as any, { params: Promise.resolve({ id: 'song-1', draftId: 'draft-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(discardDraftRecording).toHaveBeenCalledWith('song-1', 'draft-1', 'default');
+    expect(data).toEqual({ draftRecording });
+  });
+
+  it('returns 404 when there is no active draft to discard', async () => {
+    vi.mocked(discardDraftRecording).mockResolvedValue(null);
+
+    const request = new Request('http://localhost/api/songs/song-1/draft-recordings/missing', {
+      method: 'DELETE',
+    });
+
+    const response = await DELETE(request as any, { params: Promise.resolve({ id: 'song-1', draftId: 'missing' }) });
     const data = await response.json();
 
     expect(response.status).toBe(404);

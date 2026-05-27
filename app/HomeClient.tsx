@@ -19,7 +19,7 @@ import {
   markGuestProgressClaimDeclined,
   markGuestSongProgress,
 } from "./lib/guestProgress";
-import type { Playlist, Song } from "./types";
+import type { DraftRecording, Playlist, Song } from "./types";
 import {
   createPublicUsernameFromName,
   DEFAULT_USER_ID,
@@ -72,6 +72,16 @@ interface BuildInfo {
   branch: string;
   commitSha?: string;
 }
+
+type LibraryRecordingStatus = "idle" | "recording" | "saving" | "saved" | "error";
+
+const LIBRARY_DRAFT_RECORDING_MIME_TYPES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg;codecs=opus",
+  "audio/ogg",
+] as const;
 
 const SETTINGS_STORAGE_KEY = "cantare:user-settings";
 const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -176,6 +186,19 @@ function parseStoredSettings(raw: string | null): UserSettings {
   }
 }
 
+function getGuestUserSettings(storedSettings: UserSettings, storage: Storage): UserSettings {
+  const guestUserId = getOrCreateAnonymousUserId(storage);
+  const users = storedSettings.users.some((user) => user.id === guestUserId)
+    ? storedSettings.users
+    : [...storedSettings.users, makeAnonymousKnownUser(guestUserId)];
+
+  return {
+    ...storedSettings,
+    currentUserId: guestUserId,
+    users,
+  };
+}
+
 function mergeUsersWithDatabase(cachedUsers: KnownUser[], dbUsers: KnownUser[]): KnownUser[] {
   const merged = new Map<string, KnownUser>();
 
@@ -278,6 +301,446 @@ function UnifiedHeader({
   );
 }
 
+function getLibraryDraftRecordingMimeType(): string {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+
+  return LIBRARY_DRAFT_RECORDING_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
+}
+
+function getLibraryDraftRecordingExtension(contentType: string): string {
+  const baseType = contentType.split(";")[0].trim().toLowerCase();
+  if (baseType === "audio/mp4") return "m4a";
+  if (baseType === "audio/ogg") return "ogg";
+  if (baseType === "audio/wav") return "wav";
+  if (baseType === "audio/mpeg" || baseType === "audio/mp3") return "mp3";
+  return "webm";
+}
+
+function normalizeLibraryRecordingError(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+  if (error.name === "NotAllowedError" || error.name === "SecurityError") {
+    return "Microphone permission was denied.";
+  }
+  if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+    return "No microphone was found.";
+  }
+  if (error.name === "NotReadableError") {
+    return "The microphone is already in use.";
+  }
+  return error.message || fallback;
+}
+
+function formatLibraryDraftCreatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function LibraryDraftRecorder({
+  request,
+  userId,
+  refreshTrigger,
+}: {
+  request: (url: string, init?: RequestInit) => Promise<Response>;
+  userId: string;
+  refreshTrigger: number;
+}) {
+  const [recordingStatus, setRecordingStatus] = useState<LibraryRecordingStatus>("idle");
+  const [recordingMessage, setRecordingMessage] = useState<string | null>(null);
+  const [recordingLevel, setRecordingLevel] = useState(0);
+  const [drafts, setDrafts] = useState<DraftRecording[]>([]);
+  const [songs, setSongs] = useState<SongListItem[]>([]);
+  const [reviewingDraftId, setReviewingDraftId] = useState<string | null>(null);
+  const [selectedSongByDraft, setSelectedSongByDraft] = useState<Record<string, string>>({});
+  const [assignMessage, setAssignMessage] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const levelFrameRef = useRef<number | null>(null);
+
+  const reviewingDraft = drafts.find((draft) => draft.id === reviewingDraftId) ?? null;
+
+  const stopLevelMeter = useCallback(() => {
+    if (levelFrameRef.current !== null) {
+      window.cancelAnimationFrame(levelFrameRef.current);
+      levelFrameRef.current = null;
+    }
+    void audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    sourceRef.current = null;
+    setRecordingLevel(0);
+  }, []);
+
+  const stopStream = useCallback(() => {
+    stopLevelMeter();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  }, [stopLevelMeter]);
+
+  const startLevelMeter = useCallback((stream: MediaStream) => {
+    const AudioContextCtor = window.AudioContext ?? (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) {
+      setRecordingLevel(0);
+      return;
+    }
+
+    try {
+      const audioContext = new AudioContextCtor();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+      sourceRef.current = source;
+
+      const updateLevel = () => {
+        analyser.getByteTimeDomainData(samples);
+        let total = 0;
+        for (const sample of samples) {
+          const centered = sample - 128;
+          total += centered * centered;
+        }
+        setRecordingLevel(Math.min(1, Math.sqrt(total / samples.length) / 36));
+        levelFrameRef.current = window.requestAnimationFrame(updateLevel);
+      };
+      updateLevel();
+    } catch {
+      setRecordingLevel(0);
+    }
+  }, []);
+
+  const loadDrafts = useCallback(async () => {
+    try {
+      const response = await request("/api/draft-recordings", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const payload = (await response.json()) as { draftRecordings?: DraftRecording[] };
+      setDrafts(Array.isArray(payload.draftRecordings) ? payload.draftRecordings : []);
+    } catch {
+      setDrafts([]);
+    }
+  }, [request]);
+
+  const loadSongs = useCallback(async () => {
+    try {
+      const response = await request("/api/songs", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const payload = (await response.json()) as SongListItem[];
+      setSongs(Array.isArray(payload) ? payload : []);
+    } catch {
+      setSongs([]);
+    }
+  }, [request]);
+
+  useEffect(() => {
+    void loadDrafts();
+    void loadSongs();
+  }, [loadDrafts, loadSongs, refreshTrigger, userId]);
+
+  useEffect(() => {
+    return () => {
+      stopStream();
+    };
+  }, [stopStream]);
+
+  const saveRecordingBlob = useCallback(async (blob: Blob) => {
+    const contentType = blob.type || "audio/webm";
+    const extension = getLibraryDraftRecordingExtension(contentType);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `library-draft-recording-${timestamp}.${extension}`;
+
+    const uploadUrlResponse = await request("/api/songs/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename,
+        contentType,
+        size: blob.size,
+        audioVersion: "draft",
+      }),
+    });
+    if (!uploadUrlResponse.ok) {
+      const payload = await uploadUrlResponse.json().catch(() => ({ error: "Failed to prepare draft upload" }));
+      throw new Error(payload.error ?? `Failed to prepare draft upload (${uploadUrlResponse.status})`);
+    }
+
+    const { uploadUrl, key } = await uploadUrlResponse.json() as { uploadUrl?: string; key?: string };
+    if (!uploadUrl || !key) {
+      throw new Error("Draft upload response did not include an upload URL.");
+    }
+
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: blob,
+    });
+    if (!uploadResponse.ok) {
+      throw new Error(`Draft upload failed (${uploadResponse.status})`);
+    }
+
+    const saveResponse = await request("/api/draft-recordings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ audioKey: key }),
+    });
+    if (!saveResponse.ok) {
+      const payload = await saveResponse.json().catch(() => ({ error: "Failed to save draft recording" }));
+      throw new Error(payload.error ?? `Failed to save draft recording (${saveResponse.status})`);
+    }
+    await loadDrafts();
+  }, [loadDrafts, request]);
+
+  const handleStartRecording = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setRecordingStatus("error");
+      setRecordingMessage("Recording is not available in this browser.");
+      return;
+    }
+
+    try {
+      setRecordingMessage(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = getLibraryDraftRecordingMimeType();
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      streamRef.current = stream;
+      chunksRef.current = [];
+      startLevelMeter(stream);
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data);
+        }
+      });
+
+      recorder.addEventListener("stop", () => {
+        const recordedType = recorder.mimeType || mimeType || "audio/webm";
+        stopStream();
+        recorderRef.current = null;
+
+        window.setTimeout(() => void (async () => {
+          const chunks = [...chunksRef.current];
+          chunksRef.current = [];
+          try {
+            if (chunks.length === 0) {
+              throw new Error("No audio was captured.");
+            }
+            const blob = new Blob(chunks, { type: recordedType });
+            if (blob.size === 0) {
+              throw new Error("No audio was captured.");
+            }
+            await saveRecordingBlob(blob);
+            setRecordingStatus("saved");
+            setRecordingMessage("Draft recording saved.");
+          } catch (error) {
+            setRecordingStatus("error");
+            setRecordingMessage(normalizeLibraryRecordingError(error, "Failed to save draft recording."));
+          }
+        })(), 0);
+      });
+
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecordingStatus("recording");
+      setRecordingMessage("Recording...");
+    } catch (error) {
+      stopStream();
+      recorderRef.current = null;
+      setRecordingStatus("error");
+      setRecordingMessage(normalizeLibraryRecordingError(error, "Could not start recording."));
+    }
+  }, [saveRecordingBlob, startLevelMeter, stopStream]);
+
+  const handleStopRecording = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      return;
+    }
+    setRecordingStatus("saving");
+    setRecordingMessage("Saving draft recording...");
+    recorder.stop();
+  }, []);
+
+  const handleAssignDraft = async (draftId: string) => {
+    const songId = selectedSongByDraft[draftId] ?? "";
+    if (!songId) {
+      setAssignMessage("Choose a song first.");
+      return;
+    }
+
+    setAssignMessage(null);
+    try {
+      const response = await request(`/api/draft-recordings/${draftId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ songId }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: "Failed to assign draft recording" }));
+        throw new Error(payload.error ?? `Failed to assign draft recording (${response.status})`);
+      }
+      setReviewingDraftId(null);
+      setSelectedSongByDraft((previous) => {
+        const next = { ...previous };
+        delete next[draftId];
+        return next;
+      });
+      setAssignMessage("Draft recording added to song.");
+      await loadDrafts();
+    } catch (error) {
+      setAssignMessage(error instanceof Error ? error.message : "Failed to assign draft recording.");
+    }
+  };
+
+  const handleDiscardDraft = async (draftId: string) => {
+    setAssignMessage(null);
+    try {
+      const response = await request(`/api/draft-recordings/${draftId}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: "Failed to discard draft recording" }));
+        throw new Error(payload.error ?? `Failed to discard draft recording (${response.status})`);
+      }
+      if (reviewingDraftId === draftId) {
+        setReviewingDraftId(null);
+      }
+      setAssignMessage("Draft recording discarded.");
+      await loadDrafts();
+    } catch (error) {
+      setAssignMessage(error instanceof Error ? error.message : "Failed to discard draft recording.");
+    }
+  };
+
+  return (
+    <section className="mb-5 rounded-lg border border-slate-200 bg-white p-3 shadow-sm" data-testid="library-draft-recorder">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          data-testid="library-recording-toggle"
+          aria-pressed={recordingStatus === "recording"}
+          onClick={() => {
+            if (recordingStatus === "recording") {
+              handleStopRecording();
+            } else {
+              void handleStartRecording();
+            }
+          }}
+          disabled={recordingStatus === "saving"}
+          className={`rounded-full border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            recordingStatus === "recording"
+              ? "border-red-600 bg-red-600 text-white hover:bg-red-700"
+              : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+          }`}
+        >
+          {recordingStatus === "recording" ? "Stop" : recordingStatus === "saving" ? "Saving..." : "Record"}
+        </button>
+        {recordingMessage ? (
+          <span
+            data-testid="library-recording-status"
+            role={recordingStatus === "error" ? "alert" : "status"}
+            className={`text-xs ${recordingStatus === "error" ? "text-red-700" : recordingStatus === "saved" ? "text-emerald-700" : "text-slate-600"}`}
+          >
+            {recordingMessage}
+          </span>
+        ) : null}
+        {recordingStatus === "recording" ? (
+          <div className="flex min-w-[96px] items-center gap-2" aria-label="Microphone input level" data-testid="library-recording-level">
+            <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-200">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-[width] duration-75"
+                style={{ width: `${Math.max(4, Math.round(recordingLevel * 100))}%` }}
+              />
+            </div>
+            <span className="text-xs text-slate-500">Input</span>
+          </div>
+        ) : null}
+      </div>
+
+      {drafts.length > 0 ? (
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-900">Unassigned Draft Recordings</h2>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{drafts.length}</span>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {drafts.map((draft, index) => (
+              <li key={draft.id} className="py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">{draft.title?.trim() || `Draft recording ${drafts.length - index}`}</p>
+                    <p className="text-xs text-slate-500">{formatLibraryDraftCreatedAt(draft.createdAt)}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleDiscardDraft(draft.id)}
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReviewingDraftId((current) => current === draft.id ? null : draft.id)}
+                      className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                    >
+                      Review
+                    </button>
+                  </div>
+                </div>
+                {reviewingDraft?.id === draft.id ? (
+                  <div className="mt-3 rounded-md border border-indigo-100 bg-indigo-50/40 p-3" data-testid="library-draft-review">
+                    <audio controls src={draft.audioUrl ?? ""} className="w-full" />
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <select
+                        aria-label="Choose song"
+                        value={selectedSongByDraft[draft.id] ?? ""}
+                        onChange={(event) => setSelectedSongByDraft((previous) => ({ ...previous, [draft.id]: event.target.value }))}
+                        className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                      >
+                        <option value="">Choose song...</option>
+                        {songs.map((song) => (
+                          <option key={song.id} value={song.id}>
+                            {song.title}{song.artist ? ` - ${song.artist}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void handleAssignDraft(draft.id)}
+                        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                      >
+                        Add to song
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {assignMessage ? (
+            <p className={`mt-2 text-xs ${assignMessage.includes("Failed") || assignMessage.includes("Choose") ? "text-red-700" : "text-emerald-700"}`} role={assignMessage.includes("Failed") || assignMessage.includes("Choose") ? "alert" : "status"}>
+              {assignMessage}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function SettingsSection({
   title,
   children,
@@ -329,19 +792,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
-    if (cookieUserId !== DEFAULT_USER_ID) {
-      const users = storedSettings.users.some((user) => user.id === cookieUserId)
-        ? storedSettings.users
-        : [...storedSettings.users, isAnonymousUserId(cookieUserId) ? makeAnonymousKnownUser(cookieUserId) : { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" }];
-      return { ...storedSettings, currentUserId: cookieUserId, users };
-    }
-
-    const guestUserId = getOrCreateAnonymousUserId(window.localStorage);
-    const users = storedSettings.users.some((user) => user.id === guestUserId)
-      ? storedSettings.users
-      : [...storedSettings.users, makeAnonymousKnownUser(guestUserId)];
-    return { ...storedSettings, currentUserId: guestUserId, users };
+    return getGuestUserSettings(storedSettings, window.localStorage);
   });
   const [authEmail, setAuthEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
@@ -432,25 +883,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    let cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
-    if (cookieUserId === DEFAULT_USER_ID) {
-      cookieUserId = getOrCreateAnonymousUserId(window.localStorage);
-    }
-    if (cookieUserId !== DEFAULT_USER_ID && !storedSettings.users.some((user) => user.id === cookieUserId)) {
-      setUserSettings({
-        ...storedSettings,
-        currentUserId: cookieUserId,
-        users: [
-          ...storedSettings.users,
-          isAnonymousUserId(cookieUserId) ? makeAnonymousKnownUser(cookieUserId) : { id: cookieUserId, username: "signed-in", name: "Signed-in user", email: "", profileVisibility: "private" },
-        ],
-      });
-    } else {
-      setUserSettings({
-        ...storedSettings,
-        currentUserId: storedSettings.users.some((user) => user.id === cookieUserId) ? cookieUserId : storedSettings.currentUserId,
-      });
-    }
+    setUserSettings(getGuestUserSettings(storedSettings, window.localStorage));
     settingsLoadedRef.current = true;
   }, []);
 
@@ -1158,6 +1591,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             song={selectedSong}
             userId={activeUserId}
             persistProgress={!playlistPracticeReadOnly}
+            readOnlyDataUserId={playlistPracticeReadOnly ? selectedPlaylist?.owner?.id : undefined}
             initialSession={session}
             onDraftRecordingSaved={refreshSelectedSong}
             breadcrumbRootLabel={breadcrumbRootLabel}
@@ -1639,6 +2073,11 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                 New Song
               </button>
             </div>
+            <LibraryDraftRecorder
+              request={request}
+              userId={activeUserId}
+              refreshTrigger={refreshTrigger}
+            />
             <SongBrowser
               key={`songs:${activeUserId}:${refreshTrigger}`}
               onSelectSong={handleSelectSong}

@@ -16,6 +16,10 @@ function formatError(error: unknown) {
   return shouldExpose ? { error: message } : { error: 'Internal server error' };
 }
 
+function parseShareAudioMode(value: unknown): 'part' | 'blend' | 'both' {
+  return value === 'part' || value === 'blend' || value === 'both' ? value : 'both';
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -27,8 +31,9 @@ export async function POST(
     if (!existing) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }
+    const body = (await request.json().catch(() => ({}))) as { publicShareAudioMode?: unknown; shareAudioMode?: unknown };
 
-    const playlist = await enablePlaylistPublicSharing(id, userId);
+    const playlist = await enablePlaylistPublicSharing(id, userId, parseShareAudioMode(body.publicShareAudioMode ?? body.shareAudioMode));
     if (!playlist) {
       return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
     }

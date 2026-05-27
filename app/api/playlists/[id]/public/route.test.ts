@@ -2,63 +2,63 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../../../db/queries', () => ({
   getPlaylistById: vi.fn(),
-  enablePlaylistSharing: vi.fn(),
-  disablePlaylistSharing: vi.fn(),
+  enablePlaylistPublicSharing: vi.fn(),
+  disablePlaylistPublicSharing: vi.fn(),
 }));
 
 import { DELETE, POST } from './route';
-import { disablePlaylistSharing, enablePlaylistSharing, getPlaylistById } from '../../../../../db/queries';
+import { disablePlaylistPublicSharing, enablePlaylistPublicSharing, getPlaylistById } from '../../../../../db/queries';
 
-describe('POST /api/playlists/[id]/share', () => {
+describe('POST /api/playlists/[id]/public', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('enables sharing for an owned playlist', async () => {
+  it('publishes an owned playlist with the selected audio mode', async () => {
     vi.mocked(getPlaylistById).mockResolvedValue({ id: 'pl-1', name: 'Set', songs: [], isRetired: false, createdAt: '2026-01-01T00:00:00.000Z' } as any);
-    vi.mocked(enablePlaylistSharing).mockResolvedValue({
+    vi.mocked(enablePlaylistPublicSharing).mockResolvedValue({
       id: 'pl-1',
       name: 'Set',
       isRetired: false,
+      isPublic: true,
+      shareAudioMode: 'both',
+      publicShareAudioMode: 'blend',
       createdAt: '2026-01-01T00:00:00.000Z',
       songCount: 0,
-      shareToken: 'share-token-1',
-      sharedAt: '2026-05-24T00:00:00.000Z',
     } as any);
 
-    const request = new Request('http://localhost/api/playlists/pl-1/share', {
+    const request = new Request('http://localhost/api/playlists/pl-1/public', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shareAudioMode: 'blend' }),
+      body: JSON.stringify({ publicShareAudioMode: 'blend' }),
     });
+
     const response = await POST(request as any, { params: Promise.resolve({ id: 'pl-1' }) });
-    const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(enablePlaylistSharing).toHaveBeenCalledWith('pl-1', 'default', 'blend');
-    expect(data.shareUrl).toBe('http://localhost/share/playlists/share-token-1');
+    expect(enablePlaylistPublicSharing).toHaveBeenCalledWith('pl-1', 'default', 'blend');
   });
 
   it('returns 404 when the user does not own the playlist', async () => {
     vi.mocked(getPlaylistById).mockResolvedValue(null);
 
-    const request = new Request('http://localhost/api/playlists/pl-x/share', { method: 'POST' });
+    const request = new Request('http://localhost/api/playlists/pl-x/public', { method: 'POST' });
     const response = await POST(request as any, { params: Promise.resolve({ id: 'pl-x' }) });
 
     expect(response.status).toBe(404);
-    expect(enablePlaylistSharing).not.toHaveBeenCalled();
+    expect(enablePlaylistPublicSharing).not.toHaveBeenCalled();
   });
 });
 
-describe('DELETE /api/playlists/[id]/share', () => {
+describe('DELETE /api/playlists/[id]/public', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('disables sharing for an owned playlist', async () => {
+  it('removes an owned playlist from public sharing only', async () => {
     vi.mocked(getPlaylistById).mockResolvedValue({ id: 'pl-1', name: 'Set', songs: [], isRetired: false, createdAt: '2026-01-01T00:00:00.000Z' } as any);
-    vi.mocked(disablePlaylistSharing).mockResolvedValue(true);
+    vi.mocked(disablePlaylistPublicSharing).mockResolvedValue(true);
 
-    const request = new Request('http://localhost/api/playlists/pl-1/share', { method: 'DELETE' });
+    const request = new Request('http://localhost/api/playlists/pl-1/public', { method: 'DELETE' });
     const response = await DELETE(request as any, { params: Promise.resolve({ id: 'pl-1' }) });
 
     expect(response.status).toBe(204);
-    expect(disablePlaylistSharing).toHaveBeenCalledWith('pl-1', 'default');
+    expect(disablePlaylistPublicSharing).toHaveBeenCalledWith('pl-1', 'default');
   });
 });

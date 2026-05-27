@@ -161,6 +161,7 @@ describe('PlaylistDetail', () => {
 
     render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
     await waitFor(() => expect(screen.getByTestId('playlist-share')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('playlist-share-audio-mode'), { target: { value: 'blend' } });
 
     fireEvent.click(screen.getByTestId('playlist-share'));
 
@@ -168,12 +169,54 @@ describe('PlaylistDetail', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/share', expect.objectContaining({ method: 'POST' }));
       expect(screen.getByTestId('playlist-share-link')).toHaveAttribute('href', expect.stringContaining('/share/playlists/share-token-1'));
     });
+    const shareCall = mockFetch.mock.calls.find(([url, init]) => url === '/api/playlists/pl-1/share' && init?.method === 'POST');
+    expect(JSON.parse(String(shareCall?.[1]?.body))).toEqual({ shareAudioMode: 'blend' });
 
     fireEvent.click(screen.getByTestId('playlist-unshare'));
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/share', expect.objectContaining({ method: 'DELETE' }));
       expect(screen.getByTestId('playlist-share')).toBeInTheDocument();
+    });
+  });
+
+  it('publishes and unpublishes public sharing with independent audio settings', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...playlistResponse, shareToken: 'share-token-1', shareAudioMode: 'blend', publicShareAudioMode: 'both' }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...playlistResponse,
+          isPublic: true,
+          shareToken: 'share-token-1',
+          shareAudioMode: 'blend',
+          publicShareAudioMode: 'part',
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+    await waitFor(() => expect(screen.getByTestId('playlist-publish-public')).toBeInTheDocument());
+
+    expect(screen.getByTestId('playlist-share-audio-mode')).toHaveValue('blend');
+    expect(screen.getByTestId('playlist-public-share-audio-mode')).toHaveValue('both');
+
+    fireEvent.change(screen.getByTestId('playlist-public-share-audio-mode'), { target: { value: 'part' } });
+    fireEvent.click(screen.getByTestId('playlist-publish-public'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/public', expect.objectContaining({ method: 'POST' }));
+      expect(screen.getByTestId('playlist-share-link')).toHaveAttribute('href', expect.stringContaining('/share/playlists/share-token-1'));
+    });
+    const publicCall = mockFetch.mock.calls.find(([url, init]) => url === '/api/playlists/pl-1/public' && init?.method === 'POST');
+    expect(JSON.parse(String(publicCall?.[1]?.body))).toEqual({ publicShareAudioMode: 'part' });
+    expect(screen.getByTestId('playlist-share-audio-mode')).toHaveValue('blend');
+
+    fireEvent.click(screen.getByTestId('playlist-unpublish-public'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/public', expect.objectContaining({ method: 'DELETE' }));
+      expect(screen.getByTestId('playlist-share-link')).toHaveAttribute('href', expect.stringContaining('/share/playlists/share-token-1'));
     });
   });
 

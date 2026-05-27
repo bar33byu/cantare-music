@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, isNull, and } from "drizzle-orm";
 import { songs, segments, practiceRatings, playlists, playlistSongs, draftRecordings, tapPracticeSessions, tapPracticeTaps, users, magicLinkTokens, userSessions } from "./schema";
 
 // ── chainable mock builder ─────────────────────────────────────────────────────
@@ -320,6 +320,43 @@ describe("getDraftRecordingsForSong", () => {
   });
 });
 
+describe("getUnassignedDraftRecordings", () => {
+  it("returns unassigned active draft recordings scoped by user", async () => {
+    const row = {
+      id: "draft-1",
+      userId: "user-1",
+      songId: null,
+      title: null,
+      audioKey: "audio/unassigned/user-1/draft.webm",
+      status: "draft",
+      trimStartMs: null,
+      trimEndMs: null,
+      createdAt: new Date("2026-05-26T14:30:00.000Z"),
+      archivedAt: null,
+    };
+    const chain = makeChain([row]);
+    selectSpy.mockReturnValue(chain);
+
+    const { getUnassignedDraftRecordings } = await getQueries();
+    const result = await getUnassignedDraftRecordings("user-1");
+
+    expect(selectSpy).toHaveBeenCalled();
+    const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
+    expect(whereSpy).toHaveBeenCalledWith(and(eq(draftRecordings.userId, "user-1"), isNull(draftRecordings.songId), eq(draftRecordings.status, "draft")));
+    expect(result).toEqual([{
+      id: "draft-1",
+      songId: null,
+      title: null,
+      audioKey: "audio/unassigned/user-1/draft.webm",
+      status: "draft",
+      trimStartMs: null,
+      trimEndMs: null,
+      createdAt: "2026-05-26T14:30:00.000Z",
+      archivedAt: null,
+    }]);
+  });
+});
+
 describe("getArchivedDraftRecordingsForSong", () => {
   it("returns archived drafts for a song scoped by user", async () => {
     const row = {
@@ -353,6 +390,60 @@ describe("getArchivedDraftRecordingsForSong", () => {
       createdAt: "2026-05-24T14:30:00.000Z",
       archivedAt: "2026-05-25T14:30:00.000Z",
     }]);
+  });
+});
+
+describe("discardDraftRecording", () => {
+  it("marks an active draft recording as discarded without deleting it", async () => {
+    const songRow = {
+      id: "song-1",
+      userId: "user-1",
+      title: "Song 1",
+      artist: null,
+      audioKey: "audio/song-1/current.mp3",
+      alternateAudioKey: null,
+      audioTrimStartMs: null,
+      audioTrimEndMs: null,
+      pitchContourNotes: [],
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      lastPracticedAt: null,
+    };
+    const discardedRow = {
+      id: "draft-1",
+      songId: "song-1",
+      title: null,
+      audioKey: "audio/song-1/draft.webm",
+      status: "discarded",
+      trimStartMs: 500,
+      trimEndMs: 4200,
+      createdAt: new Date("2026-05-25T14:30:00.000Z"),
+      archivedAt: new Date("2026-05-25T15:00:00.000Z"),
+    };
+    const songSelectChain = makeChain([songRow]);
+    const draftUpdateChain = makeChain([discardedRow]);
+    selectSpy.mockReturnValueOnce(songSelectChain);
+    updateSpy.mockReturnValueOnce(draftUpdateChain);
+
+    const { discardDraftRecording } = await getQueries();
+    const result = await discardDraftRecording("song-1", "draft-1", "user-1");
+
+    expect(updateSpy).toHaveBeenCalledWith(draftRecordings);
+    const draftSetSpy = (draftUpdateChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
+    expect(draftSetSpy).toHaveBeenCalledWith({
+      status: "discarded",
+      archivedAt: expect.any(Date),
+    });
+    expect(result).toEqual({
+      id: "draft-1",
+      songId: "song-1",
+      title: null,
+      audioKey: "audio/song-1/draft.webm",
+      status: "discarded",
+      trimStartMs: 500,
+      trimEndMs: 4200,
+      createdAt: "2026-05-25T14:30:00.000Z",
+      archivedAt: "2026-05-25T15:00:00.000Z",
+    });
   });
 });
 

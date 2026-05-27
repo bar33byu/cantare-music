@@ -1,10 +1,10 @@
 # Cantare Feature Roadmap
 
-## Version 2 Status
+## Current Status
 
-Version 2 is now in stabilization. The remaining work in this major version should be bug fixes, fit-and-finish, documentation, and small workflow improvements around the current single-user practice experience.
+Cantare is now in the Version 3 line. Version 2 established the single-user practice foundation: segment practice, Part and Blend audio, playlists, Listen/Focus/Auto Drill modes, and MIDI-guided tap practice. Version 3 adds account-aware libraries, sharing, imports, and faster rehearsal-capture workflows.
 
-We are not planning a new Version 2.5 feature build right now. Once the current Version 2 feature set feels stable, we will close the books on v2 and start Version 3 with the larger multi-user and collaboration work.
+The near-term priority is stabilization: keep the current workflows reliable on desktop and mobile, improve fit-and-finish, and avoid expanding into larger collaboration features until sharing and draft recordings feel solid.
 
 ## Version 2.0: Stable Tap Practice Foundation
 
@@ -47,6 +47,7 @@ We are not planning a new Version 2.5 feature build right now. Once the current 
 - [x] Use existing card arrows to move backward and forward in auto-drill
 - [x] Reset loop counts when moving to a new card manually
 - [x] Add Listen mode for sequential playlist playback
+- [x] Keep Listen mode playback position when switching between Part and Blend audio
 
 ## Version 2.4: MIDI-Guided Tap Practice and Editing Polish
 
@@ -67,23 +68,45 @@ We are not planning a new Version 2.5 feature build right now. Once the current 
 - [x] Add missing-asset library filters and clearer asset language such as MIDI contour
 - [x] Move build/version details into settings on main-branch builds while keeping branch pills for active development builds
 
+## Version 3.0: Accounts, Sharing, and Rehearsal Capture
+
+- [x] Multi-user account model and profile management
+- [x] Passwordless magic-link sign-in
+- [x] Admin impersonation for support and troubleshooting
+- [x] User-scoped songs, playlists, ratings, tap attempts, drafts, and settings
+- [x] Playlist direct URL sharing
+- [x] Public Shared tab for signed-in users
+- [x] Cross-user playlist imports with source lineage
+- [x] Independent Part, Blend, or Part and Blend audio settings for URL shares and Shared-tab publishing
+- [x] Retiring a playlist removes it from sharing
+- [x] Song-scoped Draft recording model
+- [x] Audio-only in-app recording from a song page
+- [x] Audio-only in-app recording from the library for fast unassigned capture
+- [x] Unassigned draft review flow for associating a recording with a song
+- [x] Draft Review screen with playback and Trim as the primary action
+- [x] Non-destructive trim metadata with inline autosave feedback
+- [x] Promote to song version using current trim metadata
+- [x] Automatically archive promoted drafts per song
+- [x] Per-song Archived Drafts collapsed below active draft recordings
+- [x] Discard draft recordings without permanently deleting the source object immediately
+- [x] Mobile-friendly recording status with visible input level
+
 ## Deferred From Version 2
 
 ### Spaced Repetition Scheduling
 
-This was previously listed as Version 2.5, but we are not implementing it in the current v2 line.
+This was previously listed as Version 2.5, but it remains deferred while Version 3 sharing and rehearsal capture stabilize.
 
 - [ ] Add `lastReviewedAt` and `reviewIntervalDays` to segment schema
 - [ ] Calculate review intervals from ratings
 - [ ] Surface due segments in playlist practice
 - [ ] Add Review Due sorting and filtering
 
-## Version 3.0: Multi-User, Collaboration, and Sharing
+## Future Version 3 Work
 
-- [ ] Multi-user account model and profile management
-- [ ] User invitations
-- [ ] Playlist sharing
-- [ ] Cross-user playlist imports
 - [ ] Shared practice sessions
+- [ ] User invitations
 - [ ] Collaborative challenges and games
 - [ ] Expanded profiles and leaderboards
+- [ ] Better media lifecycle tooling for old draft and orphaned audio objects
+- [ ] More explicit browser/device guidance for mobile recording limitations
