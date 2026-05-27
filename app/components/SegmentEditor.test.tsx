@@ -707,7 +707,7 @@ describe('SegmentEditor', () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText('03:00')).toBeInTheDocument();
+      expect(screen.getAllByText('03:00').length).toBeGreaterThan(0);
     });
 
     vi.stubGlobal('Audio', originalAudio);
@@ -745,11 +745,9 @@ describe('SegmentEditor', () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('segment-editor-playback-controls')).toBeInTheDocument();
+      expect(screen.queryByTestId('segment-editor-playback-controls')).not.toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-bottom-play-toggle')).toBeInTheDocument();
     });
-
-    fireEvent.click(screen.getByTestId('segment-editor-play-toggle'));
-    expect(play).toHaveBeenCalledWith(2000, 60000);
 
     fireEvent.click(screen.getByTestId('segment-editor-bottom-play-toggle'));
     expect(play).toHaveBeenCalledWith(2000, 60000);
@@ -787,10 +785,10 @@ describe('SegmentEditor', () => {
     render(<SegmentEditor songId="song-1" />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('segment-editor-play-toggle')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-bottom-play-toggle')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('segment-editor-play-toggle'));
+    fireEvent.click(screen.getByTestId('segment-editor-bottom-play-toggle'));
     expect(play).toHaveBeenCalledWith(2000, 60000);
   });
 
@@ -1220,8 +1218,11 @@ describe('SegmentEditor', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('segment-editor-board')).toBeInTheDocument();
-      expect(screen.getByTestId('midi-setup-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('segment-editor-midi-panel-toggle')).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByTestId('segment-editor-midi-panel-toggle'));
+    expect(screen.getByTestId('midi-setup-panel')).toBeInTheDocument();
 
     expect(screen.queryByTestId('segment-editor-contour-record-toggle')).not.toBeInTheDocument();
     expect(screen.queryByTestId('segment-editor-contour-tapbar')).not.toBeInTheDocument();

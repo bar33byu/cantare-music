@@ -1,18 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MidiSetupPanel } from "./MidiSetupPanel";
 
 describe("MidiSetupPanel", () => {
   const request = vi.fn();
-  const originalAudioContext = window.AudioContext;
   const audioPlayer = {
-    isPlaying: false,
-    isReady: true,
     currentMs: 2500,
     durationMs: 60000,
-    play: vi.fn(),
-    pause: vi.fn(),
-    seek: vi.fn(),
   };
 
   beforeEach(() => {
@@ -57,28 +51,19 @@ describe("MidiSetupPanel", () => {
     });
   });
 
-  afterEach(() => {
-    Object.defineProperty(window, "AudioContext", {
-      configurable: true,
-      value: originalAudioContext,
-    });
-  });
-
-  it("shows MIDI status and records alignment taps", async () => {
+  it("shows the simplified MIDI start setup without tap or cleanup controls", async () => {
     render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
 
     expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    expect(screen.getByText(/3 raw, 2 retained, 1 ignored/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Resume tap alignment"));
-    fireEvent.pointerDown(await screen.findByTestId("midi-alignment-tap"));
-
-    await waitFor(() => {
-      expect(request).toHaveBeenCalledWith("/api/songs/song-1/midi/alignment", expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ action: "tap", timeSeconds: 2.5 }),
-      }));
-    });
+    expect(screen.getByText("MIDI start setup")).toBeInTheDocument();
+    expect(screen.getByText("2 notes")).toBeInTheDocument();
+    expect(screen.getByText("1 / 2 notes")).toBeInTheDocument();
+    expect(screen.getByTestId("midi-start-offset-slider")).toBeInTheDocument();
+    expect(screen.queryByText("Play audio")).not.toBeInTheDocument();
+    expect(screen.queryByText("Undo last tap")).not.toBeInTheDocument();
+    expect(screen.queryByText("Re-clean MIDI")).not.toBeInTheDocument();
+    expect(screen.queryByText("Full realignment")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("midi-short-note-threshold")).not.toBeInTheDocument();
   });
 
   it("sets a complete MIDI alignment from the current playhead offset", async () => {
@@ -119,7 +104,7 @@ describe("MidiSetupPanel", () => {
     });
   });
 
-  it("defaults the short-note slider to zero before MIDI is uploaded", async () => {
+  it("shows upload guidance before MIDI is uploaded", async () => {
     request.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -142,234 +127,80 @@ describe("MidiSetupPanel", () => {
 
     render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
 
-    expect(await screen.findByTestId("midi-short-note-threshold")).toHaveValue("0");
-    expect(screen.getByText("Ignore notes shorter than 0 ms")).toBeInTheDocument();
+    expect(await screen.findByText("Upload a single-part MIDI file, then line up its first note with the audio.")).toBeInTheDocument();
+    expect(screen.getByText("No MIDI")).toBeInTheDocument();
+    expect(screen.queryByTestId("midi-start-offset-slider")).not.toBeInTheDocument();
   });
 
-  it("confirms restart inline without using a blocking browser dialog", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm");
-    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
-
-    expect(await screen.findByText("part.mid")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("midi-restart-alignment"));
-    expect(screen.getByText("Restart MIDI alignment?")).toBeInTheDocument();
-    expect(confirmSpy).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByTestId("midi-confirm-restart"));
-
-    await waitFor(() => {
-      expect(request).toHaveBeenCalledWith("/api/songs/song-1/midi/alignment", expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ action: "restart" }),
-      }));
-    });
-
-    confirmSpy.mockRestore();
-  });
-
-  it("positions the piano roll from audio time instead of note slots", async () => {
-    const { rerender } = render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
-
-    expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume tap alignment"));
-
-    const currentNote = await screen.findByTitle("2: D4 Up");
-    expect(currentNote).toHaveStyle({ left: "28%" });
-
-    rerender(
-      <MidiSetupPanel
-        songId="song-1"
-        audioPlayer={{ ...audioPlayer, currentMs: 3000 }}
-        request={request}
-      />
-    );
-
-    expect(await screen.findByTitle("2: D4 Up")).toHaveStyle({ left: "22%" });
-  });
-
-  it("scales piano roll note duration from aligned audio gaps", async () => {
-    const midiStatus = {
+  it("uploads MIDI without sending short-note cleanup settings", async () => {
+    const uploadedStatus = {
       source: {
-        id: "midi-1",
-        originalFilename: "part.mid",
-        uploadedAt: "2026-05-18T00:00:00.000Z",
+        id: "midi-2",
+        originalFilename: "new.mid",
+        uploadedAt: "2026-05-18T00:02:00.000Z",
         parseStatus: "parsed",
-        rawNoteCount: 3,
-        cleanedNoteCount: 3,
+        rawNoteCount: 1,
+        cleanedNoteCount: 1,
         ignoredShortNoteCount: 0,
-        cleanupSettings: { shortNoteThresholdMs: 20, simultaneousThresholdMs: 30 },
+        cleanupSettings: { shortNoteThresholdMs: 0, simultaneousThresholdMs: 30 },
         cleanedNotes: [
-          { index: 0, midiPitch: 60, pitchName: "C4", midiStartSeconds: 0, midiDurationSeconds: 0.5, movementFromPrevious: "start" },
-          { index: 1, midiPitch: 62, pitchName: "D4", midiStartSeconds: 1, midiDurationSeconds: 0.9, movementFromPrevious: "up" },
-          { index: 2, midiPitch: 64, pitchName: "E4", midiStartSeconds: 2, midiDurationSeconds: 0.5, movementFromPrevious: "up" },
+          { index: 0, midiPitch: 60, pitchName: "C4", midiStartSeconds: 0, midiDurationSeconds: 0.75, movementFromPrevious: "start" },
         ],
       },
-      alignment: {
-        id: "align-1",
-        tappedStartTimesSeconds: [1, 3],
-        retainedMidiNoteCount: 3,
-        isComplete: false,
-        updatedAt: "2026-05-18T00:01:00.000Z",
-      },
+      alignment: null,
       summary: {
         hasMidi: true,
-        rawNoteCount: 3,
-        cleanedNoteCount: 3,
+        rawNoteCount: 1,
+        cleanedNoteCount: 1,
         ignoredShortNoteCount: 0,
-        shortNoteThresholdMs: 20,
-        alignedCount: 2,
-        retainedMidiNoteCount: 3,
+        shortNoteThresholdMs: 0,
+        alignedCount: 0,
+        retainedMidiNoteCount: 1,
         hasCompleteAlignment: false,
         hasDerivedAnswerKey: false,
-        latestAlignmentDate: "2026-05-18T00:01:00.000Z",
+        latestAlignmentDate: null,
       },
     };
-    const customRequest = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/midi/alignment") && init?.method === "POST") {
-        return {
-          ok: true,
-          json: async () => ({ alignment: midiStatus.alignment }),
-        } as Response;
-      }
-      return {
+    request
+      .mockResolvedValueOnce({
         ok: true,
-        json: async () => midiStatus,
-      } as Response;
-    });
+        json: async () => ({
+          source: null,
+          alignment: null,
+          summary: {
+            hasMidi: false,
+            rawNoteCount: 0,
+            cleanedNoteCount: 0,
+            ignoredShortNoteCount: 0,
+            shortNoteThresholdMs: 0,
+            alignedCount: 0,
+            retainedMidiNoteCount: 0,
+            hasCompleteAlignment: false,
+            hasDerivedAnswerKey: false,
+            latestAlignmentDate: null,
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => uploadedStatus,
+      });
 
-    render(
-      <MidiSetupPanel
-        songId="song-1"
-        audioPlayer={{ ...audioPlayer, currentMs: 1000 }}
-        request={customRequest}
-      />
-    );
-
-    expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume tap alignment"));
-
-    const firstNote = await screen.findByTitle("1: C4 Start");
-    const secondNote = await screen.findByTitle("2: D4 Up");
-    expect(firstNote).toHaveStyle({ left: "28%", minWidth: "1.4rem", width: "12%" });
-    expect(secondNote).toHaveStyle({ left: "52%", minWidth: "1.4rem", width: "10.8%" });
-  });
-
-  it("updates the resume index when a piano roll note is selected", async () => {
     render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
 
-    expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume tap alignment"));
-
-    const resumeInput = screen.getByTestId("midi-resume-index");
-    expect(resumeInput).toHaveValue(1);
-
-    fireEvent.click(await screen.findByTestId("midi-note-1"));
-
-    expect(resumeInput).toHaveValue(0);
-  });
-
-  it("does not let delayed tap-save responses move the visible alignment backward", async () => {
-    let resolveTapSave: (value: Response) => void = () => undefined;
-    const delayedRequest = vi.fn(async (url: string, init?: RequestInit) => {
-      const body = typeof init?.body === "string" ? JSON.parse(init.body) as { action?: string } : {};
-      if (url.endsWith("/midi/alignment") && init?.method === "POST" && body.action === "tap") {
-        return new Promise<Response>((resolve) => {
-          resolveTapSave = resolve;
-        });
-      }
-      if (url.endsWith("/midi/alignment") && init?.method === "POST") {
-        return {
-          ok: true,
-          json: async () => ({
-            alignment: {
-              id: "align-1",
-              tappedStartTimesSeconds: [1],
-              retainedMidiNoteCount: 2,
-              isComplete: false,
-              updatedAt: "2026-05-18T00:01:00.000Z",
-            },
-          }),
-        } as Response;
-      }
-      return request(url, init);
-    });
-
-    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={delayedRequest} />);
-
-    expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume tap alignment"));
-    fireEvent.pointerDown(await screen.findByTestId("midi-alignment-tap"));
-
-    expect(screen.getAllByText("2 / 2 notes").length).toBeGreaterThan(0);
-
-    resolveTapSave({
-      ok: true,
-      json: async () => ({
-        alignment: {
-          id: "align-1",
-          tappedStartTimesSeconds: [1],
-          retainedMidiNoteCount: 2,
-          isComplete: false,
-          updatedAt: "2026-05-18T00:01:01.000Z",
-        },
-      }),
-    } as Response);
+    expect(await screen.findByText("Upload a single-part MIDI file, then line up its first note with the audio.")).toBeInTheDocument();
+    const file = new File(["midi"], "new.mid", { type: "audio/midi" });
+    fireEvent.change(screen.getByTestId("midi-upload-input"), { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(delayedRequest).toHaveBeenCalledWith("/api/songs/song-1/midi/alignment", expect.objectContaining({
-        body: JSON.stringify({ action: "tap", timeSeconds: 2.5 }),
+      expect(request).toHaveBeenCalledWith("/api/songs/song-1/midi", expect.objectContaining({
+        method: "POST",
+        body: expect.any(FormData),
       }));
     });
-    expect(screen.getAllByText("2 / 2 notes").length).toBeGreaterThan(0);
-  });
-
-  it("plays the MIDI pitch for the note being aligned on tap", async () => {
-    const setFrequency = vi.fn();
-    const oscillator = {
-      type: "sine",
-      frequency: { setValueAtTime: setFrequency },
-      connect: vi.fn(),
-      start: vi.fn(),
-      stop: vi.fn(),
-    };
-    const gain = {
-      gain: {
-        setValueAtTime: vi.fn(),
-        exponentialRampToValueAtTime: vi.fn(),
-      },
-      connect: vi.fn(),
-    };
-    class MockAudioContext {
-      currentTime = 12;
-      destination = {};
-      state = "running";
-
-      createOscillator() {
-        return oscillator;
-      }
-
-      createGain() {
-        return gain;
-      }
-
-      resume = vi.fn();
-    }
-    Object.defineProperty(window, "AudioContext", {
-      configurable: true,
-      value: MockAudioContext,
-    });
-
-    render(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} />);
-
-    expect(await screen.findByText("part.mid")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Resume tap alignment"));
-    fireEvent.pointerDown(await screen.findByTestId("midi-alignment-tap"));
-
-    expect(setFrequency).toHaveBeenCalled();
-    expect(setFrequency.mock.calls[0][0]).toBeCloseTo(293.66, 2);
-    expect(setFrequency.mock.calls[0][1]).toBe(12);
-    expect(oscillator.start).toHaveBeenCalledWith(12);
-    expect(oscillator.stop).toHaveBeenCalledWith(12.52);
+    const postCall = request.mock.calls.find(([url, init]) => url === "/api/songs/song-1/midi" && init?.method === "POST");
+    const formData = postCall?.[1]?.body as FormData;
+    expect(formData.get("file")).toBe(file);
+    expect(formData.has("shortNoteThresholdMs")).toBe(false);
   });
 });
