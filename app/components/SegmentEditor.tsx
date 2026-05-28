@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Segment } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { MidiSetupPanel } from './MidiSetupPanel';
@@ -43,6 +43,39 @@ interface SegmentEditorProps {
   onSongUpdated?: () => void;
 }
 
+interface EditorDisclosureProps {
+  title: string;
+  description?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+  testId: string;
+  toggleTestId?: string;
+}
+
+function EditorDisclosure({ title, description, open, onToggle, children, testId, toggleTestId }: EditorDisclosureProps) {
+  return (
+    <section data-testid={testId} className="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <button
+        type="button"
+        data-testid={toggleTestId ?? `${testId}-toggle`}
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left"
+      >
+        <span>
+          <span className="block text-sm font-semibold text-slate-950">{title}</span>
+          {description ? <span className="mt-1 block text-xs leading-5 text-slate-600">{description}</span> : null}
+        </span>
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-300 text-sm font-semibold text-slate-600">
+          {open ? '-' : '+'}
+        </span>
+      </button>
+      {open ? <div className="border-t border-slate-100 px-4 py-3">{children}</div> : null}
+    </section>
+  );
+}
+
 export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
@@ -54,6 +87,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [songTitle, setSongTitle] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
   const [showReplaceAudio, setShowReplaceAudio] = useState(false);
+  const [showMidiSetup, setShowMidiSetup] = useState(false);
   const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
   const [savingSegmentId, setSavingSegmentId] = useState<string | null>(null);
   const [savingTitle, setSavingTitle] = useState(false);
@@ -787,6 +821,9 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       {/* Header */}
       <div className="mb-4">
         <h2 className="text-2xl font-bold text-gray-900">Edit Song</h2>
+        <p className="mt-1 max-w-3xl text-sm text-slate-600">
+          Start with the title and optional setup tools, then use the sections workspace to line up lyrics with the recording.
+        </p>
       </div>
 
       {/* Song title */}
@@ -807,7 +844,10 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       </div>
 
       {/* Replace audio (collapsible) */}
-      <div className="mb-4">
+      <div className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <p className="mb-2 text-xs leading-5 text-slate-600">
+          Replace audio only when the source recording changes. Section timings and lyrics are preserved.
+        </p>
         <button
           type="button"
           data-testid="segment-editor-replace-audio-toggle"
@@ -839,7 +879,17 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         )}
       </div>
 
-      <MidiSetupPanel songId={songId} audioPlayer={audioPlayer} request={request} />
+      <div className="mb-4">
+        <EditorDisclosure
+          title="Contour and Tap setup"
+          description="Use MIDI setup when you want contour thumbnails or Tap practice. Leave it closed when you are only editing lyrics."
+          open={showMidiSetup}
+          onToggle={() => setShowMidiSetup((previous) => !previous)}
+          testId="segment-editor-midi-panel"
+        >
+          <MidiSetupPanel songId={songId} audioPlayer={audioPlayer} request={request} />
+        </EditorDisclosure>
+      </div>
 
       {deleteError && (
         <div role="alert" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -872,9 +922,10 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       <div className="mb-4 rounded-xl border border-indigo-100 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            <p className="text-sm font-semibold text-indigo-800">
-              Sections
-            </p>
+            <div>
+              <p className="text-sm font-semibold text-indigo-800">Sections</p>
+              <p className="text-xs leading-5 text-slate-600">Create rough sections first, then drag their edges to match the audio.</p>
+            </div>
             <button
               type="button"
               data-testid="segment-editor-new-section"
@@ -898,7 +949,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               }}
               className="px-3 py-1 border border-indigo-300 text-indigo-700 text-sm rounded hover:bg-indigo-50"
             >
-              Bulk Lyrics
+              Bulk lyrics import
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
@@ -927,82 +978,16 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
           </div>
         </div>
 
-        <div
-          data-testid="segment-editor-playback-controls"
-          className="sticky top-2 z-50 mb-3 rounded-lg border border-indigo-200 bg-white/95 p-3 shadow-sm backdrop-blur"
-        >
-          <div className="min-w-0 space-y-2">
-              <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:flex-nowrap">
-                <button
-                  type="button"
-                  data-testid="segment-editor-skip-back"
-                  onClick={() => handleSkipBy(-5000)}
-                  aria-label="Skip backward 5 seconds"
-                  disabled={!isReady}
-                  className="flex h-8 w-10 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
-                >
-                  <span className="inline-flex items-center justify-center">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
-                      <rect x="4" y="4.25" width="2.25" height="9.5" rx="1" />
-                      <path d="M8.1 9a1.2 1.2 0 0 1 .55-1.01l6.8-4.35A1.2 1.2 0 0 1 17.3 4.65v8.7a1.2 1.2 0 0 1-1.85 1.01l-6.8-4.35A1.2 1.2 0 0 1 8.1 9Z" />
-                      <text x="12" y="22" textAnchor="middle" className="fill-current text-[8px] font-bold">5</text>
-                    </svg>
-                    <span className="sr-only">-5s</span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  data-testid="segment-editor-play-toggle"
-                  onClick={handleTogglePlay}
-                  aria-label={isPlaying ? 'Pause' : 'Play'}
-                  className="h-8 w-12 rounded-xl bg-indigo-600 text-base text-white hover:bg-indigo-700"
-                >
-                  {isPlaying ? '⏸' : '▶'}
-                </button>
-                <button
-                  type="button"
-                  data-testid="segment-editor-skip-forward"
-                  onClick={() => handleSkipBy(5000)}
-                  aria-label="Skip forward 5 seconds"
-                  disabled={!isReady}
-                  className="flex h-8 w-10 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 text-xs"
-                >
-                  <span className="inline-flex items-center justify-center">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
-                      <path d="M6.7 4.65a1.2 1.2 0 0 1 1.85-1.01l6.8 4.35a1.2 1.2 0 0 1 0 2.02l-6.8 4.35a1.2 1.2 0 0 1-1.85-1.01v-8.7Z" />
-                      <rect x="17.75" y="4.25" width="2.25" height="9.5" rx="1" />
-                      <text x="12" y="22" textAnchor="middle" className="fill-current text-[8px] font-bold">5</text>
-                    </svg>
-                    <span className="sr-only">+5s</span>
-                  </span>
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                <span data-testid="segment-editor-current-ms">{formatMs(currentMs)}</span>
-                <span className="text-gray-400">/</span>
-                <span>{formatMs(timelineDurationMs)}</span>
-                {savingSegmentId ? <span className="text-indigo-600">Saving...</span> : null}
-              </div>
-          </div>
-        </div>
-
         {showBulkImport ? (
           <div data-testid="segment-editor-bulk-panel" className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <details className="text-xs text-indigo-800">
-                <summary className="cursor-pointer font-semibold">Custom separator</summary>
-                <label className="mt-2 block">
-                  Separator token
-                  <input
-                    data-testid="segment-editor-bulk-separator"
-                    value={bulkSeparator}
-                    onChange={(event) => setBulkSeparator(event.target.value)}
-                    className="mt-1 w-44 rounded border border-indigo-300 bg-white px-2 py-1 text-sm"
-                    placeholder="Blank line"
-                  />
-                </label>
-              </details>
-              <label className="mt-5 inline-flex items-center gap-2 text-xs text-indigo-900">
+            <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-indigo-950">Bulk lyrics import</p>
+                <p className="mt-1 text-xs leading-5 text-indigo-800">
+                  Paste the full text here first. Blank lines create sections, then the editor spaces them across the full recording so you can fine tune the timing below.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 text-xs text-indigo-900">
                 <input
                   data-testid="segment-editor-bulk-replace"
                   type="checkbox"
@@ -1012,6 +997,19 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
                 Replace existing sections
               </label>
             </div>
+            <details className="mb-2 text-xs text-indigo-800">
+              <summary className="cursor-pointer font-semibold">Custom separator</summary>
+              <label className="mt-2 block">
+                Separator token
+                <input
+                  data-testid="segment-editor-bulk-separator"
+                  value={bulkSeparator}
+                  onChange={(event) => setBulkSeparator(event.target.value)}
+                  className="mt-1 w-44 rounded border border-indigo-300 bg-white px-2 py-1 text-sm"
+                  placeholder="Blank line"
+                />
+              </label>
+            </details>
             <label className="block text-xs font-semibold text-indigo-800">Paste all lyrics</label>
             <textarea
               data-testid="segment-editor-bulk-text"
@@ -1026,9 +1024,6 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               ].join('\n')}
               className="mt-1 h-96 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm"
             />
-            <p className="mt-1 text-xs text-indigo-700">
-              Blank lines create new sections by default. Each block becomes one section, spaced evenly across the full song.
-            </p>
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
@@ -1228,7 +1223,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
         <div className="mt-2 flex items-center justify-between text-sm text-indigo-800">
           <span>0:00</span>
-          <span>{Math.floor(timelineDurationMs / 60000)}:{String(Math.floor((timelineDurationMs % 60000) / 1000)).padStart(2, '0')}</span>
+          <span>{formatMs(timelineDurationMs)}</span>
         </div>
           </div>
         </div>
@@ -1269,12 +1264,32 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
           <div className="mt-1 flex items-center justify-between text-xs text-indigo-800">
             <span>0:00</span>
-            <span>{Math.floor(Math.max(0, currentMs) / 60000)}:{String(Math.floor((Math.max(0, currentMs) % 60000) / 1000)).padStart(2, '0')}</span>
-            <span>{Math.floor(timelineDurationMs / 60000)}:{String(Math.floor((timelineDurationMs % 60000) / 1000)).padStart(2, '0')}</span>
+            <span data-testid="segment-editor-current-ms">{formatMs(currentMs)}</span>
+            <span>{formatMs(timelineDurationMs)}</span>
           </div>
+          {savingSegmentId ? (
+            <p className="mt-1 text-xs text-indigo-600">Saving...</p>
+          ) : null}
         </div>
 
-        <div className="sticky bottom-2 z-50 mt-3 flex justify-center">
+        <div className="sticky bottom-2 z-50 mt-3 flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            data-testid="segment-editor-skip-back"
+            onClick={() => handleSkipBy(-5000)}
+            aria-label="Skip backward 5 seconds"
+            disabled={!isReady}
+            className="flex h-10 w-11 items-center justify-center rounded-xl border border-indigo-300 bg-white/95 text-indigo-700 shadow-lg shadow-indigo-100 backdrop-blur hover:bg-indigo-50 disabled:opacity-40"
+          >
+            <span className="inline-flex items-center justify-center">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+                <rect x="4" y="4.25" width="2.25" height="9.5" rx="1" />
+                <path d="M8.1 9a1.2 1.2 0 0 1 .55-1.01l6.8-4.35A1.2 1.2 0 0 1 17.3 4.65v8.7a1.2 1.2 0 0 1-1.85 1.01l-6.8-4.35A1.2 1.2 0 0 1 8.1 9Z" />
+                <text x="12" y="22" textAnchor="middle" className="fill-current text-[8px] font-bold">5</text>
+              </svg>
+              <span className="sr-only">-5s</span>
+            </span>
+          </button>
           <button
             type="button"
             data-testid="segment-editor-bottom-play-toggle"
@@ -1283,6 +1298,23 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
             className="flex h-12 min-w-28 items-center justify-center rounded-2xl bg-indigo-600 px-5 text-lg font-semibold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700"
           >
             {isPlaying ? '⏸' : '▶'}
+          </button>
+          <button
+            type="button"
+            data-testid="segment-editor-skip-forward"
+            onClick={() => handleSkipBy(5000)}
+            aria-label="Skip forward 5 seconds"
+            disabled={!isReady}
+            className="flex h-10 w-11 items-center justify-center rounded-xl border border-indigo-300 bg-white/95 text-indigo-700 shadow-lg shadow-indigo-100 backdrop-blur hover:bg-indigo-50 disabled:opacity-40"
+          >
+            <span className="inline-flex items-center justify-center">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+                <path d="M6.7 4.65a1.2 1.2 0 0 1 1.85-1.01l6.8 4.35a1.2 1.2 0 0 1 0 2.02l-6.8 4.35a1.2 1.2 0 0 1-1.85-1.01v-8.7Z" />
+                <rect x="17.75" y="4.25" width="2.25" height="9.5" rx="1" />
+                <text x="12" y="22" textAnchor="middle" className="fill-current text-[8px] font-bold">5</text>
+              </svg>
+              <span className="sr-only">+5s</span>
+            </span>
           </button>
         </div>
       </div>
