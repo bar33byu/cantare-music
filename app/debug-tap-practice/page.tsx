@@ -7,6 +7,7 @@ import {
   compareContourAttemptDetailed,
   type ContourDirection,
 } from "../lib/contourPractice";
+import { DEFAULT_TAP_TIMING_TOLERANCE_MS } from "../lib/tapPracticeConstants";
 import type { PitchContourNote, Song } from "../types";
 
 interface SongSummary {
@@ -115,7 +116,7 @@ export default function DebugTapPracticePage() {
   const [sessionDetail, setSessionDetail] = React.useState<TapSessionDetail | null>(null);
   const [sessionLoading, setSessionLoading] = React.useState(false);
 
-  const [timeToleranceMs, setTimeToleranceMs] = React.useState(400);
+  const [timeToleranceMs, setTimeToleranceMs] = React.useState(DEFAULT_TAP_TIMING_TOLERANCE_MS);
   const [sameDeadZone, setSameDeadZone] = React.useState(DEFAULT_CONTOUR_SAME_DEAD_ZONE);
   const [durationToleranceRatio, setDurationToleranceRatio] = React.useState(0.6);
   const [selectedSegmentId, setSelectedSegmentId] = React.useState("all");

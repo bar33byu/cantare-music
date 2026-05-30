@@ -15,6 +15,7 @@ import {
   type CleanedMidiNote,
   type RawMidiNote,
 } from "./midiGuidedTapPractice";
+import { DEFAULT_TAP_TIMING_TOLERANCE_MS } from "./tapPracticeConstants";
 
 function raw(index: number, pitch: number, startSeconds: number, durationSeconds: number): RawMidiNote {
   return {
@@ -187,6 +188,18 @@ describe("midiGuidedTapPractice", () => {
       { timeOffsetMs: 0, direction: "same" },
       { timeOffsetMs: 1000, direction: "up" },
     ], 400);
+
+    expect(score.scorePercent).toBe(100);
+  });
+
+  it("accepts directionally correct taps that are slightly late within the shared tolerance", () => {
+    const notes: CleanedMidiNote[] = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
+    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
+    const score = scoreTapAttemptAgainstMidiKey(segmentKey, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 1500, direction: "up" },
+    ], DEFAULT_TAP_TIMING_TOLERANCE_MS);
 
     expect(score.scorePercent).toBe(100);
   });

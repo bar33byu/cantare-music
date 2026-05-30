@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useUploadAudio } from "../hooks/useUploadAudio";
 
 interface ReplaceAudioFormProps {
@@ -10,6 +10,7 @@ interface ReplaceAudioFormProps {
   mode?: 'upload' | 'replace';
   audioUrl?: string;
   alternateAudioUrl?: string;
+  children?: ReactNode;
 }
 
 type AudioVersion = 'prominent' | 'blend';
@@ -40,6 +41,7 @@ export function ReplaceAudioForm({
   mode = 'replace',
   audioUrl = '',
   alternateAudioUrl = '',
+  children,
 }: ReplaceAudioFormProps) {
   const { upload, uploading, progress, error: uploadError } = useUploadAudio(userId);
   const [versionState, setVersionState] = useState<Record<AudioVersion, VersionState>>({
@@ -193,6 +195,8 @@ export function ReplaceAudioForm({
           <p className="mt-1 text-xs text-gray-600">{progress}% uploaded</p>
         </div>
       )}
+
+      {children}
     </section>
   );
 }

@@ -1,0 +1,1 @@
+export const DEFAULT_TAP_TIMING_TOLERANCE_MS = 550;

@@ -30,6 +30,7 @@ import {
   scoreTapAttemptAgainstMidiKey,
   type MidiSegmentAnswerKey,
 } from "../lib/midiGuidedTapPractice";
+import { DEFAULT_TAP_TIMING_TOLERANCE_MS } from "../lib/tapPracticeConstants";
 
 interface TransportDebugState {
   playToggleClicks: number;
@@ -100,7 +101,7 @@ const TAP_CONTOUR_HEAT_MAP_ATTEMPT_LIMIT = 5;
 // code paths instead of keeping them hidden indefinitely.
 const SHOW_AUXILIARY_TAP_DEBUG_CONTROLS = false;
 const TAP_MATCH_OPTIONS = {
-  timeToleranceMs: 400,
+  timeToleranceMs: DEFAULT_TAP_TIMING_TOLERANCE_MS,
   sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   durationToleranceRatio: 0.6,
 } as const;
@@ -2284,6 +2285,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     const attemptNotes = tapAttemptsRef.current[currentSegment.id] ?? [];
+    if (attemptNotes.length === 0) {
+      return;
+    }
     const score = scoreTapAttemptAgainstMidiKey(
       currentMidiSegmentAnswerKey,
       toDirectionTaps(attemptNotes),
@@ -2595,13 +2599,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
       loopHandledRef.current = loopKey;
-      const loopMatch = compareContourAttemptDetailed(
-        currentCardContourNotes,
-        tapAttemptsBySegment[currentSegment.id] ?? [],
-        TAP_MATCH_OPTIONS
-      );
-      showAccuracyToast(`Loop accuracy ${Math.round(loopMatch.score * 100)}%`);
-      recordCurrentMidiContourAttempt();
+      const attemptNotes = tapAttemptsBySegment[currentSegment.id] ?? [];
+      if (isTapPracticeMode && attemptNotes.length > 0) {
+        const loopMatch = compareContourAttemptDetailed(
+          currentCardContourNotes,
+          attemptNotes,
+          TAP_MATCH_OPTIONS
+        );
+        showAccuracyToast(`Loop accuracy ${Math.round(loopMatch.score * 100)}%`);
+        recordCurrentMidiContourAttempt();
+      }
       setTapAttemptsBySegment((previous) => ({
         ...previous,
         [currentSegment.id]: [],
@@ -2614,6 +2621,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     currentMs,
     currentSegment,
     getSegmentStartWithPreroll,
+    isTapPracticeMode,
     isLooping,
     isPlaying,
     play,
@@ -3057,60 +3065,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               ))}
             </div>
           ) : null}
-          {!isTapPracticeMode ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <button
-                type="button"
-                data-testid="draft-recording-toggle"
-                aria-pressed={draftRecordingStatus === "recording"}
-                onClick={() => {
-                  if (draftRecordingStatus === "recording") {
-                    handleStopDraftRecording();
-                  } else {
-                    void handleStartDraftRecording();
-                  }
-                }}
-                disabled={draftRecordingStatus === "saving"}
-                className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                  draftRecordingStatus === "recording"
-                    ? "border-red-600 bg-red-600 text-white hover:bg-red-700"
-                    : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
-                }`}
-              >
-                {draftRecordingStatus === "recording"
-                  ? "Stop"
-                  : draftRecordingStatus === "saving"
-                    ? "Saving..."
-                    : "Record"}
-              </button>
-              {draftRecordingMessage ? (
-                <span
-                  data-testid="draft-recording-status"
-                  role={draftRecordingStatus === "error" ? "alert" : "status"}
-                  className={`text-xs ${
-                    draftRecordingStatus === "error"
-                      ? "text-red-700"
-                      : draftRecordingStatus === "saved"
-                        ? "text-emerald-700"
-                        : "text-slate-600"
-                  }`}
-                >
-                  {draftRecordingMessage}
-                </span>
-              ) : null}
-              {draftRecordingStatus === "recording" ? (
-                <div className="flex min-w-[96px] items-center gap-2" aria-label="Microphone input level" data-testid="draft-recording-level">
-                  <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-200">
-                    <div
-                      className="h-full rounded-full bg-emerald-500 transition-[width] duration-75"
-                      style={{ width: `${Math.max(4, Math.round(draftRecordingLevel * 100))}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-slate-500">Input</span>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
           {hasSegments && currentSegment && hasCardContourData ? (
             <button
               type="button"
@@ -3225,67 +3179,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       </div>
       ) : null}
 
-      {!isTapPracticeMode && !reviewingDraft && draftRecordings.length > 0 ? (
-        <section
-          data-testid="draft-recordings"
-          className="mx-4 mb-3 rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-sm md:mx-8"
-        >
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-slate-900">{DRAFT_LABELS.activeSection}</h2>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-              {draftRecordings.length}
-            </span>
-          </div>
-          <ul className="divide-y divide-slate-100">
-            {draftRecordings.map((draft) => (
-              <DraftRecordingListItem
-                key={draft.id}
-                draft={draft}
-                sequence={getDraftRecordingSequence(draft, draftRecordings)}
-                isPlaying={isPlaying}
-                onPause={pause}
-                onReview={setReviewingDraftId}
-                onDiscard={(draftId) => void handleDiscardDraftRecording(draftId)}
-              />
-            ))}
-          </ul>
-          {draftDiscardMessage ? (
-            <p
-              className={`mt-2 text-xs ${draftDiscardMessage.includes("discarded") ? "text-emerald-700" : "text-red-700"}`}
-              role={draftDiscardMessage.includes("discarded") ? "status" : "alert"}
-              data-testid="draft-discard-status"
-            >
-              {draftDiscardMessage}
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
-      {!isTapPracticeMode && reviewingDraft ? (
-        <main
-          data-testid="draft-review-main"
-          className="flex flex-1 justify-center overflow-y-auto px-4 pt-2 md:px-8"
-          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)" }}
-        >
-          <DraftRecordingReview
-            draft={reviewingDraft}
-            fallbackTitle={
-              reviewingDraft.status === "archived"
-                ? getDraftRecordingFallbackTitle(reviewingDraft, getDraftRecordingSequence(reviewingDraft, archivedDraftRecordings))
-                : getDraftRecordingFallbackTitle(reviewingDraft, getDraftRecordingSequence(reviewingDraft, draftRecordings))
-            }
-            request={request}
-            onTrimSaved={onDraftRecordingSaved}
-            onPromoted={onDraftRecordingSaved}
-            onDiscard={(draftId) => void handleDiscardDraftRecording(draftId)}
-            onBack={() => setReviewingDraftId(null)}
-          />
-        </main>
-      ) : null}
-
       <main
         data-testid="practice-main"
-        className={`${reviewingDraft ? "hidden" : "flex"} flex-1 justify-center px-2 pt-2 sm:px-3 md:px-8 ${isTapPracticeMode ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
+        className={`flex flex-1 justify-center px-2 pt-2 sm:px-3 md:px-8 ${isTapPracticeMode ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
         style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
       >
         <section data-testid="practice-focus" className={`flex min-h-full w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl items-start" : "items-stretch max-w-3xl"}`}>
@@ -3625,47 +3521,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         </section>
       </main>
 
-      {!isTapPracticeMode && !reviewingDraft && archivedDraftRecordings.length > 0 ? (
-        <details
-          data-testid="archived-drafts"
-          className="group mx-4 mb-3 rounded-lg border border-slate-200 bg-slate-50/70 text-slate-700 md:mx-8"
-        >
-          <summary
-            data-testid="archived-drafts-toggle"
-            className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-semibold"
-          >
-            <span>{DRAFT_LABELS.archivedSection}</span>
-            <span className="flex items-center gap-2">
-              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
-                {archivedDraftRecordings.length}
-              </span>
-              <span aria-hidden="true" className="transition-transform group-open:rotate-90">
-                &gt;
-              </span>
-            </span>
-          </summary>
-          <ul className="divide-y divide-slate-200 border-t border-slate-200 px-3 py-1">
-            {archivedDraftRecordings.map((draft) => (
-              <DraftRecordingListItem
-                key={draft.id}
-                draft={draft}
-                sequence={getDraftRecordingSequence(draft, archivedDraftRecordings)}
-                archived
-                isPlaying={isPlaying}
-                onPause={pause}
-                onReview={setReviewingDraftId}
-              />
-            ))}
-          </ul>
-        </details>
-      ) : null}
-
-      {!reviewingDraft ? (
-        <section
-          data-testid="practice-transport"
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
-          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
-        >
+      <section
+        data-testid="practice-transport"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
+        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
+      >
           <AudioPlayer
             audioUrl={activeAudioUrl}
             currentMs={currentMs}
@@ -3691,8 +3551,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             onToggleLyricMode={() => setLyricVisibilityMode((previous) => getNextLyricMode(previous))}
             reducedControls={reducedControls}
           />
-        </section>
-      ) : null}
+      </section>
     </div>
   );
 };

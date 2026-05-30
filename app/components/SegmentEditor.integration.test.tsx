@@ -9,7 +9,7 @@ vi.mock('../hooks/useAudioPlayer', () => ({
 }));
 
 vi.mock('./ReplaceAudioForm', () => ({
-  ReplaceAudioForm: () => <div data-testid="replace-audio" />,
+  ReplaceAudioForm: ({ children }: { children?: unknown }) => <div data-testid="replace-audio">{children as any}</div>,
 }));
 
 const initialSegments: Segment[] = [

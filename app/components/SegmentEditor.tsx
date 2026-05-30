@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Segment } from '../types/index';
+import { Segment, Song } from '../types/index';
 import { ReplaceAudioForm } from './ReplaceAudioForm';
 import { MidiSetupPanel } from './MidiSetupPanel';
+import { DraftRecordingManager } from './DraftRecordingManager';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { toPlayableAudioUrl } from '../lib/audioUrls';
 import { getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
@@ -111,6 +112,8 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [bulkImportPending, setBulkImportPending] = useState(false);
   const [songLoaded, setSongLoaded] = useState(false);
   const [songLoadKey, setSongLoadKey] = useState(0);
+  const [draftRecordings, setDraftRecordings] = useState<Song["draftRecordings"]>([]);
+  const [archivedDraftRecordings, setArchivedDraftRecordings] = useState<Song["archivedDraftRecordings"]>([]);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
   const pinchZoomRef = useRef<{ startDistance: number; startZoom: number } | null>(null);
@@ -752,6 +755,11 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     seek(targetMs);
   };
 
+  const handleDraftRecordingSaved = useCallback(() => {
+    setSongLoadKey((previous) => previous + 1);
+    onSongUpdated?.();
+  }, [onSongUpdated]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -786,18 +794,28 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         if (!response.ok) {
           return;
         }
-        const data = (await response.json()) as { audioUrl?: string; alternateAudioUrl?: string; title?: string };
+        const data = (await response.json()) as {
+          audioUrl?: string;
+          alternateAudioUrl?: string;
+          title?: string;
+          draftRecordings?: Song["draftRecordings"];
+          archivedDraftRecordings?: Song["archivedDraftRecordings"];
+        };
         if (!cancelled) {
           setAudioUrl(data.audioUrl ?? '');
           setAlternateAudioUrl(data.alternateAudioUrl ?? '');
           setSongTitle(data.title ?? '');
           setTitleDraft(data.title ?? '');
+          setDraftRecordings(data.draftRecordings ?? []);
+          setArchivedDraftRecordings(data.archivedDraftRecordings ?? []);
           setSongLoaded(true);
         }
       } catch {
         if (!cancelled) {
           setAudioUrl('');
           setAlternateAudioUrl('');
+          setDraftRecordings([]);
+          setArchivedDraftRecordings([]);
           setSongLoaded(true);
         }
       }
@@ -862,7 +880,13 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
           alternateAudioUrl={alternateAudioUrl}
           onReplaced={handleAudioUploaded}
           mode="upload"
-        />
+        >
+          <DraftRecordingManager
+            song={{ id: songId, draftRecordings, archivedDraftRecordings }}
+            userId={userId}
+            onDraftRecordingSaved={handleDraftRecordingSaved}
+          />
+        </ReplaceAudioForm>
       </div>
     );
   }
@@ -925,7 +949,13 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               audioUrl={audioUrl}
               alternateAudioUrl={alternateAudioUrl}
               onReplaced={handleAudioUploaded}
-            />
+            >
+              <DraftRecordingManager
+                song={{ id: songId, draftRecordings, archivedDraftRecordings }}
+                userId={userId}
+                onDraftRecordingSaved={handleDraftRecordingSaved}
+              />
+            </ReplaceAudioForm>
           </div>
         )}
       </div>

@@ -22,6 +22,7 @@ import {
   deriveWholeSongAnswerKey,
   scoreTapAttemptAgainstMidiKey,
 } from '../../../../../lib/midiGuidedTapPractice';
+import { DEFAULT_TAP_TIMING_TOLERANCE_MS } from '../../../../../lib/tapPracticeConstants';
 import { resolveRequestUserId } from '../../../../_user';
 
 function formatError(error: unknown) {
@@ -71,7 +72,11 @@ async function scoreTapPracticeSession(songId: string, userId: string, sessionId
     return { autoScorePercent: null, scoreDetails: null };
   }
 
-  const score = scoreTapAttemptAgainstMidiKey(midiSegmentKey, directionTapsFromSession(session), 400);
+  const score = scoreTapAttemptAgainstMidiKey(
+    midiSegmentKey,
+    directionTapsFromSession(session),
+    DEFAULT_TAP_TIMING_TOLERANCE_MS
+  );
   return { autoScorePercent: score.scorePercent, scoreDetails: score };
 }
 
