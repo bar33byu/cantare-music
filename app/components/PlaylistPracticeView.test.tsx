@@ -138,6 +138,29 @@ describe('PlaylistPracticeView', () => {
     expect(onManage).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps playlist header controls wrap-friendly on narrow screens when manage is available', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 25 }) }) as unknown as typeof fetch;
+
+    render(
+      <PlaylistPracticeView
+        playlist={playlist}
+        onExit={() => undefined}
+        onSelectSong={() => undefined}
+        onManage={() => undefined}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-practice-score')).toBeInTheDocument();
+    });
+
+    const manageButton = screen.getByTestId('playlist-practice-manage');
+    const controlsRow = manageButton.parentElement;
+    expect(controlsRow?.className).toContain('flex-wrap');
+    expect(controlsRow?.className).toContain('w-full');
+    expect(manageButton.className).toContain('ml-auto');
+  });
+
   it('shows readiness tags for songs missing audio and/or segments', async () => {
     const mixedPlaylist: Playlist = {
       ...playlist,
@@ -478,7 +501,7 @@ describe('PlaylistPracticeView', () => {
       paddingBottom: 'calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)',
     });
     expect(practiceMain).toHaveStyle({
-      paddingBottom: 'calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)',
+      paddingBottom: 'calc(var(--player-height) + env(safe-area-inset-bottom) + 8px)',
     });
     expect(segmentCard).toHaveTextContent('Segment 3');
     expect(segmentCard).toHaveTextContent('Alpha - 00:12');
@@ -688,7 +711,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.queryByText('Mastered Verse')).not.toBeInTheDocument();
   });
 
-  it('saves Focus Queue ratings and advances in song order', async () => {
+  it('saves Focus Queue ratings without auto-advancing to the next segment', async () => {
     const focusPlaylist: Playlist = {
       ...playlist,
       songs: [
@@ -743,7 +766,7 @@ describe('PlaylistPracticeView', () => {
           );
         })
       ).toBe(true);
-      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Chorus');
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Verse');
     }, { timeout: 2000 });
   });
 

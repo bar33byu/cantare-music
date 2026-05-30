@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useUploadAudio } from "../hooks/useUploadAudio";
 
 interface ReplaceAudioFormProps {
@@ -10,6 +10,7 @@ interface ReplaceAudioFormProps {
   mode?: 'upload' | 'replace';
   audioUrl?: string;
   alternateAudioUrl?: string;
+  children?: ReactNode;
 }
 
 type AudioVersion = 'prominent' | 'blend';
@@ -40,6 +41,7 @@ export function ReplaceAudioForm({
   mode = 'replace',
   audioUrl = '',
   alternateAudioUrl = '',
+  children,
 }: ReplaceAudioFormProps) {
   const { upload, uploading, progress, error: uploadError } = useUploadAudio(userId);
   const [versionState, setVersionState] = useState<Record<AudioVersion, VersionState>>({
@@ -98,10 +100,19 @@ export function ReplaceAudioForm({
 
   return (
     <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="replace-audio-card">
-      <h3 className="text-lg font-semibold text-gray-900">{isUpload ? 'Upload Audio' : 'Manage Audio Files'}</h3>
+      <h3 className="text-lg font-semibold text-gray-900">{isUpload ? 'Upload Audio' : 'Audio File'}</h3>
       <p className="mt-1 text-sm text-gray-500">
-        {isUpload ? 'Upload an MP3 file to enable segment editing.' : 'Upload or replace MP3 files while keeping segment boundaries and lyrics.'}
+        {isUpload ? 'Upload an MP3 file to enable segment editing.' : 'Choose between replacing the source files below or recording a temporary draft take further down.'}
       </p>
+
+      {!isUpload ? (
+        <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+          <h4 className="text-sm font-semibold text-slate-900">Upload or replace files</h4>
+          <p className="mt-1 text-xs text-slate-600">
+            Use these slots for the main practice audio and the blended reference mix.
+          </p>
+        </div>
+      ) : null}
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         {(['prominent', 'blend'] as const).map((version) => {
@@ -193,6 +204,8 @@ export function ReplaceAudioForm({
           <p className="mt-1 text-xs text-gray-600">{progress}% uploaded</p>
         </div>
       )}
+
+      {children}
     </section>
   );
 }

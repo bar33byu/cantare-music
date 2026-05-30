@@ -50,18 +50,27 @@ vi.mock("./SegmentCard", () => ({
     currentRating,
     lyricVisibilityMode,
     showContourMap,
+    contourHeatMap,
   }: {
     segment: { id: string; label: string };
     onRate: (r: MemoryRating) => void;
     currentRating?: MemoryRating;
     lyricVisibilityMode?: "full" | "hint" | "hidden";
     showContourMap?: boolean;
+    contourHeatMap?: Record<string, unknown>;
   }) => (
     <div
       data-testid="mock-segment-card"
       data-segment-id={segment.id}
       data-lyric-mode={lyricVisibilityMode}
       data-show-contour-map={showContourMap ? "true" : "false"}
+      data-contour-heat-count={Object.keys(contourHeatMap ?? {}).length}
+      data-contour-heat-miss-total={Object.values(contourHeatMap ?? {}).reduce((total, value) => {
+        const missCount = typeof value === "object" && value && "missCount" in value
+          ? Number((value as { missCount?: number }).missCount ?? 0)
+          : 0;
+        return total + missCount;
+      }, 0)}
     >
       <span>{segment.label}</span>
       <span data-testid="mock-current-rating">{currentRating ?? "none"}</span>
@@ -265,6 +274,31 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
   });
 
+  it("switches to the compact two-column practice shell on short landscape screens", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 844 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 390 });
+
+    const song = makeSong();
+    await renderAndWaitForRatings(song);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-shell")).toHaveAttribute("data-compact-layout", "true");
+    });
+
+    expect(screen.getByTestId("practice-transport").className).not.toContain("fixed");
+    expect(screen.getByTestId("practice-transport").className).toContain("rounded-2xl");
+  });
+
+  it("keeps the regular practice card stretchable and the side navigation compact on narrow screens", async () => {
+    const song = makeSong();
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("practice-focus").className).toContain("items-stretch");
+    expect(screen.getByTestId("practice-prev-segment").className).toContain("w-8");
+    expect(screen.getByTestId("practice-next-segment").className).toContain("w-8");
+    expect(screen.getByTestId("mock-segment-card").parentElement?.className).toContain("flex-1");
+  });
+
   it("loads MIDI contour controls for read-only shared playlist songs using the owner data user", async () => {
     mockPracticeFetchWithMidiAnswerKey();
     const sharedSong = { ...makeSong(), hasMidiContour: true };
@@ -290,40 +324,7 @@ describe("PracticeView", () => {
     expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith("/tap-sessions"))).toBe(false);
   });
 
-  it("shows draft recordings for the song", async () => {
-    const song: Song = {
-      ...makeSong(),
-      draftRecordings: [
-        {
-          id: "draft-1",
-          songId: "song-1",
-          title: null,
-          audioKey: "audio/drafts/draft-1.mp3",
-          audioUrl: "https://cdn.example.com/audio/drafts/draft-1.webm",
-          status: "draft",
-          createdAt: "2026-05-25T14:30:00.000Z",
-        },
-      ],
-    };
-
-    await renderAndWaitForRatings(song);
-
-    const drafts = screen.getByTestId("draft-recordings");
-    expect(within(drafts).getByText("Draft recording")).toBeInTheDocument();
-    expect(within(drafts).getByText("Draft recording 1")).toBeInTheDocument();
-    expect(within(drafts).getByRole("button", { name: "Discard" })).toBeInTheDocument();
-    fireEvent.click(within(drafts).getByRole("button", { name: "Review" }));
-
-    const review = screen.getByTestId("draft-review-screen");
-    expect(within(review).getByText("Draft recording 1")).toBeInTheDocument();
-    expect(within(review).getByText("Created")).toBeInTheDocument();
-    expect(within(review).getByText("Trim")).toBeInTheDocument();
-    expect(screen.queryByTestId("draft-review-trim")).not.toBeInTheDocument();
-    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", "https://cdn.example.com/audio/drafts/draft-1.webm");
-  });
-
-  it("discards an active draft recording without opening review", async () => {
-    const onDraftRecordingSaved = vi.fn();
+  it("does not show draft recording tools on the practice screen", async () => {
     const song: Song = {
       ...makeSong(),
       draftRecordings: [
@@ -333,73 +334,6 @@ describe("PracticeView", () => {
           title: null,
           audioKey: "audio/drafts/draft-1.webm",
           audioUrl: "https://cdn.example.com/audio/drafts/draft-1.webm",
-          status: "draft",
-          createdAt: "2026-05-25T14:30:00.000Z",
-        },
-      ],
-    };
-
-    render(
-      <PracticeView
-        song={song}
-        initialSession={makeSession(song)}
-        onDraftRecordingSaved={onDraftRecordingSaved}
-      />
-    );
-
-    const drafts = screen.getByTestId("draft-recordings");
-    fireEvent.click(within(drafts).getByRole("button", { name: "Discard" }));
-
-    await waitFor(() => {
-      expect(onDraftRecordingSaved).toHaveBeenCalled();
-    });
-    expect(mockFetch).toHaveBeenCalledWith("/api/songs/song-1/draft-recordings/draft-1", expect.objectContaining({ method: "DELETE" }));
-    expect(screen.getByTestId("draft-discard-status")).toHaveTextContent("Draft recording discarded.");
-  });
-
-  it("numbers generated draft recording labels by creation order", async () => {
-    const song: Song = {
-      ...makeSong(),
-      draftRecordings: [
-        {
-          id: "draft-new",
-          songId: "song-1",
-          title: null,
-          audioKey: "audio/drafts/new.webm",
-          audioUrl: "https://cdn.example.com/audio/drafts/new.webm",
-          status: "draft",
-          createdAt: "2026-05-25T22:44:00.000Z",
-        },
-        {
-          id: "draft-old",
-          songId: "song-1",
-          title: null,
-          audioKey: "audio/drafts/old.webm",
-          audioUrl: "https://cdn.example.com/audio/drafts/old.webm",
-          status: "draft",
-          createdAt: "2026-05-25T21:41:00.000Z",
-        },
-      ],
-    };
-
-    await renderAndWaitForRatings(song);
-
-    const drafts = screen.getByTestId("draft-recordings");
-    const items = within(drafts).getAllByRole("listitem");
-    expect(items[0]).toHaveTextContent("Draft recording 2");
-    expect(items[1]).toHaveTextContent("Draft recording 1");
-  });
-
-  it("shows archived drafts collapsed near the bottom and keeps them reviewable", async () => {
-    const song: Song = {
-      ...makeSong(),
-      draftRecordings: [
-        {
-          id: "draft-active",
-          songId: "song-1",
-          title: null,
-          audioKey: "audio/drafts/active.webm",
-          audioUrl: "https://cdn.example.com/audio/drafts/active.webm",
           status: "draft",
           createdAt: "2026-05-25T14:30:00.000Z",
         },
@@ -408,12 +342,10 @@ describe("PracticeView", () => {
         {
           id: "draft-archived",
           songId: "song-1",
-          title: "Promoted take",
-          audioKey: "audio/drafts/archived.webm",
-          audioUrl: "https://cdn.example.com/audio/drafts/archived.webm",
+          title: "Archived take",
+          audioKey: "audio/drafts/draft-archived.webm",
+          audioUrl: "https://cdn.example.com/audio/drafts/draft-archived.webm",
           status: "archived",
-          trimStartMs: 500,
-          trimEndMs: 4200,
           createdAt: "2026-05-24T14:30:00.000Z",
           archivedAt: "2026-05-25T15:00:00.000Z",
         },
@@ -422,300 +354,10 @@ describe("PracticeView", () => {
 
     await renderAndWaitForRatings(song);
 
-    const activeDrafts = screen.getByTestId("draft-recordings");
-    expect(within(activeDrafts).getByText("Draft recording 1")).toBeInTheDocument();
-    expect(within(activeDrafts).queryByText("Promoted take")).not.toBeInTheDocument();
-
-    const archived = screen.getByTestId("archived-drafts");
-    expect(archived).not.toHaveAttribute("open");
-    expect(within(archived).getByText("Archived Drafts")).toBeInTheDocument();
-    expect(within(archived).getByText("1")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("archived-drafts-toggle"));
-    fireEvent.click(within(archived).getByRole("button", { name: "Review" }));
-
-    const review = screen.getByTestId("draft-review-screen");
-    expect(within(review).getByText("Promoted take")).toBeInTheDocument();
-    expect(within(review).getByText("Archived draft")).toBeInTheDocument();
-    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", "https://cdn.example.com/audio/drafts/archived.webm");
-    expect(screen.queryByTestId("draft-promote")).not.toBeInTheDocument();
-    expect(screen.getByTestId("draft-trim-start")).toBeDisabled();
-    expect(screen.getByTestId("draft-trim-end")).toBeDisabled();
-  });
-
-  it("loads and autosaves non-destructive draft trim metadata after repeated adjustments", async () => {
-    const onDraftRecordingSaved = vi.fn();
-    const song: Song = {
-      ...makeSong(),
-      draftRecordings: [
-        {
-          id: "draft-1",
-          songId: "song-1",
-          title: "Monday take",
-          audioKey: "audio/drafts/draft-1.mp3",
-          audioUrl: "https://cdn.example.com/audio/drafts/draft-1.webm",
-          status: "draft",
-          trimStartMs: 1000,
-          trimEndMs: 6000,
-          createdAt: "2026-05-25T14:30:00.000Z",
-        },
-      ],
-    };
-
-    render(
-      <PracticeView
-        song={song}
-        initialSession={makeSession(song)}
-        onDraftRecordingSaved={onDraftRecordingSaved}
-      />
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Review" }));
-
-    expect(screen.getByTestId("draft-trim-bar")).toBeInTheDocument();
-    expect(screen.getByTestId("draft-waveform-zoom")).toHaveValue("1");
-    expect(screen.getByTestId("draft-trim-start")).toHaveValue("1000");
-    expect(screen.getByTestId("draft-trim-end")).toHaveValue("6000");
-
-    fireEvent.change(screen.getByTestId("draft-waveform-zoom"), { target: { value: "4" } });
-    expect(screen.getByTestId("draft-waveform-zoom")).toHaveValue("4");
-
-    fireEvent.change(screen.getByTestId("draft-trim-start"), { target: { value: "2000" } });
-    fireEvent.change(screen.getByTestId("draft-trim-end"), { target: { value: "7000" } });
-    fireEvent.change(screen.getByTestId("draft-trim-start"), { target: { value: "2100" } });
-
-    expect(screen.getByTestId("draft-trim-status")).toHaveTextContent("Saving...");
-
-    await waitFor(() => {
-      expect(onDraftRecordingSaved).toHaveBeenCalled();
-    }, { timeout: 2000 });
-    expect(screen.getByTestId("draft-trim-status")).toHaveTextContent("Saved");
-    const patchCalls = mockFetch.mock.calls.filter(([url, init]) => (
-      url === "/api/songs/song-1/draft-recordings/draft-1" && init?.method === "PATCH"
-    ));
-    expect(patchCalls).toHaveLength(1);
-    expect(JSON.parse(String(patchCalls[0]?.[1]?.body))).toEqual({ trimStartMs: 2100, trimEndMs: 7000 });
-  });
-
-  it("promotes a draft recording with the current trim metadata", async () => {
-    const onDraftRecordingSaved = vi.fn();
-    const song: Song = {
-      ...makeSong(),
-      draftRecordings: [
-        {
-          id: "draft-1",
-          songId: "song-1",
-          title: "Monday take",
-          audioKey: "audio/drafts/draft-1.webm",
-          audioUrl: "https://cdn.example.com/audio/drafts/draft-1.webm",
-          status: "draft",
-          trimStartMs: 1000,
-          trimEndMs: 6000,
-          createdAt: "2026-05-25T14:30:00.000Z",
-        },
-      ],
-    };
-
-    render(
-      <PracticeView
-        song={song}
-        initialSession={makeSession(song)}
-        onDraftRecordingSaved={onDraftRecordingSaved}
-      />
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Review" }));
-    fireEvent.change(screen.getByTestId("draft-trim-start"), { target: { value: "1500" } });
-    fireEvent.change(screen.getByTestId("draft-trim-end"), { target: { value: "6500" } });
-    fireEvent.click(screen.getByTestId("draft-promote"));
-
-    await waitFor(() => {
-      expect(onDraftRecordingSaved).toHaveBeenCalled();
-    });
-    const promoteCalls = mockFetch.mock.calls.filter(([url, init]) => (
-      url === "/api/songs/song-1/draft-recordings/draft-1/promote" && init?.method === "POST"
-    ));
-    expect(promoteCalls).toHaveLength(1);
-    expect(JSON.parse(String(promoteCalls[0]?.[1]?.body))).toEqual({ trimStartMs: 1500, trimEndMs: 6500 });
+    expect(screen.queryByTestId("draft-recording-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("draft-recordings")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("archived-drafts")).not.toBeInTheDocument();
     expect(screen.queryByTestId("draft-review-screen")).not.toBeInTheDocument();
-  });
-
-  it("keeps review safe when draft audio is missing and trim metadata is corrupted", async () => {
-    const song: Song = {
-      ...makeSong(),
-      draftRecordings: [
-        {
-          id: "draft-1",
-          songId: "song-1",
-          title: null,
-          audioKey: "audio/drafts/missing.webm",
-          audioUrl: "",
-          status: "draft",
-          trimStartMs: 100000,
-          trimEndMs: 10,
-          createdAt: "2026-05-25T14:30:00.000Z",
-        },
-      ],
-    };
-
-    await renderAndWaitForRatings(song);
-    fireEvent.click(screen.getByRole("button", { name: "Review" }));
-
-    expect(screen.getByTestId("draft-missing-audio")).toHaveTextContent("Draft recording audio is unavailable.");
-    expect(screen.getByTestId("draft-promote")).toBeDisabled();
-    expect(screen.getByTestId("draft-trim-start")).toHaveValue("11000");
-    expect(screen.getByTestId("draft-trim-end")).toHaveValue("12000");
-  });
-
-  it("shows an inline promotion failure", async () => {
-    const onDraftRecordingSaved = vi.fn();
-    const song: Song = {
-      ...makeSong(),
-      draftRecordings: [
-        {
-          id: "draft-1",
-          songId: "song-1",
-          title: "Monday take",
-          audioKey: "audio/drafts/draft-1.webm",
-          audioUrl: "https://cdn.example.com/audio/drafts/draft-1.webm",
-          status: "draft",
-          trimStartMs: 1000,
-          trimEndMs: 6000,
-          createdAt: "2026-05-25T14:30:00.000Z",
-        },
-      ],
-    };
-    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
-        return makeFetchResponse({ ratings: [] });
-      }
-      if (url.endsWith("/midi") && (!init || init.method === undefined)) {
-        return makeFetchResponse({ segmentAnswerKeys: {} });
-      }
-      if (url === "/api/songs/song-1/draft-recordings/draft-1/promote" && init?.method === "POST") {
-        return makeFetchResponse({ error: "Promotion failed" }, false, 500);
-      }
-      return makeFetchResponse({});
-    });
-
-    render(
-      <PracticeView
-        song={song}
-        initialSession={makeSession(song)}
-        onDraftRecordingSaved={onDraftRecordingSaved}
-      />
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Review" }));
-    fireEvent.click(screen.getByTestId("draft-promote"));
-
-    expect(await screen.findByTestId("draft-promote-status")).toHaveTextContent("Promotion failed");
-    expect(onDraftRecordingSaved).not.toHaveBeenCalled();
-    expect(screen.getByTestId("draft-review-screen")).toBeInTheDocument();
-  });
-
-  it("saves a draft recording immediately after stop", async () => {
-    const onDraftRecordingSaved = vi.fn();
-    const stopTrack = vi.fn();
-    const startSpy = vi.fn();
-    class MockMediaRecorder extends EventTarget {
-      static isTypeSupported = vi.fn(() => true);
-      state: RecordingState = "inactive";
-      mimeType = "audio/webm";
-
-      start() {
-        startSpy();
-        this.state = "recording";
-      }
-
-      emitAudio() {
-        const event = new Event("dataavailable") as Event & { data: Blob };
-        event.data = new Blob(["draft-audio"], { type: "audio/webm" });
-        this.dispatchEvent(event);
-      }
-
-      stop() {
-        this.state = "inactive";
-        this.emitAudio();
-        this.dispatchEvent(new Event("stop"));
-      }
-    }
-    vi.stubGlobal("MediaRecorder", MockMediaRecorder);
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: {
-        getUserMedia: vi.fn().mockResolvedValue({
-          getTracks: () => [{ stop: stopTrack }],
-        }),
-      },
-    });
-    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
-        return makeFetchResponse({ ratings: [] });
-      }
-      if (url.endsWith("/midi") && (!init || init.method === undefined)) {
-        return makeFetchResponse({ segmentAnswerKeys: {} });
-      }
-      if (url === "/api/songs/upload-url" && init?.method === "POST") {
-        return makeFetchResponse({ uploadUrl: "https://uploads.example.test/draft", key: "audio/song-1/draft/draft.webm" });
-      }
-      if (url === "https://uploads.example.test/draft" && init?.method === "PUT") {
-        return makeFetchResponse({});
-      }
-      if (url === "/api/songs/song-1/draft-recordings" && init?.method === "POST") {
-        return makeFetchResponse({ draftRecording: { id: "draft-1" } }, true, 201);
-      }
-      return makeFetchResponse({});
-    });
-    const song = makeSong();
-
-    render(
-      <PracticeView
-        song={song}
-        initialSession={makeSession(song)}
-        onDraftRecordingSaved={onDraftRecordingSaved}
-      />
-    );
-
-    fireEvent.click(screen.getByTestId("draft-recording-toggle"));
-    await waitFor(() => {
-      expect(screen.getByTestId("draft-recording-status")).toHaveTextContent("Recording...");
-    });
-    expect(screen.getByTestId("draft-recording-level")).toBeInTheDocument();
-    expect(startSpy).toHaveBeenCalledWith();
-
-    fireEvent.click(screen.getByTestId("draft-recording-toggle"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("draft-recording-status")).toHaveTextContent("Draft recording saved.");
-    });
-    expect(stopTrack).toHaveBeenCalled();
-    expect(onDraftRecordingSaved).toHaveBeenCalled();
-    expect(mockFetch).toHaveBeenCalledWith("/api/songs/upload-url", expect.objectContaining({ method: "POST" }));
-    expect(mockFetch).toHaveBeenCalledWith("https://uploads.example.test/draft", expect.objectContaining({ method: "PUT" }));
-    expect(mockFetch).toHaveBeenCalledWith("/api/songs/song-1/draft-recordings", expect.objectContaining({ method: "POST" }));
-  });
-
-  it("shows a clear message when microphone permission is denied", async () => {
-    class MockMediaRecorder extends EventTarget {
-      static isTypeSupported = vi.fn(() => true);
-    }
-    vi.stubGlobal("MediaRecorder", MockMediaRecorder);
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: {
-        getUserMedia: vi.fn().mockRejectedValue(Object.assign(new Error("Permission denied"), { name: "NotAllowedError" })),
-      },
-    });
-    const song = makeSong();
-
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
-
-    fireEvent.click(screen.getByTestId("draft-recording-toggle"));
-
-    expect(await screen.findByTestId("draft-recording-status")).toHaveTextContent("Microphone permission was denied.");
   });
 
   it("loads practice data for the selected user", async () => {
@@ -1895,6 +1537,40 @@ describe("PracticeView", () => {
     });
 
     expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
+  });
+
+  it("does not score tap accuracy or contour heat during regular looping", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 3995,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    const song = makeSong(1);
+    song.segments[0] = {
+      ...song.segments[0],
+      startMs: 0,
+      endMs: 4000,
+    };
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("mock-loop-toggle"));
+
+    await waitFor(() => {
+      expect(mockPlay).toHaveBeenCalledWith(0, 4000);
+    });
+
+    expect(screen.queryByTestId("practice-accuracy-toast")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-contour-heat-miss-total", "0");
   });
 
   it("shows immediate miss feedback when a tap is classified as a miss", async () => {

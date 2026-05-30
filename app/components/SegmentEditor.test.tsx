@@ -30,7 +30,7 @@ vi.mock('../hooks/useAudioPlayer', () => ({
 }));
 
 vi.mock('./ReplaceAudioForm', () => ({
-  ReplaceAudioForm: () => <div data-testid="replace-audio" />,
+  ReplaceAudioForm: ({ children }: { children?: unknown }) => <div data-testid="replace-audio">{children as any}</div>,
 }));
 
 describe('SegmentEditor', () => {
@@ -1138,6 +1138,42 @@ describe('SegmentEditor', () => {
     expect(board).toHaveStyle({ width: '100%' });
   });
 
+  it('keeps the editor canvas in a touch-scrollable wrapper on mobile', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const boardScroll = await screen.findByTestId('segment-editor-board-scroll');
+    expect(boardScroll).toHaveStyle({ touchAction: 'pan-x pinch-zoom' });
+    expect(screen.getByTestId('segment-editor-board').className).not.toContain('touch-none');
+  });
+
+  it('supports pinch-to-zoom on the editor canvas', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const boardScroll = await screen.findByTestId('segment-editor-board-scroll');
+    const board = screen.getByTestId('segment-editor-board');
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('100%');
+
+    fireEvent.touchStart(boardScroll, {
+      touches: [
+        { clientX: 40, clientY: 40 },
+        { clientX: 140, clientY: 40 },
+      ],
+    });
+    fireEvent.touchMove(boardScroll, {
+      touches: [
+        { clientX: 40, clientY: 40 },
+        { clientX: 190, clientY: 40 },
+      ],
+    });
+
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('150%');
+    expect(board).toHaveStyle({ width: '150%' });
+
+    fireEvent.touchEnd(boardScroll, {
+      touches: [],
+    });
+  });
+
   it('loads song title into input and saves on blur', async () => {
     const onSongUpdated = vi.fn();
     render(<SegmentEditor songId="song-1" onSongUpdated={onSongUpdated} />);
@@ -1174,6 +1210,57 @@ describe('SegmentEditor', () => {
 
     fireEvent.click(screen.getByTestId('segment-editor-replace-audio-toggle'));
     expect(screen.queryByTestId('replace-audio')).not.toBeInTheDocument();
+  });
+
+  it('moves draft recording management into the editor audio section', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({
+            audioUrl: '/audio/song.mp3',
+            title: 'My Song',
+            draftRecordings: [
+              {
+                id: 'draft-1',
+                songId: 'song-1',
+                title: null,
+                audioKey: 'audio/drafts/draft-1.webm',
+                audioUrl: 'https://cdn.example.com/audio/drafts/draft-1.webm',
+                status: 'draft',
+                createdAt: '2026-05-25T14:30:00.000Z',
+              },
+            ],
+          }),
+        } as Response;
+      }
+
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return {
+          ok: true,
+          json: async () => sampleSegments,
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({ error: 'Unexpected request' }),
+      } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    fireEvent.click(await screen.findByTestId('segment-editor-replace-audio-toggle'));
+
+    expect(await screen.findByTestId('segment-editor-draft-recordings')).toBeInTheDocument();
+    expect(screen.getByText('Audio file')).toBeInTheDocument();
+    expect(screen.getByText('Record a draft take')).toBeInTheDocument();
+    expect(screen.getByText('Draft takes stay here until you discard them or promote one into a song version.')).toBeInTheDocument();
+    expect(screen.getByTestId('draft-recordings')).toHaveTextContent('Draft recording 1');
+    expect(screen.queryByTestId('draft-recording-toggle')).toBeInTheDocument();
   });
 
   it('renders playhead line on the canvas board', async () => {
