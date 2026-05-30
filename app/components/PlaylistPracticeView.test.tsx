@@ -138,6 +138,29 @@ describe('PlaylistPracticeView', () => {
     expect(onManage).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps playlist header controls wrap-friendly on narrow screens when manage is available', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 25 }) }) as unknown as typeof fetch;
+
+    render(
+      <PlaylistPracticeView
+        playlist={playlist}
+        onExit={() => undefined}
+        onSelectSong={() => undefined}
+        onManage={() => undefined}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-practice-score')).toBeInTheDocument();
+    });
+
+    const manageButton = screen.getByTestId('playlist-practice-manage');
+    const controlsRow = manageButton.parentElement;
+    expect(controlsRow?.className).toContain('flex-wrap');
+    expect(controlsRow?.className).toContain('w-full');
+    expect(manageButton.className).toContain('ml-auto');
+  });
+
   it('shows readiness tags for songs missing audio and/or segments', async () => {
     const mixedPlaylist: Playlist = {
       ...playlist,

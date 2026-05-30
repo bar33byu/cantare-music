@@ -39,7 +39,7 @@ const RatingBar: React.FC<RatingBarProps> = ({
   disabled = false,
 }) => {
   return (
-    <div className="flex gap-2 justify-center">
+    <div className="flex justify-center gap-1.5 sm:gap-2">
       {RATINGS.map((rating) => {
         const isExactSelection = currentRating === rating;
         const isFilled = currentRating !== undefined && rating <= currentRating;
@@ -54,7 +54,7 @@ const RatingBar: React.FC<RatingBarProps> = ({
           aria-label={`Rate ${rating}`}
           aria-pressed={isExactSelection ? "true" : "false"}
           className={[
-            "w-10 h-10 rounded-full text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2",
+            "h-9 w-9 rounded-full text-[13px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 sm:h-10 sm:w-10 sm:text-sm",
             isFilled
               ? ratingStyle.filled
               : ratingStyle.empty,

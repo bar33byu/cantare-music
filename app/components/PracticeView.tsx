@@ -3285,10 +3285,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       <main
         data-testid="practice-main"
-        className={`${reviewingDraft ? "hidden" : "flex"} flex-1 justify-center px-4 pt-2 md:px-8 ${isTapPracticeMode ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
+        className={`${reviewingDraft ? "hidden" : "flex"} flex-1 justify-center px-2 pt-2 sm:px-3 md:px-8 ${isTapPracticeMode ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
         style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
       >
-        <section data-testid="practice-focus" className={`flex h-full min-h-0 w-full items-start justify-center gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl" : "max-w-3xl"}`}>
+        <section data-testid="practice-focus" className={`flex min-h-full w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl items-start" : "items-stretch max-w-3xl"}`}>
           {!isTapPracticeMode && showSegmentNavigationControls ? (
             <button
               type="button"
@@ -3296,7 +3296,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               data-testid="practice-prev-segment"
               onClick={handlePrevSegment}
               disabled={!canUsePrevSegment}
-              className="inline-flex h-24 w-10 shrink-0 self-center items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+              className="inline-flex h-20 w-8 shrink-0 self-center items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30 sm:h-24 sm:w-10"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 12H6" />
@@ -3304,9 +3304,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               </svg>
             </button>
           ) : null}
-          <div className="h-full min-h-0 w-full max-w-md">
+          <div className={`min-w-0 ${isTapPracticeMode ? "h-full w-full max-w-md" : "flex min-h-0 flex-1 self-stretch justify-center"}`}>
             {hasSegments && currentSegment ? (
-              <div className="segment-stack-shell relative h-full min-h-0 overflow-visible">
+              <div className={`segment-stack-shell relative min-h-0 overflow-visible ${isTapPracticeMode ? "h-full" : "flex h-full w-full max-w-md flex-col"}`}>
                 {isTapPracticeMode ? (
                   <div
                     data-testid="practice-tap-feedback"
@@ -3338,7 +3338,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                 ) : null}
                 <div
                   key={`${currentSegment.id}-${transitionToken}`}
-                  className={`relative z-10 h-full min-h-0 ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}
+                  className={`relative z-10 min-h-0 ${isTapPracticeMode ? "h-full" : "flex h-full flex-1"} ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}
                 >
                   <SegmentCard
                     segment={{ ...currentSegment, pitchContourNotes: currentCardContourNotes }}
@@ -3614,7 +3614,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               data-testid="practice-next-segment"
               onClick={handleNextSegment}
               disabled={!canUseNextSegment}
-              className="inline-flex h-24 w-10 shrink-0 self-center items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30"
+              className="inline-flex h-20 w-8 shrink-0 self-center items-center justify-center rounded-xl border border-indigo-300 bg-white text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-30 sm:h-24 sm:w-10"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M6 12h12" />

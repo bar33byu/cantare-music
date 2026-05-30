@@ -46,4 +46,13 @@ describe('RatingBar', () => {
       expect(btn).toBeDisabled();
     });
   });
+
+  it('uses compact mobile sizing classes to preserve room on narrow screens', () => {
+    render(<RatingBar onRate={vi.fn()} />);
+    const button = screen.getByTestId('rating-button-3');
+    expect(button.className).toContain('h-9');
+    expect(button.className).toContain('w-9');
+    expect(button.className).toContain('sm:h-10');
+    expect(button.className).toContain('sm:w-10');
+  });
 });

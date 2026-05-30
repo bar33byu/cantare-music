@@ -25,6 +25,15 @@ function formatMs(ms: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+function getTouchDistance(touches: TouchList): number {
+  if (touches.length < 2) {
+    return 0;
+  }
+
+  const [first, second] = [touches[0], touches[1]];
+  return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+}
+
 type ResizeEdge = 'start' | 'end';
 
 interface ActiveInteraction {
@@ -103,6 +112,8 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [songLoaded, setSongLoaded] = useState(false);
   const [songLoadKey, setSongLoadKey] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
+  const boardScrollRef = useRef<HTMLDivElement | null>(null);
+  const pinchZoomRef = useRef<{ startDistance: number; startZoom: number } | null>(null);
 
   const hasAnyAudio = Boolean(audioUrl.trim() || alternateAudioUrl.trim());
   const playbackAudioUrl = useMemo(
@@ -543,6 +554,10 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     return candidate > 0 ? candidate : DEFAULT_TIMELINE_FALLBACK_MS;
   }, [durationMs, segments, stableDurationMs]);
 
+  const clampZoom = useCallback((nextZoom: number) => {
+    return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
+  }, []);
+
   const zoomPercent = Math.round(zoom * 100);
 
   const orderedSegments = useMemo(
@@ -566,6 +581,42 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
     seek(msFromClientX(event.clientX));
   };
+
+  const handleBoardTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 2) {
+      if (event.touches.length < 2) {
+        pinchZoomRef.current = null;
+      }
+      return;
+    }
+
+    pinchZoomRef.current = {
+      startDistance: getTouchDistance(event.touches),
+      startZoom: zoom,
+    };
+  }, [zoom]);
+
+  const handleBoardTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 2 || !pinchZoomRef.current) {
+      return;
+    }
+
+    const nextDistance = getTouchDistance(event.touches);
+    if (nextDistance <= 0 || pinchZoomRef.current.startDistance <= 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const rawZoom = pinchZoomRef.current.startZoom * (nextDistance / pinchZoomRef.current.startDistance);
+    const nextZoom = clampZoom(rawZoom);
+    setZoom((previous) => (Math.abs(previous - nextZoom) < 0.01 ? previous : nextZoom));
+  }, [clampZoom]);
+
+  const handleBoardTouchEnd = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length < 2) {
+      pinchZoomRef.current = null;
+    }
+  }, []);
 
   const handleInteractionMove = (clientX: number, pointerId: number) => {
     if (!activeInteraction || pointerId !== activeInteraction.pointerId) {
@@ -958,7 +1009,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               <button
                 type="button"
                 data-testid="segment-editor-zoom-out"
-                onClick={() => setZoom((previous) => Math.max(MIN_ZOOM, previous - ZOOM_STEP))}
+                onClick={() => setZoom((previous) => clampZoom(previous - ZOOM_STEP))}
                 className="h-8 w-8 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
               >
                 -
@@ -969,7 +1020,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               <button
                 type="button"
                 data-testid="segment-editor-zoom-in"
-                onClick={() => setZoom((previous) => Math.min(MAX_ZOOM, previous + ZOOM_STEP))}
+                onClick={() => setZoom((previous) => clampZoom(previous + ZOOM_STEP))}
                 className="h-8 w-8 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
               >
                 +
@@ -1048,11 +1099,20 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
         <div>
           <div className="min-w-0">
-          <div className="overflow-x-auto rounded-lg border border-indigo-300">
+          <div
+            ref={boardScrollRef}
+            data-testid="segment-editor-board-scroll"
+            className="overflow-x-auto rounded-lg border border-indigo-300 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-indigo-100 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-indigo-300"
+            style={{ touchAction: 'pan-x pinch-zoom' }}
+            onTouchStart={handleBoardTouchStart}
+            onTouchMove={handleBoardTouchMove}
+            onTouchEnd={handleBoardTouchEnd}
+            onTouchCancel={handleBoardTouchEnd}
+          >
             <div
               ref={boardRef}
               data-testid="segment-editor-board"
-              className="relative h-[560px] min-w-full overflow-hidden bg-gradient-to-b from-indigo-50/40 to-white touch-none"
+              className="relative h-[560px] min-w-full overflow-hidden bg-gradient-to-b from-indigo-50/40 to-white"
               style={{ width: `${zoomPercent}%` }}
               onClick={handleBoardSeek}
             >

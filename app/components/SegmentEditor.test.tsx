@@ -1138,6 +1138,42 @@ describe('SegmentEditor', () => {
     expect(board).toHaveStyle({ width: '100%' });
   });
 
+  it('keeps the editor canvas in a touch-scrollable wrapper on mobile', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const boardScroll = await screen.findByTestId('segment-editor-board-scroll');
+    expect(boardScroll).toHaveStyle({ touchAction: 'pan-x pinch-zoom' });
+    expect(screen.getByTestId('segment-editor-board').className).not.toContain('touch-none');
+  });
+
+  it('supports pinch-to-zoom on the editor canvas', async () => {
+    render(<SegmentEditor songId="song-1" />);
+
+    const boardScroll = await screen.findByTestId('segment-editor-board-scroll');
+    const board = screen.getByTestId('segment-editor-board');
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('100%');
+
+    fireEvent.touchStart(boardScroll, {
+      touches: [
+        { clientX: 40, clientY: 40 },
+        { clientX: 140, clientY: 40 },
+      ],
+    });
+    fireEvent.touchMove(boardScroll, {
+      touches: [
+        { clientX: 40, clientY: 40 },
+        { clientX: 190, clientY: 40 },
+      ],
+    });
+
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('150%');
+    expect(board).toHaveStyle({ width: '150%' });
+
+    fireEvent.touchEnd(boardScroll, {
+      touches: [],
+    });
+  });
+
   it('loads song title into input and saves on blur', async () => {
     const onSongUpdated = vi.fn();
     render(<SegmentEditor songId="song-1" onSongUpdated={onSongUpdated} />);

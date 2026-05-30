@@ -265,6 +265,16 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
   });
 
+  it("keeps the regular practice card stretchable and the side navigation compact on narrow screens", async () => {
+    const song = makeSong();
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("practice-focus").className).toContain("items-stretch");
+    expect(screen.getByTestId("practice-prev-segment").className).toContain("w-8");
+    expect(screen.getByTestId("practice-next-segment").className).toContain("w-8");
+    expect(screen.getByTestId("mock-segment-card").parentElement?.className).toContain("flex-1");
+  });
+
   it("loads MIDI contour controls for read-only shared playlist songs using the owner data user", async () => {
     mockPracticeFetchWithMidiAnswerKey();
     const sharedSong = { ...makeSong(), hasMidiContour: true };

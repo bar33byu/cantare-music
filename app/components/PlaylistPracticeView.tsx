@@ -1231,8 +1231,8 @@ export function PlaylistPracticeView({
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <div className="inline-flex h-10 rounded border border-indigo-300 bg-white p-0.5">
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
+          <div className="inline-flex h-10 min-w-0 max-w-full rounded border border-indigo-300 bg-white p-0.5">
             {([
               ['practice', 'Songs'],
               ['focus', 'Focus'],
@@ -1259,7 +1259,7 @@ export function PlaylistPracticeView({
                   }
                   setMode(nextMode);
                 }}
-                className={`rounded px-3 text-sm font-semibold ${
+                className={`rounded px-2.5 text-xs font-semibold sm:px-3 sm:text-sm ${
                   mode === nextMode
                     ? 'bg-indigo-600 text-white'
                     : 'text-indigo-700 hover:bg-indigo-50'
@@ -1270,7 +1270,7 @@ export function PlaylistPracticeView({
             ))}
           </div>
           <div
-            className="inline-flex h-10 rounded border border-slate-300 bg-white p-0.5"
+            className="inline-flex h-10 shrink-0 rounded border border-slate-300 bg-white p-0.5"
             data-testid="playlist-audio-preference-toggle"
             title="Default audio version"
           >
@@ -1284,7 +1284,7 @@ export function PlaylistPracticeView({
                 data-testid={`playlist-audio-preference-${version}`}
                 aria-pressed={preferredAudioVersion === version}
                 onClick={() => handlePlaylistAudioPreferenceChange(version)}
-                className={`rounded px-3 text-sm font-semibold ${
+                className={`rounded px-2.5 text-xs font-semibold sm:px-3 sm:text-sm ${
                   preferredAudioVersion === version
                     ? 'bg-slate-800 text-white'
                     : 'text-slate-700 hover:bg-slate-100'
@@ -1299,7 +1299,7 @@ export function PlaylistPracticeView({
               data-testid="playlist-practice-manage"
               aria-label="Edit Playlist"
               title="Edit Playlist"
-              className="flex h-10 w-10 items-center justify-center rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+              className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50 sm:ml-0"
               onClick={onManage}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">

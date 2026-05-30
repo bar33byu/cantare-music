@@ -271,13 +271,13 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   };
 
   return (
-    <div ref={cardRef} className="relative mx-auto flex h-full min-h-0 w-full max-w-md flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
-      <div className="mb-3">
+    <div ref={cardRef} className="relative mx-auto flex h-full min-h-0 w-full max-w-md flex-col rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-md sm:px-6 sm:py-6">
+      <div className="mb-2 sm:mb-3">
         <p className="text-center text-sm text-gray-500" data-testid="segment-label-text">
           {segment.label}
         </p>
       </div>
-      <div className="mb-4 min-h-0 flex-1">
+      <div className="mb-3 min-h-0 flex-1 sm:mb-4">
         <div
           ref={lyricScrollRef}
           className="h-full overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
@@ -293,7 +293,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
           </p>
         </div>
       </div>
-      <div className="mb-3">
+      <div className="mb-2.5 sm:mb-3">
         <div
           role="progressbar"
           aria-valuenow={Math.round(progress * 100)}
@@ -309,14 +309,14 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
             style={{ width: `${progress * 100}%` }}
           />
         </div>
-        <div className="mt-2 flex justify-between text-sm text-indigo-700">
+        <div className="mt-2 flex justify-between text-xs text-indigo-700 sm:text-sm">
           <span data-testid="segment-start-time">{formatMs(clampedPlaybackMs)}</span>
           <span data-testid="segment-end-time">{formatMs(segment.endMs)}</span>
         </div>
       </div>
 
       {showContourMap ? (
-        <div className="mb-3" data-testid="segment-card-contour-map">
+        <div className="mb-2.5 sm:mb-3" data-testid="segment-card-contour-map">
           <PitchContourThumbnail
             notes={segment.pitchContourNotes ?? []}
             segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
@@ -325,7 +325,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
         </div>
       ) : null}
 
-      <p className="mb-2 text-sm text-gray-500">Level of knowledge</p>
+      <p className="mb-2 text-xs text-gray-500 sm:text-sm">Level of knowledge</p>
       <RatingBar
         currentRating={currentRating}
         onRate={onRate}
