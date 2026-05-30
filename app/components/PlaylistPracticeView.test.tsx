@@ -501,7 +501,7 @@ describe('PlaylistPracticeView', () => {
       paddingBottom: 'calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)',
     });
     expect(practiceMain).toHaveStyle({
-      paddingBottom: 'calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)',
+      paddingBottom: 'calc(var(--player-height) + env(safe-area-inset-bottom) + 8px)',
     });
     expect(segmentCard).toHaveTextContent('Segment 3');
     expect(segmentCard).toHaveTextContent('Alpha - 00:12');
