@@ -26,7 +26,12 @@ function formatMs(ms: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-function getTouchDistance(touches: TouchList): number {
+type TouchPairSource = {
+  length: number;
+  [index: number]: { clientX: number; clientY: number };
+};
+
+function getTouchDistance(touches: TouchPairSource): number {
   if (touches.length < 2) {
     return 0;
   }
