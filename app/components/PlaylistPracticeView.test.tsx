@@ -688,7 +688,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.queryByText('Mastered Verse')).not.toBeInTheDocument();
   });
 
-  it('saves Focus Queue ratings and advances in song order', async () => {
+  it('saves Focus Queue ratings without auto-advancing to the next segment', async () => {
     const focusPlaylist: Playlist = {
       ...playlist,
       songs: [
@@ -743,7 +743,7 @@ describe('PlaylistPracticeView', () => {
           );
         })
       ).toBe(true);
-      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Chorus');
+      expect(screen.getByTestId('focus-current-segment')).toHaveTextContent('Verse');
     }, { timeout: 2000 });
   });
 

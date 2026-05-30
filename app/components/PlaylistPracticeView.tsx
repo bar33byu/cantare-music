@@ -58,6 +58,21 @@ interface AutoDrillQueueItem {
   latestRating?: SegmentRating;
 }
 
+function isPlaybackPermissionBlockMessage(message: string | null | undefined): boolean {
+  if (!message) {
+    return false;
+  }
+
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('request is not allowed by the user agent') ||
+    normalized.includes('user denied permission') ||
+    normalized.includes('notallowederror') ||
+    normalized.includes('automatic audio') ||
+    normalized.includes('autoplay')
+  );
+}
+
 function speakPrompt(text: string, enabled = true): Promise<void> {
   if (
     !enabled ||
@@ -209,6 +224,7 @@ export function PlaylistPracticeView({
   const autoDrillRunIdRef = useRef(0);
   const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
+  const autoDrillPlaybackRecoveryKeyRef = useRef<string | null>(null);
 
   const userScopedHeaders = useMemo(() => {
     return userId ? { 'X-User-ID': userId } : undefined;
@@ -752,11 +768,7 @@ export function PlaylistPracticeView({
 
     lastObservedFocusRatingRef.current = nextObservedKey;
     setRefetchTrigger((prev) => prev + 1);
-    setCurrentFocusIndex((prev) => {
-      const lastIndex = Math.max(focusQueue.length - 1, 0);
-      return focusSortKey === 'song-order' ? Math.min(prev + 1, lastIndex) : Math.min(prev, lastIndex);
-    });
-  }, [currentFocusItem, focusQueue.length, focusSortKey]);
+  }, [currentFocusItem]);
 
   const stopAutoDrill = useCallback(() => {
     autoDrillRunIdRef.current += 1;
@@ -897,6 +909,38 @@ export function PlaylistPracticeView({
     currentAutoDrillItem,
     practiceMode,
     autoDrillRunRatings,
+  ]);
+
+  const handleAutoDrillPlaybackBlocked = useCallback((message: string | null) => {
+    if (
+      practiceMode === 'auto-drill' &&
+      currentAutoDrillItem &&
+      autoDrillState === 'playing' &&
+      autoDrillVoiceEnabled &&
+      isPlaybackPermissionBlockMessage(message)
+    ) {
+      const recoveryKey = `${currentAutoDrillItem.id}:${autoDrillPlayToken}`;
+      if (autoDrillPlaybackRecoveryKeyRef.current !== recoveryKey) {
+        autoDrillPlaybackRecoveryKeyRef.current = recoveryKey;
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+        }
+        setAutoDrillVoiceEnabled(false);
+        setAutoDrillPlaybackWarning(null);
+        autoDrillTransitionRef.current = 'again';
+        setAutoDrillState('repeating');
+        setAutoDrillMessage('Retrying without voice.');
+        return;
+      }
+    }
+
+    setAutoDrillPlaybackWarning(message);
+  }, [
+    autoDrillPlayToken,
+    autoDrillState,
+    autoDrillVoiceEnabled,
+    currentAutoDrillItem,
+    practiceMode,
   ]);
 
   const handleAutoDrillRatingSubmitted = useCallback((rating: MemoryRating) => {
@@ -1626,7 +1670,7 @@ export function PlaylistPracticeView({
                     ratingKeysEnabled={practiceMode === 'auto-drill'}
                     onSegmentPlaybackComplete={handleAutoDrillPlaybackComplete}
                     onRatingSubmitted={handleAutoDrillRatingSubmitted}
-                    onAutoPlayBlocked={setAutoDrillPlaybackWarning}
+                    onAutoPlayBlocked={handleAutoDrillPlaybackBlocked}
                     onPrevSegment={handlePrevAutoDrillSegment}
                     onNextSegment={handleNextAutoDrillSegment}
                     canUsePrevSegment={autoDrillIndex > 0}
