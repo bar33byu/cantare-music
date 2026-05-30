@@ -33,6 +33,8 @@ describe("ReplaceAudioForm", () => {
   it("shows populated and missing status for each audio version", () => {
     render(<ReplaceAudioForm songId="song-1" audioUrl="https://cdn.example.com/prominent.mp3" />);
 
+    expect(screen.getByText("Audio File")).toBeInTheDocument();
+    expect(screen.getByText("Upload or replace files")).toBeInTheDocument();
     expect(screen.getByTestId("replace-audio-status-prominent")).toHaveTextContent("Uploaded");
     expect(screen.getByTestId("replace-audio-status-blend")).toHaveTextContent("Missing");
     expect(screen.getByTestId("replace-audio-submit-prominent")).toHaveTextContent("Replace Prominent");

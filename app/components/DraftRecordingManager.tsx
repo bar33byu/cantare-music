@@ -37,6 +37,25 @@ function formatMs(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function getDraftRecordingDisplayDurationMs(
+  draft: DraftRecording,
+  measuredDurationMs?: number | null
+): number | null {
+  const trimmedDurationMs = (draft.trimEndMs ?? null) !== null
+    ? Math.max(0, (draft.trimEndMs ?? 0) - (draft.trimStartMs ?? 0))
+    : null;
+
+  if (trimmedDurationMs && trimmedDurationMs > 0) {
+    return trimmedDurationMs;
+  }
+
+  if (typeof measuredDurationMs === "number" && Number.isFinite(measuredDurationMs) && measuredDurationMs > 0) {
+    return measuredDurationMs;
+  }
+
+  return null;
+}
+
 function formatDraftRecordingCreatedAt(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -167,6 +186,65 @@ function getDraftRecordingSequence(draft: DraftRecording, drafts: DraftRecording
 function getDraftRecordingFallbackTitle(draft: DraftRecording, sequence: number): string {
   const safeSequence = Math.max(1, sequence);
   return draft.title?.trim() || (draft.status === "archived" ? `Archived draft ${safeSequence}` : `Draft recording ${safeSequence}`);
+}
+
+function useDraftRecordingDurations(drafts: DraftRecording[]): Record<string, number> {
+  const [durationsById, setDurationsById] = React.useState<Record<string, number>>({});
+  const knownDurationIds = React.useMemo(() => new Set(Object.keys(durationsById)), [durationsById]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextDraftIds = new Set(drafts.map((draft) => draft.id));
+    setDurationsById((previous) => {
+      const filteredEntries = Object.entries(previous).filter(([draftId]) => nextDraftIds.has(draftId));
+      if (filteredEntries.length === Object.keys(previous).length) {
+        return previous;
+      }
+      return Object.fromEntries(filteredEntries);
+    });
+
+    const cleanups: Array<() => void> = [];
+
+    for (const draft of drafts) {
+      if (!draft.audioUrl?.trim() || knownDurationIds.has(draft.id)) {
+        continue;
+      }
+
+      const audio = document.createElement("audio");
+      audio.preload = "metadata";
+
+      const handleLoadedMetadata = () => {
+        const durationMs = Math.round(audio.duration * 1000);
+        if (Number.isFinite(durationMs) && durationMs > 0) {
+          setDurationsById((previous) => (
+            previous[draft.id] === durationMs ? previous : { ...previous, [draft.id]: durationMs }
+          ));
+        }
+      };
+
+      const handleError = () => undefined;
+
+      audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.addEventListener("error", handleError);
+      audio.src = draft.audioUrl;
+      audio.load();
+
+      cleanups.push(() => {
+        audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+        audio.removeEventListener("error", handleError);
+        audio.src = "";
+      });
+    }
+
+    return () => {
+      cleanups.forEach((cleanup) => cleanup());
+    };
+  }, [drafts, knownDurationIds]);
+
+  return durationsById;
 }
 
 function DraftWaveformTrim({
@@ -392,19 +470,25 @@ function DraftRecordingListItem({
   draft,
   sequence,
   archived = false,
+  measuredDurationMs,
   onReview,
   onDiscard,
 }: {
   draft: DraftRecording;
   sequence: number;
   archived?: boolean;
+  measuredDurationMs?: number | null;
   onReview: (draftId: string) => void;
   onDiscard?: (draftId: string) => void;
 }) {
   const title = getDraftRecordingFallbackTitle(draft, sequence);
-  const secondaryText = archived && draft.archivedAt
+  const durationLabel = getDraftRecordingDisplayDurationMs(draft, measuredDurationMs);
+  const createdLabel = archived && draft.archivedAt
     ? `Archived ${formatDraftRecordingCreatedAt(draft.archivedAt)}`
-    : formatDraftRecordingCreatedAt(draft.createdAt);
+    : `Recorded ${formatDraftRecordingCreatedAt(draft.createdAt)}`;
+  const secondaryText = durationLabel !== null
+    ? `${formatMs(durationLabel)} · ${createdLabel}`
+    : createdLabel;
 
   return (
     <li className="flex items-center justify-between gap-3 py-2">
@@ -756,6 +840,7 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
   const [draftRecordingStatus, setDraftRecordingStatus] = React.useState<DraftRecordingStatus>("idle");
   const [draftRecordingMessage, setDraftRecordingMessage] = React.useState<string | null>(null);
   const [draftRecordingLevel, setDraftRecordingLevel] = React.useState(0);
+  const [draftRecordingElapsedMs, setDraftRecordingElapsedMs] = React.useState(0);
   const [reviewingDraftId, setReviewingDraftId] = React.useState<string | null>(null);
   const [draftDiscardMessage, setDraftDiscardMessage] = React.useState<string | null>(null);
   const draftRecorderRef = React.useRef<MediaRecorder | null>(null);
@@ -765,6 +850,7 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
   const draftRecordingAnalyserRef = React.useRef<AnalyserNode | null>(null);
   const draftRecordingSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
   const draftRecordingLevelFrameRef = React.useRef<number | null>(null);
+  const draftRecordingStartedAtRef = React.useRef<number | null>(null);
 
   const withUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
     if (!userId) {
@@ -787,6 +873,7 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
   const archivedDraftRecordings = song.archivedDraftRecordings ?? [];
   const allReviewableDraftRecordings = [...draftRecordings, ...archivedDraftRecordings];
   const reviewingDraft = allReviewableDraftRecordings.find((draft) => draft.id === reviewingDraftId) ?? null;
+  const draftDurationsById = useDraftRecordingDurations(allReviewableDraftRecordings);
 
   const stopDraftRecordingLevelMeter = React.useCallback(() => {
     if (draftRecordingLevelFrameRef.current !== null) {
@@ -905,6 +992,7 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
 
     try {
       setDraftRecordingMessage(null);
+      setDraftRecordingElapsedMs(0);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = getDraftRecordingMimeType();
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
@@ -945,12 +1033,14 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
       });
 
       draftRecorderRef.current = recorder;
+      draftRecordingStartedAtRef.current = Date.now();
       recorder.start();
       setDraftRecordingStatus("recording");
-      setDraftRecordingMessage("Recording...");
     } catch (error) {
       stopDraftRecordingStream();
       draftRecorderRef.current = null;
+      draftRecordingStartedAtRef.current = null;
+      setDraftRecordingElapsedMs(0);
       setDraftRecordingStatus("error");
       setDraftRecordingMessage(normalizeDraftRecordingError(error, "Could not start recording."));
     }
@@ -961,6 +1051,7 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
     if (!recorder || recorder.state === "inactive") {
       return;
     }
+    draftRecordingStartedAtRef.current = null;
     setDraftRecordingStatus("saving");
     setDraftRecordingMessage("Saving draft recording...");
     recorder.stop();
@@ -987,6 +1078,41 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
   }, [onDraftRecordingSaved, request, reviewingDraftId, song.id]);
 
   React.useEffect(() => {
+    if (draftRecordingStatus !== "recording") {
+      return;
+    }
+
+    const updateElapsed = () => {
+      const startedAt = draftRecordingStartedAtRef.current;
+      if (startedAt === null) {
+        return;
+      }
+      setDraftRecordingElapsedMs(Date.now() - startedAt);
+    };
+
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 250);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [draftRecordingStatus]);
+
+  React.useEffect(() => {
+    if (draftRecordingStatus !== "saved") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setDraftRecordingStatus("idle");
+      setDraftRecordingMessage(null);
+    }, 3500);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [draftRecordingStatus]);
+
+  React.useEffect(() => {
     return () => {
       if (draftRecorderRef.current && draftRecorderRef.current.state !== "inactive") {
         draftRecorderRef.current.stop();
@@ -997,8 +1123,14 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
       setDraftRecordingStatus("idle");
       setDraftRecordingMessage(null);
       setDraftRecordingLevel(0);
+      setDraftRecordingElapsedMs(0);
+      draftRecordingStartedAtRef.current = null;
     };
   }, [stopDraftRecordingStream]);
+
+  const draftRecordingStatusText = draftRecordingStatus === "recording"
+    ? formatMs(draftRecordingElapsedMs)
+    : draftRecordingMessage;
 
   if (reviewingDraft) {
     return (
@@ -1024,9 +1156,9 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
     <section className="mt-4 border-t border-slate-100 pt-4" data-testid="segment-editor-draft-recordings">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h4 className="text-base font-semibold text-slate-900">{DRAFT_LABELS.activeSection}</h4>
+          <h4 className="text-base font-semibold text-slate-900">Record a draft take</h4>
           <p className="mt-1 text-sm text-slate-600">
-            Capture reference takes while you are editing the song, then trim and promote the best one into a song version.
+            Capture a temporary reference take while you are editing, then trim it and promote the best one into a song version.
           </p>
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1068,7 +1200,7 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
         </div>
       </div>
 
-      {draftRecordingMessage ? (
+      {draftRecordingStatusText ? (
         <p
           data-testid="draft-recording-status"
           role={draftRecordingStatus === "error" ? "alert" : "status"}
@@ -1080,7 +1212,7 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
                 : "text-slate-600"
           }`}
         >
-          {draftRecordingMessage}
+          {draftRecordingStatusText}
         </p>
       ) : null}
 
@@ -1095,12 +1227,16 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
               {draftRecordings.length}
             </span>
           </div>
+          <p className="mb-2 text-xs text-slate-500">
+            Draft takes stay here until you discard them or promote one into a song version.
+          </p>
           <ul className="divide-y divide-slate-100">
             {draftRecordings.map((draft) => (
               <DraftRecordingListItem
                 key={draft.id}
                 draft={draft}
                 sequence={getDraftRecordingSequence(draft, draftRecordings)}
+                measuredDurationMs={draftDurationsById[draft.id]}
                 onReview={setReviewingDraftId}
                 onDiscard={(draftId) => void handleDiscardDraftRecording(draftId)}
               />
@@ -1144,6 +1280,7 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
                 draft={draft}
                 sequence={getDraftRecordingSequence(draft, archivedDraftRecordings)}
                 archived
+                measuredDurationMs={draftDurationsById[draft.id]}
                 onReview={setReviewingDraftId}
               />
             ))}

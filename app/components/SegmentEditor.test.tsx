@@ -1256,6 +1256,9 @@ describe('SegmentEditor', () => {
     fireEvent.click(await screen.findByTestId('segment-editor-replace-audio-toggle'));
 
     expect(await screen.findByTestId('segment-editor-draft-recordings')).toBeInTheDocument();
+    expect(screen.getByText('Audio file')).toBeInTheDocument();
+    expect(screen.getByText('Record a draft take')).toBeInTheDocument();
+    expect(screen.getByText('Draft takes stay here until you discard them or promote one into a song version.')).toBeInTheDocument();
     expect(screen.getByTestId('draft-recordings')).toHaveTextContent('Draft recording 1');
     expect(screen.queryByTestId('draft-recording-toggle')).toBeInTheDocument();
   });

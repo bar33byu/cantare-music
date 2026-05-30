@@ -923,10 +923,10 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
         </div>
       </div>
 
-      {/* Replace audio (collapsible) */}
+      {/* Audio files (collapsible) */}
       <div className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <p className="mb-2 text-xs leading-5 text-slate-600">
-          Replace audio only when the source recording changes. Section timings and lyrics are preserved.
+          Update the source audio or record a temporary draft take without changing section timings or lyrics.
         </p>
         <button
           type="button"
@@ -944,7 +944,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
           >
             ▶
           </span>
-          <span>Replace audio file</span>
+          <span>Audio file</span>
         </button>
         {showReplaceAudio && (
           <div className="mt-2">
