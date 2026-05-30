@@ -1039,6 +1039,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [tapPersistenceWarning, setTapPersistenceWarning] = React.useState<string | null>(null);
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
   const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
+  const [viewportSize, setViewportSize] = React.useState({ width: 0, height: 0 });
   const practicedRecordedRef = React.useRef(false);
   const accumulatedPlaybackMsRef = React.useRef(0);
   const playbackStartedAtRef = React.useRef<number | null>(null);
@@ -1125,6 +1126,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     : false;
   const canUsePrevSegment = canUsePrevSegmentOverride ?? (hasSegments && (!isFirst || canRestartCurrentSegment));
   const canUseNextSegment = canUseNextSegmentOverride ?? (hasSegments && !isLast);
+  const isCompactLandscapeLayout = (
+    !reducedControls &&
+    !isTapPracticeMode &&
+    viewportSize.width > viewportSize.height &&
+    viewportSize.height > 0 &&
+    viewportSize.height <= 520 &&
+    viewportSize.width <= 1100
+  );
   const tapDebugHref = React.useMemo(() => {
     const params = new URLSearchParams({ songId: song.id });
     if (tapSessionId) {
@@ -2680,6 +2689,27 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [tapAttemptsBySegment]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const updateViewportSize = () => {
+      setViewportSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+
+    updateViewportSize();
+    window.addEventListener("resize", updateViewportSize);
+    window.addEventListener("orientationchange", updateViewportSize);
+    return () => {
+      window.removeEventListener("resize", updateViewportSize);
+      window.removeEventListener("orientationchange", updateViewportSize);
+    };
+  }, []);
+
+  useEffect(() => {
     tapSessionIdRef.current = tapSessionId;
   }, [tapSessionId]);
 
@@ -3031,8 +3061,27 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         </p>
       </header>
 
+      <div
+        data-testid="practice-shell"
+        data-compact-layout={isCompactLandscapeLayout ? "true" : "false"}
+        className={
+          isCompactLandscapeLayout
+            ? "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] grid-rows-[auto_minmax(0,1fr)] gap-3 px-3 pb-3 pt-2"
+            : "flex min-h-0 flex-1 flex-col"
+        }
+      >
+
       {!reducedControls ? (
-      <div className={isTapPracticeMode ? "px-3 pb-1 pt-2 md:px-6" : "px-4 md:px-8"} data-testid="practice-top-bar">
+      <div
+        className={
+          isCompactLandscapeLayout
+            ? "col-start-2 row-start-1 rounded-2xl border border-slate-200 bg-white/90 p-3 shadow-sm"
+            : isTapPracticeMode
+              ? "px-3 pb-1 pt-2 md:px-6"
+              : "px-4 md:px-8"
+        }
+        data-testid="practice-top-bar"
+      >
         {!isTapPracticeMode && ratingsLoading ? (
           <div
             data-testid="ratings-loading-skeleton"
@@ -3181,10 +3230,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       <main
         data-testid="practice-main"
-        className={`flex flex-1 justify-center px-2 pt-2 sm:px-3 md:px-8 ${isTapPracticeMode ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
-        style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
+        className={`flex flex-1 justify-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 min-h-0 overflow-y-auto px-1 pt-0" : "px-2 pt-2 sm:px-3 md:px-8"} ${isTapPracticeMode ? "min-h-0 overflow-hidden" : isCompactLandscapeLayout ? "" : "overflow-y-auto"}`}
+        style={isCompactLandscapeLayout ? undefined : { paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
       >
-        <section data-testid="practice-focus" className={`flex min-h-full w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl items-start" : "items-stretch max-w-3xl"}`}>
+        <section data-testid="practice-focus" className={`flex min-h-full w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isTapPracticeMode ? "max-w-4xl items-start" : isCompactLandscapeLayout ? "items-stretch max-w-none" : "items-stretch max-w-3xl"}`}>
           {!isTapPracticeMode && showSegmentNavigationControls ? (
             <button
               type="button"
@@ -3200,9 +3249,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               </svg>
             </button>
           ) : null}
-          <div className={`min-w-0 ${isTapPracticeMode ? "h-full w-full max-w-md" : "flex min-h-0 flex-1 self-stretch justify-center"}`}>
+          <div className={`min-w-0 ${isTapPracticeMode ? "h-full w-full max-w-md" : isCompactLandscapeLayout ? "flex min-h-0 flex-1 self-stretch justify-center" : "flex min-h-0 flex-1 self-stretch justify-center"}`}>
             {hasSegments && currentSegment ? (
-              <div className={`segment-stack-shell relative min-h-0 overflow-visible ${isTapPracticeMode ? "h-full" : "flex h-full w-full max-w-md flex-col"}`}>
+              <div className={`segment-stack-shell relative min-h-0 overflow-visible ${isTapPracticeMode ? "h-full" : isCompactLandscapeLayout ? "flex h-full w-full max-w-none flex-col" : "flex h-full w-full max-w-md flex-col"}`}>
                 {isTapPracticeMode ? (
                   <div
                     data-testid="practice-tap-feedback"
@@ -3523,8 +3572,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       <section
         data-testid="practice-transport"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
-        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
+        className={
+          isCompactLandscapeLayout
+            ? "col-start-2 row-start-2 self-stretch overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm"
+            : "fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
+        }
+        style={isCompactLandscapeLayout ? undefined : { paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
       >
           <AudioPlayer
             audioUrl={activeAudioUrl}
@@ -3552,6 +3605,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             reducedControls={reducedControls}
           />
       </section>
+      </div>
     </div>
   );
 };

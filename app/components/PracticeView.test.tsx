@@ -274,6 +274,21 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
   });
 
+  it("switches to the compact two-column practice shell on short landscape screens", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 844 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 390 });
+
+    const song = makeSong();
+    await renderAndWaitForRatings(song);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-shell")).toHaveAttribute("data-compact-layout", "true");
+    });
+
+    expect(screen.getByTestId("practice-transport").className).not.toContain("fixed");
+    expect(screen.getByTestId("practice-transport").className).toContain("rounded-2xl");
+  });
+
   it("keeps the regular practice card stretchable and the side navigation compact on narrow screens", async () => {
     const song = makeSong();
     await renderAndWaitForRatings(song);
