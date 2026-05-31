@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { importSharedPlaylist } from "../../../../../../db/queries";
 import { resolveRequestContext } from "../../../../_user";
 
-function playlistRedirectUrl(request: NextRequest, playlistId: string): URL {
-  const url = new URL("/", request.url);
+const sharedHeaders = {
+  "Cache-Control": "private, no-store",
+};
+
+function playlistRedirectPath(playlistId: string): string {
   const params = new URLSearchParams();
   params.set("view", "playlist_detail");
   params.set("playlist", playlistId);
-  url.hash = params.toString();
-  return url;
+  return `/#${params.toString()}`;
 }
 
 export async function POST(
@@ -18,22 +20,36 @@ export async function POST(
   const context = await resolveRequestContext(request);
   const user = context.effectiveUser;
   if (!context.actor || !user || !(context.actor.email ?? "").trim()) {
-    return NextResponse.json({ error: "Sign in to import this playlist." }, { status: 401 });
+    return NextResponse.json({ error: "Sign in to import this playlist." }, { status: 401, headers: sharedHeaders });
   }
 
   const { token } = await params;
-  const formData = await request.formData().catch(() => null);
-  const force = formData?.get("force") === "true" || new URL(request.url).searchParams.get("force") === "true";
+  const requestUrl = new URL(request.url);
+  const contentType = request.headers.get("content-type") ?? "";
+  const body = contentType.includes("application/json")
+    ? await request.json().catch(() => ({})) as { force?: unknown }
+    : null;
+  const formData = body ? null : await request.formData().catch(() => null);
+  const force =
+    body?.force === true ||
+    formData?.get("force") === "true" ||
+    requestUrl.searchParams.get("force") === "true";
 
   try {
     const result = await importSharedPlaylist(token, user.id, { force });
-    return NextResponse.redirect(playlistRedirectUrl(request, result.playlist.id), 303);
+    return NextResponse.json(
+      {
+        ...result,
+        redirectTo: playlistRedirectPath(result.playlist.id),
+      },
+      { headers: sharedHeaders }
+    );
   } catch (error) {
     const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;
     if (code === "SHARED_PLAYLIST_NOT_FOUND") {
-      return NextResponse.json({ error: "Shared playlist not found." }, { status: 404 });
+      return NextResponse.json({ error: "Shared playlist not found." }, { status: 404, headers: sharedHeaders });
     }
     console.error("Error importing shared playlist:", error);
-    return NextResponse.json({ error: "Unable to import this playlist right now." }, { status: 500 });
+    return NextResponse.json({ error: "Unable to import this playlist right now." }, { status: 500, headers: sharedHeaders });
   }
 }

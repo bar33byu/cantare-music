@@ -16,12 +16,16 @@ import type { MemoryRating } from '../types';
 
 type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
 type FocusSortKey = 'mastery' | 'due-date' | 'song-order';
+type PlaylistMode = 'practice' | 'focus' | 'listen' | 'auto';
+type ExplainedMode = Extract<PlaylistMode, 'focus' | 'listen' | 'auto'>;
 interface SortState { key: SortKey; asc: boolean }
 const SORT_STORAGE_KEY = 'playlist-practice-sort';
+const MODE_EXPLAINER_STORAGE_KEY_PREFIX = 'playlist-practice-mode-explainer:';
 const DEFAULT_SORT: SortState = { key: 'date-practiced', asc: false };
 const DEFAULT_FOCUS_PREROLL_MS = 5000;
 const FOCUS_MASTERED_RATING = 5;
 const AUTO_DRILL_PREROLL_MS = 500;
+const HANDS_FREE_LABEL = 'Hands Free';
 
 const sortKeyLabel: Record<SortKey, string> = {
   alphabetical: 'Alphabetical',
@@ -38,6 +42,55 @@ const sortDirLabel: Record<SortKey, [string, string]> = {
 };
 
 const defaultAscForKey = (key: SortKey) => key === 'alphabetical';
+
+const modeLabel: Record<PlaylistMode, string> = {
+  practice: 'Songs',
+  focus: 'Focus',
+  auto: HANDS_FREE_LABEL,
+  listen: 'Listen',
+};
+
+const modeExplainerCopy: Record<ExplainedMode, { title: string; description: string; detail: string }> = {
+  focus: {
+    title: 'Focus mode',
+    description: 'Focus mode pulls individual segments into a queue so you can work the weakest or stalest material first.',
+    detail: 'It is built for targeted repetition instead of running whole songs from top to bottom.',
+  },
+  auto: {
+    title: HANDS_FREE_LABEL,
+    description: `${HANDS_FREE_LABEL} steps through the playlist for you, announces each target, and keeps repeating segments until it is time to advance.`,
+    detail: 'It is meant for situations where you want the app to keep moving with minimal tapping.',
+  },
+  listen: {
+    title: 'Listen mode',
+    description: 'Listen mode plays the playlist straight through without opening the practice-card workflow for each song.',
+    detail: 'Use it when you want continuous rehearsal playback instead of segment drills.',
+  },
+};
+
+function hasSeenModeExplainer(mode: ExplainedMode): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(`${MODE_EXPLAINER_STORAGE_KEY_PREFIX}${mode}`) === 'seen';
+  } catch {
+    return false;
+  }
+}
+
+function markModeExplainerSeen(mode: ExplainedMode): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(`${MODE_EXPLAINER_STORAGE_KEY_PREFIX}${mode}`, 'seen');
+  } catch {
+    // Ignore storage failures; the explainer can show again.
+  }
+}
 
 interface FocusQueueItem {
   id: string;
@@ -198,12 +251,12 @@ export function PlaylistPracticeView({
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
-  const [mode, setMode] = useState<'practice' | 'focus' | 'listen' | 'auto'>('practice');
+  const [mode, setMode] = useState<PlaylistMode>('practice');
   const [practiceMode, setPracticeMode] = useState<PracticeMode>('manual');
   const [autoDrillState, setAutoDrillState] = useState<AutoDrillState>('idle');
   const [autoDrillIndex, setAutoDrillIndex] = useState(0);
   const [autoDrillPlayToken, setAutoDrillPlayToken] = useState(0);
-  const [autoDrillMessage, setAutoDrillMessage] = useState('Auto Drill idle');
+  const [autoDrillMessage, setAutoDrillMessage] = useState(`${HANDS_FREE_LABEL} idle`);
   const [autoDrillPlaybackWarning, setAutoDrillPlaybackWarning] = useState<string | null>(null);
   const [autoDrillVoiceEnabled, setAutoDrillVoiceEnabled] = useState(true);
   const [autoDrillCompletedPasses, setAutoDrillCompletedPasses] = useState<Record<string, number>>({});
@@ -225,6 +278,7 @@ export function PlaylistPracticeView({
   const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
   const autoDrillPlaybackRecoveryKeyRef = useRef<string | null>(null);
+  const [modeExplainer, setModeExplainer] = useState<ExplainedMode | null>(null);
 
   const userScopedHeaders = useMemo(() => {
     return userId ? { 'X-User-ID': userId } : undefined;
@@ -777,7 +831,7 @@ export function PlaylistPracticeView({
     }
     setPracticeMode('manual');
     setAutoDrillState('idle');
-    setAutoDrillMessage('Auto Drill idle');
+    setAutoDrillMessage(`${HANDS_FREE_LABEL} idle`);
     setMode('practice');
   }, []);
 
@@ -791,9 +845,51 @@ export function PlaylistPracticeView({
     setAutoDrillCompletedPasses({});
     setAutoDrillRunRatings({});
     setAutoDrillPlaybackWarning(null);
-    setAutoDrillMessage('Auto Drill starting');
+    setAutoDrillMessage(`${HANDS_FREE_LABEL} starting`);
     setAutoDrillState(autoDrillQueue.length > 0 ? 'announcing' : 'complete');
   }, [autoDrillQueue.length]);
+
+  const activateMode = useCallback((nextMode: PlaylistMode) => {
+    if (nextMode === 'auto') {
+      startAutoDrill();
+      return;
+    }
+
+    if (practiceMode === 'auto-drill') {
+      autoDrillRunIdRef.current += 1;
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      setPracticeMode('manual');
+      setAutoDrillState('idle');
+    }
+
+    setMode(nextMode);
+  }, [practiceMode, startAutoDrill]);
+
+  const requestModeChange = useCallback((nextMode: PlaylistMode) => {
+    if ((nextMode === 'focus' || nextMode === 'listen' || nextMode === 'auto') && !hasSeenModeExplainer(nextMode)) {
+      setModeExplainer(nextMode);
+      return;
+    }
+
+    activateMode(nextMode);
+  }, [activateMode]);
+
+  const dismissModeExplainer = useCallback(() => {
+    setModeExplainer(null);
+  }, []);
+
+  const confirmModeExplainer = useCallback(() => {
+    if (!modeExplainer) {
+      return;
+    }
+
+    markModeExplainerSeen(modeExplainer);
+    const nextMode = modeExplainer;
+    setModeExplainer(null);
+    activateMode(nextMode);
+  }, [activateMode, modeExplainer]);
 
   const handleAutoDrillRatingsSaved = useCallback((ratings: SessionState["ratings"]) => {
     if (!currentAutoDrillItem) {
@@ -1234,31 +1330,17 @@ export function PlaylistPracticeView({
         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
           <div className="inline-flex h-10 min-w-0 max-w-full rounded border border-indigo-300 bg-white p-0.5">
             {([
-              ['practice', 'Songs'],
-              ['focus', 'Focus'],
-              ['auto', 'Auto Drill'],
-              ['listen', 'Listen'],
+              ['practice', modeLabel.practice],
+              ['focus', modeLabel.focus],
+              ['auto', modeLabel.auto],
+              ['listen', modeLabel.listen],
             ] as const).map(([nextMode, label]) => (
               <button
                 key={nextMode}
                 type="button"
                 data-testid={`playlist-mode-${nextMode}`}
                 aria-pressed={mode === nextMode}
-                onClick={() => {
-                  if (nextMode === 'auto') {
-                    startAutoDrill();
-                    return;
-                  }
-                  if (practiceMode === 'auto-drill') {
-                    autoDrillRunIdRef.current += 1;
-                    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-                      window.speechSynthesis.cancel();
-                    }
-                    setPracticeMode('manual');
-                    setAutoDrillState('idle');
-                  }
-                  setMode(nextMode);
-                }}
+                onClick={() => requestModeChange(nextMode)}
                 className={`rounded px-2.5 text-xs font-semibold sm:px-3 sm:text-sm ${
                   mode === nextMode
                     ? 'bg-indigo-600 text-white'
@@ -1310,6 +1392,41 @@ export function PlaylistPracticeView({
           ) : null}
         </div>
       </header>
+
+      {modeExplainer ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4" role="dialog" aria-modal="true" aria-labelledby="playlist-mode-explainer-title">
+          <div className="w-full max-w-md rounded-xl border border-indigo-100 bg-white p-5 shadow-xl">
+            <p className="text-sm font-semibold uppercase tracking-wide text-indigo-700">Playlist mode</p>
+            <h3 id="playlist-mode-explainer-title" className="mt-2 text-xl font-semibold text-gray-950">
+              {modeExplainerCopy[modeExplainer].title}
+            </h3>
+            <p className="mt-3 text-sm leading-6 text-gray-700">
+              {modeExplainerCopy[modeExplainer].description}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              {modeExplainerCopy[modeExplainer].detail}
+            </p>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                data-testid="playlist-mode-explainer-cancel"
+                onClick={dismissModeExplainer}
+                className="rounded border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="playlist-mode-explainer-continue"
+                onClick={confirmModeExplainer}
+                className="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {mode === 'practice' && (
         <>
@@ -1591,7 +1708,7 @@ export function PlaylistPracticeView({
 
           {!currentAutoDrillItem ? (
             <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              This playlist needs songs with audio and segments before Auto Drill can start.
+              This playlist needs songs with audio and segments before {HANDS_FREE_LABEL} can start.
             </div>
           ) : (
             <>
@@ -1618,7 +1735,7 @@ export function PlaylistPracticeView({
                   <button
                     type="button"
                     data-testid="auto-drill-exit"
-                    aria-label="Exit Auto Drill"
+                    aria-label={`Exit ${HANDS_FREE_LABEL}`}
                     onClick={stopAutoDrill}
                     className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                   >
@@ -1628,7 +1745,7 @@ export function PlaylistPracticeView({
                   <button
                     type="button"
                     data-testid="auto-drill-start"
-                    aria-label="Start Auto Drill"
+                    aria-label={`Start ${HANDS_FREE_LABEL}`}
                     onClick={startAutoDrill}
                     disabled={autoDrillQueue.length === 0}
                     className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
@@ -1658,7 +1775,7 @@ export function PlaylistPracticeView({
                     readOnlyDataUserId={readOnlyDataUserId}
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
-                    breadcrumbRootLabel="Auto Drill"
+                    breadcrumbRootLabel={HANDS_FREE_LABEL}
                     segmentPrerollMs={AUTO_DRILL_PREROLL_MS}
                     preferredAudioVersion={preferredAudioVersion}
                     onPreferredAudioVersionChange={onPreferredAudioVersionChange}

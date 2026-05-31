@@ -182,6 +182,39 @@ describe("shared playlist import title helpers", () => {
       ["502-Child of God"]
     )).toBe("501 I Am a Child of God");
   });
+
+  it("adds an incremented suffix when the imported song title already exists", async () => {
+    const { getImportedSongTitle } = await getQueries();
+
+    expect(getImportedSongTitle(
+      "501 I Am a Child of God",
+      "Stake Conference",
+      ["501 I Am a Child of God"]
+    )).toBe("501 I Am a Child of God (from Stake Conference)");
+  });
+
+  it("adds an incremented suffix to contextual imported titles when duplicates already exist", async () => {
+    const { getImportedSongTitle } = await getQueries();
+
+    expect(getImportedSongTitle(
+      "501 I Am a Child of God",
+      "Stake Conference",
+      [
+        "501-Child of God",
+        "501 I Am a Child of God (from Stake Conference)",
+        "501 I Am a Child of God (from Stake Conference) (import 2)",
+      ]
+    )).toBe("501 I Am a Child of God (from Stake Conference) (import 3)");
+  });
+
+  it("increments duplicate imported playlist names", async () => {
+    const { getImportedPlaylistName } = await getQueries();
+
+    expect(getImportedPlaylistName(
+      "MSW 31 May 2026 Baritone",
+      ["MSW 31 May 2026 Baritone", "MSW 31 May 2026 Baritone (import 2)"]
+    )).toBe("MSW 31 May 2026 Baritone (import 3)");
+  });
 });
 
 describe("getAllSongs", () => {

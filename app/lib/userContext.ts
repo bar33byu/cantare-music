@@ -11,6 +11,8 @@ export interface KnownUser {
   email?: string;
   avatarUrl?: string | null;
   profileVisibility?: "private" | string;
+  accountDeletionRequestedAt?: string | null;
+  accountDeletionScheduledFor?: string | null;
   isAdmin?: boolean;
 }
 

@@ -24,6 +24,8 @@ describe("schema tables", () => {
     expect(cols).toContain("email");
     expect(cols).toContain("avatarUrl");
     expect(cols).toContain("profileVisibility");
+    expect(cols).toContain("accountDeletionRequestedAt");
+    expect(cols).toContain("accountDeletionScheduledFor");
     expect(cols).toContain("createdAt");
     expect(cols).toContain("updatedAt");
   });
