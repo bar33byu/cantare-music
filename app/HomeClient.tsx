@@ -5,6 +5,7 @@ import PracticeView from "./components/PracticeView";
 import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
 import { PlaylistPracticeView } from "./components/PlaylistPracticeView";
+import { GuestWelcomePanel } from "./components/GuestWelcomePanel";
 import { SharedBrowser } from "./components/SharedBrowser";
 import { SongForm } from "./components/SongForm";
 import { SongBrowser } from "./components/SongBrowser";
@@ -1062,6 +1063,31 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       setAuthLoading(false);
     }
   };
+  const guestSignInForm = (
+    <>
+      <form className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={handleMagicLinkRequest}>
+        <input
+          type="email"
+          value={authEmail}
+          onChange={(event) => setAuthEmail(event.target.value)}
+          placeholder="Email address"
+          className="min-w-0 rounded border border-gray-300 px-3 py-2 text-sm text-gray-800"
+        />
+        <button
+          type="submit"
+          disabled={authLoading || !authEmail.trim()}
+          className="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Send login link
+        </button>
+      </form>
+      {authMessage ? (
+        <p className="mt-2 text-xs text-gray-600" role="status">
+          {authMessage}
+        </p>
+      ) : null}
+    </>
+  );
 
   const handleProfileSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2090,28 +2116,33 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         ) : null}
 
         {activeView === "playlists" ? (
-          <PlaylistBrowser
-            key={`playlists:${activeUserId}:${refreshTrigger}`}
-            userId={activeUserId}
-            refreshTrigger={refreshTrigger}
-            onSelectPlaylist={async (playlist) => {
-              try {
-                const response = await request(`/api/playlists/${playlist.id}`);
-                if (!response.ok) throw new Error("Failed to fetch playlist");
-                const fullPlaylist: Playlist = await response.json();
-                setSelectedPlaylist(fullPlaylist);
-                setPlaylistPracticeReturnView("playlists");
-                setPlaylistPracticeReadOnly(false);
-                setActiveView("playlist_practice");
-              } catch (err) {
-                console.error("Failed to load playlist:", err);
-              }
-            }}
-            onManagePlaylist={(playlist) => {
-              setSelectedPlaylist(playlist);
-              setActiveView("playlist_detail");
-            }}
-          />
+          <>
+            {!isSignedIn ? (
+              <GuestWelcomePanel className="mb-6" action={guestSignInForm} />
+            ) : null}
+            <PlaylistBrowser
+              key={`playlists:${activeUserId}:${refreshTrigger}`}
+              userId={activeUserId}
+              refreshTrigger={refreshTrigger}
+              onSelectPlaylist={async (playlist) => {
+                try {
+                  const response = await request(`/api/playlists/${playlist.id}`);
+                  if (!response.ok) throw new Error("Failed to fetch playlist");
+                  const fullPlaylist: Playlist = await response.json();
+                  setSelectedPlaylist(fullPlaylist);
+                  setPlaylistPracticeReturnView("playlists");
+                  setPlaylistPracticeReadOnly(false);
+                  setActiveView("playlist_practice");
+                } catch (err) {
+                  console.error("Failed to load playlist:", err);
+                }
+              }}
+              onManagePlaylist={(playlist) => {
+                setSelectedPlaylist(playlist);
+                setActiveView("playlist_detail");
+              }}
+            />
+          </>
         ) : null}
 
         {activeView === "shared" ? (
@@ -2139,19 +2170,11 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               }}
             />
           ) : (
-            <section data-testid="shared-sign-in-required" className="rounded border border-gray-200 bg-white p-6 text-gray-700">
-              <h2 className="text-lg font-semibold text-gray-950">Sign in to browse Shared</h2>
-              <p className="mt-2 text-sm text-gray-600">
-                Public shared playlists are available to signed-in users. Direct playlist share links still work without signing in.
-              </p>
-              <button
-                type="button"
-                className="mt-4 rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-                onClick={() => setSettingsOpen(true)}
-              >
-                Sign in
-              </button>
-            </section>
+            <GuestWelcomePanel
+              title="Sign in to browse Shared"
+              action={guestSignInForm}
+              footer="Public shared playlists are available to signed-in users. Direct playlist share links still work without signing in."
+            />
           )
         ) : null}
       </div>

@@ -7,7 +7,6 @@ interface SharedPlaylistSignInProps {
 }
 
 export function SharedPlaylistSignIn({ returnTo }: SharedPlaylistSignInProps) {
-  const [expanded, setExpanded] = useState(false);
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -35,20 +34,8 @@ export function SharedPlaylistSignIn({ returnTo }: SharedPlaylistSignInProps) {
     }
   };
 
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        onClick={() => setExpanded(true)}
-        className="inline-flex rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-      >
-        Sign in to import
-      </button>
-    );
-  }
-
   return (
-    <form onSubmit={handleSubmit} className="grid gap-2 rounded border border-indigo-100 bg-white p-3 shadow-sm sm:min-w-80">
+    <form onSubmit={handleSubmit} className="grid gap-2 sm:min-w-80">
       <label htmlFor="shared-playlist-sign-in-email" className="text-sm font-semibold text-gray-900">
         Sign in to import
       </label>

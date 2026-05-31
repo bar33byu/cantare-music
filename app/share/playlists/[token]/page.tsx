@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { getPlaylistImportsForSource, getSharedPlaylistByToken, getUserForSessionTokenHash } from "../../../../db/queries";
 import { AUTH_SESSION_COOKIE_NAME, hashAuthToken } from "../../../lib/authTokens";
 import type { Playlist } from "../../../types";
+import { GuestWelcomePanel } from "../../../components/GuestWelcomePanel";
 import { SharedPlaylistGuestPractice } from "./SharedPlaylistGuestPractice";
 import { SharedPlaylistSignIn } from "./SharedPlaylistSignIn";
 
@@ -64,33 +65,37 @@ export default async function SharedPlaylistPage({
           {playlist.eventDate ? (
             <p className="mt-1 text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p>
           ) : null}
-          <div className="mt-5 flex flex-wrap items-center gap-3">
-            {viewer ? (
-              <>
+          {viewer ? (
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <form action={`/api/share/playlists/${encodeURIComponent(token)}/import`} method="post">
+                <button
+                  type="submit"
+                  className="inline-flex rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                >
+                  Import playlist
+                </button>
+              </form>
+              {priorImports.length > 0 ? (
                 <form action={`/api/share/playlists/${encodeURIComponent(token)}/import`} method="post">
+                  <input type="hidden" name="force" value="true" />
                   <button
                     type="submit"
-                    className="inline-flex rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                    className="inline-flex rounded border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
                   >
-                    Import playlist
+                    Import again
                   </button>
                 </form>
-                {priorImports.length > 0 ? (
-                  <form action={`/api/share/playlists/${encodeURIComponent(token)}/import`} method="post">
-                    <input type="hidden" name="force" value="true" />
-                    <button
-                      type="submit"
-                      className="inline-flex rounded border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
-                    >
-                      Import again
-                    </button>
-                  </form>
-                ) : null}
-              </>
-            ) : (
-              <SharedPlaylistSignIn returnTo={`/share/playlists/${encodeURIComponent(token)}`} />
-            )}
-          </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-5">
+              <GuestWelcomePanel
+                title="Welcome to Cantare"
+                action={<SharedPlaylistSignIn returnTo={`/share/playlists/${encodeURIComponent(token)}`} />}
+                footer="Sign in to import this playlist into your own library, or keep practicing here as a guest."
+              />
+            </div>
+          )}
           {priorImports.length > 0 ? (
             <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               <p className="font-semibold">Already imported</p>
