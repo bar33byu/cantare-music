@@ -85,6 +85,9 @@ describe('PlaylistPracticeView', () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     window.localStorage.clear();
+    window.localStorage.setItem('playlist-practice-mode-explainer:focus', 'seen');
+    window.localStorage.setItem('playlist-practice-mode-explainer:listen', 'seen');
+    window.localStorage.setItem('playlist-practice-mode-explainer:auto', 'seen');
     Reflect.deleteProperty(window, 'caches');
     Object.defineProperty(navigator, 'onLine', {
       configurable: true,
@@ -103,6 +106,26 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-1')).toHaveTextContent('Alpha');
     expect(screen.getByRole('heading', { name: 'Alpha' })).toHaveClass('text-gray-900');
     expect(screen.getByTestId('playlist-practice-song-song-2')).toHaveTextContent('Beta');
+    expect(screen.getByRole('button', { name: 'Hands Free' })).toBeInTheDocument();
+  });
+
+  it('shows a first-run explainer before entering Focus mode', async () => {
+    window.localStorage.removeItem('playlist-practice-mode-explainer:focus');
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-focus'));
+
+    expect(screen.getByRole('heading', { name: 'Focus mode' })).toBeInTheDocument();
+    expect(screen.queryByTestId('playlist-focus-queue')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('playlist-mode-explainer-continue'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-focus-queue')).toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem('playlist-practice-mode-explainer:focus')).toBe('seen');
   });
 
   it('calls onSelectSong when a song card is clicked', async () => {
