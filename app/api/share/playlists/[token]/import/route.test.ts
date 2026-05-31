@@ -26,19 +26,22 @@ describe("POST /api/share/playlists/[token]/import", () => {
       playlist: { id: "imported-1" },
     } as any);
 
-    const body = new FormData();
     const request = new Request("http://localhost/api/share/playlists/share-token/import", {
       method: "POST",
-      body,
-      headers: { cookie: "cantare-session=session-token" },
+      headers: {
+        cookie: "cantare-session=session-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
     });
 
     const response = await POST(request as any, { params: Promise.resolve({ token: "share-token" }) });
+    const data = await response.json();
 
     expect(getUserForSessionTokenHash).toHaveBeenCalledWith("hashed:session-token");
     expect(importSharedPlaylist).toHaveBeenCalledWith("share-token", "user-1", { force: false });
-    expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("http://localhost/#view=playlist_detail&playlist=imported-1");
+    expect(response.status).toBe(200);
+    expect(data.redirectTo).toBe("/#view=playlist_detail&playlist=imported-1");
   });
 
   it("passes force when importing again", async () => {
@@ -48,12 +51,13 @@ describe("POST /api/share/playlists/[token]/import", () => {
       playlist: { id: "imported-2" },
     } as any);
 
-    const body = new FormData();
-    body.set("force", "true");
     const request = new Request("http://localhost/api/share/playlists/share-token/import", {
       method: "POST",
-      body,
-      headers: { cookie: "cantare-session=session-token" },
+      headers: {
+        cookie: "cantare-session=session-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ force: true }),
     });
 
     await POST(request as any, { params: Promise.resolve({ token: "share-token" }) });

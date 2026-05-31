@@ -24,6 +24,10 @@ vi.mock('../../../../lib/r2', () => ({
   getPublicUrl: vi.fn(),
 }));
 
+vi.mock('../../../lib/accountDeletion', () => ({
+  deleteSongStorageAssets: vi.fn(),
+}));
+
 import { GET, DELETE, PATCH } from './route';
 import {
   getSongById,
@@ -34,6 +38,7 @@ import {
   getArchivedDraftRecordingsForSong,
 } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
+import { deleteSongStorageAssets } from '../../../lib/accountDeletion';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -119,38 +124,40 @@ describe('DELETE /api/songs/[id]', () => {
   it('returns 204 and calls deleteObject if audioKey exists', async () => {
     const mockSong = { id: '123', title: 'Song 1', audioKey: 'key-123', alternateAudioKey: null, artist: null, createdAt: null, lastPracticedAt: null, userId: 'default', pitchContourNotes: [] };
     vi.mocked(getSongById).mockResolvedValue(mockSong);
+    vi.mocked(deleteSongStorageAssets).mockResolvedValue([]);
 
     const request = new Request('http://localhost/api/songs/123', { method: 'DELETE' });
     const response = await DELETE(request as any, { params: Promise.resolve({ id: '123' }) });
 
     expect(response.status).toBe(204);
-    expect(deleteObject).toHaveBeenCalledWith('key-123');
+    expect(deleteSongStorageAssets).toHaveBeenCalledWith('123', 'default');
     expect(deleteSong).toHaveBeenCalledWith('123', 'default');
   });
 
   it('returns 204 without calling deleteObject if no audioKey', async () => {
     const mockSong = { id: '123', title: 'Song 1', artist: null, audioKey: null, alternateAudioKey: null, createdAt: null, lastPracticedAt: null, userId: 'default', pitchContourNotes: [] };
     vi.mocked(getSongById).mockResolvedValue(mockSong);
+    vi.mocked(deleteSongStorageAssets).mockResolvedValue([]);
 
     const request = new Request('http://localhost/api/songs/123', { method: 'DELETE' });
     const response = await DELETE(request as any, { params: Promise.resolve({ id: '123' }) });
 
     expect(response.status).toBe(204);
-    expect(deleteObject).not.toHaveBeenCalled();
+    expect(deleteSongStorageAssets).toHaveBeenCalledWith('123', 'default');
     expect(deleteSong).toHaveBeenCalledWith('123', 'default');
   });
 
-  it('returns 204 and still deletes song when deleteObject fails', async () => {
+  it('returns 204 and still deletes song when storage cleanup fails', async () => {
     const mockSong = { id: '123', title: 'Song 1', audioKey: 'key-123', alternateAudioKey: null, artist: null, createdAt: null, lastPracticedAt: null, userId: 'default', pitchContourNotes: [] };
     vi.mocked(getSongById).mockResolvedValue(mockSong);
-    vi.mocked(deleteObject).mockRejectedValueOnce(new Error('SignatureDoesNotMatch'));
+    vi.mocked(deleteSongStorageAssets).mockResolvedValue(['key-123']);
 
     const request = new Request('http://localhost/api/songs/123', { method: 'DELETE' });
     const response = await DELETE(request as any, { params: Promise.resolve({ id: '123' }) });
 
     expect(response.status).toBe(204);
     expect(response.headers.get('x-audio-cleanup-warning')).toBe('true');
-    expect(deleteObject).toHaveBeenCalledWith('key-123');
+    expect(deleteSongStorageAssets).toHaveBeenCalledWith('123', 'default');
     expect(deleteSong).toHaveBeenCalledWith('123', 'default');
   });
 

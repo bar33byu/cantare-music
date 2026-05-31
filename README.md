@@ -11,6 +11,7 @@ Cantare lets you upload songs, divide them into labeled segments, add lyrics, an
 **Current features:**
 
 - **Song library** - upload songs, edit titles, browse your catalog, and filter for missing song assets such as audio, sections, or MIDI contour data.
+- **Real deletion controls** - delete songs from the library with storage cleanup, and schedule full account deletion with a 30-day warning window before permanent purge.
 - **Two-version audio** - store separate Part and Blend recordings, see which versions are present, choose a preferred version, and switch gracefully when a song only has one file.
 - **Draft recordings** - capture audio-only rehearsal takes from the library or a song page, review them later, trim non-destructively, promote a draft to the song's audio version, archive promoted drafts, or discard drafts without deleting source files immediately.
 - **Visual segment editor** - create, move, resize, overlap, and label sections on a timeline; manual new sections insert at the current playhead.
@@ -66,6 +67,7 @@ CANTARE_APP_URL=       # Public app URL used in magic-link emails
 RESEND_API_KEY=        # Resend API key for passwordless email login
 RESEND_FROM_EMAIL=     # Verified Resend sender, e.g. Cantare <login@example.com>
 CANTARE_ADMIN_EMAILS=  # Comma- or newline-separated admin email allowlist
+CANTARE_ACCOUNT_DELETION_CRON_SECRET=  # Optional bearer token for the scheduled account-deletion purge endpoint
 ```
 
 Notes:
@@ -75,6 +77,7 @@ Notes:
 - Part and Blend audio versions are both stored as R2 objects and exposed to the browser as direct public R2 URLs.
 - Draft recordings are stored as audio objects and remain editable through metadata until promoted.
 - Magic-link login links expire after 15 minutes and can be consumed once. Sessions persist for 90 days or until sign-out.
+- Scheduled account deletions are marked immediately, remain cancelable for 30 days, and can be purged by calling `POST /api/admin/account-deletions/purge` with an admin session or `Authorization: Bearer $CANTARE_ACCOUNT_DELETION_CRON_SECRET`.
 
 Run database migrations before first use:
 

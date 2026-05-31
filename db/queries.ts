@@ -25,19 +25,45 @@ export function getLeadingTitleNumber(title: string): string | null {
   return match ? match[1] : null;
 }
 
+function normalizeImportedNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function getNextImportedCopyName(baseName: string, existingNames: string[]): string {
+  const fallbackBaseName = baseName.trim() || "Imported copy";
+  const existingNameKeys = new Set(existingNames.map(normalizeImportedNameKey));
+
+  if (!existingNameKeys.has(normalizeImportedNameKey(fallbackBaseName))) {
+    return fallbackBaseName;
+  }
+
+  let copyNumber = 2;
+  while (existingNameKeys.has(normalizeImportedNameKey(`${fallbackBaseName} (import ${copyNumber})`))) {
+    copyNumber += 1;
+  }
+
+  return `${fallbackBaseName} (import ${copyNumber})`;
+}
+
+export function getImportedPlaylistName(sourceName: string, existingNames: string[]): string {
+  return getNextImportedCopyName(sourceName, existingNames);
+}
+
 export function getImportedSongTitle(sourceTitle: string, playlistName: string, existingTitles: string[]): string {
   const leadingNumber = getLeadingTitleNumber(sourceTitle);
+  const trimmedPlaylistName = playlistName.trim() || "imported playlist";
   if (!leadingNumber) {
-    return sourceTitle;
+    return getNextImportedCopyName(sourceTitle, existingTitles);
   }
 
   const hasNumberCollision = existingTitles.some((title) => getLeadingTitleNumber(title) === leadingNumber);
   if (!hasNumberCollision) {
-    return sourceTitle;
+    return getNextImportedCopyName(sourceTitle, existingTitles);
   }
 
-  const suffix = ` (from ${playlistName.trim() || "imported playlist"})`;
-  return sourceTitle.endsWith(suffix) ? sourceTitle : `${sourceTitle}${suffix}`;
+  const suffix = ` (from ${trimmedPlaylistName})`;
+  const contextualTitle = sourceTitle.endsWith(suffix) ? sourceTitle : `${sourceTitle}${suffix}`;
+  return getNextImportedCopyName(contextualTitle, existingTitles);
 }
 
 export type AuditEventType =
@@ -46,6 +72,9 @@ export type AuditEventType =
   | "impersonation.action"
   | "user.email_changed"
   | "user.username_changed"
+  | "user.account_deletion_scheduled"
+  | "user.account_deletion_canceled"
+  | "user.account_purged"
   | "auth.admin_status_resolved";
 
 export interface AuditLogInput {
@@ -404,7 +433,15 @@ function isMissingUserProfileColumnError(error: unknown): boolean {
     return false;
   }
 
-  const profileColumns = ["username", "email", "avatar_url", "profile_visibility", "updated_at"];
+  const profileColumns = [
+    "username",
+    "email",
+    "avatar_url",
+    "profile_visibility",
+    "updated_at",
+    "account_deletion_requested_at",
+    "account_deletion_scheduled_for",
+  ];
   const message = error.message.toLowerCase();
   if (profileColumns.some((column) => message.includes(column)) && message.includes("does not exist")) {
     return true;
@@ -797,6 +834,8 @@ export interface PublicUser {
   email: string;
   avatarUrl?: string | null;
   profileVisibility: string;
+  accountDeletionRequestedAt?: string | null;
+  accountDeletionScheduledFor?: string | null;
 }
 
 function fallbackUsername(id: string, name: string): string {
@@ -804,7 +843,9 @@ function fallbackUsername(id: string, name: string): string {
   return base || "default";
 }
 
-function mapUserRow(row: Pick<UserRow, "id" | "username" | "name" | "email" | "avatarUrl" | "profileVisibility">): PublicUser {
+function mapUserRow(
+  row: Pick<UserRow, "id" | "username" | "name" | "email" | "avatarUrl" | "profileVisibility" | "accountDeletionRequestedAt" | "accountDeletionScheduledFor">
+): PublicUser {
   return {
     id: row.id,
     username: row.username,
@@ -812,6 +853,8 @@ function mapUserRow(row: Pick<UserRow, "id" | "username" | "name" | "email" | "a
     email: row.email,
     avatarUrl: row.avatarUrl,
     profileVisibility: row.profileVisibility,
+    accountDeletionRequestedAt: row.accountDeletionRequestedAt ? row.accountDeletionRequestedAt.toISOString() : null,
+    accountDeletionScheduledFor: row.accountDeletionScheduledFor ? row.accountDeletionScheduledFor.toISOString() : null,
   };
 }
 
@@ -835,11 +878,22 @@ export async function getAllUsers(): Promise<PublicUser[]> {
         email: users.email,
         avatarUrl: users.avatarUrl,
         profileVisibility: users.profileVisibility,
+        accountDeletionRequestedAt: users.accountDeletionRequestedAt,
+        accountDeletionScheduledFor: users.accountDeletionScheduledFor,
       })
       .from(users)
       .orderBy(asc(users.name));
     if (rows.length === 0) {
-      return [{ id: DEFAULT_QUERY_USER_ID, username: "default", name: "Default User", email: "", avatarUrl: null, profileVisibility: "private" }];
+      return [{
+        id: DEFAULT_QUERY_USER_ID,
+        username: "default",
+        name: "Default User",
+        email: "",
+        avatarUrl: null,
+        profileVisibility: "private",
+        accountDeletionRequestedAt: null,
+        accountDeletionScheduledFor: null,
+      }];
     }
     return rows.map(mapUserRow);
   } catch (error) {
@@ -855,11 +909,29 @@ export async function getAllUsers(): Promise<PublicUser[]> {
               avatarUrl: null,
               profileVisibility: "private",
             }))
-          : [{ id: DEFAULT_QUERY_USER_ID, username: "default", name: "Default User", email: "", avatarUrl: null, profileVisibility: "private" }];
+          : [{
+              id: DEFAULT_QUERY_USER_ID,
+              username: "default",
+              name: "Default User",
+              email: "",
+              avatarUrl: null,
+              profileVisibility: "private",
+              accountDeletionRequestedAt: null,
+              accountDeletionScheduledFor: null,
+            }];
       }
       throw error;
     }
-    return [{ id: DEFAULT_QUERY_USER_ID, username: "default", name: "Default User", email: "", avatarUrl: null, profileVisibility: "private" }];
+    return [{
+      id: DEFAULT_QUERY_USER_ID,
+      username: "default",
+      name: "Default User",
+      email: "",
+      avatarUrl: null,
+      profileVisibility: "private",
+      accountDeletionRequestedAt: null,
+      accountDeletionScheduledFor: null,
+    }];
   }
 }
 
@@ -873,6 +945,8 @@ export async function getUserById(id: string): Promise<PublicUser | null> {
         email: users.email,
         avatarUrl: users.avatarUrl,
         profileVisibility: users.profileVisibility,
+        accountDeletionRequestedAt: users.accountDeletionRequestedAt,
+        accountDeletionScheduledFor: users.accountDeletionScheduledFor,
       })
       .from(users)
       .where(eq(users.id, id))
@@ -881,7 +955,16 @@ export async function getUserById(id: string): Promise<PublicUser | null> {
   } catch (error) {
     if (isMissingUsersTableError(error)) {
       return id === DEFAULT_QUERY_USER_ID
-        ? { id: DEFAULT_QUERY_USER_ID, username: "default", name: "Default User", email: "", avatarUrl: null, profileVisibility: "private" }
+        ? {
+            id: DEFAULT_QUERY_USER_ID,
+            username: "default",
+            name: "Default User",
+            email: "",
+            avatarUrl: null,
+            profileVisibility: "private",
+            accountDeletionRequestedAt: null,
+            accountDeletionScheduledFor: null,
+          }
         : null;
     }
     if (isMissingUserProfileColumnError(error)) {
@@ -894,6 +977,8 @@ export async function getUserById(id: string): Promise<PublicUser | null> {
             email: "",
             avatarUrl: null,
             profileVisibility: "private",
+            accountDeletionRequestedAt: null,
+            accountDeletionScheduledFor: null,
           }
         : null;
     }
@@ -916,6 +1001,8 @@ export async function getUserByEmail(email: string): Promise<PublicUser | null> 
         email: users.email,
         avatarUrl: users.avatarUrl,
         profileVisibility: users.profileVisibility,
+        accountDeletionRequestedAt: users.accountDeletionRequestedAt,
+        accountDeletionScheduledFor: users.accountDeletionScheduledFor,
       })
       .from(users)
       .where(eq(users.email, normalizedEmail))
@@ -956,6 +1043,8 @@ export async function updateUserProfile(
         email: users.email,
         avatarUrl: users.avatarUrl,
         profileVisibility: users.profileVisibility,
+        accountDeletionRequestedAt: users.accountDeletionRequestedAt,
+        accountDeletionScheduledFor: users.accountDeletionScheduledFor,
       });
     return rows[0] ? mapUserRow(rows[0]) : null;
   } catch (error) {
@@ -1006,8 +1095,12 @@ export async function upsertUser(data: {
         email: users.email,
         avatarUrl: users.avatarUrl,
         profileVisibility: users.profileVisibility,
+        accountDeletionRequestedAt: users.accountDeletionRequestedAt,
+        accountDeletionScheduledFor: users.accountDeletionScheduledFor,
       });
-    return rows[0] ? mapUserRow(rows[0]) : { ...values, avatarUrl: values.avatarUrl };
+    return rows[0]
+      ? mapUserRow(rows[0])
+      : { ...values, avatarUrl: values.avatarUrl, accountDeletionRequestedAt: null, accountDeletionScheduledFor: null };
   } catch (error) {
     if (isMissingUserProfileColumnError(error)) {
       const rows = await db()
@@ -1026,12 +1119,14 @@ export async function upsertUser(data: {
         email: data.email ?? "",
         avatarUrl: data.avatarUrl ?? null,
         profileVisibility: data.profileVisibility ?? "private",
+        accountDeletionRequestedAt: null,
+        accountDeletionScheduledFor: null,
       };
     }
     if (!isMissingUsersTableError(error)) {
       throw error;
     }
-    return { ...values, avatarUrl: values.avatarUrl };
+    return { ...values, avatarUrl: values.avatarUrl, accountDeletionRequestedAt: null, accountDeletionScheduledFor: null };
   }
 }
 
@@ -1075,6 +1170,211 @@ export async function getOrCreateUserForEmail(email: string): Promise<PublicUser
     email: normalizedEmail,
     profileVisibility: "private",
   });
+}
+
+export interface UserAccountDeletionStatus {
+  requestedAt: string | null;
+  scheduledFor: string | null;
+}
+
+async function ensureUserAccountDeletionColumns(): Promise<void> {
+  await db().execute(sql.raw(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "account_deletion_requested_at" timestamp`));
+  await db().execute(sql.raw(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "account_deletion_scheduled_for" timestamp`));
+  await db().execute(sql.raw(`
+    CREATE INDEX IF NOT EXISTS "idx_users_account_deletion_scheduled_for"
+      ON "users" ("account_deletion_scheduled_for")
+  `));
+}
+
+export async function getUserAccountDeletionStatus(userId: string): Promise<UserAccountDeletionStatus | null> {
+  await ensureUserAccountDeletionColumns();
+
+  const rows = await db()
+    .select({
+      requestedAt: users.accountDeletionRequestedAt,
+      scheduledFor: users.accountDeletionScheduledFor,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    requestedAt: row.requestedAt ? row.requestedAt.toISOString() : null,
+    scheduledFor: row.scheduledFor ? row.scheduledFor.toISOString() : null,
+  };
+}
+
+export async function scheduleUserAccountDeletion(
+  userId: string,
+  requestedAt: Date,
+  scheduledFor: Date
+): Promise<UserAccountDeletionStatus | null> {
+  await ensureUserAccountDeletionColumns();
+
+  const rows = await db()
+    .update(users)
+    .set({
+      accountDeletionRequestedAt: requestedAt,
+      accountDeletionScheduledFor: scheduledFor,
+      updatedAt: requestedAt,
+    })
+    .where(eq(users.id, userId))
+    .returning({
+      requestedAt: users.accountDeletionRequestedAt,
+      scheduledFor: users.accountDeletionScheduledFor,
+    });
+
+  const row = rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    requestedAt: row.requestedAt ? row.requestedAt.toISOString() : null,
+    scheduledFor: row.scheduledFor ? row.scheduledFor.toISOString() : null,
+  };
+}
+
+export async function cancelUserAccountDeletion(userId: string): Promise<UserAccountDeletionStatus | null> {
+  await ensureUserAccountDeletionColumns();
+
+  const rows = await db()
+    .update(users)
+    .set({
+      accountDeletionRequestedAt: null,
+      accountDeletionScheduledFor: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId))
+    .returning({
+      requestedAt: users.accountDeletionRequestedAt,
+      scheduledFor: users.accountDeletionScheduledFor,
+    });
+
+  const row = rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    requestedAt: row.requestedAt ? row.requestedAt.toISOString() : null,
+    scheduledFor: row.scheduledFor ? row.scheduledFor.toISOString() : null,
+  };
+}
+
+export async function getUsersPendingAccountDeletion(before: Date = new Date()): Promise<PublicUser[]> {
+  await ensureUserAccountDeletionColumns();
+
+  const rows = await db()
+    .select({
+      id: users.id,
+      username: users.username,
+      name: users.name,
+      email: users.email,
+      avatarUrl: users.avatarUrl,
+      profileVisibility: users.profileVisibility,
+      accountDeletionRequestedAt: users.accountDeletionRequestedAt,
+      accountDeletionScheduledFor: users.accountDeletionScheduledFor,
+    })
+    .from(users)
+    .where(lte(users.accountDeletionScheduledFor, before))
+    .orderBy(asc(users.accountDeletionScheduledFor));
+
+  return rows.map(mapUserRow);
+}
+
+export interface UserStorageKeys {
+  songAudioKeys: string[];
+  draftAudioKeys: string[];
+  midiStorageKeys: string[];
+  orphanedAudioKeys: string[];
+}
+
+export async function getUserStorageKeys(userId: string): Promise<UserStorageKeys> {
+  const [songRows, draftRows, midiRows, orphanedRows] = await Promise.all([
+    db()
+      .select({ audioKey: songs.audioKey, alternateAudioKey: songs.alternateAudioKey })
+      .from(songs)
+      .where(eq(songs.userId, userId)),
+    db()
+      .select({ audioKey: draftRecordings.audioKey })
+      .from(draftRecordings)
+      .where(eq(draftRecordings.userId, userId)),
+    db()
+      .select({ storageKey: midiSources.storageKey })
+      .from(midiSources)
+      .innerJoin(songs, eq(midiSources.songId, songs.id))
+      .where(eq(songs.userId, userId)),
+    db()
+      .select({ audioKey: orphanedAudioKeys.audioKey })
+      .from(orphanedAudioKeys)
+      .where(eq(orphanedAudioKeys.userId, userId)),
+  ]);
+
+  return {
+    songAudioKeys: songRows.flatMap((row) => [row.audioKey, row.alternateAudioKey].filter((value): value is string => Boolean(value))),
+    draftAudioKeys: draftRows.map((row) => row.audioKey).filter((value): value is string => Boolean(value)),
+    midiStorageKeys: midiRows.map((row) => row.storageKey).filter((value): value is string => Boolean(value)),
+    orphanedAudioKeys: orphanedRows.map((row) => row.audioKey).filter((value): value is string => Boolean(value)),
+  };
+}
+
+export async function getSongStorageKeys(songId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<string[]> {
+  const [songRows, draftRows, midiRows] = await Promise.all([
+    db()
+      .select({ audioKey: songs.audioKey, alternateAudioKey: songs.alternateAudioKey })
+      .from(songs)
+      .where(and(eq(songs.id, songId), eq(songs.userId, userId)))
+      .limit(1),
+    db()
+      .select({ audioKey: draftRecordings.audioKey })
+      .from(draftRecordings)
+      .innerJoin(songs, eq(draftRecordings.songId, songs.id))
+      .where(and(eq(draftRecordings.songId, songId), eq(songs.userId, userId))),
+    db()
+      .select({ storageKey: midiSources.storageKey })
+      .from(midiSources)
+      .innerJoin(songs, eq(midiSources.songId, songs.id))
+      .where(and(eq(midiSources.songId, songId), eq(songs.userId, userId))),
+  ]);
+
+  const song = songRows[0];
+  if (!song) {
+    return [];
+  }
+
+  return [
+    ...[song.audioKey, song.alternateAudioKey].filter((value): value is string => Boolean(value)),
+    ...draftRows.map((row) => row.audioKey).filter((value): value is string => Boolean(value)),
+    ...midiRows.map((row) => row.storageKey).filter((value): value is string => Boolean(value)),
+  ];
+}
+
+export async function purgeUserAccountData(userId: string): Promise<boolean> {
+  await ensureUserAccountDeletionColumns();
+  const user = await getUserById(userId);
+  if (!user) {
+    return false;
+  }
+
+  await db().delete(playlists).where(eq(playlists.userId, userId));
+  await db().delete(draftRecordings).where(eq(draftRecordings.userId, userId));
+  await db().delete(practiceRatings).where(eq(practiceRatings.userId, userId));
+  await db().delete(tapPracticeSessions).where(eq(tapPracticeSessions.userId, userId));
+  await db().delete(songs).where(eq(songs.userId, userId));
+  await db().delete(orphanedAudioKeys).where(eq(orphanedAudioKeys.userId, userId));
+
+  if (user.email.trim()) {
+    await db().delete(magicLinkTokens).where(eq(magicLinkTokens.email, user.email.trim().toLowerCase()));
+  }
+
+  const deletedUsers = await db().delete(users).where(eq(users.id, userId)).returning({ id: users.id });
+  return deletedUsers.length > 0;
 }
 
 export async function createMagicLinkToken(data: {
@@ -4219,12 +4519,20 @@ async function importPlaylistSource(
 
   const now = new Date();
   const importedPlaylistId = crypto.randomUUID();
+  const existingPlaylistRows = await db()
+    .select({ name: playlists.name })
+    .from(playlists)
+    .where(eq(playlists.userId, userId));
+  const importedPlaylistName = getImportedPlaylistName(
+    source.name,
+    existingPlaylistRows.map((row) => row.name)
+  );
   const playlistRows = await db()
     .insert(playlists)
     .values({
       id: importedPlaylistId,
       userId,
-      name: source.name,
+      name: importedPlaylistName,
       eventDate: source.eventDate ?? null,
       isRetired: false,
       sourcePlaylistId: source.id,
@@ -4238,6 +4546,12 @@ async function importPlaylistSource(
   const sortedSongs = [...source.songs].sort((a, b) => a.position - b.position);
   const shareAudioMode = normalizeShareAudioMode(options.shareAudioMode ?? source.shareAudioMode);
   let importedSongCount = 0;
+  const existingSongTitleRows = await db()
+    .select({ title: songs.title })
+    .from(songs)
+    .where(eq(songs.userId, userId));
+  const knownSongTitles = existingSongTitleRows.map((row) => row.title);
+  const importedSongIdsBySourceSongId = new Map<string, string>();
 
   for (const item of sortedSongs) {
     const songRows = await db()
@@ -4251,35 +4565,43 @@ async function importPlaylistSource(
     }
 
     const sourceSongId = sourceSongRow.sourceSongId ?? sourceSongRow.id;
-    const existingSongRows = await db()
-      .select({ id: songs.id })
-      .from(songs)
-      .where(and(eq(songs.userId, userId), sql`COALESCE(${songs.sourceSongId}, ${songs.id}) = ${sourceSongId}`))
-      .orderBy(asc(songs.createdAt))
-      .limit(1);
-
-    const existingSong = existingSongRows[0];
-    if (existingSong) {
+    const alreadyImportedSongId = importedSongIdsBySourceSongId.get(sourceSongId);
+    if (alreadyImportedSongId) {
       await db()
         .insert(playlistSongs)
         .values({
           playlistId: importedPlaylistId,
-          songId: existingSong.id,
+          songId: alreadyImportedSongId,
           position: item.position,
         });
       importedSongCount += 1;
       continue;
     }
 
-    const existingTitleRows = await db()
-      .select({ title: songs.title })
-      .from(songs)
-      .where(eq(songs.userId, userId));
-    const importedTitle = getImportedSongTitle(
-      sourceSongRow.title,
-      source.name,
-      existingTitleRows.map((row) => row.title)
-    );
+    if (!options.force) {
+      const existingSongRows = await db()
+        .select({ id: songs.id })
+        .from(songs)
+        .where(and(eq(songs.userId, userId), sql`COALESCE(${songs.sourceSongId}, ${songs.id}) = ${sourceSongId}`))
+        .orderBy(asc(songs.createdAt))
+        .limit(1);
+
+      const existingSong = existingSongRows[0];
+      if (existingSong) {
+        importedSongIdsBySourceSongId.set(sourceSongId, existingSong.id);
+        await db()
+          .insert(playlistSongs)
+          .values({
+            playlistId: importedPlaylistId,
+            songId: existingSong.id,
+            position: item.position,
+          });
+        importedSongCount += 1;
+        continue;
+      }
+    }
+
+    const importedTitle = getImportedSongTitle(sourceSongRow.title, importedPlaylistName, knownSongTitles);
 
     const importedSongId = crypto.randomUUID();
     await db()
@@ -4295,6 +4617,8 @@ async function importPlaylistSource(
         sourceSongId,
         lastPracticedAt: null,
       });
+    importedSongIdsBySourceSongId.set(sourceSongId, importedSongId);
+    knownSongTitles.push(importedTitle);
 
     const sourceSegments = await getSegmentsBySongId(item.id);
     if (sourceSegments.length > 0) {

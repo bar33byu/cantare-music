@@ -63,6 +63,8 @@ export const users = pgTable(
     email: text("email").notNull().default(""),
     avatarUrl: text("avatar_url"),
     profileVisibility: text("profile_visibility").notNull().default("private"),
+    accountDeletionRequestedAt: timestamp("account_deletion_requested_at"),
+    accountDeletionScheduledFor: timestamp("account_deletion_scheduled_for"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

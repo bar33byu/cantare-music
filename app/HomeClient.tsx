@@ -74,6 +74,11 @@ interface BuildInfo {
   commitSha?: string;
 }
 
+interface AccountDeletionState {
+  requestedAt: string | null;
+  scheduledFor: string | null;
+}
+
 type LibraryRecordingStatus = "idle" | "recording" | "saving" | "saved" | "error";
 
 const LIBRARY_DRAFT_RECORDING_MIME_TYPES = [
@@ -122,6 +127,8 @@ function normalizeKnownUsers(users: Array<Partial<KnownUser>> | undefined): Know
         email: typeof user.email === "string" ? user.email.trim().toLowerCase() : "",
         avatarUrl: user.avatarUrl ?? null,
         profileVisibility: user.profileVisibility ?? "private",
+        accountDeletionRequestedAt: user.accountDeletionRequestedAt ?? null,
+        accountDeletionScheduledFor: user.accountDeletionScheduledFor ?? null,
         isAdmin: user.isAdmin ?? false,
       });
     }
@@ -341,6 +348,19 @@ function formatLibraryDraftCreatedAt(value: string): string {
     return value;
   }
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function formatAccountDeletionDate(value?: string | null): string {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" }).format(date);
 }
 
 function LibraryDraftRecorder({
@@ -801,6 +821,9 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [profileDisplayName, setProfileDisplayName] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
+  const [accountDeletion, setAccountDeletion] = useState<AccountDeletionState | null>(null);
+  const [accountDeletionLoading, setAccountDeletionLoading] = useState(false);
+  const [accountDeletionMessage, setAccountDeletionMessage] = useState("");
   const [guestClaimVisible, setGuestClaimVisible] = useState(false);
   const [guestClaimLoading, setGuestClaimLoading] = useState(false);
   const [guestClaimMessage, setGuestClaimMessage] = useState("");
@@ -942,6 +965,44 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   }, [currentUser.name, settingsOpen]);
 
   useEffect(() => {
+    if (!settingsOpen || !isSignedIn) {
+      setAccountDeletion(null);
+      setAccountDeletionMessage("");
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadAccountDeletion = async () => {
+      setAccountDeletionLoading(true);
+      try {
+        const response = await fetch("/api/users/me/deletion", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Failed to load account deletion");
+        }
+        const payload = (await response.json()) as { deletion?: AccountDeletionState };
+        if (!cancelled) {
+          setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
+        }
+      } catch {
+        if (!cancelled) {
+          setAccountDeletion(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setAccountDeletionLoading(false);
+        }
+      }
+    };
+
+    void loadAccountDeletion();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, settingsOpen]);
+
+  useEffect(() => {
     if (!isSignedIn || typeof window === "undefined") {
       setGuestClaimVisible(false);
       return;
@@ -1066,26 +1127,34 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const guestSignInForm = (
     <>
       <form className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={handleMagicLinkRequest}>
+        <label htmlFor="guest-sign-in-email" className="text-sm font-medium text-gray-700">
+          Email for magic link
+        </label>
         <input
+          id="guest-sign-in-email"
           type="email"
           value={authEmail}
           onChange={(event) => setAuthEmail(event.target.value)}
           placeholder="Email address"
-          className="min-w-0 rounded border border-gray-300 px-3 py-2 text-sm text-gray-800"
+          className="min-w-0 rounded border border-gray-300 px-3 py-2 text-sm text-gray-800 sm:col-start-1 sm:row-start-2"
         />
         <button
           type="submit"
           disabled={authLoading || !authEmail.trim()}
-          className="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 sm:col-start-2 sm:row-start-2"
         >
-          Send login link
+          Email magic link
         </button>
       </form>
       {authMessage ? (
         <p className="mt-2 text-xs text-gray-600" role="status">
           {authMessage}
         </p>
-      ) : null}
+      ) : (
+        <p className="mt-2 text-xs text-gray-600">
+          Enter your email and Cantare will mail you a secure sign-in link. No password required.
+        </p>
+      )}
     </>
   );
 
@@ -1119,6 +1188,72 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       setProfileMessage("Could not save profile.");
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  const handleScheduleAccountDeletion = async () => {
+    if (accountDeletionLoading) {
+      return;
+    }
+
+    const confirmationDate = formatAccountDeletionDate(
+      (() => {
+        const future = new Date();
+        future.setDate(future.getDate() + 30);
+        return future.toISOString();
+      })()
+    );
+
+    const confirmed = window.confirm(
+      `Schedule this account for permanent deletion on ${confirmationDate}? You can cancel anytime before then.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setAccountDeletionLoading(true);
+    setAccountDeletionMessage("");
+    try {
+      const response = await fetch("/api/users/me/deletion", { method: "POST" });
+      if (!response.ok) {
+        throw new Error("Failed to schedule account deletion");
+      }
+      const payload = (await response.json()) as { deletion?: AccountDeletionState };
+      setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
+      setAccountDeletionMessage("Account scheduled for deletion.");
+      usersHydratedFromDbRef.current = false;
+    } catch {
+      setAccountDeletionMessage("Could not schedule account deletion.");
+    } finally {
+      setAccountDeletionLoading(false);
+    }
+  };
+
+  const handleCancelAccountDeletion = async () => {
+    if (accountDeletionLoading) {
+      return;
+    }
+
+    const confirmed = window.confirm("Cancel the scheduled account deletion?");
+    if (!confirmed) {
+      return;
+    }
+
+    setAccountDeletionLoading(true);
+    setAccountDeletionMessage("");
+    try {
+      const response = await fetch("/api/users/me/deletion", { method: "DELETE" });
+      if (!response.ok) {
+        throw new Error("Failed to cancel account deletion");
+      }
+      const payload = (await response.json()) as { deletion?: AccountDeletionState };
+      setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
+      setAccountDeletionMessage("Scheduled account deletion canceled.");
+      usersHydratedFromDbRef.current = false;
+    } catch {
+      setAccountDeletionMessage("Could not cancel account deletion.");
+    } finally {
+      setAccountDeletionLoading(false);
     }
   };
 
@@ -1925,11 +2060,55 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                       >
                         Sign out
                       </button>
+                      <div className="mt-4 rounded border border-red-200 bg-red-50 p-3" data-testid="settings-account-deletion">
+                        <p className="text-sm font-semibold text-red-900">Danger zone</p>
+                        {accountDeletion?.scheduledFor ? (
+                          <p className="mt-1 text-xs text-red-900">
+                            This account is scheduled for permanent deletion on {formatAccountDeletionDate(accountDeletion.scheduledFor)}.
+                            You can cancel it any time before then.
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-xs text-red-900">
+                            Deleting your account permanently removes your songs, playlists, draft recordings, practice history, and sign-in access after a 30-day warning period.
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          data-testid={accountDeletion?.scheduledFor ? "cancel-account-deletion-button" : "schedule-account-deletion-button"}
+                          onClick={() => {
+                            void (accountDeletion?.scheduledFor ? handleCancelAccountDeletion() : handleScheduleAccountDeletion());
+                          }}
+                          disabled={accountDeletionLoading}
+                          className={`mt-3 rounded border px-3 py-1 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
+                            accountDeletion?.scheduledFor
+                              ? "border-red-300 bg-white text-red-800 hover:bg-red-100"
+                              : "border-red-600 bg-red-600 text-white hover:bg-red-700"
+                          }`}
+                        >
+                          {accountDeletionLoading
+                            ? "Working..."
+                            : accountDeletion?.scheduledFor
+                              ? "Cancel scheduled deletion"
+                              : "Delete account in 30 days"}
+                        </button>
+                        {accountDeletionMessage ? (
+                          <p className="mt-2 text-xs text-red-900" role="status">
+                            {accountDeletionMessage}
+                          </p>
+                        ) : null}
+                      </div>
                     </>
                   ) : (
                     <>
+                      <p className="mt-3 text-sm text-gray-600">
+                        Enter your email and Cantare will mail you a secure sign-in link. No password required.
+                      </p>
                       <form className="mt-3 grid gap-2" onSubmit={handleMagicLinkRequest}>
+                        <label htmlFor="settings-sign-in-email" className="text-sm font-medium text-gray-700">
+                          Email for magic link
+                        </label>
                         <input
+                          id="settings-sign-in-email"
                           type="email"
                           value={authEmail}
                           onChange={(event) => setAuthEmail(event.target.value)}
@@ -1941,7 +2120,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                           disabled={authLoading || !authEmail.trim()}
                           className="rounded border border-indigo-300 px-3 py-1 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          Send login link
+                          Email magic link
                         </button>
                       </form>
                       {authMessage ? (
@@ -2171,7 +2350,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             />
           ) : (
             <GuestWelcomePanel
-              title="Sign in to browse Shared"
+              title="Welcome to Cantare"
               action={guestSignInForm}
               footer="Public shared playlists are available to signed-in users. Direct playlist share links still work without signing in."
             />

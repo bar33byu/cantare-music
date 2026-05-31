@@ -6,11 +6,11 @@ import {
   getSegmentsBySongId,
   getDraftRecordingsForSong,
   getArchivedDraftRecordingsForSong,
-  recordOrphanedAudioKey,
 } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
 import { resolveRequestUserId } from '../../_user';
+import { deleteSongStorageAssets } from '../../../lib/accountDeletion';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -82,43 +82,20 @@ export async function GET(
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
-) {
+  ) {
   try {
     const userId = resolveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
-    let audioCleanupFailed = false;
     if (!song) {
       return NextResponse.json({ error: 'Song not found' }, { status: 404 });
     }
 
-    for (const audioKey of [song.audioKey, song.alternateAudioKey]) {
-      if (!audioKey) {
-        continue;
-      }
-      try {
-        await deleteObject(audioKey);
-      } catch (audioDeleteError) {
-        // Remote object cleanup should not block deleting the song record.
-        // Record the key so it can be retried later.
-        audioCleanupFailed = true;
-        console.warn('Failed to delete audio object during song delete:', {
-          songId: id,
-          audioKey,
-          error: audioDeleteError,
-        });
-        try {
-          await recordOrphanedAudioKey(crypto.randomUUID(), audioKey, userId);
-        } catch (recordError) {
-          console.error('Failed to record orphaned audio key:', recordError);
-        }
-      }
-    }
-
+    const failedStorageKeys = await deleteSongStorageAssets(id, userId);
     await deleteSong(id, userId);
     return new NextResponse(null, {
       status: 204,
-      headers: audioCleanupFailed ? { 'x-audio-cleanup-warning': 'true' } : undefined,
+      headers: failedStorageKeys.length > 0 ? { 'x-audio-cleanup-warning': 'true' } : undefined,
     });
   } catch (error) {
     console.error('Error deleting song:', error);

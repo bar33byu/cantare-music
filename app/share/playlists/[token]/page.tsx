@@ -4,6 +4,7 @@ import { getPlaylistImportsForSource, getSharedPlaylistByToken, getUserForSessio
 import { AUTH_SESSION_COOKIE_NAME, hashAuthToken } from "../../../lib/authTokens";
 import type { Playlist } from "../../../types";
 import { GuestWelcomePanel } from "../../../components/GuestWelcomePanel";
+import { SharedPlaylistImportButton } from "./SharedPlaylistImportButton";
 import { SharedPlaylistGuestPractice } from "./SharedPlaylistGuestPractice";
 import { SharedPlaylistSignIn } from "./SharedPlaylistSignIn";
 
@@ -40,16 +41,17 @@ export default async function SharedPlaylistPage({
     );
   }
 
-  const sortedSongs = [...playlist.songs].sort((a, b) => a.position - b.position);
   const practicePlaylist: Playlist = {
     ...playlist,
-    songs: sortedSongs.map((song) => ({
+    songs: [...playlist.songs]
+      .sort((a, b) => a.position - b.position)
+      .map((song) => ({
       ...song,
       segments: song.segments.map((segment) => ({
         ...segment,
         lyricText: segment.lyricText ?? "",
       })),
-    })),
+      })),
   };
 
   return (
@@ -65,28 +67,19 @@ export default async function SharedPlaylistPage({
           {playlist.eventDate ? (
             <p className="mt-1 text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p>
           ) : null}
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <Link
+              href={viewer ? "/#view=shared" : "/"}
+              className="inline-flex rounded border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+            >
+              Open Cantare
+            </Link>
+            {viewer ? <SharedPlaylistImportButton priorImportCount={priorImports.length} /> : null}
+          </div>
           {viewer ? (
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <form action={`/api/share/playlists/${encodeURIComponent(token)}/import`} method="post">
-                <button
-                  type="submit"
-                  className="inline-flex rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-                >
-                  Import playlist
-                </button>
-              </form>
-              {priorImports.length > 0 ? (
-                <form action={`/api/share/playlists/${encodeURIComponent(token)}/import`} method="post">
-                  <input type="hidden" name="force" value="true" />
-                  <button
-                    type="submit"
-                    className="inline-flex rounded border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
-                  >
-                    Import again
-                  </button>
-                </form>
-              ) : null}
-            </div>
+            <p className="mt-2 text-sm text-gray-600">
+              Return to the main app at any time, or import this playlist into your own library.
+            </p>
           ) : (
             <div className="mt-5">
               <GuestWelcomePanel
@@ -113,33 +106,6 @@ export default async function SharedPlaylistPage({
         </header>
 
         <SharedPlaylistGuestPractice playlist={practicePlaylist} />
-
-        <ul className="space-y-3" data-testid="shared-playlist-song-list">
-          {sortedSongs.length > 0 ? (
-            sortedSongs.map((song, index) => (
-              <li key={song.id} className="rounded border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="flex items-start gap-3">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-sm font-semibold text-indigo-700">
-                    {index + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <h2 className="font-semibold text-gray-950">{song.title}</h2>
-                    {song.artist ? <p className="text-sm text-gray-600">{song.artist}</p> : null}
-                    {song.segments.length > 0 ? (
-                      <p className="mt-2 text-xs text-gray-500">
-                        {song.segments.length} {song.segments.length === 1 ? "section" : "sections"}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              </li>
-            ))
-          ) : (
-            <li className="rounded border border-gray-200 bg-white p-4 text-gray-600 shadow-sm">
-              This playlist does not have songs yet.
-            </li>
-          )}
-        </ul>
       </section>
     </main>
   );
