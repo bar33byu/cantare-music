@@ -2062,11 +2062,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                       </button>
                       <div className="mt-4 rounded border border-red-200 bg-red-50 p-3" data-testid="settings-account-deletion">
                         <p className="text-sm font-semibold text-red-900">Danger zone</p>
-                        {impersonation ? (
-                          <p className="mt-1 text-xs text-red-900">
-                            Exit impersonation to manage account deletion for this user.
-                          </p>
-                        ) : accountDeletion?.scheduledFor ? (
+                        {accountDeletion?.scheduledFor ? (
                           <p className="mt-1 text-xs text-red-900">
                             This account is scheduled for permanent deletion on {formatAccountDeletionDate(accountDeletion.scheduledFor)}.
                             You can cancel it any time before then.
@@ -2082,7 +2078,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                           onClick={() => {
                             void (accountDeletion?.scheduledFor ? handleCancelAccountDeletion() : handleScheduleAccountDeletion());
                           }}
-                          disabled={accountDeletionLoading || Boolean(impersonation)}
+                          disabled={accountDeletionLoading}
                           className={`mt-3 rounded border px-3 py-1 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
                             accountDeletion?.scheduledFor
                               ? "border-red-300 bg-white text-red-800 hover:bg-red-100"

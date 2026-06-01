@@ -106,14 +106,32 @@ describe("/api/users/me/deletion", () => {
     expect(data.deletion.scheduledFor).toBeNull();
   });
 
-  it("blocks impersonated account deletion changes", async () => {
+  it("allows admins to schedule deletion while impersonating", async () => {
     vi.mocked(resolveRequestContext).mockResolvedValue({
       actor: { id: "admin-1", email: "admin@example.com", isAdmin: true },
       effectiveUser: { id: "user-1", email: "user@example.com", isAdmin: false },
       isImpersonating: true,
     } as any);
+    vi.mocked(getUserAccountDeletionStatus).mockResolvedValue(null);
+    vi.mocked(scheduleUserAccountDeletion).mockResolvedValue({
+      requestedAt: "2026-05-30T12:00:00.000Z",
+      scheduledFor: "2026-06-29T12:00:00.000Z",
+    });
 
     const response = await POST(new Request("http://localhost/api/users/me/deletion", { method: "POST" }) as any);
-    expect(response.status).toBe(403);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(scheduleUserAccountDeletion).toHaveBeenCalledWith(
+      "user-1",
+      new Date("2026-05-30T12:00:00.000Z"),
+      new Date("2026-06-29T12:00:00.000Z")
+    );
+    expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: "admin-1",
+      effectiveUserId: "user-1",
+      eventType: "user.account_deletion_scheduled",
+    }));
+    expect(data.deletion.scheduledFor).toBe("2026-06-29T12:00:00.000Z");
   });
 });
