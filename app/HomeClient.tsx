@@ -1215,15 +1215,15 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     setAccountDeletionMessage("");
     try {
       const response = await fetch("/api/users/me/deletion", { method: "POST" });
+      const payload = (await response.json().catch(() => ({}))) as { deletion?: AccountDeletionState; error?: string };
       if (!response.ok) {
-        throw new Error("Failed to schedule account deletion");
+        throw new Error(payload.error ?? "Failed to schedule account deletion");
       }
-      const payload = (await response.json()) as { deletion?: AccountDeletionState };
       setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
       setAccountDeletionMessage("Account scheduled for deletion.");
       usersHydratedFromDbRef.current = false;
-    } catch {
-      setAccountDeletionMessage("Could not schedule account deletion.");
+    } catch (error) {
+      setAccountDeletionMessage(error instanceof Error ? error.message : "Could not schedule account deletion.");
     } finally {
       setAccountDeletionLoading(false);
     }
@@ -1243,15 +1243,15 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     setAccountDeletionMessage("");
     try {
       const response = await fetch("/api/users/me/deletion", { method: "DELETE" });
+      const payload = (await response.json().catch(() => ({}))) as { deletion?: AccountDeletionState; error?: string };
       if (!response.ok) {
-        throw new Error("Failed to cancel account deletion");
+        throw new Error(payload.error ?? "Failed to cancel account deletion");
       }
-      const payload = (await response.json()) as { deletion?: AccountDeletionState };
       setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
       setAccountDeletionMessage("Scheduled account deletion canceled.");
       usersHydratedFromDbRef.current = false;
-    } catch {
-      setAccountDeletionMessage("Could not cancel account deletion.");
+    } catch (error) {
+      setAccountDeletionMessage(error instanceof Error ? error.message : "Could not cancel account deletion.");
     } finally {
       setAccountDeletionLoading(false);
     }
@@ -2062,7 +2062,11 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                       </button>
                       <div className="mt-4 rounded border border-red-200 bg-red-50 p-3" data-testid="settings-account-deletion">
                         <p className="text-sm font-semibold text-red-900">Danger zone</p>
-                        {accountDeletion?.scheduledFor ? (
+                        {impersonation ? (
+                          <p className="mt-1 text-xs text-red-900">
+                            Exit impersonation to manage account deletion for this user.
+                          </p>
+                        ) : accountDeletion?.scheduledFor ? (
                           <p className="mt-1 text-xs text-red-900">
                             This account is scheduled for permanent deletion on {formatAccountDeletionDate(accountDeletion.scheduledFor)}.
                             You can cancel it any time before then.
@@ -2078,7 +2082,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                           onClick={() => {
                             void (accountDeletion?.scheduledFor ? handleCancelAccountDeletion() : handleScheduleAccountDeletion());
                           }}
-                          disabled={accountDeletionLoading}
+                          disabled={accountDeletionLoading || Boolean(impersonation)}
                           className={`mt-3 rounded border px-3 py-1 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
                             accountDeletion?.scheduledFor
                               ? "border-red-300 bg-white text-red-800 hover:bg-red-100"
