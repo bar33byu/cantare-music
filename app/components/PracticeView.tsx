@@ -1011,6 +1011,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const syncedInitialSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
   const lastSyncedSegmentIdRef = React.useRef<string | null>(initialSegmentId);
   const previousSegmentIndexRef = React.useRef(initialSession.currentSegmentIndex);
+  const previousSongIdRef = React.useRef(song.id);
   const lastSavedRatingsRef = React.useRef<string>("unloaded");
   const [transitionDirection, setTransitionDirection] = React.useState<"forward" | "backward">("forward");
   const [transitionToken, setTransitionToken] = React.useState(0);
@@ -1688,6 +1689,31 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     // On song change, avoid forcing an initial jump to the first section start.
     lastSyncedSegmentIdRef.current = song.segments[session.currentSegmentIndex]?.id ?? null;
   }, [session.currentSegmentIndex, song.id, song.segments]);
+
+  useEffect(() => {
+    if (song.id === previousSongIdRef.current) {
+      return;
+    }
+
+    previousSongIdRef.current = song.id;
+    syncedInitialSegmentIndexRef.current = initialSession.currentSegmentIndex;
+    segmentIndexRef.current = initialSession.currentSegmentIndex;
+    previousSegmentIndexRef.current = initialSession.currentSegmentIndex;
+    lastSyncedSegmentIdRef.current = song.segments[initialSession.currentSegmentIndex]?.id ?? null;
+    lastSavedRatingsRef.current = "unloaded";
+    practicedRecordedRef.current = false;
+    accumulatedPlaybackMsRef.current = 0;
+    playbackStartedAtRef.current = null;
+    pausedByUserRef.current = false;
+    autoPlayHandledKeyRef.current = null;
+    autoPlayTokenHandledRef.current = 0;
+    playbackCompleteNotifiedRef.current = null;
+    loopHandledRef.current = null;
+    setRatingsLoading(true);
+    setRatingsError(null);
+    setReviewingDraftId(null);
+    dispatch({ type: "REPLACE_SESSION", session: initialSession });
+  }, [initialSession, song.id, song.segments]);
 
   useEffect(() => {
     segmentIndexRef.current = session.currentSegmentIndex;

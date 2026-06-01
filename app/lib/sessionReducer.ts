@@ -14,6 +14,7 @@ export type SessionAction =
   | { type: 'LOAD_RATINGS'; ratings: PracticeSession['ratings'] }
   | { type: 'COMPLETE' }
   | { type: 'RESET'; songId: string }
+  | { type: 'REPLACE_SESSION'; session: SessionState }
   | { type: 'SET_CURRENT_SONG'; songId: string };
 
 export function sessionReducer(
@@ -83,6 +84,9 @@ export function sessionReducer(
         completedAt: undefined,
         currentSongId: state.currentSongId,
       };
+
+    case 'REPLACE_SESSION':
+      return action.session;
 
     case 'SET_CURRENT_SONG':
       return { ...state, currentSongId: action.songId };

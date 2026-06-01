@@ -265,6 +265,60 @@ describe("PracticeView", () => {
     });
   });
 
+  it("replaces the active session when the song prop changes without remounting", async () => {
+    const firstSong = makeSong(2);
+    const secondSong: Song = {
+      ...makeSong(2),
+      id: "song-2",
+      title: "Be Thou My Vision",
+      artist: "Traditional",
+      audioUrl: "https://cdn.example.com/audio/song-2/audio.mp3",
+      segments: [
+        {
+          id: "song-2-seg-1",
+          songId: "song-2",
+          order: 0,
+          label: "Bridge 1",
+          lyricText: "Bridge line 1",
+          startMs: 0,
+          endMs: 4000,
+        },
+        {
+          id: "song-2-seg-2",
+          songId: "song-2",
+          order: 1,
+          label: "Bridge 2",
+          lyricText: "Bridge line 2",
+          startMs: 4000,
+          endMs: 8000,
+        },
+      ],
+    };
+    const firstSession = makeSession(firstSong);
+    const secondSession = {
+      ...makeSession(secondSong),
+      id: "session-2",
+      currentSegmentIndex: 1,
+    };
+
+    const view = render(<PracticeView song={firstSong} initialSession={firstSession} />);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith("/api/songs/song-1/ratings");
+    });
+
+    fireEvent.click(screen.getByTestId("rate-btn"));
+    expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("4");
+
+    view.rerender(<PracticeView song={secondSong} initialSession={secondSession} />);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith("/api/songs/song-2/ratings");
+      expect(screen.getByText("Bridge 2")).toBeInTheDocument();
+      expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("none");
+    });
+  });
+
   it("renders full-screen layout regions", async () => {
     const song = makeSong();
     await renderAndWaitForRatings(song);
