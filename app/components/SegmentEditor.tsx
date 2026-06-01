@@ -56,6 +56,7 @@ interface SegmentEditorProps {
   songId: string;
   userId?: string;
   onSongUpdated?: () => void;
+  onSongDeleted?: (songId: string) => void;
 }
 
 interface EditorDisclosureProps {
@@ -91,7 +92,7 @@ function EditorDisclosure({ title, description, open, onToggle, children, testId
   );
 }
 
-export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorProps) {
+export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: SegmentEditorProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -106,6 +107,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
   const [savingSegmentId, setSavingSegmentId] = useState<string | null>(null);
   const [savingTitle, setSavingTitle] = useState(false);
+  const [deletingSong, setDeletingSong] = useState(false);
   const [lastDeletedSection, setLastDeletedSection] = useState<Segment | null>(null);
   const [undoDismissTimer, setUndoDismissTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -857,6 +859,33 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     }
   };
 
+  const handleDeleteSong = async () => {
+    const titleForPrompt = songTitle.trim() || titleDraft.trim() || "this song";
+    const shouldDelete = window.confirm(`Delete "${titleForPrompt}"? This cannot be undone.`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeleteError(null);
+    setDeletingSong(true);
+    try {
+      const response = await request(`/api/songs/${songId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: 'Failed to delete song' })) as { error?: string };
+        throw new Error(payload.error || 'Failed to delete song');
+      }
+
+      onSongDeleted?.(songId);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'Failed to delete song. Please try again.');
+    } finally {
+      setDeletingSong(false);
+    }
+  };
+
   if (songLoaded && !hasAnyAudio) {
     return (
       <div className="mx-auto w-full max-w-6xl">
@@ -875,6 +904,15 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               className="flex-1 rounded border border-indigo-200 px-3 py-1.5 text-base font-medium text-gray-900"
               placeholder="Song title"
             />
+            <button
+              type="button"
+              data-testid="segment-editor-delete-song"
+              onClick={() => { void handleDeleteSong(); }}
+              disabled={deletingSong}
+              className="rounded border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {deletingSong ? 'Deleting...' : 'Delete song'}
+            </button>
             {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
           </div>
         </div>
@@ -919,6 +957,15 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
             className="flex-1 rounded border border-indigo-200 px-3 py-1.5 text-base font-medium text-gray-900"
             placeholder="Song title"
           />
+          <button
+            type="button"
+            data-testid="segment-editor-delete-song"
+            onClick={() => { void handleDeleteSong(); }}
+            disabled={deletingSong}
+            className="rounded border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deletingSong ? 'Deleting...' : 'Delete song'}
+          </button>
           {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
         </div>
       </div>

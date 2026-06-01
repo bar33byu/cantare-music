@@ -1806,6 +1806,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             songId={selectedSong.id}
             userId={activeUserId}
             onSongUpdated={refreshSelectedSong}
+            onSongDeleted={handleSongDeleted}
           />
         </div>
       </div>
