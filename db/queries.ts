@@ -838,9 +838,24 @@ export interface PublicUser {
   accountDeletionScheduledFor?: string | null;
 }
 
+type LegacyUserRow = Pick<UserRow, "id" | "username" | "name" | "email" | "avatarUrl" | "profileVisibility">;
+
 function fallbackUsername(id: string, name: string): string {
   const base = (name || id).trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
   return base || "default";
+}
+
+function mapLegacyUserRow(row: LegacyUserRow): PublicUser {
+  return {
+    id: row.id,
+    username: row.username,
+    name: row.name,
+    email: row.email,
+    avatarUrl: row.avatarUrl,
+    profileVisibility: row.profileVisibility,
+    accountDeletionRequestedAt: null,
+    accountDeletionScheduledFor: null,
+  };
 }
 
 function mapUserRow(
@@ -968,19 +983,19 @@ export async function getUserById(id: string): Promise<PublicUser | null> {
         : null;
     }
     if (isMissingUserProfileColumnError(error)) {
-      const rows = await db().select({ id: users.id, name: users.name }).from(users).where(eq(users.id, id)).limit(1);
-      return rows[0]
-        ? {
-            id: rows[0].id,
-            username: fallbackUsername(rows[0].id, rows[0].name),
-            name: rows[0].name,
-            email: "",
-            avatarUrl: null,
-            profileVisibility: "private",
-            accountDeletionRequestedAt: null,
-            accountDeletionScheduledFor: null,
-          }
-        : null;
+      const rows = await db()
+        .select({
+          id: users.id,
+          username: users.username,
+          name: users.name,
+          email: users.email,
+          avatarUrl: users.avatarUrl,
+          profileVisibility: users.profileVisibility,
+        })
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+      return rows[0] ? mapLegacyUserRow(rows[0]) : null;
     }
     throw error;
   }
@@ -1009,8 +1024,23 @@ export async function getUserByEmail(email: string): Promise<PublicUser | null> 
       .limit(1);
     return rows[0] ? mapUserRow(rows[0]) : null;
   } catch (error) {
-    if (isMissingUsersTableError(error) || isMissingUserProfileColumnError(error)) {
+    if (isMissingUsersTableError(error)) {
       return null;
+    }
+    if (isMissingUserProfileColumnError(error)) {
+      const rows = await db()
+        .select({
+          id: users.id,
+          username: users.username,
+          name: users.name,
+          email: users.email,
+          avatarUrl: users.avatarUrl,
+          profileVisibility: users.profileVisibility,
+        })
+        .from(users)
+        .where(eq(users.email, normalizedEmail))
+        .limit(1);
+      return rows[0] ? mapLegacyUserRow(rows[0]) : null;
     }
     throw error;
   }
@@ -1048,8 +1078,23 @@ export async function updateUserProfile(
       });
     return rows[0] ? mapUserRow(rows[0]) : null;
   } catch (error) {
-    if (isMissingUsersTableError(error) || isMissingUserProfileColumnError(error)) {
+    if (isMissingUsersTableError(error)) {
       return null;
+    }
+    if (isMissingUserProfileColumnError(error)) {
+      const rows = await db()
+        .update(users)
+        .set(updates)
+        .where(eq(users.id, id))
+        .returning({
+          id: users.id,
+          username: users.username,
+          name: users.name,
+          email: users.email,
+          avatarUrl: users.avatarUrl,
+          profileVisibility: users.profileVisibility,
+        });
+      return rows[0] ? mapLegacyUserRow(rows[0]) : null;
     }
     throw error;
   }
@@ -1105,23 +1150,28 @@ export async function upsertUser(data: {
     if (isMissingUserProfileColumnError(error)) {
       const rows = await db()
         .insert(users)
-        .values({ id: data.id, name: data.name } as typeof users.$inferInsert)
+        .values(values)
         .onConflictDoUpdate({
           target: users.id,
-          set: { name: data.name },
+          set: {
+            username: values.username,
+            name: values.name,
+            email: values.email,
+            avatarUrl: values.avatarUrl,
+            profileVisibility: values.profileVisibility,
+            updatedAt: values.updatedAt,
+          },
         })
-        .returning({ id: users.id, name: users.name });
-      const row = rows[0] ?? { id: data.id, name: data.name };
-      return {
-        id: row.id,
-        username: fallbackUsername(row.id, row.name),
-        name: row.name,
-        email: data.email ?? "",
-        avatarUrl: data.avatarUrl ?? null,
-        profileVisibility: data.profileVisibility ?? "private",
-        accountDeletionRequestedAt: null,
-        accountDeletionScheduledFor: null,
-      };
+        .returning({
+          id: users.id,
+          username: users.username,
+          name: users.name,
+          email: users.email,
+          avatarUrl: users.avatarUrl,
+          profileVisibility: users.profileVisibility,
+        });
+      const row = rows[0] ?? values;
+      return mapLegacyUserRow(row);
     }
     if (!isMissingUsersTableError(error)) {
       throw error;
@@ -1465,8 +1515,26 @@ export async function getUserForSessionTokenHash(tokenHash: string, now: Date = 
       .limit(1);
     return rows[0] ? mapUserRow(rows[0].user) : null;
   } catch (error) {
-    if (isMissingAuthTableError(error) || isMissingUsersTableError(error) || isMissingUserProfileColumnError(error)) {
+    if (isMissingAuthTableError(error) || isMissingUsersTableError(error)) {
       return null;
+    }
+    if (isMissingUserProfileColumnError(error)) {
+      const rows = await db()
+        .select({
+          user: {
+            id: users.id,
+            username: users.username,
+            name: users.name,
+            email: users.email,
+            avatarUrl: users.avatarUrl,
+            profileVisibility: users.profileVisibility,
+          },
+        })
+        .from(userSessions)
+        .innerJoin(users, eq(userSessions.userId, users.id))
+        .where(and(eq(userSessions.tokenHash, tokenHash), sql`${userSessions.revokedAt} IS NULL`, sql`${userSessions.expiresAt} > ${now}`))
+        .limit(1);
+      return rows[0] ? mapLegacyUserRow(rows[0].user) : null;
     }
     throw error;
   }

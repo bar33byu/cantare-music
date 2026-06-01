@@ -75,7 +75,83 @@ describe("users", () => {
       email: "singer@example.com",
       profileVisibility: "private",
     }));
-    expect(result).toEqual(row);
+    expect(result).toEqual({
+      ...row,
+      accountDeletionRequestedAt: null,
+      accountDeletionScheduledFor: null,
+    });
+  });
+
+  it("upsertUser falls back to legacy user columns when account deletion columns are missing", async () => {
+    const failingChain = {
+      values: vi.fn(() => ({
+        onConflictDoUpdate: vi.fn(() => ({
+          returning: vi.fn(() => {
+            throw new Error('column "account_deletion_requested_at" does not exist');
+          }),
+        })),
+      })),
+    };
+    const legacyRow = {
+      id: "internal-user-legacy",
+      username: "legacy-singer",
+      name: "Legacy Singer",
+      email: "legacy@example.com",
+      avatarUrl: null,
+      profileVisibility: "private",
+    };
+    const fallbackChain = makeChain([legacyRow]);
+    insertSpy
+      .mockReturnValueOnce(failingChain as unknown as ReturnType<typeof makeChain>)
+      .mockReturnValueOnce(fallbackChain);
+
+    const { upsertUser } = await getQueries();
+    const result = await upsertUser(legacyRow);
+
+    expect(insertSpy).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      ...legacyRow,
+      accountDeletionRequestedAt: null,
+      accountDeletionScheduledFor: null,
+    });
+  });
+
+  it("getUserByEmail falls back to legacy user columns when account deletion columns are missing", async () => {
+    const failingChain = {
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(() => {
+            throw new Error('column "account_deletion_scheduled_for" does not exist');
+          }),
+        })),
+      })),
+    };
+    const fallbackChain = makeChain([{
+      id: "user-legacy",
+      username: "legacy-singer",
+      name: "Legacy Singer",
+      email: "legacy@example.com",
+      avatarUrl: null,
+      profileVisibility: "private",
+    }]);
+    selectSpy
+      .mockReturnValueOnce(failingChain as unknown as ReturnType<typeof makeChain>)
+      .mockReturnValueOnce(fallbackChain);
+
+    const { getUserByEmail } = await getQueries();
+    const result = await getUserByEmail("legacy@example.com");
+
+    expect(selectSpy).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      id: "user-legacy",
+      username: "legacy-singer",
+      name: "Legacy Singer",
+      email: "legacy@example.com",
+      avatarUrl: null,
+      profileVisibility: "private",
+      accountDeletionRequestedAt: null,
+      accountDeletionScheduledFor: null,
+    });
   });
 
   it("getAllUsers maps profile fields and keeps profiles private by default", async () => {
@@ -102,6 +178,8 @@ describe("users", () => {
         email: "",
         avatarUrl: null,
         profileVisibility: "private",
+        accountDeletionRequestedAt: null,
+        accountDeletionScheduledFor: null,
       },
     ]);
   });
@@ -150,6 +228,48 @@ describe("users", () => {
 
     expect(insertSpy).toHaveBeenCalledWith(userSessions);
     expect(result).toEqual(row);
+  });
+
+  it("getUserForSessionTokenHash falls back to legacy user columns when account deletion columns are missing", async () => {
+    const failingChain = {
+      from: vi.fn(() => ({
+        innerJoin: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => {
+              throw new Error('column "account_deletion_requested_at" does not exist');
+            }),
+          })),
+        })),
+      })),
+    };
+    const fallbackChain = makeChain([{
+      user: {
+        id: "user-1",
+        username: "session-user",
+        name: "Session User",
+        email: "session@example.com",
+        avatarUrl: null,
+        profileVisibility: "private",
+      },
+    }]);
+    selectSpy
+      .mockReturnValueOnce(failingChain as unknown as ReturnType<typeof makeChain>)
+      .mockReturnValueOnce(fallbackChain);
+
+    const { getUserForSessionTokenHash } = await getQueries();
+    const result = await getUserForSessionTokenHash("hashed-session-token");
+
+    expect(selectSpy).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      id: "user-1",
+      username: "session-user",
+      name: "Session User",
+      email: "session@example.com",
+      avatarUrl: null,
+      profileVisibility: "private",
+      accountDeletionRequestedAt: null,
+      accountDeletionScheduledFor: null,
+    });
   });
 });
 
