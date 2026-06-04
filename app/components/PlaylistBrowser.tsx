@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { buildUserScopedCacheKey, readCachedJson, writeCachedJson } from '../lib/localJsonCache';
+import { withUserIdHeader } from '../lib/userContext';
 import type { Playlist } from '../types';
 
 type PlaylistListItem = {
@@ -104,18 +105,8 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
     const scopedInit: RequestInit = {
       ...init,
       cache: 'no-store',
-      headers: {
-        ...(init?.headers ?? {}),
-      },
     };
-
-    if (userId) {
-      const headers = new Headers(scopedInit.headers);
-      headers.set('X-User-ID', userId);
-      scopedInit.headers = headers;
-    }
-
-    return scopedInit;
+    return withUserIdHeader(scopedInit, userId);
   }, [userId]);
 
   const request = useCallback((url: string, init?: RequestInit) => {

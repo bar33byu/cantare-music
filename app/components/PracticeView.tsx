@@ -13,7 +13,6 @@ import { getMasteryPercent } from "../lib/masteryColors";
 import { getGuestSongRatings, markGuestSongProgress, saveGuestSongRatings } from "../lib/guestProgress";
 import {
   DEFAULT_CONTOUR_SAME_DEAD_ZONE,
-  buildContourDirectionEvents,
   classifyContourDirection,
   compareContourAttemptDetailed,
 } from "../lib/contourPractice";
@@ -31,6 +30,7 @@ import {
   type MidiSegmentAnswerKey,
 } from "../lib/midiGuidedTapPractice";
 import { DEFAULT_TAP_TIMING_TOLERANCE_MS } from "../lib/tapPracticeConstants";
+import { withUserIdHeader } from "../lib/userContext";
 
 interface TransportDebugState {
   playToggleClicks: number;
@@ -94,24 +94,11 @@ const ROLL_WINDOW_MS = 6000;
 const TAP_PERSISTENCE_WARNING_MS = 3500;
 const TAP_PRACTICE_COUNT_IN_MS = 2000;
 const TAP_CONTOUR_HEAT_MAP_ATTEMPT_LIMIT = 5;
-// TODO: If we do not restore these debugging controls, remove the supporting
-// code paths instead of keeping them hidden indefinitely.
-const SHOW_AUXILIARY_TAP_DEBUG_CONTROLS = false;
 const TAP_MATCH_OPTIONS = {
   timeToleranceMs: DEFAULT_TAP_TIMING_TOLERANCE_MS,
   sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   durationToleranceRatio: 0.6,
 } as const;
-
-function toDirectionLetter(direction: "up" | "down" | "same"): "U" | "D" | "S" {
-  if (direction === "up") {
-    return "U";
-  }
-  if (direction === "down") {
-    return "D";
-  }
-  return "S";
-}
 
 interface ActiveTapCapture {
   id: string;
@@ -209,16 +196,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   canUseNextSegment: canUseNextSegmentOverride,
 }) => {
   const withUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
-    if (!userId) {
-      return init;
-    }
-
-    const headers = new Headers(init?.headers);
-    headers.set("X-User-ID", userId);
-    return {
-      ...init,
-      headers,
-    };
+    return withUserIdHeader(init, userId);
   }, [userId]);
 
   const request = React.useCallback((url: string, init?: RequestInit) => {
@@ -228,16 +206,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
   const withReadOnlyDataUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
     const dataUserId = readOnlyDataUserId ?? userId;
-    if (!dataUserId) {
-      return init;
-    }
-
-    const headers = new Headers(init?.headers);
-    headers.set("X-User-ID", dataUserId);
-    return {
-      ...init,
-      headers,
-    };
+    return withUserIdHeader(init, dataUserId);
   }, [readOnlyDataUserId, userId]);
 
   const readOnlyDataRequest = React.useCallback((url: string, init?: RequestInit) => {
@@ -267,8 +236,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [isLooping, setIsLooping] = React.useState(defaultLooping);
   const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
   const [showCardContourMap, setShowCardContourMap] = React.useState(false);
-  const [showTapOverlay, setShowTapOverlay] = React.useState(true);
-  const [showSameLaneGuides, setShowSameLaneGuides] = React.useState(false);
   const [tapSessionSummaries, setTapSessionSummaries] = React.useState<TapSessionSummaryPayload[]>([]);
   const [midiSegmentAnswerKeys, setMidiSegmentAnswerKeys] = React.useState<Record<string, MidiSegmentAnswerKey>>({});
   const [localMidiScoreAttemptsBySegment, setLocalMidiScoreAttemptsBySegment] = React.useState<Record<string, TapScoreResult[]>>({});
@@ -369,13 +336,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     viewportSize.height <= 520 &&
     viewportSize.width <= 1100
   );
-  const tapDebugHref = React.useMemo(() => {
-    const params = new URLSearchParams({ songId: song.id });
-    if (tapSessionId) {
-      params.set("sessionId", tapSessionId);
-    }
-    return `/debug-tap-practice?${params.toString()}`;
-  }, [song.id, tapSessionId]);
   React.useEffect(() => {
     onSegmentPlaybackCompleteRef.current = onSegmentPlaybackComplete;
   }, [onSegmentPlaybackComplete]);
@@ -471,19 +431,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const midiKey = midiSegmentAnswerKeys[currentSegment.id] ?? null;
     return buildMidiContourTapHeatMap(midiKey, scores, TAP_CONTOUR_HEAT_MAP_ATTEMPT_LIMIT);
   }, [currentSegment, localMidiScoreAttemptsBySegment, midiSegmentAnswerKeys, tapSessionSummaries]);
-  const answerDirectionLetters = useMemo(() => {
-    if (!currentSegment) {
-      return new Map<string, "U" | "D" | "S">();
-    }
-    const sortedNotes = [...currentCardContourNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-    const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
-    return new Map(events.map((event, index) => [sortedNotes[index + 1]?.id, toDirectionLetter(event.direction)]).filter((entry): entry is [string, "U" | "D" | "S"] => Boolean(entry[0])));
-  }, [currentCardContourNotes, currentSegment]);
-  const attemptDirectionLetters = useMemo(() => {
-    const sortedNotes = [...currentAttemptNotes].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-    const events = buildContourDirectionEvents(sortedNotes, TAP_MATCH_OPTIONS);
-    return new Map(events.map((event, index) => [sortedNotes[index + 1]?.id, toDirectionLetter(event.direction)]).filter((entry): entry is [string, "U" | "D" | "S"] => Boolean(entry[0])));
-  }, [currentAttemptNotes]);
   const currentSegmentOffsetMs = currentSegment
     ? Math.max(0, Math.min(currentSegment.endMs - currentSegment.startMs, currentMs - currentSegment.startMs))
     : 0;
@@ -1264,17 +1211,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     activeTapCaptureRef.current = null;
   }, [currentCardContourNotes, currentMidiSegmentAnswerKey, currentMs, currentSegment, queuePersistedTap, showAccuracyToast]);
 
-  const clearCurrentSegmentTaps = React.useCallback(() => {
-    if (!currentSegment) {
-      return;
-    }
-    setTapAttemptsBySegment((previous) => ({
-      ...previous,
-      [currentSegment.id]: [],
-    }));
-    activeTapCaptureRef.current = null;
-  }, [currentSegment]);
-
   const recordCurrentMidiContourAttempt = React.useCallback(() => {
     if (!currentSegment || !currentMidiSegmentAnswerKey || currentMidiSegmentAnswerKey.taps.length === 0) {
       return;
@@ -1860,7 +1796,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setTapAttemptsBySegment({});
     setIsTapPracticeMode(false);
     setShowCardContourMap(false);
-    setShowTapOverlay(true);
     setTapSessionSummaries([]);
     setMidiSegmentAnswerKeys({});
     setLocalMidiScoreAttemptsBySegment({});
@@ -2220,45 +2155,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               {isTapPracticeMode ? "Exit Tap" : "Tap"}
             </button>
           ) : null}
-          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
-            <button
-              type="button"
-              data-testid="practice-overlay-toggle"
-              onClick={() => setShowTapOverlay((previous) => !previous)}
-              className="rounded-full border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
-            >
-              Overlay: {showTapOverlay ? "On" : "Off"}
-            </button>
-          ) : null}
-          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
-            <button
-              type="button"
-              data-testid="practice-same-lane-guides-toggle"
-              onClick={() => setShowSameLaneGuides((previous) => !previous)}
-              className="rounded-full border border-sky-300 bg-white px-3 py-1.5 text-sm font-semibold text-sky-700 hover:bg-sky-50"
-            >
-              Same lanes: {showSameLaneGuides ? "On" : "Off"}
-            </button>
-          ) : null}
-          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode && hasSegments && currentSegment ? (
-            <button
-              type="button"
-              data-testid="practice-clear-taps"
-              onClick={clearCurrentSegmentTaps}
-              className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-            >
-              Clear segment taps
-            </button>
-          ) : null}
-          {SHOW_AUXILIARY_TAP_DEBUG_CONTROLS && isTapPracticeMode ? (
-            <a
-              href={tapDebugHref}
-              data-testid="practice-open-tap-debug"
-              className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-900 hover:bg-amber-100"
-            >
-              Open Tap Debug
-            </a>
-          ) : null}
         </div>
         {ratingsError ? (
           <p data-testid="ratings-load-error" className="mt-2 text-sm text-amber-700">
@@ -2340,14 +2236,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     <span className="mt-1 text-xs font-medium text-amber-800">Get ready to tap</span>
                   </div>
                 ) : null}
-                {isTapPracticeMode && showTapOverlay && showSameLaneGuides ? (
-                  <div
-                    data-testid="practice-same-lane-legend"
-                    className="pointer-events-none absolute right-3 top-3 z-20 max-w-[11rem] rounded-2xl border border-sky-200/80 bg-white/90 px-3 py-2 text-[11px] font-medium text-sky-950 shadow-sm"
-                  >
-                    Same lane zone: answer lane +/- {TAP_MATCH_OPTIONS.sameDeadZone.toFixed(2)}
-                  </div>
-                ) : null}
                 <div
                   key={`${currentSegment.id}-${transitionToken}`}
                   className={`relative z-10 min-h-0 ${isTapPracticeMode ? "h-full" : "flex h-full flex-1"} ${transitionDirection === "forward" ? "segment-enter-forward" : "segment-enter-backward"}`}
@@ -2365,43 +2253,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     contourHeatMap={currentMidiContourHeatMap}
                   />
                 </div>
-                {isTapPracticeMode && hasSegments && currentSegment && showTapOverlay ? (
+                {isTapPracticeMode && hasSegments && currentSegment ? (
                   <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden rounded-2xl border border-indigo-200/30 bg-indigo-50/10" data-testid="practice-piano-roll-overlay">
                     <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
                       <line x1="0" y1="50" x2="100" y2="50" stroke="rgb(199 210 254)" strokeWidth="0.5" opacity="0.45" />
-                      {showSameLaneGuides ? currentCardContourNotes.map((note) => {
-                        const x = getRollX(note.timeOffsetMs);
-                        if (x < -5 || x > 105) {
-                          return null;
-                        }
-                        const zoneTopLane = Math.min(1, note.lane + TAP_MATCH_OPTIONS.sameDeadZone);
-                        const zoneBottomLane = Math.max(0, note.lane - TAP_MATCH_OPTIONS.sameDeadZone);
-                        const topY = (1 - zoneTopLane) * 100;
-                        const bottomY = (1 - zoneBottomLane) * 100;
-                        const centerY = (1 - note.lane) * 100;
-                        return (
-                          <g key={`same-zone-${note.id}`} data-testid="practice-same-lane-guide">
-                            <rect
-                              x={0}
-                              y={topY}
-                              width={100}
-                              height={Math.max(0.8, bottomY - topY)}
-                              fill="rgb(14 165 233)"
-                              opacity="0.07"
-                            />
-                            <line x1="0" y1={topY} x2="100" y2={topY} stroke="rgb(14 165 233)" strokeWidth="0.35" opacity="0.26" />
-                            <line x1="0" y1={bottomY} x2="100" y2={bottomY} stroke="rgb(14 165 233)" strokeWidth="0.35" opacity="0.26" />
-                            <line x1={Math.max(0, x - 4)} y1={centerY} x2={Math.min(100, x + 4)} y2={centerY} stroke="rgb(2 132 199)" strokeWidth="0.8" opacity="0.5" />
-                          </g>
-                        );
-                      }) : null}
                       {currentCardContourNotes.map((note) => {
                         const x = getRollX(note.timeOffsetMs);
                         if (x < -5 || x > 105) {
                           return null;
                         }
                         const y = (1 - note.lane) * 100;
-                        const directionLetter = answerDirectionLetters.get(note.id);
                         return (
                           <g key={`answer-${note.id}`}>
                             <circle
@@ -2411,20 +2272,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                               fill="rgb(99 102 241)"
                               opacity="0.35"
                             />
-                            {showSameLaneGuides && directionLetter ? (
-                              <text
-                                x={x}
-                                y={Math.max(4.5, y - 3.3)}
-                                textAnchor="middle"
-                                fontSize="4.4"
-                                fontWeight="700"
-                                fill="rgb(49 46 129)"
-                                opacity="0.95"
-                                data-testid="practice-answer-direction-label"
-                              >
-                                {directionLetter}
-                              </text>
-                            ) : null}
                           </g>
                         );
                       })}
@@ -2435,7 +2282,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                         }
                         const y = (1 - note.lane) * 100;
                         const status = currentSegmentMatch?.attemptNoteStatuses[note.id] ?? "pending";
-                        const directionLetter = attemptDirectionLetters.get(note.id);
                         return (
                           <g key={`attempt-${note.id}`}>
                             <circle
@@ -2446,21 +2292,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                               fill={getAttemptStatusColor(status)}
                               opacity="0.72"
                             />
-                            {showSameLaneGuides && directionLetter ? (
-                              <text
-                                x={x}
-                                y={Math.min(97, y + 1.6)}
-                                textAnchor="middle"
-                                dominantBaseline="middle"
-                                fontSize="4.6"
-                                fontWeight="800"
-                                fill="white"
-                                opacity="0.98"
-                                data-testid="practice-attempt-direction-label"
-                              >
-                                {directionLetter}
-                              </text>
-                            ) : null}
                           </g>
                         );
                       })}

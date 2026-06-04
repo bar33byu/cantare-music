@@ -4,6 +4,7 @@ import React from "react";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { toPlayableAudioUrl } from "../lib/audioUrls";
+import { withUserIdHeader } from "../lib/userContext";
 import type { DraftRecording, Song } from "../types";
 
 const DRAFT_RECORDING_MIME_TYPES = [
@@ -859,16 +860,7 @@ export function DraftRecordingManager({ song, userId, onDraftRecordingSaved }: D
   const draftRecordingStartedAtRef = React.useRef<number | null>(null);
 
   const withUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
-    if (!userId) {
-      return init;
-    }
-
-    const headers = new Headers(init?.headers);
-    headers.set("X-User-ID", userId);
-    return {
-      ...init,
-      headers,
-    };
+    return withUserIdHeader(init, userId);
   }, [userId]);
 
   const request = React.useCallback((url: string, init?: RequestInit) => {

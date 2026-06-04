@@ -8,6 +8,7 @@ import { SongReadinessIcons } from './SongReadinessIcons';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import PracticeView, { type ProgressStorageMode } from './PracticeView';
 import { getGuestSongRatings } from '../lib/guestProgress';
+import { withUserIdHeader } from '../lib/userContext';
 import type { Segment, SegmentRating } from '../types';
 import type { SessionState } from '../lib/sessionReducer';
 import type { AutoDrillState, PracticeMode } from '../lib/autoDrill';
@@ -281,7 +282,7 @@ export function PlaylistPracticeView({
   const [modeExplainer, setModeExplainer] = useState<ExplainedMode | null>(null);
 
   const userScopedHeaders = useMemo(() => {
-    return userId ? { 'X-User-ID': userId } : undefined;
+    return withUserIdHeader(undefined, userId)?.headers;
   }, [userId]);
   const progressStorage = progressStorageOverride ?? (persistProgress ? 'account' : 'none');
   const accountProgressEnabled = progressStorage === 'account';

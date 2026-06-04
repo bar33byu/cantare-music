@@ -28,6 +28,7 @@ import {
   isAnonymousUserId,
   normalizeUserId,
   normalizeUsername,
+  withUserIdHeader,
   type KnownUser,
   USER_COOKIE_NAME,
 } from "./lib/userContext";
@@ -881,13 +882,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   }, []);
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
-    return {
-      ...init,
-      headers: {
-        ...(init?.headers ?? {}),
-        "X-User-ID": activeUserId,
-      },
-    };
+    return withUserIdHeader(init, activeUserId);
   }, [activeUserId]);
 
   const request = useCallback((url: string, init?: RequestInit) => {

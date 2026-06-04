@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useUploadAudio } from "../hooks/useUploadAudio";
+import { withUserIdHeader } from "../lib/userContext";
 
 interface ReplaceAudioFormProps {
   songId: string;
@@ -76,10 +77,7 @@ export function ReplaceAudioForm({
       const details = VERSION_DETAILS[audioVersion];
       const response = await fetch(`/api/songs/${songId}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          ...(userId ? { "X-User-ID": userId } : {}),
-        },
+        headers: withUserIdHeader({ headers: { "Content-Type": "application/json" } }, userId)?.headers,
         body: JSON.stringify({ [details.patchKey]: uploadedKey }),
       });
 

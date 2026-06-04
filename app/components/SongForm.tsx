@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { useUploadAudio } from '../hooks/useUploadAudio';
+import { withUserIdHeader } from '../lib/userContext';
 
 interface SongFormProps {
   onSuccess: (songId: string) => void;
@@ -22,11 +23,6 @@ export function SongForm({ onSuccess, userId }: SongFormProps) {
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const { upload, uploading, progress, error: uploadError } = useUploadAudio(userId);
 
-  const withUserHeader = (headers: Record<string, string>) => ({
-    ...headers,
-    ...(userId ? { 'X-User-ID': userId } : {}),
-  });
-
   const appendDebug = (message: string) => {
     setDebugLog((prev) => [...prev, `${new Date().toISOString()} - ${message}`]);
   };
@@ -45,7 +41,7 @@ export function SongForm({ onSuccess, userId }: SongFormProps) {
       // Create song record
       const createResponse = await fetch('/api/songs', {
         method: 'POST',
-        headers: withUserHeader({ 'Content-Type': 'application/json' }),
+        headers: withUserIdHeader({ headers: { 'Content-Type': 'application/json' } }, userId)?.headers,
         body: JSON.stringify({ title: title.trim() }),
       });
 
@@ -67,7 +63,7 @@ export function SongForm({ onSuccess, userId }: SongFormProps) {
 
         const updateResponse = await fetch(`/api/songs/${newSongId}`, {
           method: 'PATCH',
-          headers: withUserHeader({ 'Content-Type': 'application/json' }),
+          headers: withUserIdHeader({ headers: { 'Content-Type': 'application/json' } }, userId)?.headers,
           body: JSON.stringify({ audioKey }),
         });
 
@@ -86,7 +82,7 @@ export function SongForm({ onSuccess, userId }: SongFormProps) {
 
         const updateResponse = await fetch(`/api/songs/${newSongId}`, {
           method: 'PATCH',
-          headers: withUserHeader({ 'Content-Type': 'application/json' }),
+          headers: withUserIdHeader({ headers: { 'Content-Type': 'application/json' } }, userId)?.headers,
           body: JSON.stringify({ alternateAudioKey }),
         });
 

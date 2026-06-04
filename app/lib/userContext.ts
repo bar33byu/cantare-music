@@ -3,6 +3,7 @@ export const ANONYMOUS_USER_ID_PREFIX = "guest-";
 export const ANONYMOUS_USER_STORAGE_KEY = "cantare:anonymous-user-id";
 export const USER_ID_HEADER = "x-user-id";
 export const USER_COOKIE_NAME = "cantare-user-id";
+const USER_ID_HEADER_DISPLAY_NAME = "X-User-ID";
 
 export interface KnownUser {
   id: string;
@@ -23,6 +24,32 @@ export function normalizeUserId(value: string | null | undefined): string {
 
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").slice(0, 48);
   return normalized.length > 0 ? normalized : DEFAULT_USER_ID;
+}
+
+export function withUserIdHeader(init: RequestInit | undefined, userId: string | null | undefined): RequestInit | undefined {
+  if (!userId) {
+    return init;
+  }
+
+  const headers = init?.headers;
+  if (headers instanceof Headers || Array.isArray(headers)) {
+    const nextHeaders = new Headers(headers);
+    nextHeaders.set(USER_ID_HEADER, userId);
+    return {
+      ...init,
+      headers: nextHeaders,
+    };
+  }
+
+  const nextHeaders = Object.fromEntries(
+    Object.entries(headers ?? {}).filter(([name]) => name.toLowerCase() !== USER_ID_HEADER)
+  );
+  nextHeaders[USER_ID_HEADER_DISPLAY_NAME] = userId;
+
+  return {
+    ...init,
+    headers: nextHeaders,
+  };
 }
 
 export function isAnonymousUserId(value: string | null | undefined): boolean {

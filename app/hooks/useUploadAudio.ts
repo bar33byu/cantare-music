@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { withUserIdHeader } from '../lib/userContext';
 
 interface UseUploadAudioReturn {
   upload: (songId: string, file: File, audioVersion?: AudioUploadVersion) => Promise<string>;
@@ -47,10 +48,7 @@ export function useUploadAudio(userId?: string): UseUploadAudioReturn {
       // Get presigned URL from the API
       const response = await fetch('/api/songs/upload-url', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(userId ? { 'X-User-ID': userId } : {}),
-        },
+        headers: withUserIdHeader({ headers: { 'Content-Type': 'application/json' } }, userId)?.headers,
         body: JSON.stringify({
           songId,
           filename: file.name,

@@ -8,10 +8,12 @@ import { DraftRecordingManager } from './DraftRecordingManager';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { toPlayableAudioUrl } from '../lib/audioUrls';
 import { getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
+import { withUserIdHeader } from '../lib/userContext';
 
 const MIN_SEGMENT_MS = 1000;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
+const DEFAULT_ZOOM = 4;
 const ZOOM_STEP = 0.5;
 const BULK_IMPORT_ZOOM = 3;
 const DEFAULT_TIMELINE_FALLBACK_MS = 60000;
@@ -110,7 +112,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
   const [deletingSong, setDeletingSong] = useState(false);
   const [lastDeletedSection, setLastDeletedSection] = useState<Segment | null>(null);
   const [undoDismissTimer, setUndoDismissTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [stableDurationMs, setStableDurationMs] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
@@ -148,17 +150,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
   );
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
-    if (!userId) {
-      return init;
-    }
-
-    const headers = new Headers(init?.headers);
-    headers.set('X-User-ID', userId);
-
-    return {
-      ...init,
-      headers,
-    };
+    return withUserIdHeader(init, userId);
   }, [userId]);
 
   const request = useCallback((url: string, init?: RequestInit) => {
