@@ -1749,7 +1749,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             persistProgress={!playlistPracticeReadOnly}
             readOnlyDataUserId={playlistPracticeReadOnly ? selectedPlaylist?.owner?.id : undefined}
             initialSession={session}
-            onDraftRecordingSaved={refreshSelectedSong}
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
             segmentPrerollMs={userSettings.segmentPrerollMs}
