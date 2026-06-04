@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSongById, getSegmentsBySongId, updateSegment, deleteSegment, reorderSegments } from '../../../../../../db/queries';
 import type { SegmentRow } from '../../../../../../db/schema';
 import { inferTimelineOrder } from '../../../../../lib/segmentTiming';
-import { resolveRequestUserId } from '../../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -18,7 +18,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string; segmentId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id: songId, segmentId } = await params;
     const song = await getSongById(songId, userId);
     if (!song) {
@@ -45,7 +45,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; segmentId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id: songId, segmentId } = await params;
     const song = await getSongById(songId, userId);
     if (!song) {
@@ -125,7 +125,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; segmentId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id: songId, segmentId } = await params;
     const song = await getSongById(songId, userId);
     if (!song) {

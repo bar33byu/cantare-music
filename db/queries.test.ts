@@ -40,7 +40,11 @@ vi.mock("./index", () => ({
 }));
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  selectSpy.mockReset();
+  insertSpy.mockReset();
+  updateSpy.mockReset();
+  deleteSpy.mockReset();
+  executeSpy.mockReset();
 });
 
 // Lazily import queries AFTER mock is set up
@@ -1250,40 +1254,23 @@ describe("deleteRatingsForSong", () => {
 });
 
 describe("tap practice persistence", () => {
-  it("createTapPracticeSession auto-creates missing tap practice tables and retries", async () => {
+  it("createTapPracticeSession surfaces missing tap practice migrations without running DDL", async () => {
     const startedAt = new Date("2026-04-11T12:00:00.000Z");
+    const missingTableError = new Error('relation "tap_practice_sessions" does not exist');
     const failingInsertChain = {
       values: vi.fn(() => {
-        throw new Error('relation "tap_practice_sessions" does not exist');
+        throw missingTableError;
       }),
     };
-    const successfulInsertChain = makeChain([
-      {
-        id: "session-9",
-        userId: "default",
-        songId: "song-1",
-        startedAt,
-      },
-    ]);
 
-    insertSpy
-      .mockReturnValueOnce(failingInsertChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(successfulInsertChain);
+    insertSpy.mockReturnValueOnce(failingInsertChain as unknown as ReturnType<typeof makeChain>);
     executeSpy.mockResolvedValue({});
 
     const { createTapPracticeSession } = await getQueries();
-    const result = await createTapPracticeSession("song-1", "default", startedAt);
+    await expect(createTapPracticeSession("song-1", "default", startedAt)).rejects.toBe(missingTableError);
 
-    expect(executeSpy).toHaveBeenCalledTimes(15);
-    expect(insertSpy).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({
-      id: "session-9",
-      songId: "song-1",
-      audioVersion: "straight",
-      mode: "practice",
-      startedAt: startedAt.toISOString(),
-      tapCount: 0,
-    });
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(insertSpy).toHaveBeenCalledTimes(1);
   });
 
   it("createTapPracticeSession inserts a new session row", async () => {
@@ -1489,14 +1476,46 @@ describe("deletePlaylist", () => {
 
 describe("reorderPlaylistSongs", () => {
   it("issues updates for each ordered song", async () => {
+    const guardChain = makeChain([{ id: "pl-1" }]);
     const chain = makeChain();
+    selectSpy.mockReturnValue(guardChain);
     updateSpy.mockReturnValue(chain);
 
     const { reorderPlaylistSongs } = await getQueries();
-    await reorderPlaylistSongs("pl-1", ["song-2", "song-1"]);
+    await reorderPlaylistSongs("pl-1", ["song-2", "song-1"], "user-1");
 
+    expect(selectSpy).toHaveBeenCalled();
     expect(updateSpy).toHaveBeenCalledWith(playlistSongs);
     const setSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
     expect(setSpy).toHaveBeenCalledWith({ position: 1 });
+  });
+
+  it("does not update songs for playlists outside the user scope", async () => {
+    selectSpy.mockReturnValue(makeChain([]));
+
+    const { reorderPlaylistSongs } = await getQueries();
+    await reorderPlaylistSongs("pl-1", ["song-2", "song-1"], "user-2");
+
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("playlist song mutations", () => {
+  it("does not add a song when the playlist or song is outside the user scope", async () => {
+    selectSpy.mockReturnValue(makeChain([]));
+
+    const { addSongToPlaylist } = await getQueries();
+    await addSongToPlaylist("pl-1", "song-1", undefined, "user-2");
+
+    expect(insertSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not remove a song when the playlist is outside the user scope", async () => {
+    selectSpy.mockReturnValue(makeChain([]));
+
+    const { removeSongFromPlaylist } = await getQueries();
+    await removeSongFromPlaylist("pl-1", "song-1", "user-2");
+
+    expect(deleteSpy).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createDraftRecording, getSongById } from '../../../../../db/queries';
-import { resolveRequestUserId } from '../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../_user';
 
 type CreateDraftRecordingBody = {
   audioKey?: string;
@@ -21,7 +21,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const body = (await request.json().catch(() => null)) as CreateDraftRecordingBody | null;
 

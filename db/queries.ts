@@ -7,9 +7,10 @@ import type { SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapSco
 import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
 
 const DEFAULT_QUERY_USER_ID = "default";
-let ensureTapPracticeTablesPromise: Promise<void> | null = null;
-let ensureMidiTablesPromise: Promise<void> | null = null;
-let ensureDraftRecordingTablesPromise: Promise<void> | null = null;
+
+async function ensureMigratedSchema(): Promise<void> {
+  // Schema is managed by Drizzle migrations. Request handlers must not run DDL.
+}
 
 function normalizeDbUserId(value: string | null | undefined): string {
   if (!value) {
@@ -650,139 +651,11 @@ function isMissingEnhancedTapPracticeColumnError(error: unknown): boolean {
 }
 
 async function ensureTapPracticeTables(): Promise<void> {
-  if (!ensureTapPracticeTablesPromise) {
-    ensureTapPracticeTablesPromise = (async () => {
-      await db().execute(sql.raw(`
-        CREATE TABLE IF NOT EXISTS "tap_practice_sessions" (
-          "id" text PRIMARY KEY NOT NULL,
-          "user_id" text NOT NULL DEFAULT 'default',
-          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
-          "started_at" timestamp NOT NULL DEFAULT now()
-        )
-      `));
-
-      await db().execute(sql.raw(`
-        CREATE TABLE IF NOT EXISTS "tap_practice_taps" (
-          "id" text PRIMARY KEY NOT NULL,
-          "session_id" text NOT NULL REFERENCES "tap_practice_sessions"("id") ON DELETE cascade,
-          "segment_id" text NOT NULL REFERENCES "segments"("id") ON DELETE cascade,
-          "note_id" text NOT NULL,
-          "time_offset_ms" integer NOT NULL,
-          "duration_ms" integer NOT NULL,
-          "lane_milli" integer NOT NULL,
-          "created_at" timestamp NOT NULL DEFAULT now()
-        )
-      `));
-
-      await db().execute(sql.raw(`
-        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_started_at"
-          ON "tap_practice_sessions" ("user_id", "started_at")
-      `));
-
-      await db().execute(sql.raw(`
-        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_song_started_at"
-          ON "tap_practice_sessions" ("user_id", "song_id", "started_at")
-      `));
-
-      await db().execute(sql.raw(`
-        CREATE INDEX IF NOT EXISTS "idx_tap_practice_taps_session_created_at"
-          ON "tap_practice_taps" ("session_id", "created_at")
-      `));
-
-      await db().execute(sql.raw(`
-        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "segment_id" text REFERENCES "segments"("id") ON DELETE cascade
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "audio_version" text NOT NULL DEFAULT 'straight'
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "mode" text NOT NULL DEFAULT 'practice'
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "completed_at" timestamp
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "finalized_at" timestamp
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "auto_score_percent" integer
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "self_rating" integer
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "tap_practice_sessions" ADD COLUMN IF NOT EXISTS "score_details" jsonb NOT NULL DEFAULT '{}'::jsonb
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "tap_practice_taps" ADD COLUMN IF NOT EXISTS "direction" text
-      `));
-      await db().execute(sql.raw(`
-        CREATE INDEX IF NOT EXISTS "idx_tap_practice_sessions_user_song_segment_mode"
-          ON "tap_practice_sessions" ("user_id", "song_id", "segment_id", "mode")
-      `));
-    })().catch((error) => {
-      ensureTapPracticeTablesPromise = null;
-      throw error;
-    });
-  }
-
-  await ensureTapPracticeTablesPromise;
+  await ensureMigratedSchema();
 }
 
 async function ensureDraftRecordingTables(): Promise<void> {
-  if (!ensureDraftRecordingTablesPromise) {
-    ensureDraftRecordingTablesPromise = (async () => {
-      await db().execute(sql.raw(`
-        CREATE TABLE IF NOT EXISTS "draft_recordings" (
-          "id" text PRIMARY KEY NOT NULL,
-          "user_id" text NOT NULL DEFAULT 'default',
-          "song_id" text REFERENCES "songs"("id") ON DELETE cascade,
-          "title" text,
-          "audio_key" text NOT NULL,
-          "status" text NOT NULL DEFAULT 'draft',
-          "trim_start_ms" integer,
-          "trim_end_ms" integer,
-          "created_at" timestamp NOT NULL DEFAULT now()
-        )
-      `));
-
-      await db().execute(sql.raw(`
-        ALTER TABLE "draft_recordings" ADD COLUMN IF NOT EXISTS "user_id" text NOT NULL DEFAULT 'default'
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "draft_recordings" ALTER COLUMN "song_id" DROP NOT NULL
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "draft_recordings" ADD COLUMN IF NOT EXISTS "trim_start_ms" integer
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "draft_recordings" ADD COLUMN IF NOT EXISTS "trim_end_ms" integer
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "draft_recordings" ADD COLUMN IF NOT EXISTS "archived_at" timestamp
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "songs" ADD COLUMN IF NOT EXISTS "audio_trim_start_ms" integer
-      `));
-      await db().execute(sql.raw(`
-        ALTER TABLE "songs" ADD COLUMN IF NOT EXISTS "audio_trim_end_ms" integer
-      `));
-
-      await db().execute(sql.raw(`
-        CREATE INDEX IF NOT EXISTS "idx_draft_recordings_song_status_created_at"
-          ON "draft_recordings" ("song_id", "status", "created_at")
-      `));
-      await db().execute(sql.raw(`
-        CREATE INDEX IF NOT EXISTS "idx_draft_recordings_user_status_created_at"
-          ON "draft_recordings" ("user_id", "status", "created_at")
-      `));
-    })().catch((error) => {
-      ensureDraftRecordingTablesPromise = null;
-      throw error;
-    });
-  }
-
-  await ensureDraftRecordingTablesPromise;
+  await ensureMigratedSchema();
 }
 
 // Audit logs are intentionally lightweight: high-risk auth/account events only.
@@ -1228,12 +1101,7 @@ export interface UserAccountDeletionStatus {
 }
 
 async function ensureUserAccountDeletionColumns(): Promise<void> {
-  await db().execute(sql.raw(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "account_deletion_requested_at" timestamp`));
-  await db().execute(sql.raw(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "account_deletion_scheduled_for" timestamp`));
-  await db().execute(sql.raw(`
-    CREATE INDEX IF NOT EXISTS "idx_users_account_deletion_scheduled_for"
-      ON "users" ("account_deletion_scheduled_for")
-  `));
+  await ensureMigratedSchema();
 }
 
 export async function getUserAccountDeletionStatus(userId: string): Promise<UserAccountDeletionStatus | null> {
@@ -1864,7 +1732,8 @@ export async function updateSong(
       .where(and(eq(songs.id, id), eq(songs.userId, userId)));
   } catch (error) {
     if (isMissingAlternateAudioKeyColumnError(error)) {
-      const { alternateAudioKey: _alternateAudioKey, ...legacyUpdates } = updates;
+      const legacyUpdates = { ...updates };
+      delete legacyUpdates.alternateAudioKey;
       if (Object.keys(legacyUpdates).length === 0) {
         const migrationError = new Error(
           'Alternate song audio requires database migration 0009_alternate_audio_key.sql before it can be saved.'
@@ -1884,7 +1753,8 @@ export async function updateSong(
       throw error;
     }
 
-    const { pitchContourNotes: _pitchContourNotes, ...legacyUpdates } = updates;
+    const legacyUpdates = { ...updates };
+    delete legacyUpdates.pitchContourNotes;
     if (Object.keys(legacyUpdates).length === 0) {
       const migrationError = new Error(
         'Song pitch contour notes require database migration 0008_song_timeline_contour.sql before they can be saved.'
@@ -2266,11 +2136,15 @@ export async function upsertSegments(
 
       const includeSourceSegmentId = !isMissingImportLineageColumnError(error);
       await db().insert(segments).values(
-        newSegments.map(({ pitchContourNotes: _pitchContourNotes, ...segment }) => ({
-          ...segment,
-          songId,
-          ...(includeSourceSegmentId ? { sourceSegmentId: segment.id } : {}),
-        }))
+        newSegments.map((segment) => {
+          const legacySegment = { ...segment };
+          delete legacySegment.pitchContourNotes;
+          return {
+            ...legacySegment,
+            songId,
+            ...(includeSourceSegmentId ? { sourceSegmentId: segment.id } : {}),
+          };
+        })
       );
     }
   }
@@ -2301,7 +2175,8 @@ export async function createSegment(data: {
       throw error;
     }
 
-    const { pitchContourNotes: _pitchContourNotes, ...legacyData } = data;
+    const legacyData = { ...data };
+    delete legacyData.pitchContourNotes;
     const rows = await db()
       .insert(segments)
       .values(legacyData)
@@ -2327,7 +2202,8 @@ export async function updateSegment(
       throw error;
     }
 
-    const { pitchContourNotes: _pitchContourNotes, ...legacyUpdates } = updates;
+    const legacyUpdates = { ...updates };
+    delete legacyUpdates.pitchContourNotes;
     if (Object.keys(legacyUpdates).length === 0) {
       const migrationError = new Error(
         'Pitch contour notes require database migration 0004_song_pitch_contour.sql before they can be saved.'
@@ -2532,39 +2408,86 @@ export async function getLatestRatingTimeBySongIds(
   songIds: string[],
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<Record<string, Date>> {
+  const uniqueSongIds = Array.from(new Set(songIds));
   const bySong: Record<string, Date> = {};
-  await Promise.all(songIds.map(async (id) => {
-    const ratings = await getRatingsForSong(id, userId);
-    const latest = ratings[0];
-    if (latest) {
-      bySong[id] = new Date(latest.ratedAt);
+  if (uniqueSongIds.length === 0) {
+    return bySong;
+  }
+
+  const rows = await db()
+    .select({
+      songId: segments.songId,
+      ratedAt: practiceRatings.ratedAt,
+    })
+    .from(practiceRatings)
+    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(eq(practiceRatings.userId, userId), eq(songs.userId, userId), inArray(segments.songId, uniqueSongIds)))
+    .orderBy(desc(practiceRatings.ratedAt));
+
+  for (const row of rows) {
+    if (!bySong[row.songId]) {
+      bySong[row.songId] = new Date(row.ratedAt);
     }
-  }));
+  }
 
   return bySong;
+}
+
+async function getLatestRatingsBySegmentIds(
+  segmentIds: string[],
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<Map<string, PersistedMemoryRating>> {
+  const latestBySegment = new Map<string, PersistedMemoryRating>();
+  const uniqueSegmentIds = Array.from(new Set(segmentIds));
+  if (uniqueSegmentIds.length === 0) {
+    return latestBySegment;
+  }
+
+  const rows = await db()
+    .select({
+      segmentId: practiceRatings.segmentId,
+      rating: practiceRatings.rating,
+    })
+    .from(practiceRatings)
+    .where(and(eq(practiceRatings.userId, userId), inArray(practiceRatings.segmentId, uniqueSegmentIds)))
+    .orderBy(desc(practiceRatings.ratedAt));
+
+  for (const row of rows) {
+    if (!latestBySegment.has(row.segmentId)) {
+      latestBySegment.set(row.segmentId, row.rating as PersistedMemoryRating);
+    }
+  }
+
+  return latestBySegment;
 }
 
 export async function getSongKnowledgeBySongIds(
   songIds: string[],
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<Record<string, number>> {
+  const uniqueSongIds = Array.from(new Set(songIds));
   const knowledgeBySong: Record<string, number> = {};
-  await Promise.all(songIds.map(async (songId) => {
-    const [songSegments, ratings] = await Promise.all([
-      getSegmentsBySongId(songId),
-      getRatingsForSong(songId, userId),
-    ]);
+  if (uniqueSongIds.length === 0) {
+    return knowledgeBySong;
+  }
+
+  const segmentsBySong = await getSegmentsBySongIds(uniqueSongIds);
+  const allSegmentIds = uniqueSongIds.flatMap((songId) => (segmentsBySong[songId] ?? []).map((segment) => segment.id));
+  const latestRatings = await getLatestRatingsBySegmentIds(allSegmentIds, userId);
+
+  for (const songId of uniqueSongIds) {
+    const songSegments = segmentsBySong[songId] ?? [];
     if (songSegments.length === 0) {
       knowledgeBySong[songId] = 0;
-      return;
+      continue;
     }
-    const ratingBySegmentId = new Map(ratings.map((rating) => [rating.segmentId, rating.rating]));
     const totalRating = songSegments.reduce((sum, segment) => {
-      return sum + (ratingBySegmentId.get(segment.id) ?? 0);
+      return sum + (latestRatings.get(segment.id) ?? 0);
     }, 0);
     const averageRating = totalRating / songSegments.length;
     knowledgeBySong[songId] = Math.round(averageRating * 20);
-  }));
+  }
 
   return knowledgeBySong;
 }
@@ -2917,60 +2840,7 @@ function normalizeTapAudioVersion(value: string | null | undefined): TapAudioVer
 }
 
 async function ensureMidiTables(): Promise<void> {
-  if (!ensureMidiTablesPromise) {
-    ensureMidiTablesPromise = (async () => {
-      await db().execute(sql.raw(`
-        CREATE TABLE IF NOT EXISTS "midi_sources" (
-          "id" text PRIMARY KEY NOT NULL,
-          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
-          "original_filename" text NOT NULL,
-          "storage_key" text NOT NULL,
-          "uploaded_at" timestamp NOT NULL DEFAULT now(),
-          "content_type" text,
-          "file_size" integer NOT NULL DEFAULT 0,
-          "parse_status" text NOT NULL DEFAULT 'parsed',
-          "cleanup_settings" jsonb NOT NULL DEFAULT '{"shortNoteThresholdMs":0,"simultaneousThresholdMs":30}'::jsonb,
-          "raw_notes" jsonb NOT NULL DEFAULT '[]'::jsonb,
-          "cleaned_notes" jsonb NOT NULL DEFAULT '[]'::jsonb,
-          "raw_note_count" integer NOT NULL DEFAULT 0,
-          "cleaned_note_count" integer NOT NULL DEFAULT 0,
-          "ignored_short_note_count" integer NOT NULL DEFAULT 0,
-          "parse_error" text
-        )
-      `));
-      await db().execute(sql.raw(`
-        CREATE INDEX IF NOT EXISTS "idx_midi_sources_song_uploaded_at"
-          ON "midi_sources" ("song_id", "uploaded_at")
-      `));
-      await db().execute(sql.raw(`
-        CREATE TABLE IF NOT EXISTS "midi_alignments" (
-          "id" text PRIMARY KEY NOT NULL,
-          "song_id" text NOT NULL REFERENCES "songs"("id") ON DELETE cascade,
-          "midi_source_id" text NOT NULL REFERENCES "midi_sources"("id") ON DELETE cascade,
-          "tapped_start_times_seconds" jsonb NOT NULL DEFAULT '[]'::jsonb,
-          "retained_midi_note_count" integer NOT NULL DEFAULT 0,
-          "is_complete" boolean NOT NULL DEFAULT false,
-          "status" text NOT NULL DEFAULT 'partial',
-          "notes" text,
-          "created_at" timestamp NOT NULL DEFAULT now(),
-          "updated_at" timestamp NOT NULL DEFAULT now()
-        )
-      `));
-      await db().execute(sql.raw(`
-        CREATE INDEX IF NOT EXISTS "idx_midi_alignments_song_updated_at"
-          ON "midi_alignments" ("song_id", "updated_at")
-      `));
-      await db().execute(sql.raw(`
-        CREATE INDEX IF NOT EXISTS "idx_midi_alignments_source_updated_at"
-          ON "midi_alignments" ("midi_source_id", "updated_at")
-      `));
-    })().catch((error) => {
-      ensureMidiTablesPromise = null;
-      throw error;
-    });
-  }
-
-  await ensureMidiTablesPromise;
+  await ensureMigratedSchema();
 }
 
 function normalizeTapPracticeMode(value: string | null | undefined): TapPracticeMode {
@@ -3132,24 +3002,65 @@ export async function createTapPracticeSession(
 
     return mapTapPracticeSession(rows[0]);
   } catch (error) {
-    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await ensureTapPracticeTables();
-      const rows = await db()
-        .insert(tapPracticeSessions)
-        .values({
-          id: crypto.randomUUID(),
-          userId,
-          songId,
-          segmentId: options.segmentId ?? null,
-          audioVersion: options.audioVersion ?? "straight",
-          mode: options.mode ?? "practice",
-          startedAt,
-        })
-        .returning();
-
-      return mapTapPracticeSession(rows[0]);
-    }
     throw error;
+  }
+}
+
+export async function getSegmentsBySongIds(
+  songIds: string[]
+): Promise<Record<string, SegmentRow[]>> {
+  const uniqueSongIds = Array.from(new Set(songIds));
+  const bySong = Object.fromEntries(uniqueSongIds.map((songId) => [songId, [] as SegmentRow[]]));
+  if (uniqueSongIds.length === 0) {
+    return bySong;
+  }
+
+  let primaryError: unknown;
+  try {
+    const rows = await db()
+      .select()
+      .from(segments)
+      .where(inArray(segments.songId, uniqueSongIds))
+      .orderBy(asc(segments.songId), asc(segments.order));
+
+    for (const row of rows) {
+      bySong[row.songId] = [...(bySong[row.songId] ?? []), row];
+    }
+    return bySong;
+  } catch (error) {
+    primaryError = error;
+    if (!isMissingPitchContourNotesColumnError(error)) {
+      throw error;
+    }
+  }
+
+  try {
+    const legacyRows = await db()
+      .select({
+        id: segments.id,
+        songId: segments.songId,
+        label: segments.label,
+        order: segments.order,
+        startMs: segments.startMs,
+        endMs: segments.endMs,
+        lyricText: segments.lyricText,
+      })
+      .from(segments)
+      .where(inArray(segments.songId, uniqueSongIds))
+      .orderBy(asc(segments.songId), asc(segments.order));
+
+    for (const row of legacyRows) {
+      bySong[row.songId] = [
+        ...(bySong[row.songId] ?? []),
+        {
+          ...row,
+          pitchContourNotes: [],
+        } as SegmentRow,
+      ];
+    }
+    return bySong;
+  } catch {
+    throw primaryError;
   }
 }
 
@@ -3613,6 +3524,42 @@ export async function getLatestMidiSourceForSong(songId: string, userId: string 
   }
 }
 
+export async function getMidiContourStatusBySongIds(
+  songIds: string[],
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<Record<string, boolean>> {
+  const uniqueSongIds = Array.from(new Set(songIds));
+  const bySong: Record<string, boolean> = {};
+  if (uniqueSongIds.length === 0) {
+    return bySong;
+  }
+
+  try {
+    const rows = await db()
+      .select({
+        songId: midiSources.songId,
+        cleanedNoteCount: midiSources.cleanedNoteCount,
+      })
+      .from(midiSources)
+      .innerJoin(songs, eq(midiSources.songId, songs.id))
+      .where(and(eq(songs.userId, userId), inArray(midiSources.songId, uniqueSongIds)))
+      .orderBy(desc(midiSources.uploadedAt));
+
+    for (const row of rows) {
+      if (bySong[row.songId] === undefined) {
+        bySong[row.songId] = row.cleanedNoteCount > 0;
+      }
+    }
+    return bySong;
+  } catch (error) {
+    if (isMissingMidiTableError(error)) {
+      await ensureMidiTables();
+      return bySong;
+    }
+    throw error;
+  }
+}
+
 export async function getMidiSourceById(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedMidiSource | null> {
   try {
     const rows = await db()
@@ -3776,29 +3723,7 @@ function emptyPlaylistHealthStats() {
 }
 
 async function ensurePlaylistSharingColumns(): Promise<void> {
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "share_token" text`));
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "shared_at" timestamp`));
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "share_audio_mode" text NOT NULL DEFAULT 'both'`));
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "public_share_audio_mode" text NOT NULL DEFAULT 'both'`));
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "is_public" boolean NOT NULL DEFAULT false`));
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "published_at" timestamp`));
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "source_playlist_id" text`));
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "source_owner_id" text`));
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "source_share_token" text`));
-  await db().execute(sql.raw(`ALTER TABLE "playlists" ADD COLUMN IF NOT EXISTS "imported_at" timestamp`));
-  await db().execute(sql.raw(`
-    CREATE UNIQUE INDEX IF NOT EXISTS "playlists_share_token_unique"
-      ON "playlists" ("share_token")
-      WHERE "share_token" IS NOT NULL
-  `));
-  await db().execute(sql.raw(`
-    CREATE INDEX IF NOT EXISTS "idx_playlists_public_published_at"
-      ON "playlists" ("is_public", "published_at")
-  `));
-  await db().execute(sql.raw(`
-    CREATE INDEX IF NOT EXISTS "idx_playlists_user_source_playlist"
-      ON "playlists" ("user_id", "source_playlist_id")
-  `));
+  await ensureMigratedSchema();
 }
 
 function normalizeShareAudioMode(mode: unknown): PlaylistShareAudioMode {
@@ -4101,20 +4026,14 @@ export async function getPlaylistById(
 
   const songIds = linkedSongs.map((s) => s.songId);
   const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts, midiContourEntries] = await Promise.all([
-    Promise.all(linkedSongs.map((s) => getSegmentsBySongId(s.songId))),
+    getSegmentsBySongIds(songIds),
     getSongKnowledgeBySongIds(songIds, playlist.userId),
     getLatestRatingTimeBySongIds(songIds, playlist.userId),
     getRatingCountBySongIds(songIds, playlist.userId),
-    Promise.all(
-      linkedSongs.map(async (song) => {
-        const source = await getLatestMidiSourceForSong(song.songId, playlist.userId);
-        const hasMidiContour = (source?.cleanedNoteCount ?? 0) > 0;
-        return [song.songId, hasMidiContour] as const;
-      })
-    ).then((entries) => Object.fromEntries(entries)),
+    getMidiContourStatusBySongIds(songIds, playlist.userId),
   ]);
 
-  const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow, i) => ({
+  const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow) => ({
     id: songRow.songId,
     title: songRow.title,
     artist: songRow.artist ?? undefined,
@@ -4123,7 +4042,7 @@ export async function getPlaylistById(
     pitchContourNotes: [],
     hasMidiContour: midiContourEntries[songRow.songId] ?? false,
     ratingCount: ratingCounts[songRow.songId] ?? 0,
-    segments: segmentsBySong[i],
+    segments: segmentsBySong[songRow.songId] ?? [],
     createdAt: toIso(songRow.createdAt),
     updatedAt: toIso(songRow.createdAt),
     position: songRow.position,
@@ -4724,10 +4643,26 @@ async function getRatingCountBySongIds(
   songIds: string[],
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<Record<string, number>> {
+  const uniqueSongIds = Array.from(new Set(songIds));
   const bySong: Record<string, number> = {};
-  await Promise.all(songIds.map(async (songId) => {
-    bySong[songId] = (await getRatingsForSong(songId, userId)).length;
-  }));
+  if (uniqueSongIds.length === 0) {
+    return bySong;
+  }
+
+  const rows = await db()
+    .select({
+      songId: segments.songId,
+      count: count(practiceRatings.id),
+    })
+    .from(practiceRatings)
+    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(eq(practiceRatings.userId, userId), eq(songs.userId, userId), inArray(segments.songId, uniqueSongIds)))
+    .groupBy(segments.songId);
+
+  for (const row of rows) {
+    bySong[row.songId] = row.count;
+  }
 
   return bySong;
 }
@@ -4799,12 +4734,35 @@ export async function deletePlaylist(id: string, userId: string = DEFAULT_QUERY_
   await db().delete(playlists).where(and(eq(playlists.id, id), eq(playlists.userId, userId)));
 }
 
+async function hasOwnedPlaylist(playlistId: string, userId: string): Promise<boolean> {
+  const rows = await db()
+    .select({ id: playlists.id })
+    .from(playlists)
+    .where(and(eq(playlists.id, playlistId), eq(playlists.userId, userId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
+async function canAddOwnedSongToPlaylist(playlistId: string, songId: string, userId: string): Promise<boolean> {
+  const rows = await db()
+    .select({ playlistId: playlists.id })
+    .from(playlists)
+    .innerJoin(songs, and(eq(songs.id, songId), eq(songs.userId, userId)))
+    .where(and(eq(playlists.id, playlistId), eq(playlists.userId, userId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function addSongToPlaylist(
   playlistId: string,
   songId: string,
   position?: number,
-  _userId: string = DEFAULT_QUERY_USER_ID
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
+  if (!(await canAddOwnedSongToPlaylist(playlistId, songId, userId))) {
+    return;
+  }
+
   let nextPosition = position;
   if (nextPosition === undefined) {
     const rows = await db()
@@ -4829,8 +4787,12 @@ export async function addSongToPlaylist(
 export async function removeSongFromPlaylist(
   playlistId: string,
   songId: string,
-  _userId: string = DEFAULT_QUERY_USER_ID
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
+  if (!(await hasOwnedPlaylist(playlistId, userId))) {
+    return;
+  }
+
   await db()
     .delete(playlistSongs)
     .where(and(eq(playlistSongs.playlistId, playlistId), eq(playlistSongs.songId, songId)));
@@ -4839,8 +4801,12 @@ export async function removeSongFromPlaylist(
 export async function reorderPlaylistSongs(
   playlistId: string,
   orderedSongIds: string[],
-  _userId: string = DEFAULT_QUERY_USER_ID
+  userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
+  if (!(await hasOwnedPlaylist(playlistId, userId))) {
+    return;
+  }
+
   await Promise.all(
     orderedSongIds.map((songId, position) =>
       db()

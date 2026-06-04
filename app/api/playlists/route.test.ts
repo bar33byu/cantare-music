@@ -3,10 +3,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../db/queries', () => ({
   getAllPlaylists: vi.fn(),
   createPlaylist: vi.fn(),
+  getUserById: vi.fn(),
+  getUserForSessionTokenHash: vi.fn(),
+  logAuditEvent: vi.fn(),
+}));
+
+vi.mock('../../lib/authTokens', () => ({
+  AUTH_SESSION_COOKIE_NAME: "cantare-session",
+  hashAuthToken: vi.fn((token: string) => `hashed:${token}`),
 }));
 
 import { GET, POST } from './route';
-import { createPlaylist, getAllPlaylists } from '../../../db/queries';
+import { createPlaylist, getAllPlaylists, getUserForSessionTokenHash } from '../../../db/queries';
 
 describe('GET /api/playlists', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -22,7 +30,29 @@ describe('GET /api/playlists', () => {
     expect(data.playlists).toHaveLength(1);
     expect(getAllPlaylists).toHaveBeenCalledWith('default', false);
     expect(response.headers.get('Cache-Control')).toBe('private, no-store');
-    expect(response.headers.get('Vary')).toBe('X-User-ID');
+    expect(response.headers.get('Vary')).toBe('Cookie, X-User-ID');
+  });
+
+  it('uses the signed-in session instead of a client user header', async () => {
+    vi.mocked(getAllPlaylists).mockResolvedValue([] as any);
+    vi.mocked(getUserForSessionTokenHash).mockResolvedValue({
+      id: 'session-user',
+      username: 'session-user',
+      name: 'Session User',
+      email: 'session@example.com',
+      profileVisibility: 'private',
+    } as any);
+
+    const request = new Request('http://localhost/api/playlists', {
+      headers: {
+        cookie: 'cantare-session=session-token',
+        'X-User-ID': 'spoofed-user',
+      },
+    });
+
+    await GET(request as any);
+
+    expect(getAllPlaylists).toHaveBeenCalledWith('session-user', false);
   });
 
   it('supports includeRetired query param', async () => {

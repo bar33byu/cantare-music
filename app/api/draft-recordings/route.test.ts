@@ -23,7 +23,7 @@ describe('GET /api/draft-recordings', () => {
         id: 'draft-1',
         songId: null,
         title: null,
-        audioKey: 'audio/unassigned/user-1/draft.webm',
+        audioKey: 'audio/unassigned/guest-user-1/draft.webm',
         status: 'draft',
         trimStartMs: null,
         trimEndMs: null,
@@ -33,18 +33,18 @@ describe('GET /api/draft-recordings', () => {
     ]);
 
     const request = new Request('http://localhost/api/draft-recordings', {
-      headers: { 'X-User-ID': 'user-1' },
+      headers: { 'X-User-ID': 'guest-user-1' },
     });
 
     const response = await GET(request as any);
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(getUnassignedDraftRecordings).toHaveBeenCalledWith('user-1');
+    expect(getUnassignedDraftRecordings).toHaveBeenCalledWith('guest-user-1');
     expect(data.draftRecordings[0]).toEqual(expect.objectContaining({
       id: 'draft-1',
       songId: null,
-      audioUrl: 'https://cdn.example.com/audio/unassigned/user-1/draft.webm',
+      audioUrl: 'https://cdn.example.com/audio/unassigned/guest-user-1/draft.webm',
     }));
   });
 });
@@ -55,7 +55,7 @@ describe('POST /api/draft-recordings', () => {
       id: 'draft-1',
       songId: null,
       title: null,
-      audioKey: 'audio/unassigned/user-1/draft.webm',
+      audioKey: 'audio/unassigned/guest-user-1/draft.webm',
       status: 'draft',
       trimStartMs: null,
       trimEndMs: null,
@@ -67,9 +67,9 @@ describe('POST /api/draft-recordings', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-User-ID': 'user-1',
+        'X-User-ID': 'guest-user-1',
       },
-      body: JSON.stringify({ audioKey: 'audio/unassigned/user-1/draft.webm' }),
+      body: JSON.stringify({ audioKey: 'audio/unassigned/guest-user-1/draft.webm' }),
     });
 
     const response = await POST(request as any);
@@ -77,8 +77,8 @@ describe('POST /api/draft-recordings', () => {
     expect(response.status).toBe(201);
     expect(createDraftRecording).toHaveBeenCalledWith({
       songId: null,
-      audioKey: 'audio/unassigned/user-1/draft.webm',
+      audioKey: 'audio/unassigned/guest-user-1/draft.webm',
       title: null,
-    }, 'user-1');
+    }, 'guest-user-1');
   });
 });

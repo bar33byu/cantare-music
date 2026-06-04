@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createDraftRecording, getUnassignedDraftRecordings } from '../../../db/queries';
 import { getPublicUrl } from '../../../lib/r2';
-import { resolveRequestUserId } from '../_user';
+import { resolveEffectiveRequestUserId } from '../_user';
 
 type CreateDraftRecordingBody = {
   audioKey?: string;
@@ -19,7 +19,7 @@ function formatError(error: unknown) {
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const draftRecordings = await getUnassignedDraftRecordings(userId);
 
     return NextResponse.json({
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const body = (await request.json().catch(() => null)) as CreateDraftRecordingBody | null;
 
     if (!body || typeof body.audioKey !== 'string' || body.audioKey.trim().length === 0) {

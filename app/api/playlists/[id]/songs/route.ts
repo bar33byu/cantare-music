@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addSongToPlaylist, getPlaylistById, reorderPlaylistSongs } from '../../../../../db/queries';
-import { resolveRequestUserId } from '../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -16,7 +16,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const existing = await getPlaylistById(id, userId);
     if (!existing) {
@@ -47,7 +47,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const existing = await getPlaylistById(id, userId);
     if (!existing) {

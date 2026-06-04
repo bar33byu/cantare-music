@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPlaylistById, getRatingsForSong } from '../../../../../db/queries';
 import { computePlaylistKnowledge } from '../../../../lib/knowledgeUtils';
 import type { Song } from '../../../../types';
-import { resolveRequestUserId } from '../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../_user';
 
 const userScopedHeaders = {
   'Cache-Control': 'private, no-store',
@@ -23,7 +23,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const playlist = await getPlaylistById(id, userId);
 

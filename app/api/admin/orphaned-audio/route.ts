@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getOrphanedAudioKeys, deleteOrphanedAudioKey } from '../../../../db/queries';
 import { deleteObject } from '../../../../lib/r2';
-import { resolveRequestUserId } from '../../_user';
+import { resolveEffectiveRequestUserId } from '../../_user';
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const rows = await getOrphanedAudioKeys(userId);
     return NextResponse.json(rows);
   } catch (error) {
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const rows = await getOrphanedAudioKeys(userId);
     const results: { id: string; audioKey: string; status: 'deleted' | 'failed'; error?: string }[] = [];
 

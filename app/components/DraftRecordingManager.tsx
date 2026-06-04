@@ -100,10 +100,13 @@ function clampTrimValue(value: number, durationMs: number): number {
   return Math.max(0, Math.min(Math.max(0, durationMs), Math.round(value)));
 }
 
-function normalizeDraftTrimState(draft: DraftRecording, durationMs: number): DraftTrimState {
-  const safeDurationMs = Math.max(durationMs, draft.trimEndMs ?? 0, MIN_DRAFT_TRIM_MS);
-  const rawStartMs = clampTrimValue(draft.trimStartMs ?? 0, safeDurationMs);
-  const rawEndMs = clampTrimValue(draft.trimEndMs ?? safeDurationMs, safeDurationMs);
+function normalizeDraftTrimState(
+  draftTrim: Pick<DraftRecording, "trimStartMs" | "trimEndMs">,
+  durationMs: number
+): DraftTrimState {
+  const safeDurationMs = Math.max(durationMs, draftTrim.trimEndMs ?? 0, MIN_DRAFT_TRIM_MS);
+  const rawStartMs = clampTrimValue(draftTrim.trimStartMs ?? 0, safeDurationMs);
+  const rawEndMs = clampTrimValue(draftTrim.trimEndMs ?? safeDurationMs, safeDurationMs);
   const startMs = Math.min(rawStartMs, Math.max(0, safeDurationMs - MIN_DRAFT_TRIM_MS));
   const endMs = Math.min(safeDurationMs, Math.max(startMs + MIN_DRAFT_TRIM_MS, rawEndMs));
   return { startMs, endMs };
@@ -564,7 +567,10 @@ function DraftRecordingReview({
 
   React.useEffect(() => {
     const nextDurationMs = Math.max(durationMs, draft.trimEndMs ?? 0, MIN_DRAFT_TRIM_MS);
-    const nextTrim = normalizeDraftTrimState(draft, nextDurationMs);
+    const nextTrim = normalizeDraftTrimState(
+      { trimStartMs: draft.trimStartMs, trimEndMs: draft.trimEndMs },
+      nextDurationMs
+    );
     setTrimStartMs(nextTrim.startMs);
     setTrimEndMs(nextTrim.endMs);
     lastSavedTrimRef.current = {

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getUserById, getUserForSessionTokenHash, logAuditEvent } from "../../db/queries";
 import { AUTH_SESSION_COOKIE_NAME, hashAuthToken } from "../lib/authTokens";
-import { DEFAULT_USER_ID, USER_COOKIE_NAME, USER_ID_HEADER, normalizeUserId } from "../lib/userContext";
+import { DEFAULT_USER_ID, USER_COOKIE_NAME, USER_ID_HEADER, isAnonymousUserId, normalizeUserId } from "../lib/userContext";
 
 export const IMPERSONATION_COOKIE_NAME = "cantare-impersonate-user-id";
 
@@ -41,6 +41,58 @@ function resolveHeaderOrCookieUserId(request: NextRequest | Request): string {
 export function resolveRequestUserId(request: NextRequest | Request): string {
   void logImpersonatedMutation(request);
   return resolveHeaderOrCookieUserId(request);
+}
+
+function resolveGuestHeaderOrCookieUserId(request: NextRequest | Request): string {
+  const candidate = resolveHeaderOrCookieUserId(request);
+  return candidate === DEFAULT_USER_ID || isAnonymousUserId(candidate) ? candidate : DEFAULT_USER_ID;
+}
+
+async function resolveSessionRequestContext(request: NextRequest | Request): Promise<RequestActorContext | null> {
+  const sessionToken = getRequestCookie(request, AUTH_SESSION_COOKIE_NAME);
+  if (!sessionToken) {
+    return null;
+  }
+
+  const actor = await getUserForSessionTokenHash(hashAuthToken(sessionToken));
+  if (!actor) {
+    return null;
+  }
+
+  const actorWithRole = {
+    ...actor,
+    isAdmin: isEmailAdmin(actor.email),
+  };
+  const impersonatedUserId = getRequestCookie(request, IMPERSONATION_COOKIE_NAME);
+  if (impersonatedUserId && actorWithRole.isAdmin) {
+    const effectiveUser = await getUserById(normalizeUserId(impersonatedUserId));
+    if (effectiveUser) {
+      return {
+        actor: actorWithRole,
+        effectiveUser: {
+          ...effectiveUser,
+          isAdmin: isEmailAdmin(effectiveUser.email),
+        },
+        isImpersonating: effectiveUser.id !== actorWithRole.id,
+      };
+    }
+  }
+
+  return {
+    actor: actorWithRole,
+    effectiveUser: actorWithRole,
+    isImpersonating: false,
+  };
+}
+
+export async function resolveEffectiveRequestUserId(request: NextRequest | Request): Promise<string> {
+  const sessionContext = await resolveSessionRequestContext(request);
+  await logImpersonatedMutation(request, sessionContext);
+  if (sessionContext?.effectiveUser) {
+    return sessionContext.effectiveUser.id;
+  }
+
+  return resolveGuestHeaderOrCookieUserId(request);
 }
 
 export function getRequestCookie(request: NextRequest | Request, cookieName: string): string | undefined {
@@ -92,28 +144,51 @@ function inferAuditResource(request: NextRequest | Request): { resourceType: str
   return { resourceType, resourceId };
 }
 
-async function logImpersonatedMutation(request: NextRequest | Request): Promise<void> {
+async function logImpersonatedMutation(
+  request: NextRequest | Request,
+  resolvedContext?: RequestActorContext | null
+): Promise<void> {
   if (["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase())) {
     return;
   }
 
   const impersonatedUserId = getRequestCookie(request, IMPERSONATION_COOKIE_NAME);
-  const sessionToken = getRequestCookie(request, AUTH_SESSION_COOKIE_NAME);
-  if (!impersonatedUserId || !sessionToken) {
+  if (!impersonatedUserId) {
     return;
   }
 
   try {
-    const actor = await getUserForSessionTokenHash(hashAuthToken(sessionToken));
-    if (!actor || actor.id === impersonatedUserId || !isEmailAdmin(actor.email)) {
+    let context = resolvedContext;
+    if (!context) {
+      const sessionToken = getRequestCookie(request, AUTH_SESSION_COOKIE_NAME);
+      if (!sessionToken) {
+        return;
+      }
+
+      const actor = await getUserForSessionTokenHash(hashAuthToken(sessionToken));
+      if (!actor) {
+        return;
+      }
+      const actorWithRole = {
+        ...actor,
+        isAdmin: isEmailAdmin(actor.email),
+      };
+      context = {
+        actor: actorWithRole,
+        effectiveUser: actorWithRole,
+        isImpersonating: actorWithRole.id !== normalizeUserId(impersonatedUserId),
+      };
+    }
+
+    if (!context.actor?.isAdmin || !context.isImpersonating || !context.effectiveUser) {
       return;
     }
 
     const resource = inferAuditResource(request);
     await logAuditEvent({
       eventType: "impersonation.action",
-      actorUserId: actor.id,
-      effectiveUserId: normalizeUserId(impersonatedUserId),
+      actorUserId: context.actor.id,
+      effectiveUserId: context.effectiveUser.id,
       resourceType: resource.resourceType,
       resourceId: resource.resourceId,
       metadata: {
@@ -132,35 +207,9 @@ export async function resolveRequestUser(request: NextRequest | Request) {
 }
 
 export async function resolveRequestContext(request: NextRequest | Request): Promise<RequestActorContext> {
-  const sessionToken = getRequestCookie(request, AUTH_SESSION_COOKIE_NAME);
-  if (sessionToken) {
-    const actor = await getUserForSessionTokenHash(hashAuthToken(sessionToken));
-    if (actor) {
-      const actorWithRole = {
-        ...actor,
-        isAdmin: isEmailAdmin(actor.email),
-      };
-      const impersonatedUserId = getRequestCookie(request, IMPERSONATION_COOKIE_NAME);
-      if (impersonatedUserId && actorWithRole.isAdmin) {
-        const effectiveUser = await getUserById(normalizeUserId(impersonatedUserId));
-        if (effectiveUser) {
-          return {
-            actor: actorWithRole,
-            effectiveUser: {
-              ...effectiveUser,
-              isAdmin: isEmailAdmin(effectiveUser.email),
-            },
-            isImpersonating: effectiveUser.id !== actorWithRole.id,
-          };
-        }
-      }
-
-      return {
-        actor: actorWithRole,
-        effectiveUser: actorWithRole,
-        isImpersonating: false,
-      };
-    }
+  const sessionContext = await resolveSessionRequestContext(request);
+  if (sessionContext) {
+    return sessionContext;
   }
 
   const userId = resolveHeaderOrCookieUserId(request);

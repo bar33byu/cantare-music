@@ -13,7 +13,7 @@ import {
   type MidiSegmentAnswerKey,
 } from '../../../../lib/midiGuidedTapPractice';
 import type { TapScoreResult } from '../../../../lib/enhancedTapPractice';
-import { resolveRequestUserId } from '../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../_user';
 
 const TAP_HEAT_MAP_SESSION_LIMIT = 200;
 const TAP_HEAT_MAP_ATTEMPT_LIMIT = 5;
@@ -47,7 +47,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
 
     const song = await getSongById(id, userId);

@@ -23,7 +23,7 @@ import {
   scoreTapAttemptAgainstMidiKey,
 } from '../../../../../lib/midiGuidedTapPractice';
 import { DEFAULT_TAP_TIMING_TOLERANCE_MS } from '../../../../../lib/tapPracticeConstants';
-import { resolveRequestUserId } from '../../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -85,7 +85,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string; sessionId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id, sessionId } = await params;
 
     const song = await getSongById(id, userId);
@@ -110,7 +110,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string; sessionId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id, sessionId } = await params;
 
     const song = await getSongById(id, userId);
@@ -190,7 +190,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; sessionId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id, sessionId } = await params;
 
     const song = await getSongById(id, userId);

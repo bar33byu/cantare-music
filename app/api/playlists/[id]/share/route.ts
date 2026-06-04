@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { disablePlaylistSharing, enablePlaylistSharing, getPlaylistById } from '../../../../../db/queries';
-import { resolveRequestUserId } from '../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../_user';
 
 const userScopedHeaders = {
   'Cache-Control': 'private, no-store',
@@ -29,7 +29,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const existing = await getPlaylistById(id, userId);
     if (!existing) {
@@ -60,7 +60,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const existing = await getPlaylistById(id, userId);
     if (!existing) {

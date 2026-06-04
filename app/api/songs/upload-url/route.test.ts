@@ -106,7 +106,7 @@ describe('POST /api/songs/upload-url', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-User-ID': 'user-1',
+        'X-User-ID': 'guest-user-1',
       },
       body: JSON.stringify({
         filename: 'draft.webm',
@@ -120,7 +120,7 @@ describe('POST /api/songs/upload-url', () => {
 
     expect(response.status).toBe(200);
     expect(getSongById).not.toHaveBeenCalled();
-    expect(generateUploadKey).toHaveBeenCalledWith('unassigned/user-1', 'draft.webm', 'draft');
+    expect(generateUploadKey).toHaveBeenCalledWith('unassigned/guest-user-1', 'draft.webm', 'draft');
   });
 
   it('returns 400 when size is greater than 15 MB', async () => {
