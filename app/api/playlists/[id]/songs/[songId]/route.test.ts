@@ -22,17 +22,17 @@ describe('DELETE /api/playlists/[id]/songs/[songId]', () => {
     expect(removeSongFromPlaylist).toHaveBeenCalledWith('pl-1', 'song-1', 'default');
   });
 
-  it('removes song from playlist for the request user', async () => {
+  it('removes song from playlist for a guest request user', async () => {
     vi.mocked(getPlaylistById).mockResolvedValue({ id: 'pl-1', songs: [], isRetired: false, createdAt: '2026-01-01T00:00:00.000Z', name: 'Set' } as any);
     const request = new Request('http://localhost/api/playlists/pl-1/songs/song-1', {
       method: 'DELETE',
-      headers: { [USER_ID_HEADER]: 'Test User' },
+      headers: { [USER_ID_HEADER]: 'guest-test-user' },
     });
     const response = await DELETE(request as any, { params: Promise.resolve({ id: 'pl-1', songId: 'song-1' }) });
 
     expect(response.status).toBe(204);
-    expect(getPlaylistById).toHaveBeenCalledWith('pl-1', 'test-user');
-    expect(removeSongFromPlaylist).toHaveBeenCalledWith('pl-1', 'song-1', 'test-user');
+    expect(getPlaylistById).toHaveBeenCalledWith('pl-1', 'guest-test-user');
+    expect(removeSongFromPlaylist).toHaveBeenCalledWith('pl-1', 'song-1', 'guest-test-user');
   });
 
   it('returns 404 when playlist does not belong to request user', async () => {

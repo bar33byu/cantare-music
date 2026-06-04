@@ -5,7 +5,7 @@ import {
   getSongById,
   upsertMidiAlignment,
 } from "../../../../../../db/queries";
-import { resolveRequestUserId } from "../../../../_user";
+import { resolveEffectiveRequestUserId } from "../../../../_user";
 import {
   alignMidiByFirstAudioStart,
   appendAlignmentTap,
@@ -40,7 +40,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
     if (!song) {

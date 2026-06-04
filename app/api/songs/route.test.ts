@@ -13,13 +13,21 @@ vi.mock('../../../db/queries', () => ({
   getAllSongs: vi.fn(),
   getLatestRatingTimeBySongIds: vi.fn(),
   getSongKnowledgeBySongIds: vi.fn(),
-  getSegmentsBySongId: vi.fn(),
-  getLatestMidiSourceForSong: vi.fn(),
+  getSegmentsBySongIds: vi.fn(),
+  getMidiContourStatusBySongIds: vi.fn(),
   createSong: vi.fn(),
+  getUserById: vi.fn(),
+  getUserForSessionTokenHash: vi.fn(),
+  logAuditEvent: vi.fn(),
+}));
+
+vi.mock('../../lib/authTokens', () => ({
+  AUTH_SESSION_COOKIE_NAME: "cantare-session",
+  hashAuthToken: vi.fn((token: string) => `hashed:${token}`),
 }));
 
 import { GET, POST } from './route';
-import { getAllSongs, getLatestMidiSourceForSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getSegmentsBySongId, createSong } from '../../../db/queries';
+import { getAllSongs, getMidiContourStatusBySongIds, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getSegmentsBySongIds, createSong, getUserForSessionTokenHash } from '../../../db/queries';
 
 describe('GET /api/songs', () => {
   it('returns array of songs', async () => {
@@ -37,8 +45,8 @@ describe('GET /api/songs', () => {
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({ '1': 65 });
-    vi.mocked(getLatestMidiSourceForSong).mockResolvedValue({ cleanedNoteCount: 4 } as any);
-    vi.mocked(getSegmentsBySongId).mockResolvedValue([
+    vi.mocked(getMidiContourStatusBySongIds).mockResolvedValue({ '1': true });
+    vi.mocked(getSegmentsBySongIds).mockResolvedValue({ '1': [
       {
         id: 'seg-1',
         songId: '1',
@@ -49,7 +57,7 @@ describe('GET /api/songs', () => {
         lyricText: '',
         pitchContourNotes: [{ id: 'n-1', timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
       } as any,
-    ]);
+    ] });
 
     const request = new Request('http://localhost/api/songs');
     const response = await GET(request as any);
@@ -74,6 +82,34 @@ describe('GET /api/songs', () => {
     expect(getAllSongs).toHaveBeenCalledWith('default');
     expect(getLatestRatingTimeBySongIds).toHaveBeenCalledWith(['1'], 'default');
     expect(getSongKnowledgeBySongIds).toHaveBeenCalledWith(['1'], 'default');
+    expect(getSegmentsBySongIds).toHaveBeenCalledWith(['1']);
+    expect(getMidiContourStatusBySongIds).toHaveBeenCalledWith(['1'], 'default');
+  });
+
+  it('uses the signed-in session instead of a client user header', async () => {
+    vi.mocked(getAllSongs).mockResolvedValue([]);
+    vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
+    vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
+    vi.mocked(getSegmentsBySongIds).mockResolvedValue({});
+    vi.mocked(getMidiContourStatusBySongIds).mockResolvedValue({});
+    vi.mocked(getUserForSessionTokenHash).mockResolvedValue({
+      id: 'session-user',
+      username: 'session-user',
+      name: 'Session User',
+      email: 'session@example.com',
+      profileVisibility: 'private',
+    } as any);
+
+    const request = new Request('http://localhost/api/songs', {
+      headers: {
+        cookie: 'cantare-session=session-token',
+        'X-User-ID': 'spoofed-user',
+      },
+    });
+
+    await GET(request as any);
+
+    expect(getAllSongs).toHaveBeenCalledWith('session-user');
   });
 
   it('handles string timestamps from the database', async () => {
@@ -88,8 +124,8 @@ describe('GET /api/songs', () => {
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs as any);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
-    vi.mocked(getSegmentsBySongId).mockResolvedValue([] as any);
-    vi.mocked(getLatestMidiSourceForSong).mockResolvedValue(null);
+    vi.mocked(getSegmentsBySongIds).mockResolvedValue({});
+    vi.mocked(getMidiContourStatusBySongIds).mockResolvedValue({});
 
     const request = new Request('http://localhost/api/songs');
     const response = await GET(request as any);
@@ -128,8 +164,8 @@ describe('GET /api/songs', () => {
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
-    vi.mocked(getSegmentsBySongId).mockResolvedValue([]);
-    vi.mocked(getLatestMidiSourceForSong).mockResolvedValue(null);
+    vi.mocked(getSegmentsBySongIds).mockResolvedValue({ 'blend-only': [] });
+    vi.mocked(getMidiContourStatusBySongIds).mockResolvedValue({});
 
     const response = await GET(new Request('http://localhost/api/songs') as any);
     const data = await response.json();
@@ -153,8 +189,8 @@ describe('GET /api/songs', () => {
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
-    vi.mocked(getSegmentsBySongId).mockResolvedValue([]);
-    vi.mocked(getLatestMidiSourceForSong).mockResolvedValue({ cleanedNoteCount: 4 } as any);
+    vi.mocked(getSegmentsBySongIds).mockResolvedValue({ 'midi-song': [] });
+    vi.mocked(getMidiContourStatusBySongIds).mockResolvedValue({ 'midi-song': true });
 
     const response = await GET(new Request('http://localhost/api/songs') as any);
     const data = await response.json();
@@ -179,7 +215,7 @@ describe('GET /api/songs', () => {
     vi.mocked(getAllSongs).mockResolvedValue(mockSongs);
     vi.mocked(getLatestRatingTimeBySongIds).mockResolvedValue({});
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({});
-    vi.mocked(getSegmentsBySongId).mockResolvedValue([
+    vi.mocked(getSegmentsBySongIds).mockResolvedValue({ 'segment-contour-song': [
       {
         id: 'seg-1',
         songId: 'segment-contour-song',
@@ -190,8 +226,8 @@ describe('GET /api/songs', () => {
         lyricText: '',
         pitchContourNotes: [{ id: 'tap-1', timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
       } as any,
-    ]);
-    vi.mocked(getLatestMidiSourceForSong).mockResolvedValue(null);
+    ] });
+    vi.mocked(getMidiContourStatusBySongIds).mockResolvedValue({});
 
     const response = await GET(new Request('http://localhost/api/songs') as any);
     const data = await response.json();
@@ -226,7 +262,8 @@ describe('GET /api/songs', () => {
       'song-9': new Date('2024-03-20T00:00:00.000Z'),
     });
     vi.mocked(getSongKnowledgeBySongIds).mockResolvedValue({ 'song-9': 40 });
-    vi.mocked(getSegmentsBySongId).mockResolvedValue([] as any);
+    vi.mocked(getSegmentsBySongIds).mockResolvedValue({ 'song-9': [] });
+    vi.mocked(getMidiContourStatusBySongIds).mockResolvedValue({});
 
     const request = new Request('http://localhost/api/songs');
     const response = await GET(request as any);

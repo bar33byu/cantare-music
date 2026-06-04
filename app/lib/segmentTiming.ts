@@ -57,9 +57,7 @@ export function getPlaybackAnchoredNewSegmentPlacement(
   _segments: TimelineSegment[],
   playbackMs: number,
   durationMs = DEFAULT_DURATION_MS,
-  minimumDurationMs = DEFAULT_MIN_GAP_MS,
-  _offsetAfterLastMs = DEFAULT_OFFSET_AFTER_LAST_MS,
-  _minimumSpaceBeforeNextMs = 15_000
+  minimumDurationMs = DEFAULT_MIN_GAP_MS
 ): NewSegmentPlacement {
   const safePlaybackMs = Math.max(0, asFiniteNumber(playbackMs, 0));
   const safeDuration = Math.max(0, asFiniteNumber(durationMs, DEFAULT_DURATION_MS));

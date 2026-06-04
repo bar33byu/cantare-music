@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPlaylist, getAllPlaylists } from '../../../db/queries';
-import { resolveRequestUserId } from '../_user';
+import { resolveEffectiveRequestUserId } from '../_user';
 
 const userScopedHeaders = {
   'Cache-Control': 'private, no-store',
-  Vary: 'X-User-ID',
+  Vary: 'Cookie, X-User-ID',
 };
 
 function formatError(error: unknown) {
@@ -18,7 +18,7 @@ function formatError(error: unknown) {
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const includeRetired = new URL(request.url).searchParams.get('includeRetired') === 'true';
     const playlists = await getAllPlaylists(userId, includeRetired);
     return NextResponse.json({ playlists }, {
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const body = await request.json();
     const { name, eventDate } = body;
 

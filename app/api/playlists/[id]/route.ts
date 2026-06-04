@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deletePlaylist, getPlaylistById, updatePlaylist } from '../../../../db/queries';
-import { resolveRequestUserId } from '../../_user';
+import { resolveEffectiveRequestUserId } from '../../_user';
 
 const userScopedHeaders = {
   'Cache-Control': 'private, no-store',
@@ -21,7 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const playlist = await getPlaylistById(id, userId);
 
@@ -43,7 +43,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const existing = await getPlaylistById(id, userId);
     if (!existing) {
@@ -76,7 +76,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const existing = await getPlaylistById(id, userId);
     if (!existing) {

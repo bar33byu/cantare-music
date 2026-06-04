@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { discardDraftRecording, updateDraftRecordingTrim } from '../../../../../../db/queries';
-import { resolveRequestUserId } from '../../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../../_user';
 
 type UpdateDraftRecordingBody = {
   trimStartMs?: unknown;
@@ -25,7 +25,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; draftId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id, draftId } = await params;
     const body = (await request.json().catch(() => null)) as UpdateDraftRecordingBody | null;
 
@@ -56,7 +56,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; draftId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id, draftId } = await params;
     const draftRecording = await discardDraftRecording(id, draftId, userId);
     if (!draftRecording) {

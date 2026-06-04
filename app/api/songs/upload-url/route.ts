@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { generateUploadKey, r2Client, BUCKET } from '../../../../lib/r2';
-import { resolveRequestUserId } from '../../_user';
+import { resolveEffectiveRequestUserId } from '../../_user';
 import { getSongById } from '../../../../db/queries';
 
 type UploadRequestBody = {
@@ -30,7 +30,7 @@ function getBaseContentType(contentType: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const body = (await request.json().catch(() => null)) as UploadRequestBody | null;
 
     if (!body || typeof body.filename !== 'string' || typeof body.contentType !== 'string' || typeof body.size !== 'number') {

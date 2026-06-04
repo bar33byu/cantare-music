@@ -10,7 +10,7 @@ import {
   updateMidiSourceCleanup,
 } from "../../../../../db/queries";
 import { BUCKET, generateMidiUploadKey, r2Client } from "../../../../../lib/r2";
-import { resolveRequestUserId } from "../../../_user";
+import { resolveEffectiveRequestUserId } from "../../../_user";
 import {
   cleanMidiNotes,
   deriveSegmentAnswerKeys,
@@ -95,7 +95,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
     if (!song) {
@@ -114,7 +114,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
     if (!song) {
@@ -178,7 +178,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
     if (!song) {

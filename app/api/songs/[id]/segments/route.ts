@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSegmentsBySongId, upsertSegments, createSegment, reorderSegments, getSongById } from '../../../../../db/queries';
 import { inferTimelineOrder } from '../../../../lib/segmentTiming';
-import { resolveRequestUserId } from '../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../_user';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
     if (!song) {
@@ -32,7 +32,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id: songId } = await params;
     const song = await getSongById(songId, userId);
     if (!song) {
@@ -98,7 +98,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
     if (!song) {
@@ -142,7 +142,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
     if (!song) {

@@ -8,10 +8,12 @@ import { DraftRecordingManager } from './DraftRecordingManager';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { toPlayableAudioUrl } from '../lib/audioUrls';
 import { getPlaybackAnchoredNewSegmentPlacement } from '../lib/segmentTiming';
+import { withUserIdHeader } from '../lib/userContext';
 
 const MIN_SEGMENT_MS = 1000;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
+const DEFAULT_ZOOM = 4;
 const ZOOM_STEP = 0.5;
 const BULK_IMPORT_ZOOM = 3;
 const DEFAULT_TIMELINE_FALLBACK_MS = 60000;
@@ -56,6 +58,7 @@ interface SegmentEditorProps {
   songId: string;
   userId?: string;
   onSongUpdated?: () => void;
+  onSongDeleted?: (songId: string) => void;
 }
 
 interface EditorDisclosureProps {
@@ -91,7 +94,7 @@ function EditorDisclosure({ title, description, open, onToggle, children, testId
   );
 }
 
-export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorProps) {
+export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: SegmentEditorProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -106,9 +109,10 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
   const [savingSegmentId, setSavingSegmentId] = useState<string | null>(null);
   const [savingTitle, setSavingTitle] = useState(false);
+  const [deletingSong, setDeletingSong] = useState(false);
   const [lastDeletedSection, setLastDeletedSection] = useState<Segment | null>(null);
   const [undoDismissTimer, setUndoDismissTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [stableDurationMs, setStableDurationMs] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
@@ -146,30 +150,20 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
   );
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
-    if (!userId) {
-      return init;
-    }
-
-    const headers = new Headers(init?.headers);
-    headers.set('X-User-ID', userId);
-
-    return {
-      ...init,
-      headers,
-    };
+    return withUserIdHeader(init, userId);
   }, [userId]);
 
   const request = useCallback((url: string, init?: RequestInit) => {
     return fetch(url, withUserHeader(init));
   }, [withUserHeader]);
 
-  const updateLocalSegment = (segmentId: string, updates: Partial<Segment>) => {
+  const updateLocalSegment = useCallback((segmentId: string, updates: Partial<Segment>) => {
     setSegments((previous) =>
       previous.map((segment) => (segment.id === segmentId ? { ...segment, ...updates } : segment))
     );
-  };
+  }, []);
 
-  const saveSegmentPatch = async (segmentId: string, updates: Partial<Segment>) => {
+  const saveSegmentPatch = useCallback(async (segmentId: string, updates: Partial<Segment>) => {
     try {
       setSavingSegmentId(segmentId);
       const response = await request(`/api/songs/${songId}/segments/${segmentId}`, {
@@ -184,9 +178,9 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     } finally {
       setSavingSegmentId(null);
     }
-  };
+  }, [request, songId]);
 
-  const getNextSectionNumber = () => {
+  const getNextSectionNumber = useCallback(() => {
     const numbers = segments
       .map((s) => {
         const match = s.label.match(/^(?:Section\s+)?(\d+)$/i);
@@ -194,7 +188,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
       })
       .filter((n) => n > 0);
     return Math.max(0, ...numbers) + 1;
-  };
+  }, [segments]);
 
   const createSegment = async () => {
     const basePlacement = getPlaybackAnchoredNewSegmentPlacement(segments, currentMs);
@@ -265,7 +259,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     });
   };
 
-  const probeAudioDurationMs = async (url: string): Promise<number | null> => {
+  const probeAudioDurationMs = useCallback(async (url: string): Promise<number | null> => {
     if (!url) {
       return null;
     }
@@ -305,9 +299,9 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
       window.setTimeout(() => settle(null), BULK_DURATION_PROBE_TIMEOUT_MS);
     });
-  };
+  }, []);
 
-  const probeAudioDurationCandidatesMs = async (candidates: Array<string | null | undefined>): Promise<number | null> => {
+  const probeAudioDurationCandidatesMs = useCallback(async (candidates: Array<string | null | undefined>): Promise<number | null> => {
     for (const candidate of candidates) {
       const normalized = candidate?.trim();
       if (!normalized) {
@@ -321,7 +315,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     }
 
     return null;
-  };
+  }, [probeAudioDurationMs]);
 
   const resolveBulkDurationMs = async (): Promise<number> => {
     const knownDuration = Math.max(durationMs, stableDurationMs);
@@ -573,14 +567,14 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     [segments]
   );
 
-  const msFromClientX = (clientX: number): number => {
+  const msFromClientX = useCallback((clientX: number): number => {
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || timelineDurationMs <= 0) {
       return 0;
     }
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     return Math.round(ratio * timelineDurationMs);
-  };
+  }, [timelineDurationMs]);
 
   const handleBoardSeek = (event: React.MouseEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) {
@@ -626,7 +620,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     }
   }, []);
 
-  const handleInteractionMove = (clientX: number, pointerId: number) => {
+  const handleInteractionMove = useCallback((clientX: number, pointerId: number) => {
     if (!activeInteraction || pointerId !== activeInteraction.pointerId) {
       return;
     }
@@ -656,9 +650,9 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
 
     const nextEndMs = Math.min(timelineDurationMs, Math.max(rawMs, target.startMs + MIN_SEGMENT_MS));
     updateLocalSegment(target.id, { endMs: nextEndMs });
-  };
+  }, [activeInteraction, msFromClientX, segments, timelineDurationMs, updateLocalSegment]);
 
-  const finishInteraction = async (pointerId: number) => {
+  const finishInteraction = useCallback(async (pointerId: number) => {
     if (!activeInteraction || pointerId !== activeInteraction.pointerId) {
       return;
     }
@@ -674,7 +668,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     } catch {
       setDeleteError('Failed to save section timing. Please try again.');
     }
-  };
+  }, [activeInteraction, saveSegmentPatch, segments]);
 
   useEffect(() => {
     if (!activeInteraction) {
@@ -729,7 +723,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     return () => {
       cancelled = true;
     };
-  }, [durationMs, playbackAudioUrl, stableDurationMs]);
+  }, [durationMs, playbackAudioUrl, probeAudioDurationCandidatesMs, stableDurationMs]);
 
   // Clean up undo timer on unmount to avoid memory leaks
   useEffect(() => {
@@ -857,6 +851,33 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
     }
   };
 
+  const handleDeleteSong = async () => {
+    const titleForPrompt = songTitle.trim() || titleDraft.trim() || "this song";
+    const shouldDelete = window.confirm(`Delete "${titleForPrompt}"? This cannot be undone.`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeleteError(null);
+    setDeletingSong(true);
+    try {
+      const response = await request(`/api/songs/${songId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: 'Failed to delete song' })) as { error?: string };
+        throw new Error(payload.error || 'Failed to delete song');
+      }
+
+      onSongDeleted?.(songId);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'Failed to delete song. Please try again.');
+    } finally {
+      setDeletingSong(false);
+    }
+  };
+
   if (songLoaded && !hasAnyAudio) {
     return (
       <div className="mx-auto w-full max-w-6xl">
@@ -875,6 +896,15 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
               className="flex-1 rounded border border-indigo-200 px-3 py-1.5 text-base font-medium text-gray-900"
               placeholder="Song title"
             />
+            <button
+              type="button"
+              data-testid="segment-editor-delete-song"
+              onClick={() => { void handleDeleteSong(); }}
+              disabled={deletingSong}
+              className="rounded border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {deletingSong ? 'Deleting...' : 'Delete song'}
+            </button>
             {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
           </div>
         </div>
@@ -919,6 +949,15 @@ export function SegmentEditor({ songId, userId, onSongUpdated }: SegmentEditorPr
             className="flex-1 rounded border border-indigo-200 px-3 py-1.5 text-base font-medium text-gray-900"
             placeholder="Song title"
           />
+          <button
+            type="button"
+            data-testid="segment-editor-delete-song"
+            onClick={() => { void handleDeleteSong(); }}
+            disabled={deletingSong}
+            className="rounded border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deletingSong ? 'Deleting...' : 'Delete song'}
+          </button>
           {savingTitle && <span className="text-xs text-indigo-500">Saving…</span>}
         </div>
       </div>

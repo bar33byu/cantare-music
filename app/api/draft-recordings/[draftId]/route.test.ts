@@ -22,7 +22,7 @@ describe('PATCH /api/draft-recordings/[draftId]', () => {
       id: 'draft-1',
       songId: 'song-1',
       title: null,
-      audioKey: 'audio/unassigned/user-1/draft.webm',
+      audioKey: 'audio/unassigned/guest-user-1/draft.webm',
       status: 'draft',
       trimStartMs: null,
       trimEndMs: null,
@@ -34,7 +34,7 @@ describe('PATCH /api/draft-recordings/[draftId]', () => {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        'X-User-ID': 'user-1',
+        'X-User-ID': 'guest-user-1',
       },
       body: JSON.stringify({ songId: 'song-1' }),
     });
@@ -43,11 +43,11 @@ describe('PATCH /api/draft-recordings/[draftId]', () => {
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(assignDraftRecordingToSong).toHaveBeenCalledWith('draft-1', 'song-1', 'user-1');
+    expect(assignDraftRecordingToSong).toHaveBeenCalledWith('draft-1', 'song-1', 'guest-user-1');
     expect(data.draftRecording).toEqual(expect.objectContaining({
       id: 'draft-1',
       songId: 'song-1',
-      audioUrl: 'https://cdn.example.com/audio/unassigned/user-1/draft.webm',
+      audioUrl: 'https://cdn.example.com/audio/unassigned/guest-user-1/draft.webm',
     }));
   });
 
@@ -71,7 +71,7 @@ describe('DELETE /api/draft-recordings/[draftId]', () => {
       id: 'draft-1',
       songId: null,
       title: null,
-      audioKey: 'audio/unassigned/user-1/draft.webm',
+      audioKey: 'audio/unassigned/guest-user-1/draft.webm',
       status: 'discarded',
       trimStartMs: null,
       trimEndMs: null,
@@ -81,12 +81,12 @@ describe('DELETE /api/draft-recordings/[draftId]', () => {
 
     const request = new Request('http://localhost/api/draft-recordings/draft-1', {
       method: 'DELETE',
-      headers: { 'X-User-ID': 'user-1' },
+      headers: { 'X-User-ID': 'guest-user-1' },
     });
 
     const response = await DELETE(request as any, { params: Promise.resolve({ draftId: 'draft-1' }) });
 
     expect(response.status).toBe(200);
-    expect(discardUnassignedDraftRecording).toHaveBeenCalledWith('draft-1', 'user-1');
+    expect(discardUnassignedDraftRecording).toHaveBeenCalledWith('draft-1', 'guest-user-1');
   });
 });

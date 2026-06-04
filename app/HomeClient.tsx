@@ -28,6 +28,7 @@ import {
   isAnonymousUserId,
   normalizeUserId,
   normalizeUsername,
+  withUserIdHeader,
   type KnownUser,
   USER_COOKIE_NAME,
 } from "./lib/userContext";
@@ -881,13 +882,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   }, []);
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
-    return {
-      ...init,
-      headers: {
-        ...(init?.headers ?? {}),
-        "X-User-ID": activeUserId,
-      },
-    };
+    return withUserIdHeader(init, activeUserId);
   }, [activeUserId]);
 
   const request = useCallback((url: string, init?: RequestInit) => {
@@ -1215,15 +1210,15 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     setAccountDeletionMessage("");
     try {
       const response = await fetch("/api/users/me/deletion", { method: "POST" });
+      const payload = (await response.json().catch(() => ({}))) as { deletion?: AccountDeletionState; error?: string };
       if (!response.ok) {
-        throw new Error("Failed to schedule account deletion");
+        throw new Error(payload.error ?? "Failed to schedule account deletion");
       }
-      const payload = (await response.json()) as { deletion?: AccountDeletionState };
       setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
       setAccountDeletionMessage("Account scheduled for deletion.");
       usersHydratedFromDbRef.current = false;
-    } catch {
-      setAccountDeletionMessage("Could not schedule account deletion.");
+    } catch (error) {
+      setAccountDeletionMessage(error instanceof Error ? error.message : "Could not schedule account deletion.");
     } finally {
       setAccountDeletionLoading(false);
     }
@@ -1243,15 +1238,15 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     setAccountDeletionMessage("");
     try {
       const response = await fetch("/api/users/me/deletion", { method: "DELETE" });
+      const payload = (await response.json().catch(() => ({}))) as { deletion?: AccountDeletionState; error?: string };
       if (!response.ok) {
-        throw new Error("Failed to cancel account deletion");
+        throw new Error(payload.error ?? "Failed to cancel account deletion");
       }
-      const payload = (await response.json()) as { deletion?: AccountDeletionState };
       setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
       setAccountDeletionMessage("Scheduled account deletion canceled.");
       usersHydratedFromDbRef.current = false;
-    } catch {
-      setAccountDeletionMessage("Could not cancel account deletion.");
+    } catch (error) {
+      setAccountDeletionMessage(error instanceof Error ? error.message : "Could not cancel account deletion.");
     } finally {
       setAccountDeletionLoading(false);
     }
@@ -1754,7 +1749,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             persistProgress={!playlistPracticeReadOnly}
             readOnlyDataUserId={playlistPracticeReadOnly ? selectedPlaylist?.owner?.id : undefined}
             initialSession={session}
-            onDraftRecordingSaved={refreshSelectedSong}
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
             segmentPrerollMs={userSettings.segmentPrerollMs}
@@ -1806,6 +1800,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             songId={selectedSong.id}
             userId={activeUserId}
             onSongUpdated={refreshSelectedSong}
+            onSongDeleted={handleSongDeleted}
           />
         </div>
       </div>

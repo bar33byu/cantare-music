@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPlaylistById, removeSongFromPlaylist } from '../../../../../../db/queries';
-import { resolveRequestUserId } from '../../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -16,7 +16,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; songId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id, songId } = await params;
     const existing = await getPlaylistById(id, userId);
     if (!existing) {

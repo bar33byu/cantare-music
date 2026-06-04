@@ -1122,20 +1122,20 @@ describe('SegmentEditor', () => {
     expect(screen.queryByTestId('segment-editor-undo-delete')).not.toBeInTheDocument();
   });
 
-  it('zooms canvas in and out from whole-song default', async () => {
+  it('defaults the editor canvas to maximum zoom and allows zooming out', async () => {
     render(<SegmentEditor songId="song-1" />);
 
     const board = await screen.findByTestId('segment-editor-board');
-    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('100%');
-    expect(board).toHaveStyle({ width: '100%' });
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('400%');
+    expect(board).toHaveStyle({ width: '400%' });
 
     fireEvent.click(screen.getByTestId('segment-editor-zoom-in'));
-    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('150%');
-    expect(board).toHaveStyle({ width: '150%' });
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('400%');
+    expect(board).toHaveStyle({ width: '400%' });
 
     fireEvent.click(screen.getByTestId('segment-editor-zoom-out'));
-    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('100%');
-    expect(board).toHaveStyle({ width: '100%' });
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('350%');
+    expect(board).toHaveStyle({ width: '350%' });
   });
 
   it('keeps the editor canvas in a touch-scrollable wrapper on mobile', async () => {
@@ -1151,7 +1151,7 @@ describe('SegmentEditor', () => {
 
     const boardScroll = await screen.findByTestId('segment-editor-board-scroll');
     const board = screen.getByTestId('segment-editor-board');
-    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('100%');
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('400%');
 
     fireEvent.touchStart(boardScroll, {
       touches: [
@@ -1162,12 +1162,12 @@ describe('SegmentEditor', () => {
     fireEvent.touchMove(boardScroll, {
       touches: [
         { clientX: 40, clientY: 40 },
-        { clientX: 190, clientY: 40 },
+        { clientX: 90, clientY: 40 },
       ],
     });
 
-    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('150%');
-    expect(board).toHaveStyle({ width: '150%' });
+    expect(screen.getByTestId('segment-editor-zoom-label')).toHaveTextContent('200%');
+    expect(board).toHaveStyle({ width: '200%' });
 
     fireEvent.touchEnd(boardScroll, {
       touches: [],

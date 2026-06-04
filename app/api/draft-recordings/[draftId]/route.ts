@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assignDraftRecordingToSong, discardUnassignedDraftRecording } from '../../../../db/queries';
 import { getPublicUrl } from '../../../../lib/r2';
-import { resolveRequestUserId } from '../../_user';
+import { resolveEffectiveRequestUserId } from '../../_user';
 
 type UpdateDraftRecordingBody = {
   songId?: string;
@@ -21,7 +21,7 @@ export async function PATCH(
   { params }: { params: Promise<{ draftId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { draftId } = await params;
     const body = (await request.json().catch(() => null)) as UpdateDraftRecordingBody | null;
     const songId = typeof body?.songId === 'string' ? body.songId.trim() : '';
@@ -52,7 +52,7 @@ export async function DELETE(
   { params }: { params: Promise<{ draftId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { draftId } = await params;
     const draftRecording = await discardUnassignedDraftRecording(draftId, userId);
     if (!draftRecording) {

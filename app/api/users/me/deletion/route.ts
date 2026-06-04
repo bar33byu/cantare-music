@@ -22,10 +22,6 @@ function ensureSelfManagedAccount(context: Awaited<ReturnType<typeof resolveRequ
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   }
 
-  if (context.isImpersonating || (context.actor && context.effectiveUser && context.actor.id !== context.effectiveUser.id)) {
-    return NextResponse.json({ error: "Exit impersonation to manage account deletion" }, { status: 403 });
-  }
-
   return null;
 }
 

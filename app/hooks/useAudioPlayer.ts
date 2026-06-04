@@ -438,7 +438,7 @@ export function useAudioPlayer(
       audio.removeEventListener('pause', handlePauseDebug);
       audio.pause();
     };
-  }, [audioUrl]);
+  }, [applyCurrentTime, audioUrl, startPlayback, updateDebugInfo]);
 
   const play = useCallback((startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;

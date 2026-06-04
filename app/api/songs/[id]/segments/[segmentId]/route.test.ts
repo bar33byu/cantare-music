@@ -44,17 +44,17 @@ describe('GET /api/songs/[id]/segments/[segmentId]', () => {
     expect(getSegmentsBySongId).toHaveBeenCalledWith('song-1');
   });
 
-  it('checks segment ownership with the request user', async () => {
+  it('checks segment ownership with a guest request user', async () => {
     const mockSegments = [{ id: 'seg-1', label: 'Verse 1', order: 1 }];
     vi.mocked(getSegmentsBySongId).mockResolvedValue(mockSegments as any);
 
     const request = new Request('http://localhost/api/songs/song-1/segments/seg-1', {
-      headers: { [USER_ID_HEADER]: 'Test User' },
+      headers: { [USER_ID_HEADER]: 'guest-test-user' },
     });
     const response = await GET(request as any, { params: Promise.resolve({ id: 'song-1', segmentId: 'seg-1' }) });
 
     expect(response.status).toBe(200);
-    expect(getSongById).toHaveBeenCalledWith('song-1', 'test-user');
+    expect(getSongById).toHaveBeenCalledWith('song-1', 'guest-test-user');
   });
 
   it('returns 404 when song does not belong to request user', async () => {

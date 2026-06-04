@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllSongs, createSong, getLatestMidiSourceForSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getSegmentsBySongId } from '../../../db/queries';
-import { resolveRequestUserId } from '../_user';
+import { getAllSongs, createSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getMidiContourStatusBySongIds, getSegmentsBySongIds } from '../../../db/queries';
+import { resolveEffectiveRequestUserId } from '../_user';
 
 function toIsoString(value: unknown): string | null {
   if (!value) {
@@ -33,23 +33,14 @@ function isMissingDatabaseConfigError(error: unknown): boolean {
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const songs = await getAllSongs(userId);
     const songIds = songs.map((song) => song.id);
-    const [ratingFallbackBySongId, knowledgeBySongId, readinessBySongId] = await Promise.all([
+    const [ratingFallbackBySongId, knowledgeBySongId, segmentsBySongId, midiContourBySongId] = await Promise.all([
       getLatestRatingTimeBySongIds(songIds, userId),
       getSongKnowledgeBySongIds(songIds, userId),
-      Promise.all(
-        songs.map(async (song) => {
-          const segments = await getSegmentsBySongId(song.id);
-          const hasSegments = segments.length > 0;
-          const midiSource = await getLatestMidiSourceForSong(song.id, userId);
-          const hasMidiContour = (midiSource?.cleanedNoteCount ?? 0) > 0;
-          const hasTapKeys = hasMidiContour;
-
-          return [song.id, { hasSegments, hasTapKeys, hasMidiContour }] as const;
-        })
-      ).then((entries) => Object.fromEntries(entries)),
+      getSegmentsBySongIds(songIds),
+      getMidiContourStatusBySongIds(songIds, userId),
     ]);
 
     return NextResponse.json(
@@ -62,9 +53,9 @@ export async function GET(request: NextRequest) {
         hasAudio: Boolean(song.audioKey || song.alternateAudioKey),
         hasPartAudio: Boolean(song.audioKey),
         hasBlendAudio: Boolean(song.alternateAudioKey),
-        hasSegments: readinessBySongId[song.id]?.hasSegments ?? false,
-        hasTapKeys: readinessBySongId[song.id]?.hasTapKeys ?? false,
-        hasMidiContour: readinessBySongId[song.id]?.hasMidiContour ?? false,
+        hasSegments: (segmentsBySongId[song.id]?.length ?? 0) > 0,
+        hasTapKeys: midiContourBySongId[song.id] ?? false,
+        hasMidiContour: midiContourBySongId[song.id] ?? false,
       })),
       {
         headers: {
@@ -84,7 +75,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const body = await request.json();
     const { title, artist } = body;
 

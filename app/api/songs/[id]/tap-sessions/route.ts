@@ -6,7 +6,7 @@ import {
   listTapPracticeSessionsForSong,
 } from '../../../../../db/queries';
 import type { TapAudioVersion } from '../../../../lib/enhancedTapPractice';
-import { resolveRequestUserId } from '../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../_user';
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
@@ -22,7 +22,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
 
     const song = await getSongById(id, userId);
@@ -43,7 +43,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
 
     const song = await getSongById(id, userId);

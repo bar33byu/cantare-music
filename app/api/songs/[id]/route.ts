@@ -9,7 +9,7 @@ import {
 } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
-import { resolveRequestUserId } from '../../_user';
+import { resolveEffectiveRequestUserId } from '../../_user';
 import { deleteSongStorageAssets } from '../../../lib/accountDeletion';
 
 function formatError(error: unknown) {
@@ -26,7 +26,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
     if (!song) {
@@ -84,7 +84,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
   ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const song = await getSongById(id, userId);
     if (!song) {
@@ -108,7 +108,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id } = await params;
     const body = await request.json();
     const { audioKey, alternateAudioKey, title, artist } = body;

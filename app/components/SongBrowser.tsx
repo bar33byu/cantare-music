@@ -3,6 +3,7 @@
 import { useCallback, useState, useEffect, useMemo } from 'react';
 import { getMasteryColor } from '../lib/masteryColors';
 import { buildUserScopedCacheKey, readCachedJson, writeCachedJson } from '../lib/localJsonCache';
+import { withUserIdHeader } from '../lib/userContext';
 import { SongReadinessIcons } from './SongReadinessIcons';
 
 interface SongListItem {
@@ -65,17 +66,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   const cacheKey = useMemo(() => buildUserScopedCacheKey('songs', userId), [userId]);
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
-    if (!userId) {
-      return init;
-    }
-
-    return {
-      ...init,
-      headers: {
-        ...(init?.headers ?? {}),
-        'X-User-ID': userId,
-      },
-    };
+    return withUserIdHeader(init, userId);
   }, [userId]);
 
   // Load persisted sort from localStorage on mount

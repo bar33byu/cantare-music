@@ -1,6 +1,7 @@
 "use client";
 
 import { DragEvent, useCallback, useEffect, useState } from 'react';
+import { withUserIdHeader } from '../lib/userContext';
 import type { Playlist, Song } from '../types';
 
 interface PlaylistDetailProps {
@@ -32,17 +33,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const [publicShareAudioMode, setPublicShareAudioMode] = useState<'part' | 'blend' | 'both'>('both');
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
-    if (!userId) {
-      return init;
-    }
-
-    return {
-      ...init,
-      headers: {
-        ...(init?.headers ?? {}),
-        'X-User-ID': userId,
-      },
-    };
+    return withUserIdHeader(init, userId);
   }, [userId]);
 
   const request = useCallback((url: string, init?: RequestInit) => {

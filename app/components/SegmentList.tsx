@@ -54,7 +54,7 @@ export function SegmentList({ songId, onEdit, onDelete, onAddNew, refreshKey }: 
     }
   };
 
-  const handleDragEnd = (_e: DragEvent<HTMLLIElement>) => {
+  const handleDragEnd = () => {
     setDraggedId(null);
     setDragOverId(null);
   };

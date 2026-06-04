@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { promoteDraftRecordingToSongVersion, recordOrphanedAudioKey } from '../../../../../../../db/queries';
 import { deleteObject } from '../../../../../../../lib/r2';
-import { resolveRequestUserId } from '../../../../../_user';
+import { resolveEffectiveRequestUserId } from '../../../../../_user';
 
 type PromoteDraftRecordingBody = {
   trimStartMs?: unknown;
@@ -26,7 +26,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string; draftId: string }> }
 ) {
   try {
-    const userId = resolveRequestUserId(request);
+    const userId = await resolveEffectiveRequestUserId(request);
     const { id, draftId } = await params;
     const body = (await request.json().catch(() => ({}))) as PromoteDraftRecordingBody;
 
