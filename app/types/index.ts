@@ -53,6 +53,10 @@ export interface Song {
   alternateAudioUrl?: string;
   audioTrimStartMs?: number | null;
   audioTrimEndMs?: number | null;
+  shareToken?: string | null;
+  shareUrl?: string | null;
+  sharedAt?: string | null;
+  shareAudioMode?: "part" | "blend" | "both";
   pitchContourNotes?: SongPitchContourNote[];
   hasMidiContour?: boolean;
   draftRecordings?: DraftRecording[];

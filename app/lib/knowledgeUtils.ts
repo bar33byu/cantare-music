@@ -34,23 +34,25 @@ export function computePlaylistKnowledge(
   songs: Song[],
   ratings: SegmentRating[]
 ): number {
-  const segments = songs.flatMap((song) => song.segments ?? []);
-  if (segments.length === 0) {
+  if (songs.length === 0) {
     return 0;
   }
 
-  const latestRatingBySegment = new Map<string, SegmentRating>();
-  for (const rating of ratings) {
-    const previous = latestRatingBySegment.get(rating.segmentId);
-    if (!previous || new Date(rating.ratedAt).getTime() > new Date(previous.ratedAt).getTime()) {
-      latestRatingBySegment.set(rating.segmentId, rating);
+  const perSongScores = songs.map((song) => {
+    if (!song.segments || song.segments.length === 0) {
+      return 0;
     }
-  }
 
-  const total = segments.reduce((sum, segment) => {
-    const latest = latestRatingBySegment.get(segment.id);
-    return sum + (latest ? getSegmentKnowledgePercent(latest.rating as MemoryRating) : 0);
-  }, 0);
+    const segmentScores = song.segments.map((segment) => {
+      const latest = ratings
+        .filter((rating) => rating.segmentId === segment.id)
+        .sort((a, b) => new Date(b.ratedAt).getTime() - new Date(a.ratedAt).getTime())[0];
 
-  return total / segments.length;
+      return latest ? getSegmentKnowledgePercent(latest.rating as MemoryRating) : 0;
+    });
+
+    return segmentScores.reduce((sum, value) => sum + value, 0) / segmentScores.length;
+  });
+
+  return perSongScores.reduce((sum, score) => sum + score, 0) / perSongScores.length;
 }

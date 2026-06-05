@@ -205,6 +205,128 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return scopedInit ? fetch(url, scopedInit) : fetch(url);
   }, [withUserHeader]);
 
+  const [shareToken, setShareToken] = React.useState<string | null>(song.shareToken ?? null);
+  const [sharedAt, setSharedAt] = React.useState<string | null>(song.sharedAt ?? null);
+  const [shareAudioMode, setShareAudioMode] = React.useState<"part" | "blend" | "both">(song.shareAudioMode ?? "both");
+  const [shareUrl, setShareUrl] = React.useState<string | null>(song.shareUrl ?? null);
+  const [shareBusy, setShareBusy] = React.useState(false);
+  const [shareMessage, setShareMessage] = React.useState("");
+  const [shareError, setShareError] = React.useState("");
+
+  React.useEffect(() => {
+    setShareToken(song.shareToken ?? null);
+    setSharedAt(song.sharedAt ?? null);
+    setShareAudioMode(song.shareAudioMode ?? "both");
+    setShareUrl(song.shareUrl ?? null);
+    setShareMessage("");
+    setShareError("");
+  }, [song.id, song.shareAudioMode, song.shareToken, song.shareUrl, song.sharedAt]);
+
+  const canManageSharing = Boolean(onEditSongClick && persistProgress && !readOnlyDataUserId);
+  const resolvedShareUrl = shareToken && typeof window !== "undefined"
+    ? shareUrl ?? `${window.location.origin}/share/songs/${shareToken}`
+    : shareUrl;
+  type SongShareResponse = {
+    error?: string;
+    shareToken?: string | null;
+    sharedAt?: string | null;
+    shareAudioMode?: "part" | "blend" | "both";
+    shareUrl?: string | null;
+  };
+
+  const applyShareResponse = React.useCallback((payload: {
+    shareToken?: string | null;
+    sharedAt?: string | null;
+    shareAudioMode?: "part" | "blend" | "both";
+    shareUrl?: string | null;
+  }) => {
+    setShareToken(payload.shareToken ?? null);
+    setSharedAt(payload.sharedAt ?? null);
+    setShareAudioMode(payload.shareAudioMode ?? "both");
+    setShareUrl(payload.shareUrl ?? null);
+  }, []);
+
+  const handleEnableSongShare = React.useCallback(async () => {
+    setShareBusy(true);
+    setShareError("");
+    setShareMessage("");
+    try {
+      const response = await request(`/api/songs/${song.id}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shareAudioMode }),
+      });
+      const payload = await response.json().catch(() => ({})) as SongShareResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to update sharing.");
+      }
+      applyShareResponse(payload);
+      setShareMessage(shareToken ? "Share settings updated." : "Anyone with the link can open this song.");
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : "Unable to update sharing.");
+    } finally {
+      setShareBusy(false);
+    }
+  }, [applyShareResponse, request, shareAudioMode, shareToken, song.id]);
+
+  const handleRotateSongShare = React.useCallback(async () => {
+    if (!window.confirm("Replace this song share link? The old link will stop working.")) {
+      return;
+    }
+
+    setShareBusy(true);
+    setShareError("");
+    setShareMessage("");
+    try {
+      const response = await request(`/api/songs/${song.id}/share`, { method: "PATCH" });
+      const payload = await response.json().catch(() => ({})) as SongShareResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to rotate share link.");
+      }
+      applyShareResponse(payload);
+      setShareMessage("Share link replaced.");
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : "Unable to rotate share link.");
+    } finally {
+      setShareBusy(false);
+    }
+  }, [applyShareResponse, request, song.id]);
+
+  const handleDisableSongShare = React.useCallback(async () => {
+    setShareBusy(true);
+    setShareError("");
+    setShareMessage("");
+    try {
+      const response = await request(`/api/songs/${song.id}/share`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(payload.error ?? "Unable to turn sharing off.");
+      }
+      setShareToken(null);
+      setSharedAt(null);
+      setShareUrl(null);
+      setShareMessage("Sharing is private.");
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : "Unable to turn sharing off.");
+    } finally {
+      setShareBusy(false);
+    }
+  }, [request, song.id]);
+
+  const handleCopySongShareLink = React.useCallback(async () => {
+    if (!resolvedShareUrl) {
+      return;
+    }
+    try {
+      await navigator.clipboard?.writeText(resolvedShareUrl);
+      setShareMessage("Share link copied.");
+      setShareError("");
+    } catch {
+      setShareMessage("Share link is ready.");
+      setShareError("");
+    }
+  }, [resolvedShareUrl]);
+
   const withReadOnlyDataUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
     const dataUserId = readOnlyDataUserId ?? userId;
     return withUserIdHeader(init, dataUserId);
@@ -2066,6 +2188,92 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         </p>
       </header>
 
+      {canManageSharing && !isTapPracticeMode ? (
+        <section data-testid="song-share-panel" className="mx-4 mb-2 rounded border border-gray-200 bg-white p-3 text-sm shadow-sm md:mx-8">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0">
+              <p className="font-semibold text-gray-900">Sharing</p>
+              <p className="mt-1 text-gray-600">
+                Audience: <span className="font-medium text-gray-900">{shareToken ? "Anyone with link" : "Private"}</span>
+                {sharedAt ? <span className="text-gray-500"> · Shared {new Date(sharedAt).toLocaleDateString()}</span> : null}
+              </p>
+              {resolvedShareUrl ? (
+                <a
+                  data-testid="song-share-link"
+                  href={resolvedShareUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 block max-w-full truncate text-indigo-700 underline"
+                >
+                  {resolvedShareUrl}
+                </a>
+              ) : (
+                <p className="mt-2 text-gray-600">Create a link when you want someone else to practice a snapshot of this song.</p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 md:min-w-[18rem]">
+              <label className="flex items-center justify-between gap-3 text-gray-700">
+                <span className="font-medium">Shared audio</span>
+                <select
+                  data-testid="song-share-audio-mode"
+                  value={shareAudioMode}
+                  onChange={(event) => setShareAudioMode(event.target.value as "part" | "blend" | "both")}
+                  className="rounded border border-gray-300 bg-white px-2 py-1 text-sm"
+                >
+                  <option value="both">Part and blend</option>
+                  <option value="part">Part only</option>
+                  <option value="blend">Blend only</option>
+                </select>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  data-testid="song-share-save"
+                  disabled={shareBusy}
+                  onClick={() => void handleEnableSongShare()}
+                  className="rounded border border-emerald-300 px-3 py-1 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {shareBusy ? "Saving..." : shareToken ? "Update link" : "Create link"}
+                </button>
+                {resolvedShareUrl ? (
+                  <button
+                    type="button"
+                    data-testid="song-share-copy"
+                    onClick={() => void handleCopySongShareLink()}
+                    className="rounded border border-indigo-300 px-3 py-1 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+                  >
+                    Copy
+                  </button>
+                ) : null}
+                {shareToken ? (
+                  <>
+                    <button
+                      type="button"
+                      data-testid="song-share-rotate"
+                      disabled={shareBusy}
+                      onClick={() => void handleRotateSongShare()}
+                      className="rounded border border-amber-300 px-3 py-1 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Rotate
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="song-share-disable"
+                      disabled={shareBusy}
+                      onClick={() => void handleDisableSongShare()}
+                      className="rounded border border-red-300 px-3 py-1 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Disable
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          {shareError ? <p className="mt-2 text-xs text-red-600" role="alert">{shareError}</p> : null}
+          {shareMessage ? <p className="mt-2 text-xs text-gray-600" role="status">{shareMessage}</p> : null}
+        </section>
+      ) : null}
 
       <div
         data-testid="practice-shell"

@@ -4110,15 +4110,16 @@ export async function getAllPlaylists(
     .where(legacyMode ? inArray(playlistSongs.playlistId, playlistIds) : and(inArray(playlistSongs.playlistId, playlistIds), eq(songs.userId, userId)));
 
   const songIds = Array.from(new Set(linkedSongs.map((song) => song.songId)));
-  const [segmentRows, midiContourRows] = await Promise.all([
+  const [segmentCountRows, midiContourRows, knowledgeBySong] = await Promise.all([
     songIds.length > 0
       ? db()
           .select({
             songId: segments.songId,
-            id: segments.id,
+            count: count(segments.id),
           })
           .from(segments)
           .where(inArray(segments.songId, songIds))
+          .groupBy(segments.songId)
       : Promise.resolve([]),
     songIds.length > 0
       ? db()
@@ -4130,19 +4131,10 @@ export async function getAllPlaylists(
           .where(and(inArray(midiSources.songId, songIds), sql`${midiSources.cleanedNoteCount} > 0`))
           .groupBy(midiSources.songId)
       : Promise.resolve([]),
+    getSongKnowledgeBySongIds(songIds, userId),
   ]);
 
-  const segmentIds = segmentRows.map((segment) => segment.id);
-  const latestRatings = await getLatestRatingsBySegmentIds(segmentIds, userId);
-  const segmentCountBySong = new Map<string, number>();
-  const knowledgeNumeratorBySong = new Map<string, number>();
-  for (const segment of segmentRows) {
-    segmentCountBySong.set(segment.songId, (segmentCountBySong.get(segment.songId) ?? 0) + 1);
-    knowledgeNumeratorBySong.set(
-      segment.songId,
-      (knowledgeNumeratorBySong.get(segment.songId) ?? 0) + (latestRatings.get(segment.id) ?? 0) * 20
-    );
-  }
+  const segmentCountBySong = new Map(segmentCountRows.map((row) => [row.songId, Number(row.count)]));
   const midiSongIds = new Set(midiContourRows.map((row) => row.songId));
   const statsByPlaylist = new Map<string, ReturnType<typeof emptyPlaylistHealthStats>>();
   const knowledgeNumeratorByPlaylist = new Map<string, number>();
@@ -4162,7 +4154,7 @@ export async function getAllPlaylists(
       stats.songsWithSegments += 1;
       knowledgeNumeratorByPlaylist.set(
         linkedSong.playlistId,
-        (knowledgeNumeratorByPlaylist.get(linkedSong.playlistId) ?? 0) + (knowledgeNumeratorBySong.get(linkedSong.songId) ?? 0)
+        (knowledgeNumeratorByPlaylist.get(linkedSong.playlistId) ?? 0) + (knowledgeBySong[linkedSong.songId] ?? 0) * segmentCount
       );
       knowledgeSegmentCountByPlaylist.set(
         linkedSong.playlistId,
