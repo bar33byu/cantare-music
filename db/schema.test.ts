@@ -130,8 +130,6 @@ describe("schema tables", () => {
     expect(cols).toContain("sourceOwnerId");
     expect(cols).toContain("sourceShareToken");
     expect(cols).toContain("importedAt");
-    expect(cols).toContain("lastSourceSyncCheckedAt");
-    expect(cols).toContain("lastSourceSyncedAt");
     expect(cols).toContain("createdAt");
   });
 

@@ -223,8 +223,6 @@ export const playlists = pgTable(
     sourceOwnerId: text("source_owner_id"),
     sourceShareToken: text("source_share_token"),
     importedAt: timestamp("imported_at"),
-    lastSourceSyncCheckedAt: timestamp("last_source_sync_checked_at"),
-    lastSourceSyncedAt: timestamp("last_source_synced_at"),
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => ({

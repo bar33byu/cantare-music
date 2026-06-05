@@ -220,67 +220,6 @@ describe('PlaylistDetail', () => {
     });
   });
 
-  it('checks source updates and runs a full source resync', async () => {
-    const importedPlaylist = {
-      ...playlistResponse,
-      sourcePlaylistId: 'source-pl',
-      lastSourceSyncCheckedAt: null,
-      lastSourceSyncedAt: null,
-    };
-    const diff = {
-      sourceAvailable: true,
-      checkedAt: '2026-06-05T12:00:00.000Z',
-      lastSourceSyncCheckedAt: '2026-06-05T12:00:00.000Z',
-      lastSourceSyncedAt: null,
-      source: {
-        id: 'source-pl',
-        name: 'Source Set',
-        owner: { displayName: 'Taylor', username: 'taylor' },
-      },
-      counts: { added: 1, removed: 1, changed: 1 },
-      orderChanged: true,
-      hasChanges: true,
-    };
-    const diffAfter = {
-      ...diff,
-      counts: { added: 0, removed: 0, changed: 0 },
-      orderChanged: false,
-      hasChanges: false,
-      lastSourceSyncedAt: '2026-06-05T12:01:00.000Z',
-    };
-    mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => importedPlaylist })
-      .mockResolvedValueOnce({ ok: true, json: async () => diff })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          applied: { added: 1, updated: 1, removedFromPlaylist: 1, orderUpdated: true },
-          diffAfter,
-        }),
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...importedPlaylist, lastSourceSyncedAt: '2026-06-05T12:01:00.000Z' }) });
-
-    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
-
-    await waitFor(() => expect(screen.getByTestId('playlist-source-check')).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId('playlist-source-check'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('playlist-source-added')).toHaveTextContent('1 added');
-      expect(screen.getByTestId('playlist-source-changed')).toHaveTextContent('1 changed');
-      expect(screen.getByTestId('playlist-source-removed')).toHaveTextContent('1 removed');
-    });
-
-    fireEvent.click(screen.getByTestId('playlist-source-full-sync'));
-
-    await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/source-sync', expect.objectContaining({ method: 'POST' }));
-      expect(screen.getByTestId('playlist-source-message')).toHaveTextContent('Synced: 1 added, 1 updated, 1 removed from playlist, order updated.');
-    });
-    const syncCall = mockFetch.mock.calls.find(([url, init]) => url === '/api/playlists/pl-1/source-sync' && init?.method === 'POST');
-    expect(JSON.parse(String(syncCall?.[1]?.body))).toEqual({ mode: 'full' });
-  });
-
   it('back button calls onBack', async () => {
     render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
     await waitFor(() => expect(screen.getByTestId('playlist-detail-back')).toBeInTheDocument());

@@ -107,8 +107,6 @@ export interface Playlist {
   sourceOwnerId?: string | null;
   sourceShareToken?: string | null;
   importedAt?: string | null;
-  lastSourceSyncCheckedAt?: string | null;
-  lastSourceSyncedAt?: string | null;
   createdAt: string;
   owner?: {
     id: string;
