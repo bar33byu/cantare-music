@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Playlist } from '../types';
 import * as audioPlayerHook from '../hooks/useAudioPlayer';
-import { PlaylistPracticeView } from './PlaylistPracticeView';
+import { getAutoDrillPlaybackWarning, PlaylistPracticeView } from './PlaylistPracticeView';
 
 const playlist: Playlist = {
   id: 'playlist-1',
@@ -1980,6 +1980,16 @@ describe('PlaylistPracticeView', () => {
       expect(play).toHaveBeenCalledWith(0, 1000);
     });
     expect(screen.getByTestId('auto-drill-live')).not.toHaveTextContent('request is not allowed');
+  });
+
+  it('sanitizes mobile permission errors shown in the Auto Drill warning banner', () => {
+    const rawPermissionMessage =
+      'The request is not allowed by the user agent or the platform in the current context, possibly because the user denied permission.';
+
+    const warning = getAutoDrillPlaybackWarning(rawPermissionMessage);
+
+    expect(warning).toContain('Automatic audio or voice prompts are blocked');
+    expect(warning).not.toContain('request is not allowed');
   });
 
   it('exits Auto Drill with Escape', async () => {

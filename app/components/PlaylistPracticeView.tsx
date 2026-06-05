@@ -27,6 +27,8 @@ const DEFAULT_FOCUS_PREROLL_MS = 5000;
 const FOCUS_MASTERED_RATING = 5;
 const AUTO_DRILL_PREROLL_MS = 500;
 const HANDS_FREE_LABEL = 'Hands Free';
+const AUTO_DRILL_PERMISSION_WARNING =
+  'Automatic audio or voice prompts are blocked on this device. Tap Play once to continue; voice prompts have been turned off.';
 
 const sortKeyLabel: Record<SortKey, string> = {
   alphabetical: 'Alphabetical',
@@ -125,6 +127,14 @@ function isPlaybackPermissionBlockMessage(message: string | null | undefined): b
     normalized.includes('automatic audio') ||
     normalized.includes('autoplay')
   );
+}
+
+export function getAutoDrillPlaybackWarning(message: string | null): string | null {
+  if (!message) {
+    return null;
+  }
+
+  return isPlaybackPermissionBlockMessage(message) ? AUTO_DRILL_PERMISSION_WARNING : message;
 }
 
 function speakPrompt(text: string, enabled = true): Promise<void> {
@@ -1009,6 +1019,13 @@ export function PlaylistPracticeView({
   ]);
 
   const handleAutoDrillPlaybackBlocked = useCallback((message: string | null) => {
+    if (isPlaybackPermissionBlockMessage(message)) {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      setAutoDrillVoiceEnabled(false);
+    }
+
     if (
       practiceMode === 'auto-drill' &&
       currentAutoDrillItem &&
@@ -1031,7 +1048,7 @@ export function PlaylistPracticeView({
       }
     }
 
-    setAutoDrillPlaybackWarning(message);
+    setAutoDrillPlaybackWarning(getAutoDrillPlaybackWarning(message));
   }, [
     autoDrillPlayToken,
     autoDrillState,
@@ -1703,7 +1720,7 @@ export function PlaylistPracticeView({
               data-testid="auto-drill-playback-warning"
               className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800"
             >
-              {autoDrillPlaybackWarning}
+              {getAutoDrillPlaybackWarning(autoDrillPlaybackWarning)}
             </div>
           ) : null}
 
