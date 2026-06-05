@@ -40,7 +40,7 @@ describe("POST /api/shared/playlists/[id]/import", () => {
     expect(importPublicPlaylist).not.toHaveBeenCalled();
   });
 
-  it("copies public playlists using the public audio mode without requiring a share token", async () => {
+  it("copies public playlists without applying the public preview audio restriction", async () => {
     vi.mocked(resolveRequestContext).mockResolvedValue({
       actor: { id: "user-1", email: "user@example.com" },
       effectiveUser: { id: "user-1", email: "user@example.com" },
@@ -79,7 +79,6 @@ describe("POST /api/shared/playlists/[id]/import", () => {
     expect(response.status).toBe(200);
     expect(importPublicPlaylist).toHaveBeenCalledWith("pl-1", "user-1", {
       force: false,
-      shareAudioMode: "blend",
     });
   });
 });
