@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
 import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
@@ -781,7 +782,9 @@ export function PlaylistPracticeView({
       pauseAudio();
     }
 
-    onPreferredAudioVersionChange?.(nextVersion);
+    flushSync(() => {
+      onPreferredAudioVersionChange?.(nextVersion);
+    });
   };
 
   const handleNextSong = () => {

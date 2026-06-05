@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useReducer } from "react";
+import { flushSync } from "react-dom";
 import { Song, MemoryRating, PitchContourNote, ContourNoteHeatStat } from "../types/index";
 import { sessionReducer, SessionState } from "../lib/sessionReducer";
 import { computeKnowledgeScore } from "../lib/knowledgeUtils";
@@ -463,7 +464,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setAudioVersion(preferredAudioVersion === "blend" ? "blend" : "straight");
   }, [preferredAudioVersion, song.id]);
 
-  useEffect(() => {
+  React.useLayoutEffect(() => {
     const pending = pendingAudioVersionSwitchRef.current;
     if (!pending) {
       return;
@@ -1124,8 +1125,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       wasPlaying: isPlaying,
     };
 
-    onPreferredAudioVersionChange?.(nextVersion === "blend" ? "blend" : "part");
-    setAudioVersion(nextVersion);
+    flushSync(() => {
+      onPreferredAudioVersionChange?.(nextVersion === "blend" ? "blend" : "part");
+      setAudioVersion(nextVersion);
+    });
   }, [activeAudioVersion, currentMs, currentSegment, durationMs, hasBothAudioVersions, isLooping, isPlaying, onPreferredAudioVersionChange]);
 
   const getTapLane = React.useCallback((clientY: number) => {

@@ -220,4 +220,19 @@ describe('useAudioPlayer', () => {
     expect(result.current.playbackRate).toBe(0.75);
     expect(stub.playbackRate).toBe(0.75);
   });
+
+  it('reuses the same audio element when the source URL changes', () => {
+    const { rerender } = renderHook(({ url }) => useAudioPlayer(url, factory), {
+      initialProps: { url: 'part.mp3' },
+    });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(stub.src).toBe('part.mp3');
+
+    rerender({ url: 'blend.mp3' });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(stub.src).toBe('blend.mp3');
+    expect(stub.load).toHaveBeenCalledTimes(2);
+  });
 });
