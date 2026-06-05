@@ -96,7 +96,7 @@ describe('computePlaylistKnowledge', () => {
     expect(computePlaylistKnowledge(songs, [])).toBe(0);
   });
 
-  it('averages per-song scores with mixed ratings', () => {
+  it('averages all playlist sections with mixed ratings', () => {
     const songs = [
       makeSong({
         id: 'song-1',
@@ -119,7 +119,7 @@ describe('computePlaylistKnowledge', () => {
       makeRating({ segmentId: 'seg-3', rating: 2, ratedAt: '2026-03-01T00:00:00.000Z' }),
     ];
 
-    // Song1 avg = (100 + 60) / 2 = 80; Song2 avg = 40; playlist avg = 60
-    expect(computePlaylistKnowledge(songs, ratings)).toBe(60);
+    // Playlist section average = (100 + 60 + 40) / 3
+    expect(computePlaylistKnowledge(songs, ratings)).toBeCloseTo(66.67, 2);
   });
 });

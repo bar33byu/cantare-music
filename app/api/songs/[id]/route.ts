@@ -48,9 +48,6 @@ export async function GET(
       alternateAudioUrl: song.alternateAudioKey ? getPublicUrl(song.alternateAudioKey) : undefined,
       audioTrimStartMs: song.audioTrimStartMs ?? null,
       audioTrimEndMs: song.audioTrimEndMs ?? null,
-      shareToken: song.shareToken ?? null,
-      sharedAt: song.sharedAt ? song.sharedAt.toISOString() : null,
-      shareAudioMode: song.shareAudioMode === 'part' || song.shareAudioMode === 'blend' ? song.shareAudioMode : 'both',
       pitchContourNotes: [],
       draftRecordings: draftRecordings.map((draft) => ({
         ...draft,
