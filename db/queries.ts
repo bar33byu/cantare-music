@@ -4877,17 +4877,11 @@ async function resolveImportedPlaylistSource(imported: PlaylistDetail, userId: s
   if (imported.sourceShareToken) {
     const sourceByToken = await getSharedPlaylistByToken(imported.sourceShareToken);
     if (sourceByToken) {
-      const fullSource = await getPlaylistById(sourceByToken.id, sourceByToken.owner.id);
-      return fullSource ? { ...fullSource, owner: sourceByToken.owner, shareAudioMode: "both" } : sourceByToken;
+      return sourceByToken;
     }
   }
 
-  const publicSource = await getPublicPlaylistById(imported.sourcePlaylistId, userId);
-  if (!publicSource) {
-    return null;
-  }
-  const fullSource = await getPlaylistById(publicSource.id, publicSource.owner.id);
-  return fullSource ? { ...fullSource, owner: publicSource.owner, shareAudioMode: "both" } : publicSource;
+  return getPublicPlaylistById(imported.sourcePlaylistId, userId);
 }
 
 function comparePlaylistSource(imported: PlaylistDetail, source: SharedPlaylistDetail | null, checkedAt: Date): PlaylistSourceDiff {
@@ -5426,7 +5420,7 @@ async function importPlaylistSource(
 
   const importedPlaylist = playlistRows[0];
   const sortedSongs = [...source.songs].sort((a, b) => a.position - b.position);
-  const shareAudioMode = normalizeShareAudioMode(options.shareAudioMode);
+  const shareAudioMode = normalizeShareAudioMode(options.shareAudioMode ?? source.shareAudioMode);
   let importedSongCount = 0;
   const existingSongTitleRows = await database
     .select({ title: songs.title })
