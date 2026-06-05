@@ -820,8 +820,12 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [authMessage, setAuthMessage] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [profileDisplayName, setProfileDisplayName] = useState("");
+  const [profileUsername, setProfileUsername] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
+  const [emailChangeEmail, setEmailChangeEmail] = useState("");
+  const [emailChangeMessage, setEmailChangeMessage] = useState("");
+  const [emailChangeLoading, setEmailChangeLoading] = useState(false);
   const [accountDeletion, setAccountDeletion] = useState<AccountDeletionState | null>(null);
   const [accountDeletionLoading, setAccountDeletionLoading] = useState(false);
   const [accountDeletionMessage, setAccountDeletionMessage] = useState("");
@@ -913,8 +917,26 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
     const params = new URLSearchParams(window.location.search);
     const shouldCleanAuthParam = params.get("auth") === "signed-in";
+    const emailChangeStatus = params.get("emailChange");
+    const shouldCleanEmailChangeParam = Boolean(emailChangeStatus);
+    if (emailChangeStatus === "confirmed") {
+      setSettingsOpen(true);
+      setEmailChangeMessage("Email address confirmed.");
+      usersHydratedFromDbRef.current = false;
+    } else if (emailChangeStatus === "invalid") {
+      setSettingsOpen(true);
+      setEmailChangeMessage("That email confirmation link is invalid or expired.");
+    } else if (emailChangeStatus === "taken") {
+      setSettingsOpen(true);
+      setEmailChangeMessage("That email is already used by another account.");
+    }
+
     const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
-    if ((cookieUserId === DEFAULT_USER_ID || isAnonymousUserId(cookieUserId)) && !shouldCleanAuthParam) {
+    if ((cookieUserId === DEFAULT_USER_ID || isAnonymousUserId(cookieUserId)) && !shouldCleanAuthParam && !shouldCleanEmailChangeParam) {
+      return;
+    }
+    if ((cookieUserId === DEFAULT_USER_ID || isAnonymousUserId(cookieUserId)) && shouldCleanEmailChangeParam && !shouldCleanAuthParam) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
       return;
     }
 
@@ -928,7 +950,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         const payload = (await response.json()) as AuthSessionPayload;
         if (!cancelled && (payload.user || payload.effectiveUser)) {
           applyAuthSessionPayload(payload);
-          if (shouldCleanAuthParam) {
+          if (shouldCleanAuthParam || shouldCleanEmailChangeParam) {
             window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
           }
         }
@@ -955,9 +977,11 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   useEffect(() => {
     if (settingsOpen) {
       setProfileDisplayName(currentUser.name);
+      setProfileUsername(currentUser.username);
+      setEmailChangeEmail("");
       setProfileMessage("");
     }
-  }, [currentUser.name, settingsOpen]);
+  }, [currentUser.name, currentUser.username, settingsOpen]);
 
   useEffect(() => {
     if (!settingsOpen || !isSignedIn) {
@@ -1156,8 +1180,13 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const handleProfileSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const displayName = profileDisplayName.trim();
+    const username = normalizeUsername(profileUsername);
     if (!displayName) {
       setProfileMessage("Display name is required.");
+      return;
+    }
+    if (!username) {
+      setProfileMessage("Username must contain letters or numbers.");
       return;
     }
 
@@ -1167,22 +1196,52 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       const response = await fetch("/api/users/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName }),
+        body: JSON.stringify({ displayName, username }),
       });
       if (!response.ok) {
-        throw new Error("Failed to update profile");
+        const payload = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(payload.error ?? "Failed to update profile");
       }
       const payload = (await response.json()) as AuthSessionPayload;
       if (payload.user) {
         applyAuthenticatedUser(payload.user);
         setProfileDisplayName(payload.user.name);
+        setProfileUsername(payload.user.username);
       }
       setProfileMessage("Profile saved.");
       usersHydratedFromDbRef.current = false;
-    } catch {
-      setProfileMessage("Could not save profile.");
+    } catch (error) {
+      setProfileMessage(error instanceof Error ? error.message : "Could not save profile.");
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  const handleEmailChangeRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const email = emailChangeEmail.trim().toLowerCase();
+    if (!email) {
+      setEmailChangeMessage("Email is required.");
+      return;
+    }
+
+    setEmailChangeLoading(true);
+    setEmailChangeMessage("");
+    try {
+      const response = await fetch("/api/users/me/email-change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const payload = await response.json().catch(() => ({})) as { message?: string; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not send confirmation link.");
+      }
+      setEmailChangeMessage(payload.message ?? "If that email can be used for Cantare, a confirmation link is on the way.");
+    } catch (error) {
+      setEmailChangeMessage(error instanceof Error ? error.message : "Could not send confirmation link.");
+    } finally {
+      setEmailChangeLoading(false);
     }
   };
 
@@ -1903,6 +1962,11 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     );
   }
 
+  const normalizedProfileUsername = normalizeUsername(profileUsername);
+  const profileHasChanges =
+    profileDisplayName.trim() !== currentUser.name ||
+    normalizedProfileUsername !== currentUser.username;
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       {impersonationBanner}
@@ -2037,13 +2101,57 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                           onChange={(event) => setProfileDisplayName(event.target.value)}
                           className="min-w-0 rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
                         />
+                        <label htmlFor="profile-username" className="text-sm font-medium text-gray-700">
+                          Username
+                        </label>
+                        <div className="flex min-w-0 items-center rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-800 focus-within:border-indigo-500">
+                          <span className="text-gray-500">@</span>
+                          <input
+                            id="profile-username"
+                            data-testid="profile-username"
+                            type="text"
+                            value={profileUsername}
+                            onChange={(event) => setProfileUsername(event.target.value)}
+                            className="min-w-0 flex-1 border-0 bg-transparent px-1 py-0 outline-none"
+                          />
+                        </div>
                         <button
                           type="submit"
-                          disabled={profileSaving || !profileDisplayName.trim() || profileDisplayName.trim() === currentUser.name}
+                          disabled={profileSaving || !profileDisplayName.trim() || !normalizedProfileUsername || !profileHasChanges}
                           className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Save profile
                         </button>
+                      </form>
+                      <form className="mt-4 grid gap-2 border-t border-gray-100 pt-3" onSubmit={handleEmailChangeRequest}>
+                        <label htmlFor="profile-email-change" className="text-sm font-medium text-gray-700">
+                          Change email
+                        </label>
+                        <input
+                          id="profile-email-change"
+                          data-testid="profile-email-change"
+                          type="email"
+                          value={emailChangeEmail}
+                          onChange={(event) => setEmailChangeEmail(event.target.value)}
+                          placeholder="New email address"
+                          className="min-w-0 rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
+                        />
+                        <button
+                          type="submit"
+                          disabled={emailChangeLoading || !emailChangeEmail.trim()}
+                          className="rounded border border-indigo-300 px-3 py-1 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {emailChangeLoading ? "Sending..." : "Email confirmation link"}
+                        </button>
+                        {emailChangeMessage ? (
+                          <p className="text-xs text-gray-600" role="status">
+                            {emailChangeMessage}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-gray-600">
+                            The address changes only after you open the confirmation link sent to the new email.
+                          </p>
+                        )}
                       </form>
                       <button
                         type="button"

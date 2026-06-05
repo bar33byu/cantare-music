@@ -1,7 +1,7 @@
 import { eq, asc, desc, inArray, and, count, lte, sql, isNull } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, emailChangeTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, EmailChangeTokenRow, UserSessionRow, AuditLogRow } from "./schema";
 import { getPublicUrl } from "../lib/r2";
 import type { SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
 import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
@@ -388,7 +388,7 @@ function isMissingAuthTableError(error: unknown): boolean {
   }
 
   const message = error.message.toLowerCase();
-  const mentionsAuthTables = message.includes("magic_link_tokens") || message.includes("user_sessions");
+  const mentionsAuthTables = message.includes("magic_link_tokens") || message.includes("email_change_tokens") || message.includes("user_sessions");
   if (mentionsAuthTables && message.includes("does not exist")) {
     return true;
   }
@@ -750,9 +750,13 @@ function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
+export function normalizePublicUsername(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
+}
+
 function usernameFromEmail(email: string): string {
   const localPart = email.split("@")[0] ?? "user";
-  const base = localPart.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 24);
+  const base = normalizePublicUsername(localPart).slice(0, 24);
   return base || "user";
 }
 
@@ -923,14 +927,16 @@ export async function updateUserProfile(
   id: string,
   data: {
     name?: string;
+    username?: string;
     avatarUrl?: string | null;
     profileVisibility?: string;
   }
 ): Promise<PublicUser | null> {
-  const updates: Partial<Pick<UserRow, "name" | "avatarUrl" | "profileVisibility" | "updatedAt">> = {
+  const updates: Partial<Pick<UserRow, "name" | "username" | "avatarUrl" | "profileVisibility" | "updatedAt">> = {
     updatedAt: new Date(),
   };
   if (data.name !== undefined) updates.name = data.name;
+  if (data.username !== undefined) updates.username = normalizePublicUsername(data.username);
   if (data.avatarUrl !== undefined) updates.avatarUrl = data.avatarUrl;
   if (data.profileVisibility !== undefined) updates.profileVisibility = data.profileVisibility;
 
@@ -968,6 +974,36 @@ export async function updateUserProfile(
           profileVisibility: users.profileVisibility,
         });
       return rows[0] ? mapLegacyUserRow(rows[0]) : null;
+    }
+    throw error;
+  }
+}
+
+export async function updateUserEmail(id: string, email: string): Promise<PublicUser | null> {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    throw Object.assign(new Error("Email is required"), { code: "EMAIL_REQUIRED" });
+  }
+
+  try {
+    const rows = await db()
+      .update(users)
+      .set({ email: normalizedEmail, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning({
+        id: users.id,
+        username: users.username,
+        name: users.name,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        profileVisibility: users.profileVisibility,
+        accountDeletionRequestedAt: users.accountDeletionRequestedAt,
+        accountDeletionScheduledFor: users.accountDeletionScheduledFor,
+      });
+    return rows[0] ? mapUserRow(rows[0]) : null;
+  } catch (error) {
+    if (isMissingUsersTableError(error)) {
+      return null;
     }
     throw error;
   }
@@ -1321,6 +1357,34 @@ export async function createMagicLinkToken(data: {
   }
 }
 
+export async function createEmailChangeToken(data: {
+  userId: string;
+  email: string;
+  tokenHash: string;
+  expiresAt: Date;
+}): Promise<EmailChangeTokenRow> {
+  try {
+    const rows = await db()
+      .insert(emailChangeTokens)
+      .values({
+        id: crypto.randomUUID(),
+        userId: data.userId,
+        email: normalizeEmail(data.email),
+        tokenHash: data.tokenHash,
+        expiresAt: data.expiresAt,
+      })
+      .returning();
+    return rows[0];
+  } catch (error) {
+    if (isMissingAuthTableError(error)) {
+      throw Object.assign(new Error("Auth tables are missing; run database migrations before enabling email changes."), {
+        code: "AUTH_MIGRATION_REQUIRED",
+      });
+    }
+    throw error;
+  }
+}
+
 export async function consumeMagicLinkToken(tokenHash: string, now: Date = new Date()): Promise<MagicLinkTokenRow | null> {
   try {
     const rows = await db()
@@ -1337,6 +1401,32 @@ export async function consumeMagicLinkToken(tokenHash: string, now: Date = new D
       .update(magicLinkTokens)
       .set({ consumedAt: now })
       .where(and(eq(magicLinkTokens.tokenHash, tokenHash), sql`${magicLinkTokens.consumedAt} IS NULL`))
+      .returning();
+    return consumedRows[0] ?? null;
+  } catch (error) {
+    if (isMissingAuthTableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function consumeEmailChangeToken(tokenHash: string, now: Date = new Date()): Promise<EmailChangeTokenRow | null> {
+  try {
+    const rows = await db()
+      .select()
+      .from(emailChangeTokens)
+      .where(eq(emailChangeTokens.tokenHash, tokenHash))
+      .limit(1);
+    const token = rows[0];
+    if (!token || token.consumedAt || token.expiresAt <= now) {
+      return null;
+    }
+
+    const consumedRows = await db()
+      .update(emailChangeTokens)
+      .set({ consumedAt: now })
+      .where(and(eq(emailChangeTokens.tokenHash, tokenHash), sql`${emailChangeTokens.consumedAt} IS NULL`))
       .returning();
     return consumedRows[0] ?? null;
   } catch (error) {

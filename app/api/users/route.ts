@@ -26,6 +26,11 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const context = await resolveRequestContext(request);
+    if (!context.actor?.isAdmin) {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    }
+
     const body = await request.json();
     const name = typeof body?.displayName === 'string'
       ? body.displayName.trim()
@@ -49,7 +54,6 @@ export async function POST(request: NextRequest) {
     }
 
     const id = normalizeUserId(requestedId ?? name) || DEFAULT_USER_ID;
-    const context = await resolveRequestContext(request);
     const existing = await getUserById(id);
     const user = await upsertUser({ id, username, name, email, avatarUrl, profileVisibility });
 
