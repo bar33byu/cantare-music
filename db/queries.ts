@@ -174,6 +174,7 @@ export interface PromoteDraftRecordingResult {
 
 export interface PlaylistSongItem {
   id: string;
+  sourceSongId?: string | null;
   title: string;
   artist?: string;
   audioUrl: string;
@@ -223,6 +224,58 @@ export interface ImportedSongSummary {
   createdAt: string;
 }
 
+export type PlaylistSourceResyncMode = "add_missing" | "update_changed" | "match_order" | "full";
+
+export interface PlaylistSourceSongChange {
+  sourceSongId: string;
+  sourceSongTitle: string;
+  importedSongId?: string;
+  importedSongTitle?: string;
+  changes: string[];
+}
+
+export interface PlaylistSourceDiff {
+  importedPlaylistId: string;
+  sourcePlaylistId: string | null;
+  sourceAvailable: boolean;
+  unavailableReason?: string;
+  checkedAt: string;
+  lastSourceSyncCheckedAt?: string | null;
+  lastSourceSyncedAt?: string | null;
+  source?: {
+    id: string;
+    name: string;
+    owner: {
+      id: string;
+      displayName: string;
+      username: string;
+    };
+  };
+  counts: {
+    added: number;
+    removed: number;
+    changed: number;
+  };
+  orderChanged: boolean;
+  hasChanges: boolean;
+  added: PlaylistSourceSongChange[];
+  removed: PlaylistSourceSongChange[];
+  changed: PlaylistSourceSongChange[];
+}
+
+export interface PlaylistSourceResyncResult {
+  mode: PlaylistSourceResyncMode;
+  importedPlaylistId: string;
+  applied: {
+    added: number;
+    updated: number;
+    removedFromPlaylist: number;
+    orderUpdated: boolean;
+  };
+  diffBefore: PlaylistSourceDiff;
+  diffAfter: PlaylistSourceDiff;
+}
+
 export interface PlaylistDetail {
   id: string;
   name: string;
@@ -238,6 +291,8 @@ export interface PlaylistDetail {
   sourceOwnerId?: string | null;
   sourceShareToken?: string | null;
   importedAt?: string | null;
+  lastSourceSyncCheckedAt?: string | null;
+  lastSourceSyncedAt?: string | null;
   createdAt: string;
   songs: PlaylistSongItem[];
 }
@@ -257,6 +312,8 @@ export interface PlaylistSummary {
   sourceOwnerId?: string | null;
   sourceShareToken?: string | null;
   importedAt?: string | null;
+  lastSourceSyncCheckedAt?: string | null;
+  lastSourceSyncedAt?: string | null;
   createdAt: string;
   songCount: number;
   knowledgePercent?: number;
@@ -3878,6 +3935,23 @@ function toIso(value: Date | null): string {
   return value ? value.toISOString() : new Date(0).toISOString();
 }
 
+function defaultPlaylistSharingFields() {
+  return {
+    isPublic: false,
+    publishedAt: null,
+    shareToken: null,
+    sharedAt: null,
+    shareAudioMode: "both",
+    publicShareAudioMode: "both",
+    sourcePlaylistId: null,
+    sourceOwnerId: null,
+    sourceShareToken: null,
+    importedAt: null,
+    lastSourceSyncCheckedAt: null,
+    lastSourceSyncedAt: null,
+  };
+}
+
 function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSummary {
   const shareAudioMode = row.shareAudioMode === "part" || row.shareAudioMode === "blend" ? row.shareAudioMode : "both";
   const publicShareAudioMode = row.publicShareAudioMode === "part" || row.publicShareAudioMode === "blend" ? row.publicShareAudioMode : "both";
@@ -3896,6 +3970,8 @@ function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSu
     sourceOwnerId: row.sourceOwnerId ?? null,
     sourceShareToken: row.sourceShareToken ?? null,
     importedAt: row.importedAt ? row.importedAt.toISOString() : null,
+    lastSourceSyncCheckedAt: row.lastSourceSyncCheckedAt ? row.lastSourceSyncCheckedAt.toISOString() : null,
+    lastSourceSyncedAt: row.lastSourceSyncedAt ? row.lastSourceSyncedAt.toISOString() : null,
     createdAt: toIso(row.createdAt),
     songCount,
   };
@@ -3978,7 +4054,7 @@ export async function getAllPlaylists(
           ? await legacyBaseQuery.where(eq(playlists.userId, userId))
           : await legacyBaseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
 
-      rows = legacyRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
+      rows = legacyRows.map((row) => ({ ...row, ...defaultPlaylistSharingFields() } as PlaylistRow));
     } catch (legacyError) {
       if (!isMissingUserIdColumnError(legacyError)) {
         throw legacyError;
@@ -3999,7 +4075,7 @@ export async function getAllPlaylists(
         ? await userlessBaseQuery
         : await userlessBaseQuery.where(eq(playlists.isRetired, false));
 
-      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
+      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, ...defaultPlaylistSharingFields() } as PlaylistRow));
     }
   }
 
@@ -4131,7 +4207,7 @@ export async function getPlaylistById(
         .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
         .limit(1);
 
-      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
+      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, ...defaultPlaylistSharingFields() } as PlaylistRow));
     } catch (legacyError) {
       if (!isMissingUserIdColumnError(legacyError)) {
         throw legacyError;
@@ -4149,7 +4225,7 @@ export async function getPlaylistById(
         .where(eq(playlists.id, id))
         .limit(1);
 
-      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
+      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, ...defaultPlaylistSharingFields() } as PlaylistRow));
     }
   }
 
@@ -4161,6 +4237,7 @@ export async function getPlaylistById(
   let linkedSongs: Array<{
     playlistId: string;
     songId: string;
+    sourceSongId: string | null;
     position: number;
     title: string;
     artist: string | null;
@@ -4175,6 +4252,7 @@ export async function getPlaylistById(
       .select({
         playlistId: playlistSongs.playlistId,
         songId: playlistSongs.songId,
+        sourceSongId: songs.sourceSongId,
         position: playlistSongs.position,
         title: songs.title,
         artist: songs.artist,
@@ -4197,6 +4275,7 @@ export async function getPlaylistById(
       .select({
         playlistId: playlistSongs.playlistId,
         songId: playlistSongs.songId,
+        sourceSongId: sql<string | null>`null`,
         position: playlistSongs.position,
         title: songs.title,
         artist: songs.artist,
@@ -4223,6 +4302,7 @@ export async function getPlaylistById(
 
   const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow) => ({
     id: songRow.songId,
+    sourceSongId: songRow.sourceSongId ?? songRow.songId,
     title: songRow.title,
     artist: songRow.artist ?? undefined,
     audioUrl: songRow.audioKey ? getPublicUrl(songRow.audioKey) : "",
@@ -4747,6 +4827,171 @@ export async function getPlaylistImportsForSource(
 
 type QueryDatabase = ReturnType<typeof db>;
 
+function playlistSourceSongKey(song: Pick<PlaylistSongItem, "id" | "sourceSongId">): string {
+  return song.sourceSongId ?? song.id;
+}
+
+function segmentFingerprint(segment: SegmentRow): string {
+  return JSON.stringify({
+    label: segment.label,
+    order: segment.order,
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    lyricText: segment.lyricText ?? "",
+    pitchContourNotes: segment.pitchContourNotes ?? [],
+  });
+}
+
+function songContentChanges(source: PlaylistSongItem, imported: PlaylistSongItem): string[] {
+  const changes: string[] = [];
+  if (source.title !== imported.title || (source.artist ?? "") !== (imported.artist ?? "")) {
+    changes.push("metadata");
+  }
+  if (Boolean(source.audioUrl?.trim()) !== Boolean(imported.audioUrl?.trim()) || Boolean(source.alternateAudioUrl?.trim()) !== Boolean(imported.alternateAudioUrl?.trim())) {
+    changes.push("audio");
+  }
+  const sourceSegments = [...source.segments].sort((a, b) => a.order - b.order).map(segmentFingerprint);
+  const importedSegments = [...imported.segments].sort((a, b) => a.order - b.order).map(segmentFingerprint);
+  if (JSON.stringify(sourceSegments) !== JSON.stringify(importedSegments)) {
+    changes.push("sections");
+  }
+  if (Boolean(source.hasMidiContour) !== Boolean(imported.hasMidiContour)) {
+    changes.push("midi");
+  }
+  return changes;
+}
+
+async function resolveImportedPlaylistSource(imported: PlaylistDetail, userId: string): Promise<SharedPlaylistDetail | null> {
+  if (!imported.sourcePlaylistId) {
+    return null;
+  }
+
+  if (imported.sourceShareToken) {
+    const sourceByToken = await getSharedPlaylistByToken(imported.sourceShareToken);
+    if (sourceByToken) {
+      return sourceByToken;
+    }
+  }
+
+  return getPublicPlaylistById(imported.sourcePlaylistId, userId);
+}
+
+function comparePlaylistSource(imported: PlaylistDetail, source: SharedPlaylistDetail | null, checkedAt: Date): PlaylistSourceDiff {
+  if (!imported.sourcePlaylistId || !source) {
+    return {
+      importedPlaylistId: imported.id,
+      sourcePlaylistId: imported.sourcePlaylistId ?? null,
+      sourceAvailable: false,
+      unavailableReason: imported.sourcePlaylistId ? "Source playlist is unavailable or no longer shared." : "Playlist was not imported from a shared source.",
+      checkedAt: checkedAt.toISOString(),
+      lastSourceSyncCheckedAt: imported.lastSourceSyncCheckedAt ?? null,
+      lastSourceSyncedAt: imported.lastSourceSyncedAt ?? null,
+      counts: { added: 0, removed: 0, changed: 0 },
+      orderChanged: false,
+      hasChanges: false,
+      added: [],
+      removed: [],
+      changed: [],
+    };
+  }
+
+  const sourceSongs = [...source.songs].sort((a, b) => a.position - b.position);
+  const importedSongs = [...imported.songs].sort((a, b) => a.position - b.position);
+  const sourceByKey = new Map(sourceSongs.map((song) => [playlistSourceSongKey(song), song]));
+  const importedByKey = new Map(importedSongs.map((song) => [playlistSourceSongKey(song), song]));
+
+  const added: PlaylistSourceSongChange[] = [];
+  const removed: PlaylistSourceSongChange[] = [];
+  const changed: PlaylistSourceSongChange[] = [];
+
+  for (const sourceSong of sourceSongs) {
+    const key = playlistSourceSongKey(sourceSong);
+    const importedSong = importedByKey.get(key);
+    if (!importedSong) {
+      added.push({
+        sourceSongId: key,
+        sourceSongTitle: sourceSong.title,
+        changes: ["added"],
+      });
+      continue;
+    }
+
+    const changes = songContentChanges(sourceSong, importedSong);
+    if (changes.length > 0) {
+      changed.push({
+        sourceSongId: key,
+        sourceSongTitle: sourceSong.title,
+        importedSongId: importedSong.id,
+        importedSongTitle: importedSong.title,
+        changes,
+      });
+    }
+  }
+
+  for (const importedSong of importedSongs) {
+    const key = playlistSourceSongKey(importedSong);
+    if (!sourceByKey.has(key)) {
+      removed.push({
+        sourceSongId: key,
+        sourceSongTitle: importedSong.title,
+        importedSongId: importedSong.id,
+        importedSongTitle: importedSong.title,
+        changes: ["removed"],
+      });
+    }
+  }
+
+  const sourceOrder = sourceSongs.map(playlistSourceSongKey).filter((key) => importedByKey.has(key));
+  const importedOrder = importedSongs.map(playlistSourceSongKey).filter((key) => sourceByKey.has(key));
+  const orderChanged = JSON.stringify(sourceOrder) !== JSON.stringify(importedOrder);
+
+  return {
+    importedPlaylistId: imported.id,
+    sourcePlaylistId: source.id,
+    sourceAvailable: true,
+    checkedAt: checkedAt.toISOString(),
+    lastSourceSyncCheckedAt: imported.lastSourceSyncCheckedAt ?? null,
+    lastSourceSyncedAt: imported.lastSourceSyncedAt ?? null,
+    source: {
+      id: source.id,
+      name: source.name,
+      owner: source.owner,
+    },
+    counts: {
+      added: added.length,
+      removed: removed.length,
+      changed: changed.length,
+    },
+    orderChanged,
+    hasChanges: added.length > 0 || removed.length > 0 || changed.length > 0 || orderChanged,
+    added,
+    removed,
+    changed,
+  };
+}
+
+export async function getPlaylistSourceDiff(
+  playlistId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PlaylistSourceDiff | null> {
+  const imported = await getPlaylistById(playlistId, userId);
+  if (!imported) {
+    return null;
+  }
+
+  const checkedAt = new Date();
+  const source = await resolveImportedPlaylistSource(imported, userId);
+  const diff = comparePlaylistSource(imported, source, checkedAt);
+  await db()
+    .update(playlists)
+    .set({ lastSourceSyncCheckedAt: checkedAt })
+    .where(and(eq(playlists.id, playlistId), eq(playlists.userId, userId)));
+  return {
+    ...diff,
+    lastSourceSyncCheckedAt: checkedAt.toISOString(),
+  };
+}
+
 async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId: string, database: QueryDatabase = db()): Promise<void> {
   try {
     const sourceRows = await database
@@ -4877,6 +5122,227 @@ async function cloneSharedSongSnapshot(
     title: imported.title,
     artist: imported.artist ?? undefined,
     createdAt: toIso(imported.createdAt),
+  };
+}
+
+async function updateImportedSongSnapshot(
+  importedSongId: string,
+  sourceSongRow: SongRow,
+  shareAudioMode: PlaylistShareAudioMode,
+  database: QueryDatabase
+): Promise<void> {
+  await database
+    .update(songs)
+    .set({
+      title: sourceSongRow.title,
+      artist: sourceSongRow.artist ?? null,
+      audioKey: shareAudioMode === "blend" ? null : sourceSongRow.audioKey ?? null,
+      alternateAudioKey: shareAudioMode === "part" ? null : sourceSongRow.alternateAudioKey ?? null,
+      pitchContourNotes: sourceSongRow.pitchContourNotes ?? [],
+    })
+    .where(eq(songs.id, importedSongId));
+
+  await database.delete(segments).where(eq(segments.songId, importedSongId));
+  const sourceSegments = await database
+    .select()
+    .from(segments)
+    .where(eq(segments.songId, sourceSongRow.id))
+    .orderBy(asc(segments.order));
+  if (sourceSegments.length > 0) {
+    await database.insert(segments).values(
+      sourceSegments.map((segment) => ({
+        id: crypto.randomUUID(),
+        songId: importedSongId,
+        label: segment.label,
+        order: segment.order,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+        lyricText: segment.lyricText ?? "",
+        sourceSegmentId: segment.sourceSegmentId ?? segment.id,
+        pitchContourNotes: segment.pitchContourNotes ?? [],
+      }))
+    );
+  }
+
+  try {
+    await database.delete(midiSources).where(eq(midiSources.songId, importedSongId));
+    await cloneMidiDataForImportedSong(sourceSongRow.id, importedSongId, database);
+  } catch (error) {
+    if (!isMissingMidiTableError(error)) {
+      throw error;
+    }
+  }
+}
+
+async function reorderPlaylistToSource(
+  playlistId: string,
+  importedSongs: PlaylistSongItem[],
+  sourceSongs: PlaylistSongItem[],
+  database: QueryDatabase
+): Promise<boolean> {
+  const importedByKey = new Map(importedSongs.map((song) => [playlistSourceSongKey(song), song]));
+  const orderedIds = sourceSongs
+    .map(playlistSourceSongKey)
+    .map((key) => importedByKey.get(key)?.id)
+    .filter((id): id is string => Boolean(id));
+  const orderedSet = new Set(orderedIds);
+  const extras = importedSongs
+    .filter((song) => !orderedSet.has(song.id))
+    .sort((a, b) => a.position - b.position)
+    .map((song) => song.id);
+  const nextOrder = [...orderedIds, ...extras];
+  const currentOrder = [...importedSongs].sort((a, b) => a.position - b.position).map((song) => song.id);
+  if (JSON.stringify(nextOrder) === JSON.stringify(currentOrder)) {
+    return false;
+  }
+
+  for (let index = 0; index < nextOrder.length; index += 1) {
+    await database
+      .update(playlistSongs)
+      .set({ position: index })
+      .where(and(eq(playlistSongs.playlistId, playlistId), eq(playlistSongs.songId, nextOrder[index])));
+  }
+  return true;
+}
+
+export async function resyncPlaylistFromSource(
+  playlistId: string,
+  userId: string = DEFAULT_QUERY_USER_ID,
+  mode: PlaylistSourceResyncMode
+): Promise<PlaylistSourceResyncResult | null> {
+  const imported = await getPlaylistById(playlistId, userId);
+  if (!imported) {
+    return null;
+  }
+  const source = await resolveImportedPlaylistSource(imported, userId);
+  const diffBefore = comparePlaylistSource(imported, source, new Date());
+  if (!source || !diffBefore.sourceAvailable) {
+    return {
+      mode,
+      importedPlaylistId: playlistId,
+      applied: { added: 0, updated: 0, removedFromPlaylist: 0, orderUpdated: false },
+      diffBefore,
+      diffAfter: diffBefore,
+    };
+  }
+
+  const applied = await db().transaction(async (tx) => {
+    const database = tx as unknown as QueryDatabase;
+    const sourceSongs = [...source.songs].sort((a, b) => a.position - b.position);
+    const importedSongs = [...imported.songs].sort((a, b) => a.position - b.position);
+    const importedByKey = new Map(importedSongs.map((song) => [playlistSourceSongKey(song), song]));
+    const existingTitleRows = await database
+      .select({ title: songs.title })
+      .from(songs)
+      .where(eq(songs.userId, userId));
+    const knownSongTitles = existingTitleRows.map((row) => row.title);
+    let added = 0;
+    let updated = 0;
+    let removedFromPlaylist = 0;
+
+    const shouldAdd = mode === "add_missing" || mode === "full";
+    const shouldUpdate = mode === "update_changed" || mode === "full";
+    const shouldRemove = mode === "full";
+    const shouldOrder = mode === "match_order" || mode === "full";
+
+    if (shouldAdd) {
+      const maxPosition = importedSongs.reduce((max, song) => Math.max(max, song.position), -1);
+      let appendPosition = maxPosition + 1;
+      for (const sourceSong of sourceSongs) {
+        const key = playlistSourceSongKey(sourceSong);
+        if (importedByKey.has(key)) {
+          continue;
+        }
+        const sourceRows = await database.select().from(songs).where(eq(songs.id, sourceSong.id)).limit(1);
+        const sourceSongRow = sourceRows[0] as SongRow | undefined;
+        if (!sourceSongRow) {
+          continue;
+        }
+        const importedSong = await cloneSharedSongSnapshot(sourceSongRow, userId, {
+          existingTitles: knownSongTitles,
+          nameContext: imported.name,
+          shareAudioMode: source.shareAudioMode,
+          database,
+        });
+        await database.insert(playlistSongs).values({
+          playlistId,
+          songId: importedSong.id,
+          position: appendPosition,
+        });
+        appendPosition += 1;
+        added += 1;
+      }
+    }
+
+    if (shouldUpdate) {
+      const changedSourceIds = new Set(diffBefore.changed.map((change) => change.sourceSongId));
+      for (const sourceSong of sourceSongs) {
+        const key = playlistSourceSongKey(sourceSong);
+        const importedSong = importedByKey.get(key);
+        if (!importedSong || !changedSourceIds.has(key)) {
+          continue;
+        }
+        const sourceRows = await database.select().from(songs).where(eq(songs.id, sourceSong.id)).limit(1);
+        const sourceSongRow = sourceRows[0] as SongRow | undefined;
+        if (!sourceSongRow) {
+          continue;
+        }
+        await updateImportedSongSnapshot(importedSong.id, sourceSongRow, normalizeShareAudioMode(source.shareAudioMode), database);
+        updated += 1;
+      }
+    }
+
+    if (shouldRemove && diffBefore.removed.length > 0) {
+      const removedIds = diffBefore.removed
+        .map((change) => change.importedSongId)
+        .filter((id): id is string => Boolean(id));
+      if (removedIds.length > 0) {
+        await database
+          .delete(playlistSongs)
+          .where(and(eq(playlistSongs.playlistId, playlistId), inArray(playlistSongs.songId, removedIds)));
+        removedFromPlaylist = removedIds.length;
+      }
+    }
+
+    let orderUpdated = false;
+    if (shouldOrder) {
+      const refreshedRows = await database
+        .select({
+          id: playlistSongs.songId,
+          sourceSongId: songs.sourceSongId,
+          position: playlistSongs.position,
+        })
+        .from(playlistSongs)
+        .innerJoin(songs, eq(playlistSongs.songId, songs.id))
+        .where(eq(playlistSongs.playlistId, playlistId))
+        .orderBy(asc(playlistSongs.position));
+      orderUpdated = await reorderPlaylistToSource(
+        playlistId,
+        refreshedRows.map((song) => ({
+          id: song.id,
+          sourceSongId: song.sourceSongId ?? song.id,
+          position: song.position,
+        } as PlaylistSongItem)),
+        sourceSongs,
+        database
+      );
+    }
+
+    await database
+      .update(playlists)
+      .set({ lastSourceSyncedAt: new Date(), lastSourceSyncCheckedAt: new Date() })
+      .where(and(eq(playlists.id, playlistId), eq(playlists.userId, userId)));
+
+    return { added, updated, removedFromPlaylist, orderUpdated };
+  });
+
+  const diffAfter = await getPlaylistSourceDiff(playlistId, userId);
+  return {
+    mode,
+    importedPlaylistId: playlistId,
+    applied,
+    diffBefore,
+    diffAfter: diffAfter ?? diffBefore,
   };
 }
 

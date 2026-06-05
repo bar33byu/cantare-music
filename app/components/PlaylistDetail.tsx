@@ -4,6 +4,48 @@ import { DragEvent, useCallback, useEffect, useState } from 'react';
 import { withUserIdHeader } from '../lib/userContext';
 import type { Playlist, Song } from '../types';
 
+type SourceSyncMode = 'add_missing' | 'update_changed' | 'match_order' | 'full';
+
+interface PlaylistSourceDiff {
+  sourceAvailable: boolean;
+  unavailableReason?: string;
+  checkedAt: string;
+  lastSourceSyncCheckedAt?: string | null;
+  lastSourceSyncedAt?: string | null;
+  source?: {
+    id: string;
+    name: string;
+    owner: {
+      displayName: string;
+      username: string;
+    };
+  };
+  counts: {
+    added: number;
+    removed: number;
+    changed: number;
+  };
+  orderChanged: boolean;
+  hasChanges: boolean;
+}
+
+interface SourceSyncResult {
+  applied: {
+    added: number;
+    updated: number;
+    removedFromPlaylist: number;
+    orderUpdated: boolean;
+  };
+  diffAfter: PlaylistSourceDiff;
+}
+
+function formatSourceSyncDate(value?: string | null): string {
+  if (!value) {
+    return 'Never';
+  }
+  return new Date(value).toLocaleString();
+}
+
 interface PlaylistDetailProps {
   playlistId: string;
   onBack: () => void;
@@ -31,6 +73,10 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const [publicMessage, setPublicMessage] = useState<string | null>(null);
   const [shareAudioMode, setShareAudioMode] = useState<'part' | 'blend' | 'both'>('both');
   const [publicShareAudioMode, setPublicShareAudioMode] = useState<'part' | 'blend' | 'both'>('both');
+  const [sourceDiff, setSourceDiff] = useState<PlaylistSourceDiff | null>(null);
+  const [sourceSyncBusy, setSourceSyncBusy] = useState(false);
+  const [sourceSyncMessage, setSourceSyncMessage] = useState<string | null>(null);
+  const [sourceSyncError, setSourceSyncError] = useState<string | null>(null);
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     return withUserIdHeader(init, userId);
@@ -52,6 +98,11 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     setPlaylist(data);
     setShareAudioMode(data.shareAudioMode ?? 'both');
     setPublicShareAudioMode(data.publicShareAudioMode ?? 'both');
+    if (!data.sourcePlaylistId) {
+      setSourceDiff(null);
+      setSourceSyncMessage(null);
+      setSourceSyncError(null);
+    }
     setLoading(false);
   }, [playlistId, request]);
 
@@ -269,6 +320,51 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     }
   };
 
+  const handleCheckSourceUpdates = async () => {
+    setSourceSyncBusy(true);
+    setSourceSyncError(null);
+    setSourceSyncMessage(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}/source-diff`, { cache: 'no-store' });
+      const payload = await response.json().catch(() => ({})) as PlaylistSourceDiff & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Unable to check source updates right now.');
+      }
+      setSourceDiff(payload);
+      setSourceSyncMessage(payload.hasChanges ? 'Source updates found.' : 'This playlist matches the source.');
+    } catch (error) {
+      setSourceSyncError(error instanceof Error ? error.message : 'Unable to check source updates right now.');
+    } finally {
+      setSourceSyncBusy(false);
+    }
+  };
+
+  const handleSourceSync = async (mode: SourceSyncMode) => {
+    setSourceSyncBusy(true);
+    setSourceSyncError(null);
+    setSourceSyncMessage(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}/source-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      const payload = await response.json().catch(() => ({})) as SourceSyncResult & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Unable to sync source updates right now.');
+      }
+      setSourceDiff(payload.diffAfter);
+      setSourceSyncMessage(
+        `Synced: ${payload.applied.added} added, ${payload.applied.updated} updated, ${payload.applied.removedFromPlaylist} removed from playlist${payload.applied.orderUpdated ? ', order updated' : ''}.`
+      );
+      await fetchPlaylist();
+    } catch (error) {
+      setSourceSyncError(error instanceof Error ? error.message : 'Unable to sync source updates right now.');
+    } finally {
+      setSourceSyncBusy(false);
+    }
+  };
+
   const handleDrop = async (targetSongId: string) => {
     if (!playlist || !draggedSongId || draggedSongId === targetSongId) {
       setDraggedSongId(null);
@@ -328,6 +424,12 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
 
   // Get the selected song details for display
   const selectedSong = songs.find((s) => s.id === selectedSongId);
+  const sourceCounts = sourceDiff?.counts;
+  const hasSourceChanges = Boolean(sourceDiff?.hasChanges);
+  const canAddMissing = Boolean(sourceCounts && sourceCounts.added > 0);
+  const canUpdateChanged = Boolean(sourceCounts && sourceCounts.changed > 0);
+  const canMatchOrder = Boolean(sourceDiff?.orderChanged);
+  const canFullSync = hasSourceChanges;
 
   return (
     <section data-testid="playlist-detail" className="space-y-4">
@@ -454,6 +556,81 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
         </div>
         {publicError ? <p data-testid="playlist-public-error" className="mt-2 text-sm text-red-600">{publicError}</p> : null}
         {publicMessage ? <p data-testid="playlist-public-message" className="mt-2 text-sm text-gray-600">{publicMessage}</p> : null}
+        {playlist.sourcePlaylistId ? (
+          <div data-testid="playlist-source-sync" className="mt-3 border-t border-gray-100 pt-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-800">Source updates</p>
+                <p className="text-xs text-gray-500">
+                  {sourceDiff?.source
+                    ? `Imported from ${sourceDiff.source.name} by ${sourceDiff.source.owner.displayName}.`
+                    : 'Check whether the playlist you imported has changed.'}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Checked {formatSourceSyncDate(sourceDiff?.lastSourceSyncCheckedAt ?? playlist.lastSourceSyncCheckedAt)} · Synced {formatSourceSyncDate(sourceDiff?.lastSourceSyncedAt ?? playlist.lastSourceSyncedAt)}
+                </p>
+              </div>
+              <button
+                data-testid="playlist-source-check"
+                className="rounded border border-indigo-300 px-3 py-1 text-sm text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                disabled={sourceSyncBusy}
+                onClick={() => void handleCheckSourceUpdates()}
+              >
+                {sourceSyncBusy ? 'Checking...' : 'Check Source'}
+              </button>
+            </div>
+            {sourceDiff ? (
+              <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-700">
+                <span data-testid="playlist-source-added" className="rounded bg-emerald-50 px-2 py-1 text-emerald-800">{sourceDiff.counts.added} added</span>
+                <span data-testid="playlist-source-changed" className="rounded bg-sky-50 px-2 py-1 text-sky-800">{sourceDiff.counts.changed} changed</span>
+                <span data-testid="playlist-source-removed" className="rounded bg-amber-50 px-2 py-1 text-amber-800">{sourceDiff.counts.removed} removed</span>
+                <span data-testid="playlist-source-order" className="rounded bg-gray-100 px-2 py-1 text-gray-700">{sourceDiff.orderChanged ? 'Order changed' : 'Order matches'}</span>
+              </div>
+            ) : null}
+            {sourceDiff && !sourceDiff.sourceAvailable ? (
+              <p data-testid="playlist-source-unavailable" className="mt-2 text-sm text-amber-700">{sourceDiff.unavailableReason}</p>
+            ) : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                data-testid="playlist-source-add-missing"
+                className="rounded border border-emerald-300 px-3 py-1 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                disabled={sourceSyncBusy || !canAddMissing}
+                onClick={() => void handleSourceSync('add_missing')}
+              >
+                Add Missing
+              </button>
+              <button
+                data-testid="playlist-source-update-changed"
+                className="rounded border border-sky-300 px-3 py-1 text-sm text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                disabled={sourceSyncBusy || !canUpdateChanged}
+                onClick={() => void handleSourceSync('update_changed')}
+              >
+                Update Changed
+              </button>
+              <button
+                data-testid="playlist-source-match-order"
+                className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                disabled={sourceSyncBusy || !canMatchOrder}
+                onClick={() => void handleSourceSync('match_order')}
+              >
+                Match Order
+              </button>
+              <button
+                data-testid="playlist-source-full-sync"
+                className="rounded border border-amber-300 px-3 py-1 text-sm text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                disabled={sourceSyncBusy || !canFullSync}
+                onClick={() => void handleSourceSync('full')}
+              >
+                Full Resync
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">
+              Updating changed songs replaces copied sections. Full resync also removes source-removed songs from this playlist, but keeps the local song records.
+            </p>
+            {sourceSyncError ? <p data-testid="playlist-source-error" className="mt-2 text-sm text-red-600">{sourceSyncError}</p> : null}
+            {sourceSyncMessage ? <p data-testid="playlist-source-message" className="mt-2 text-sm text-gray-600">{sourceSyncMessage}</p> : null}
+          </div>
+        ) : null}
         {pickerOpen ? (
           <div className="mt-3 space-y-2">
             <div className="relative">
