@@ -84,6 +84,9 @@ describe("schema tables", () => {
     expect(cols).toContain("audioTrimStartMs");
     expect(cols).toContain("audioTrimEndMs");
     expect(cols).toContain("sourceSongId");
+    expect(cols).toContain("shareToken");
+    expect(cols).toContain("sharedAt");
+    expect(cols).toContain("shareAudioMode");
     expect(cols).toContain("createdAt");
     expect(cols).toContain("lastPracticedAt");
   });

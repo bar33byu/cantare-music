@@ -160,6 +160,9 @@ export const songs = pgTable(
     audioTrimStartMs: integer("audio_trim_start_ms"),
     audioTrimEndMs: integer("audio_trim_end_ms"),
     sourceSongId: text("source_song_id"),
+    shareToken: text("share_token"),
+    sharedAt: timestamp("shared_at"),
+    shareAudioMode: text("share_audio_mode").notNull().default("both"),
     pitchContourNotes: jsonb("pitch_contour_notes")
       .$type<SongPitchContourPoint[]>()
       .notNull()
@@ -171,6 +174,7 @@ export const songs = pgTable(
     userIdIdx: index("idx_songs_user_id").on(table.userId),
     userCreatedAtIdx: index("idx_songs_user_created_at").on(table.userId, table.createdAt),
     sourceSongIdx: index("idx_songs_source_song_id").on(table.sourceSongId),
+    shareTokenUniqueIdx: uniqueIndex("songs_share_token_unique").on(table.shareToken).where(sql`${table.shareToken} IS NOT NULL`),
   })
 );
 
@@ -382,10 +386,13 @@ export type MagicLinkTokenRow = InferSelectModel<typeof magicLinkTokens>;
 export type EmailChangeTokenRow = InferSelectModel<typeof emailChangeTokens>;
 export type UserSessionRow = InferSelectModel<typeof userSessions>;
 export type AuditLogRow = InferSelectModel<typeof auditLogs>;
-export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId" | "audioTrimStartMs" | "audioTrimEndMs"> & {
+export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId" | "audioTrimStartMs" | "audioTrimEndMs" | "shareToken" | "sharedAt" | "shareAudioMode"> & {
   sourceSongId?: string | null;
   audioTrimStartMs?: number | null;
   audioTrimEndMs?: number | null;
+  shareToken?: string | null;
+  sharedAt?: Date | null;
+  shareAudioMode?: string | null;
 };
 export type SegmentRow = Omit<InferSelectModel<typeof segments>, "sourceSegmentId"> & {
   sourceSegmentId?: string | null;
