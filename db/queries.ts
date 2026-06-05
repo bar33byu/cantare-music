@@ -189,40 +189,6 @@ export interface PlaylistSongItem {
   lastPracticedAt?: string | null;
 }
 
-export interface SharedSongDetail {
-  id: string;
-  sourceSongId?: string | null;
-  title: string;
-  artist?: string;
-  audioUrl: string;
-  alternateAudioUrl?: string;
-  audioTrimStartMs?: number | null;
-  audioTrimEndMs?: number | null;
-  shareToken?: string | null;
-  sharedAt?: string | null;
-  shareAudioMode: PlaylistShareAudioMode;
-  pitchContourNotes: SongRow["pitchContourNotes"];
-  hasMidiContour?: boolean;
-  ratingCount: number;
-  segments: SegmentRow[];
-  createdAt: string;
-  updatedAt?: string;
-  lastPracticedAt?: string | null;
-  owner: {
-    id: string;
-    displayName: string;
-    username: string;
-  };
-}
-
-export interface ImportedSongSummary {
-  id: string;
-  sourceSongId?: string | null;
-  title: string;
-  artist?: string;
-  createdAt: string;
-}
-
 export interface PlaylistDetail {
   id: string;
   name: string;
@@ -784,16 +750,6 @@ function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function isMissingSongSharingColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  const columns = ["share_token", "shared_at", "share_audio_mode"];
-  return columns.some((column) => message.includes(column) && message.includes("does not exist"));
-}
-
 export function normalizePublicUsername(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
 }
@@ -802,15 +758,6 @@ function usernameFromEmail(email: string): string {
   const localPart = email.split("@")[0] ?? "user";
   const base = normalizePublicUsername(localPart).slice(0, 24);
   return base || "user";
-}
-
-function withDefaultSongSharing(row: Partial<SongRow>): Partial<SongRow> {
-  return {
-    shareToken: null,
-    sharedAt: null,
-    shareAudioMode: "both",
-    ...row,
-  };
 }
 
 export async function getAllUsers(): Promise<PublicUser[]> {
@@ -1576,28 +1523,6 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
     primaryError = error;
   }
 
-  if (isMissingSongSharingColumnError(primaryError)) {
-    return db()
-      .select({
-        id: songs.id,
-        userId: songs.userId,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        alternateAudioKey: songs.alternateAudioKey,
-        audioTrimStartMs: songs.audioTrimStartMs,
-        audioTrimEndMs: songs.audioTrimEndMs,
-        sourceSongId: songs.sourceSongId,
-        pitchContourNotes: songs.pitchContourNotes,
-        createdAt: songs.createdAt,
-        lastPracticedAt: songs.lastPracticedAt,
-      })
-      .from(songs)
-      .where(eq(songs.userId, userId))
-      .orderBy(desc(songs.createdAt))
-      .then((rows) => rows.map((row) => withDefaultSongSharing(row) as SongRow));
-  }
-
   if (isMissingPitchContourNotesColumnError(primaryError)) {
     return db()
       .select({
@@ -1612,7 +1537,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
       .from(songs)
       .where(eq(songs.userId, userId))
       .orderBy(desc(songs.createdAt))
-      .then((rows) => rows.map((row) => withDefaultSongSharing({ ...row, alternateAudioKey: null, pitchContourNotes: [] }) as SongRow));
+      .then((rows) => rows.map((row) => ({ ...row, alternateAudioKey: null, pitchContourNotes: [] } as SongRow)));
   }
 
   if (isMissingAlternateAudioKeyColumnError(primaryError)) {
@@ -1630,7 +1555,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
       .from(songs)
       .where(eq(songs.userId, userId))
       .orderBy(desc(songs.createdAt))
-      .then((rows) => rows.map((row) => withDefaultSongSharing({ ...row, alternateAudioKey: null }) as SongRow));
+      .then((rows) => rows.map((row) => ({ ...row, alternateAudioKey: null } as SongRow)));
   }
 
   if (isMissingUserIdColumnError(primaryError)) {
@@ -1647,7 +1572,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
         .from(songs)
         .orderBy(desc(songs.createdAt));
 
-      return legacyRows.map((row) => withDefaultSongSharing({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, pitchContourNotes: [] }) as SongRow);
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, pitchContourNotes: [] } as SongRow));
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -1664,7 +1589,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
         .from(songs)
         .orderBy(desc(songs.createdAt));
 
-      return legacyRows.map((row) => withDefaultSongSharing({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] }) as SongRow);
+      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
     }
   }
 
@@ -1682,7 +1607,7 @@ export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promi
       .where(eq(songs.userId, userId))
       .orderBy(desc(songs.createdAt));
 
-    return legacyRows.map((row) => withDefaultSongSharing({ ...row, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] }) as SongRow);
+    return legacyRows.map((row) => ({ ...row, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
   } catch {
     throw primaryError;
   }
@@ -1704,29 +1629,6 @@ export async function getSongById(
     primaryError = error;
   }
 
-  if (isMissingSongSharingColumnError(primaryError)) {
-    const rows = await db()
-      .select({
-        id: songs.id,
-        userId: songs.userId,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        alternateAudioKey: songs.alternateAudioKey,
-        audioTrimStartMs: songs.audioTrimStartMs,
-        audioTrimEndMs: songs.audioTrimEndMs,
-        sourceSongId: songs.sourceSongId,
-        pitchContourNotes: songs.pitchContourNotes,
-        createdAt: songs.createdAt,
-        lastPracticedAt: songs.lastPracticedAt,
-      })
-      .from(songs)
-      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-      .limit(1);
-    const row = rows[0];
-    return row ? (withDefaultSongSharing(row) as SongRow) : undefined;
-  }
-
   if (isMissingPitchContourNotesColumnError(primaryError)) {
     const rows = await db()
       .select({
@@ -1743,7 +1645,7 @@ export async function getSongById(
       .limit(1);
 
     const row = rows[0];
-    return row ? (withDefaultSongSharing({ ...row, alternateAudioKey: null, pitchContourNotes: [] }) as SongRow) : undefined;
+    return row ? ({ ...row, alternateAudioKey: null, pitchContourNotes: [] } as SongRow) : undefined;
   }
 
   if (isMissingAlternateAudioKeyColumnError(primaryError)) {
@@ -1763,7 +1665,7 @@ export async function getSongById(
       .limit(1);
 
     const row = rows[0];
-    return row ? (withDefaultSongSharing({ ...row, alternateAudioKey: null }) as SongRow) : undefined;
+    return row ? ({ ...row, alternateAudioKey: null } as SongRow) : undefined;
   }
 
   if (isMissingUserIdColumnError(primaryError)) {
@@ -1784,7 +1686,7 @@ export async function getSongById(
       if (!row) {
         return undefined;
       }
-      return withDefaultSongSharing({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, pitchContourNotes: [] }) as SongRow;
+      return { ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, pitchContourNotes: [] } as SongRow;
     } catch (legacyError) {
       if (!isMissingLastPracticedColumnError(legacyError)) {
         throw legacyError;
@@ -1807,7 +1709,7 @@ export async function getSongById(
         return undefined;
       }
 
-      return withDefaultSongSharing({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] }) as SongRow;
+      return { ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
     }
   }
 
@@ -1830,7 +1732,7 @@ export async function getSongById(
       return undefined;
     }
 
-    return withDefaultSongSharing({ ...row, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] }) as SongRow;
+    return { ...row, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
   } catch {
     throw primaryError;
   }
@@ -4559,164 +4461,6 @@ export async function getSharedPlaylistByToken(token: string): Promise<SharedPla
   };
 }
 
-function applyShareAudioModeToSong(detail: SharedSongDetail, requestedMode?: PlaylistShareAudioMode): SharedSongDetail {
-  const mode = normalizeShareAudioMode(requestedMode ?? detail.shareAudioMode);
-  return {
-    ...detail,
-    shareAudioMode: mode,
-    audioUrl: mode === "blend" ? "" : detail.audioUrl,
-    alternateAudioUrl: mode === "part" ? undefined : detail.alternateAudioUrl,
-  };
-}
-
-function mapSongShareSummary(row: SongRow) {
-  return {
-    id: row.id,
-    shareToken: row.shareToken ?? null,
-    sharedAt: row.sharedAt ? row.sharedAt.toISOString() : null,
-    shareAudioMode: normalizeShareAudioMode(row.shareAudioMode),
-  };
-}
-
-export async function enableSongSharing(
-  id: string,
-  userId: string = DEFAULT_QUERY_USER_ID,
-  shareAudioMode: PlaylistShareAudioMode = "both"
-): Promise<{ id: string; shareToken: string | null; sharedAt: string | null; shareAudioMode: PlaylistShareAudioMode } | null> {
-  const existingRows = await db()
-    .select()
-    .from(songs)
-    .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-    .limit(1);
-
-  const existing = existingRows[0] as SongRow | undefined;
-  if (!existing) {
-    return null;
-  }
-
-  const mode = normalizeShareAudioMode(shareAudioMode);
-  if (existing.shareToken) {
-    const rows = await db()
-      .update(songs)
-      .set({ shareAudioMode: mode })
-      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-      .returning();
-    return rows[0] ? mapSongShareSummary(rows[0] as SongRow) : null;
-  }
-
-  const rows = await db()
-    .update(songs)
-    .set({ shareToken: createShareToken(), sharedAt: new Date(), shareAudioMode: mode })
-    .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-    .returning();
-  return rows[0] ? mapSongShareSummary(rows[0] as SongRow) : null;
-}
-
-export async function rotateSongShareLink(
-  id: string,
-  userId: string = DEFAULT_QUERY_USER_ID
-): Promise<{ id: string; shareToken: string | null; sharedAt: string | null; shareAudioMode: PlaylistShareAudioMode } | null> {
-  const rows = await db()
-    .update(songs)
-    .set({ shareToken: createShareToken(), sharedAt: new Date() })
-    .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-    .returning();
-  return rows[0] ? mapSongShareSummary(rows[0] as SongRow) : null;
-}
-
-export async function disableSongSharing(
-  id: string,
-  userId: string = DEFAULT_QUERY_USER_ID
-): Promise<boolean> {
-  const rows = await db()
-    .update(songs)
-    .set({ shareToken: null, sharedAt: null })
-    .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-    .returning({ id: songs.id });
-  return rows.length > 0;
-}
-
-export async function getSharedSongByToken(token: string): Promise<SharedSongDetail | null> {
-  if (!token.trim()) {
-    return null;
-  }
-
-  const rows = await db()
-    .select({
-      song: songs,
-      ownerId: users.id,
-      ownerName: users.name,
-      ownerUsername: users.username,
-    })
-    .from(songs)
-    .innerJoin(users, eq(songs.userId, users.id))
-    .where(eq(songs.shareToken, token))
-    .limit(1);
-
-  const row = rows[0];
-  const song = row?.song as SongRow | undefined;
-  if (!row || !song?.shareToken) {
-    return null;
-  }
-
-  const [segmentsForSong, ratingCounts, midiContourEntries] = await Promise.all([
-    getSegmentsBySongIds([song.id]),
-    getRatingCountBySongIds([song.id], song.userId),
-    getMidiContourStatusBySongIds([song.id], song.userId),
-  ]);
-
-  return applyShareAudioModeToSong({
-    id: song.id,
-    sourceSongId: song.sourceSongId ?? null,
-    title: song.title,
-    artist: song.artist ?? undefined,
-    audioUrl: song.audioKey ? getPublicUrl(song.audioKey) : "",
-    alternateAudioUrl: song.alternateAudioKey ? getPublicUrl(song.alternateAudioKey) : undefined,
-    audioTrimStartMs: song.audioTrimStartMs ?? null,
-    audioTrimEndMs: song.audioTrimEndMs ?? null,
-    shareToken: song.shareToken,
-    sharedAt: song.sharedAt ? song.sharedAt.toISOString() : null,
-    shareAudioMode: normalizeShareAudioMode(song.shareAudioMode),
-    pitchContourNotes: [],
-    hasMidiContour: midiContourEntries[song.id] ?? false,
-    ratingCount: ratingCounts[song.id] ?? 0,
-    segments: segmentsForSong[song.id] ?? [],
-    createdAt: toIso(song.createdAt),
-    updatedAt: toIso(song.createdAt),
-    lastPracticedAt: null,
-    owner: {
-      id: row.ownerId,
-      displayName: row.ownerName,
-      username: row.ownerUsername,
-    },
-  }, normalizeShareAudioMode(song.shareAudioMode));
-}
-
-export async function getSongImportsForSource(
-  sourceSongId: string,
-  userId: string = DEFAULT_QUERY_USER_ID
-): Promise<ImportedSongSummary[]> {
-  const rows = await db()
-    .select({
-      id: songs.id,
-      sourceSongId: songs.sourceSongId,
-      title: songs.title,
-      artist: songs.artist,
-      createdAt: songs.createdAt,
-    })
-    .from(songs)
-    .where(and(eq(songs.userId, userId), sql`COALESCE(${songs.sourceSongId}, ${songs.id}) = ${sourceSongId}`))
-    .orderBy(desc(songs.createdAt));
-
-  return rows.map((row) => ({
-    id: row.id,
-    sourceSongId: row.sourceSongId ?? sourceSongId,
-    title: row.title,
-    artist: row.artist ?? undefined,
-    createdAt: toIso(row.createdAt),
-  }));
-}
-
 export async function getPlaylistImportsForSource(
   sourcePlaylistId: string,
   userId: string = DEFAULT_QUERY_USER_ID
@@ -4745,11 +4489,9 @@ export async function getPlaylistImportsForSource(
   return rows.map((row) => mapPlaylistSummary(row, countMap[row.id] ?? 0));
 }
 
-type QueryDatabase = ReturnType<typeof db>;
-
-async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId: string, database: QueryDatabase = db()): Promise<void> {
+async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId: string): Promise<void> {
   try {
-    const sourceRows = await database
+    const sourceRows = await db()
       .select()
       .from(midiSources)
       .where(eq(midiSources.songId, sourceSongId));
@@ -4781,9 +4523,9 @@ async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId
       };
     });
 
-    await database.insert(midiSources).values(importedSources);
+    await db().insert(midiSources).values(importedSources);
 
-    const alignmentRows = await database
+    const alignmentRows = await db()
       .select()
       .from(midiAlignments)
       .where(inArray(midiAlignments.midiSourceId, Array.from(sourceIdMap.keys())));
@@ -4792,7 +4534,7 @@ async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId
       return;
     }
 
-    await database.insert(midiAlignments).values(
+    await db().insert(midiAlignments).values(
       alignmentRows.map((alignment) => ({
         id: crypto.randomUUID(),
         songId: importedSongId,
@@ -4814,72 +4556,6 @@ async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId
   }
 }
 
-async function cloneSharedSongSnapshot(
-  sourceSongRow: SongRow,
-  userId: string,
-  options: {
-    existingTitles: string[];
-    nameContext: string;
-    shareAudioMode?: PlaylistShareAudioMode;
-    database?: QueryDatabase;
-  }
-): Promise<ImportedSongSummary> {
-  const database = options.database ?? db();
-  const sourceSongId = sourceSongRow.sourceSongId ?? sourceSongRow.id;
-  const importedTitle = getImportedSongTitle(sourceSongRow.title, options.nameContext, options.existingTitles);
-  const importedSongId = crypto.randomUUID();
-  const shareAudioMode = normalizeShareAudioMode(options.shareAudioMode);
-
-  const rows = await database
-    .insert(songs)
-    .values({
-      id: importedSongId,
-      userId,
-      title: importedTitle,
-      artist: sourceSongRow.artist ?? null,
-      audioKey: shareAudioMode === "blend" ? null : sourceSongRow.audioKey ?? null,
-      alternateAudioKey: shareAudioMode === "part" ? null : sourceSongRow.alternateAudioKey ?? null,
-      pitchContourNotes: sourceSongRow.pitchContourNotes ?? [],
-      sourceSongId,
-      lastPracticedAt: null,
-    })
-    .returning();
-
-  options.existingTitles.push(importedTitle);
-
-  const sourceSegments = await database
-    .select()
-    .from(segments)
-    .where(eq(segments.songId, sourceSongRow.id))
-    .orderBy(asc(segments.order));
-  if (sourceSegments.length > 0) {
-    await database.insert(segments).values(
-      sourceSegments.map((segment) => ({
-        id: crypto.randomUUID(),
-        songId: importedSongId,
-        label: segment.label,
-        order: segment.order,
-        startMs: segment.startMs,
-        endMs: segment.endMs,
-        lyricText: segment.lyricText ?? "",
-        sourceSegmentId: segment.sourceSegmentId ?? segment.id,
-        pitchContourNotes: segment.pitchContourNotes ?? [],
-      }))
-    );
-  }
-
-  await cloneMidiDataForImportedSong(sourceSongRow.id, importedSongId, database);
-
-  const imported = rows[0] as SongRow;
-  return {
-    id: imported.id,
-    sourceSongId: imported.sourceSongId ?? sourceSongId,
-    title: imported.title,
-    artist: imported.artist ?? undefined,
-    createdAt: toIso(imported.createdAt),
-  };
-}
-
 export async function importSharedPlaylist(
   token: string,
   userId: string = DEFAULT_QUERY_USER_ID,
@@ -4891,7 +4567,7 @@ export async function importSharedPlaylist(
     throw Object.assign(new Error("Shared playlist not found"), { code: "SHARED_PLAYLIST_NOT_FOUND" });
   }
 
-  return db().transaction((tx) => importPlaylistSource(source, userId, { ...options, sourceShareToken: token, database: tx as unknown as QueryDatabase }));
+  return importPlaylistSource(source, userId, { ...options, sourceShareToken: token });
 }
 
 export async function importPublicPlaylist(
@@ -4905,15 +4581,14 @@ export async function importPublicPlaylist(
     throw Object.assign(new Error("Shared playlist not found"), { code: "SHARED_PLAYLIST_NOT_FOUND" });
   }
 
-  return db().transaction((tx) => importPlaylistSource(source, userId, { ...options, database: tx as unknown as QueryDatabase }));
+  return importPlaylistSource(source, userId, options);
 }
 
 async function importPlaylistSource(
   source: SharedPlaylistDetail,
   userId: string,
-  options: { force?: boolean; shareAudioMode?: PlaylistShareAudioMode; sourceShareToken?: string | null; database?: QueryDatabase } = {}
+  options: { force?: boolean; shareAudioMode?: PlaylistShareAudioMode; sourceShareToken?: string | null } = {}
 ): Promise<{ status: "imported"; playlist: PlaylistSummary } | { status: "already_imported"; playlist: PlaylistSummary }> {
-  const database = options.database ?? db();
   const existingImports = await getPlaylistImportsForSource(source.id, userId);
   if (existingImports.length > 0 && !options.force) {
     return { status: "already_imported", playlist: existingImports[0] };
@@ -4921,7 +4596,7 @@ async function importPlaylistSource(
 
   const now = new Date();
   const importedPlaylistId = crypto.randomUUID();
-  const existingPlaylistRows = await database
+  const existingPlaylistRows = await db()
     .select({ name: playlists.name })
     .from(playlists)
     .where(eq(playlists.userId, userId));
@@ -4929,7 +4604,7 @@ async function importPlaylistSource(
     source.name,
     existingPlaylistRows.map((row) => row.name)
   );
-  const playlistRows = await database
+  const playlistRows = await db()
     .insert(playlists)
     .values({
       id: importedPlaylistId,
@@ -4948,7 +4623,7 @@ async function importPlaylistSource(
   const sortedSongs = [...source.songs].sort((a, b) => a.position - b.position);
   const shareAudioMode = normalizeShareAudioMode(options.shareAudioMode ?? source.shareAudioMode);
   let importedSongCount = 0;
-  const existingSongTitleRows = await database
+  const existingSongTitleRows = await db()
     .select({ title: songs.title })
     .from(songs)
     .where(eq(songs.userId, userId));
@@ -4956,7 +4631,7 @@ async function importPlaylistSource(
   const importedSongIdsBySourceSongId = new Map<string, string>();
 
   for (const item of sortedSongs) {
-    const songRows = await database
+    const songRows = await db()
       .select()
       .from(songs)
       .where(eq(songs.id, item.id))
@@ -4969,7 +4644,7 @@ async function importPlaylistSource(
     const sourceSongId = sourceSongRow.sourceSongId ?? sourceSongRow.id;
     const alreadyImportedSongId = importedSongIdsBySourceSongId.get(sourceSongId);
     if (alreadyImportedSongId) {
-      await database
+      await db()
         .insert(playlistSongs)
         .values({
           playlistId: importedPlaylistId,
@@ -4981,7 +4656,7 @@ async function importPlaylistSource(
     }
 
     if (!options.force) {
-      const existingSongRows = await database
+      const existingSongRows = await db()
         .select({ id: songs.id })
         .from(songs)
         .where(and(eq(songs.userId, userId), sql`COALESCE(${songs.sourceSongId}, ${songs.id}) = ${sourceSongId}`))
@@ -4991,7 +4666,7 @@ async function importPlaylistSource(
       const existingSong = existingSongRows[0];
       if (existingSong) {
         importedSongIdsBySourceSongId.set(sourceSongId, existingSong.id);
-        await database
+        await db()
           .insert(playlistSongs)
           .values({
             playlistId: importedPlaylistId,
@@ -5003,16 +4678,45 @@ async function importPlaylistSource(
       }
     }
 
-    const importedSong = await cloneSharedSongSnapshot(sourceSongRow as SongRow, userId, {
-      existingTitles: knownSongTitles,
-      nameContext: importedPlaylistName,
-      shareAudioMode,
-      database,
-    });
-    const importedSongId = importedSong.id;
-    importedSongIdsBySourceSongId.set(sourceSongId, importedSongId);
+    const importedTitle = getImportedSongTitle(sourceSongRow.title, importedPlaylistName, knownSongTitles);
 
-    await database
+    const importedSongId = crypto.randomUUID();
+    await db()
+      .insert(songs)
+      .values({
+        id: importedSongId,
+        userId,
+        title: importedTitle,
+        artist: sourceSongRow.artist ?? null,
+        audioKey: shareAudioMode === "blend" ? null : sourceSongRow.audioKey ?? null,
+        alternateAudioKey: shareAudioMode === "part" ? null : sourceSongRow.alternateAudioKey ?? null,
+        pitchContourNotes: sourceSongRow.pitchContourNotes ?? [],
+        sourceSongId,
+        lastPracticedAt: null,
+      });
+    importedSongIdsBySourceSongId.set(sourceSongId, importedSongId);
+    knownSongTitles.push(importedTitle);
+
+    const sourceSegments = await getSegmentsBySongId(item.id);
+    if (sourceSegments.length > 0) {
+      await db().insert(segments).values(
+        sourceSegments.map((segment) => ({
+          id: crypto.randomUUID(),
+          songId: importedSongId,
+          label: segment.label,
+          order: segment.order,
+          startMs: segment.startMs,
+          endMs: segment.endMs,
+          lyricText: segment.lyricText ?? "",
+          sourceSegmentId: segment.sourceSegmentId ?? segment.id,
+          pitchContourNotes: segment.pitchContourNotes ?? [],
+        }))
+      );
+    }
+
+    await cloneMidiDataForImportedSong(item.id, importedSongId);
+
+    await db()
       .insert(playlistSongs)
       .values({
         playlistId: importedPlaylistId,
@@ -5023,49 +4727,6 @@ async function importPlaylistSource(
   }
 
   return { status: "imported", playlist: mapPlaylistSummary(importedPlaylist, importedSongCount) };
-}
-
-export async function importSharedSong(
-  token: string,
-  userId: string = DEFAULT_QUERY_USER_ID,
-  options: { force?: boolean } = {}
-): Promise<{ status: "imported"; song: ImportedSongSummary } | { status: "already_imported"; song: ImportedSongSummary }> {
-  const source = await getSharedSongByToken(token);
-  if (!source) {
-    throw Object.assign(new Error("Shared song not found"), { code: "SHARED_SONG_NOT_FOUND" });
-  }
-
-  const sourceSongId = source.sourceSongId ?? source.id;
-  const existingImports = await getSongImportsForSource(sourceSongId, userId);
-  const existingImport = existingImports.find((song) => song.id !== source.id) ?? null;
-  if (existingImport && !options.force) {
-    return { status: "already_imported", song: existingImport };
-  }
-
-  return db().transaction(async (tx) => {
-    const database = tx as unknown as QueryDatabase;
-    const sourceRows = await database
-      .select()
-      .from(songs)
-      .where(eq(songs.id, source.id))
-      .limit(1);
-    const sourceSongRow = sourceRows[0] as SongRow | undefined;
-    if (!sourceSongRow?.shareToken) {
-      throw Object.assign(new Error("Shared song not found"), { code: "SHARED_SONG_NOT_FOUND" });
-    }
-
-    const existingSongTitleRows = await database
-      .select({ title: songs.title })
-      .from(songs)
-      .where(eq(songs.userId, userId));
-    const importedSong = await cloneSharedSongSnapshot(sourceSongRow, userId, {
-      existingTitles: existingSongTitleRows.map((row) => row.title),
-      nameContext: "shared song",
-      shareAudioMode: source.shareAudioMode,
-      database,
-    });
-    return { status: "imported", song: importedSong };
-  });
 }
 
 async function getRatingCountBySongIds(

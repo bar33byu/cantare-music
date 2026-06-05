@@ -392,9 +392,6 @@ describe("getAllSongs", () => {
         alternateAudioKey: null,
         lastPracticedAt: null,
         pitchContourNotes: [],
-        shareToken: null,
-        sharedAt: null,
-        shareAudioMode: "both",
       },
     ]);
   });
@@ -429,9 +426,6 @@ describe("getAllSongs", () => {
         alternateAudioKey: null,
         lastPracticedAt: null,
         pitchContourNotes: [],
-        shareToken: null,
-        sharedAt: null,
-        shareAudioMode: "both",
       },
     ]);
   });
