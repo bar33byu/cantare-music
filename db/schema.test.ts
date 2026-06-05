@@ -7,7 +7,6 @@ import {
   playlistSongs,
   users,
   magicLinkTokens,
-  emailChangeTokens,
   userSessions,
   auditLogs,
   orphanedAudioKeys,
@@ -33,17 +32,6 @@ describe("schema tables", () => {
   it("magic link tokens table has expected columns", () => {
     const cols = Object.keys(magicLinkTokens);
     expect(cols).toContain("id");
-    expect(cols).toContain("email");
-    expect(cols).toContain("tokenHash");
-    expect(cols).toContain("createdAt");
-    expect(cols).toContain("expiresAt");
-    expect(cols).toContain("consumedAt");
-  });
-
-  it("email change tokens table has expected columns", () => {
-    const cols = Object.keys(emailChangeTokens);
-    expect(cols).toContain("id");
-    expect(cols).toContain("userId");
     expect(cols).toContain("email");
     expect(cols).toContain("tokenHash");
     expect(cols).toContain("createdAt");

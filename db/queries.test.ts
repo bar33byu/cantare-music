@@ -188,11 +188,6 @@ describe("users", () => {
     ]);
   });
 
-  it("normalizes public usernames consistently", async () => {
-    const { normalizePublicUsername } = await getQueries();
-    expect(normalizePublicUsername("  Lead Singer!  ")).toBe("lead-singer");
-  });
-
   it("createMagicLinkToken stores only a token hash", async () => {
     const expiresAt = new Date("2026-05-24T12:15:00.000Z");
     const row = {

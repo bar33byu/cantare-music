@@ -90,26 +90,6 @@ export const magicLinkTokens = pgTable(
   })
 );
 
-export const emailChangeTokens = pgTable(
-  "email_change_tokens",
-  {
-    id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    email: text("email").notNull(),
-    tokenHash: text("token_hash").notNull(),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    expiresAt: timestamp("expires_at").notNull(),
-    consumedAt: timestamp("consumed_at"),
-  },
-  (table) => ({
-    tokenHashUniqueIdx: uniqueIndex("email_change_tokens_token_hash_unique").on(table.tokenHash),
-    userCreatedAtIdx: index("idx_email_change_tokens_user_created_at").on(table.userId, table.createdAt),
-    emailCreatedAtIdx: index("idx_email_change_tokens_email_created_at").on(table.email, table.createdAt),
-  })
-);
-
 export const userSessions = pgTable(
   "user_sessions",
   {
@@ -379,7 +359,6 @@ export const midiAlignments = pgTable(
 
 export type UserRow = InferSelectModel<typeof users>;
 export type MagicLinkTokenRow = InferSelectModel<typeof magicLinkTokens>;
-export type EmailChangeTokenRow = InferSelectModel<typeof emailChangeTokens>;
 export type UserSessionRow = InferSelectModel<typeof userSessions>;
 export type AuditLogRow = InferSelectModel<typeof auditLogs>;
 export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId" | "audioTrimStartMs" | "audioTrimEndMs"> & {
