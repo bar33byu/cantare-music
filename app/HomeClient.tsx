@@ -1471,7 +1471,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const selectedAdminUserIsVisible = filteredAdminUsers.some((user) => user.id === adminSelectedUserId);
 
   const loadSongById = useCallback(async (songId: string): Promise<Song | null> => {
-    const response = await request(`/api/songs/${songId}`, { cache: "no-store" });
+    const response = await request(`/api/songs/${songId}`);
     if (!response.ok) {
       return null;
     }

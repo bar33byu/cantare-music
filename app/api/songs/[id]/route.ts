@@ -12,11 +12,6 @@ import type { SongRow } from '../../../../db/schema';
 import { resolveEffectiveRequestUserId } from '../../_user';
 import { deleteSongStorageAssets } from '../../../lib/accountDeletion';
 
-const userScopedHeaders = {
-  'Cache-Control': 'private, no-store',
-  Vary: 'X-User-ID',
-};
-
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unknown server error';
   const shouldExpose =
@@ -77,10 +72,10 @@ export async function GET(
       updatedAt: song.createdAt, // No updatedAt in schema, using createdAt
     };
 
-    return NextResponse.json(fullSong, { headers: userScopedHeaders });
+    return NextResponse.json(fullSong);
   } catch (error) {
     console.error('Error fetching song:', error);
-    return NextResponse.json(formatError(error), { status: 500, headers: userScopedHeaders });
+    return NextResponse.json(formatError(error), { status: 500 });
   }
 }
 
