@@ -60,6 +60,7 @@ interface PracticeViewProps {
   preferredAudioVersion?: PreferredAudioVersion;
   onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
   readOnlyDataUserId?: string;
+  sharedPlaylistToken?: string;
   collapseLyricLineBreaks?: boolean;
   defaultLooping?: boolean;
   playScope?: "song" | "segment";
@@ -180,6 +181,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   preferredAudioVersion = "part",
   onPreferredAudioVersionChange,
   readOnlyDataUserId,
+  sharedPlaylistToken,
   collapseLyricLineBreaks = false,
   defaultLooping = false,
   playScope = "song",
@@ -1897,7 +1899,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       try {
         const [response, midiResponse] = await Promise.all([
           accountProgressEnabled ? request(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }) : Promise.resolve(null),
-          readOnlyDataRequest(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
+          sharedPlaylistToken
+            ? fetch(`/api/share/playlists/${encodeURIComponent(sharedPlaylistToken)}/songs/${encodeURIComponent(song.id)}/midi`, { cache: "no-store" })
+            : readOnlyDataRequest(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
         ]);
         if (response && !response.ok) {
           throw new Error(`Failed to load tap sessions (${response.status})`);
@@ -1929,7 +1933,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [accountProgressEnabled, readOnlyDataRequest, request, segmentTimingSignature, song.hasMidiContour, song.id, song.pitchContourNotes, tapHeatMapRefreshToken, userId]);
+  }, [accountProgressEnabled, readOnlyDataRequest, request, segmentTimingSignature, sharedPlaylistToken, song.hasMidiContour, song.id, song.pitchContourNotes, tapHeatMapRefreshToken, userId]);
 
   useEffect(() => {
     let cancelled = false;
