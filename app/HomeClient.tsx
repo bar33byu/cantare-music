@@ -13,6 +13,7 @@ import { SegmentEditor } from "./components/SegmentEditor";
 import { makeSession } from "./lib/factories";
 import {
   clearGuestProgress,
+  getGuestProgressSummary,
   getGuestProgressUserId,
   getGuestProgressSongIds,
   hasDeclinedGuestProgressClaim,
@@ -1388,6 +1389,11 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     setGuestClaimMessage("");
   };
 
+  const guestProgressSummary = guestClaimVisible ? getGuestProgressSummary() : { songCount: 0, ratingCount: 0 };
+  const guestProgressDescription = guestProgressSummary.ratingCount > 0
+    ? `We found local practice ratings for ${guestProgressSummary.songCount} ${guestProgressSummary.songCount === 1 ? "song" : "songs"} (${guestProgressSummary.ratingCount} saved ${guestProgressSummary.ratingCount === 1 ? "rating" : "ratings"}) from before you signed in. Importing copies them into this account.`
+    : `We found local guest practice activity for ${guestProgressSummary.songCount} ${guestProgressSummary.songCount === 1 ? "song" : "songs"} from before you signed in. Importing tries to copy any saved local ratings into this account.`;
+
   const impersonationBanner = impersonation ? (
     <div
       className="sticky top-0 z-30 border-b border-amber-300 bg-amber-100 px-4 py-3 text-amber-950 shadow-sm"
@@ -1706,7 +1712,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         <div>
           <h2 className="text-base font-semibold text-gray-900">Import guest practice progress?</h2>
           <p className="mt-1 text-sm text-gray-600">
-            We found practice progress from before you signed in. Import it into this account.
+            {guestProgressDescription}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            Skip for this account will hide this reminder. Your local guest progress stays on this device unless you import it.
           </p>
           {guestClaimMessage ? (
             <p className="mt-2 text-xs text-amber-700" role="status">
@@ -1722,7 +1731,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             disabled={guestClaimLoading}
             className="rounded border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Not now
+            Skip for this account
           </button>
           <button
             type="button"
@@ -1861,7 +1870,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             key={`playlist-detail:${activeUserId}:${selectedPlaylist.id}`}
             playlistId={selectedPlaylist.id}
             userId={activeUserId}
-            onBack={() => setActiveView("playlists")}
+            onBack={() => {
+              setRefreshTrigger((previous) => previous + 1);
+              setActiveView("playlists");
+            }}
             onPractice={(playlist) => {
               setSelectedPlaylist(playlist);
               setPlaylistPracticeReturnView("playlists");

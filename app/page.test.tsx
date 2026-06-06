@@ -643,6 +643,49 @@ describe('Home page', () => {
     expect(screen.queryByTestId('active-user-select')).not.toBeInTheDocument();
   });
 
+  it('explains guest progress import and skip behavior', async () => {
+    window.localStorage.setItem('cantare:guest-progress:v1', JSON.stringify({
+      songIds: ['song-1'],
+      guestUserId: 'guest-abc',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+    }));
+    window.localStorage.setItem('cantare:guest-ratings:v1:song-1', JSON.stringify([
+      { id: 'rating-1', segmentId: 'seg-1', rating: 4, ratedAt: '2026-06-01T00:00:00.000Z' },
+      { id: 'rating-2', segmentId: 'seg-2', rating: 5, ratedAt: '2026-06-01T00:01:00.000Z' },
+    ]));
+    document.cookie = 'cantare-user-id=test-user; path=/';
+    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') {
+        return {
+          ok: true,
+          json: async () => ({
+            user: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+            actor: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+            effectiveUser: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+            isImpersonating: false,
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    expect(await screen.findByTestId('guest-claim-prompt')).toHaveTextContent('1 song');
+    expect(screen.getByTestId('guest-claim-prompt')).toHaveTextContent('2 saved ratings');
+    expect(screen.getByTestId('guest-claim-prompt')).toHaveTextContent('Skip for this account will hide this reminder');
+
+    fireEvent.click(screen.getByTestId('guest-claim-decline'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('guest-claim-prompt')).not.toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem('cantare:guest-progress-declined:test-user')).toBe('1');
+  });
+
   it('opens account settings after first magic-link setup', async () => {
     window.history.pushState(null, '', '/?auth=signed-in&setup=username');
     document.cookie = 'cantare-user-id=new-user; path=/';

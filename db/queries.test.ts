@@ -1550,3 +1550,66 @@ describe("playlist song mutations", () => {
     expect(deleteSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("shared playlist refresh comparison", () => {
+  const baseSong = {
+    id: "song-1",
+    sourceSongId: "source-song-1",
+    title: "Song One",
+    artist: "Artist",
+    audioUrl: "https://audio.example/part.mp3",
+    alternateAudioUrl: "https://audio.example/blend.mp3",
+    pitchContourNotes: [{ id: "note-1", absoluteMs: 100, lane: 2, durationMs: 200 }],
+    hasMidiContour: true,
+    ratingCount: 0,
+    segments: [{
+      id: "segment-1",
+      songId: "song-1",
+      sourceSegmentId: "source-segment-1",
+      label: "Verse",
+      order: 0,
+      startMs: 0,
+      endMs: 1000,
+      lyricText: "Hello",
+      pitchContourNotes: [],
+    }],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    position: 0,
+    masteryPercent: 0,
+  };
+
+  it("does not mark an immediately imported identical song as changed", async () => {
+    const { hasSharedSongContentChanged } = await getQueries();
+
+    expect(hasSharedSongContentChanged(
+      baseSong as any,
+      {
+        ...baseSong,
+        id: "imported-song-1",
+        title: "Song One (from imported playlist)",
+        segments: [{ ...baseSong.segments[0], id: "imported-segment-1", songId: "imported-song-1" }],
+      } as any
+    )).toBe(false);
+  });
+
+  it("marks a real shared segment change as changed", async () => {
+    const { hasSharedSongContentChanged } = await getQueries();
+
+    expect(hasSharedSongContentChanged(
+      {
+        ...baseSong,
+        segments: [{ ...baseSong.segments[0], lyricText: "Updated lyric" }],
+      } as any,
+      baseSong as any
+    )).toBe(true);
+  });
+
+  it("marks a real shared title change as changed", async () => {
+    const { hasSharedSongContentChanged } = await getQueries();
+
+    expect(hasSharedSongContentChanged(
+      { ...baseSong, title: "Renamed Song" } as any,
+      baseSong as any
+    )).toBe(true);
+  });
+});

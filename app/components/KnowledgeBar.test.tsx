@@ -37,4 +37,26 @@ describe("KnowledgeBar", () => {
     render(<KnowledgeBar percent={63.4} />);
     expect(screen.getByTestId("knowledge-bar-percent")).toHaveTextContent("63% memorized");
   });
+
+  it("places percentages under 50% in the unfilled part beside the fill line", () => {
+    render(<KnowledgeBar percent={49} />);
+    const percentLabel = screen.getByTestId("knowledge-bar-percent");
+
+    expect(percentLabel).toHaveClass("text-indigo-950");
+    expect(percentLabel).toHaveStyle({
+      left: "49%",
+      transform: "translate(4px, -50%)",
+    });
+  });
+
+  it("places percentages at 50% and above in the filled part beside the fill line", () => {
+    render(<KnowledgeBar percent={50} />);
+    const percentLabel = screen.getByTestId("knowledge-bar-percent");
+
+    expect(percentLabel).toHaveClass("text-white");
+    expect(percentLabel).toHaveStyle({
+      left: "50%",
+      transform: "translate(calc(-100% - 4px), -50%)",
+    });
+  });
 });

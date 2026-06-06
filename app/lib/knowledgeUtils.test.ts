@@ -122,4 +122,25 @@ describe('computePlaylistKnowledge', () => {
     // Song1 avg = (100 + 60) / 2 = 80; Song2 avg = 40; playlist avg = 60
     expect(computePlaylistKnowledge(songs, ratings)).toBe(60);
   });
+
+  it('counts songs without segments as 0 in playlist averages', () => {
+    const songs = [
+      makeSong({
+        id: 'song-1',
+        segments: [
+          makeSegment({ id: 'seg-1', label: 'Section 1', order: 0, songId: 'song-1' }),
+          makeSegment({ id: 'seg-2', label: 'Section 2', order: 1, songId: 'song-1' }),
+        ],
+      }),
+      makeSong({ id: 'song-2', segments: [] }),
+      makeSong({ id: 'song-3', segments: [] }),
+    ];
+
+    const ratings = [
+      makeRating({ segmentId: 'seg-1', rating: 5, ratedAt: '2026-03-01T00:00:00.000Z' }),
+      makeRating({ segmentId: 'seg-2', rating: 5, ratedAt: '2026-03-01T00:00:00.000Z' }),
+    ];
+
+    expect(computePlaylistKnowledge(songs, ratings)).toBe(100 / 3);
+  });
 });
