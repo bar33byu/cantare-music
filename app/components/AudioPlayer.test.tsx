@@ -126,6 +126,45 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-segment-item-2")).toBeInTheDocument();
   });
 
+  it("renders segment labels on the playbar when there is room", () => {
+    render(
+      <AudioPlayer
+        {...defaultProps}
+        durationMs={12000}
+        segmentStartMs={4000}
+        segmentEndMs={8000}
+        currentSegmentIndex={1}
+        segments={[
+          { id: "s0", songId: "song", order: 0, label: "1", lyricText: "", startMs: 0, endMs: 4000 },
+          { id: "s1", songId: "song", order: 1, label: "claps", lyricText: "", startMs: 4000, endMs: 8000 },
+          { id: "s2", songId: "song", order: 2, label: "chorus", lyricText: "", startMs: 8000, endMs: 12000 },
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId("audio-segment-label-0")).toHaveTextContent("1");
+    expect(screen.getByTestId("audio-segment-label-1")).toHaveTextContent("claps");
+    expect(screen.getByTestId("audio-segment-label-2")).toHaveTextContent("chorus");
+  });
+
+  it("does not render playbar labels for very narrow segments", () => {
+    render(
+      <AudioPlayer
+        {...defaultProps}
+        durationMs={10000}
+        segmentStartMs={0}
+        segmentEndMs={200}
+        segments={[
+          { id: "s0", songId: "song", order: 0, label: "tiny", lyricText: "", startMs: 0, endMs: 200 },
+          { id: "s1", songId: "song", order: 1, label: "wide", lyricText: "", startMs: 200, endMs: 10000 },
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("audio-segment-label-0")).toBeNull();
+    expect(screen.getByTestId("audio-segment-label-1")).toHaveTextContent("wide");
+  });
+
   it("renders full-piece mastery chunks and uses fuller color on overlap", () => {
     render(
       <AudioPlayer

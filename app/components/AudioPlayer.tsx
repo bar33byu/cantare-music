@@ -50,6 +50,8 @@ type ReachabilityState = {
   contentLength: number | null;
 };
 
+const MIN_SEGMENT_LABEL_WIDTH_PERCENT = 4;
+
 function getAudioKeyFromPublicUrl(audioUrl: string): string | null {
   const trimmed = audioUrl.trim();
   if (!trimmed) {
@@ -393,13 +395,25 @@ export function AudioPlayer({
                   ? (segment.startMs / safeDurationMs) * 100
                   : 0;
                 const isActive = index === currentSegmentIndex;
+                const segmentLabel = segment.label.trim();
+                const showSegmentLabel = segmentLabel.length > 0 && segWidth >= MIN_SEGMENT_LABEL_WIDTH_PERCENT;
                 return (
                   <div
                     key={segment.id}
                     data-testid={isActive ? "audio-segment-window" : `audio-segment-item-${index}`}
-                    className={`absolute inset-y-0 ${isActive ? "bg-amber-400" : "bg-amber-200/70"}`}
+                    className={`absolute inset-y-0 overflow-hidden border-r border-white/80 ${isActive ? "bg-amber-400" : "bg-amber-200/70"}`}
                     style={{ left: `${segLeft}%`, width: `${segWidth}%` }}
-                  />
+                    title={segmentLabel || undefined}
+                  >
+                    {showSegmentLabel ? (
+                      <span
+                        data-testid={`audio-segment-label-${index}`}
+                        className="pointer-events-none absolute inset-0 flex items-center justify-center truncate px-0.5 text-center text-[8px] font-semibold leading-none text-slate-800/75"
+                      >
+                        {segmentLabel}
+                      </span>
+                    ) : null}
+                  </div>
                 );
               })
             ) : (

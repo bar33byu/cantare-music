@@ -55,7 +55,7 @@ describe('PlaylistDetail', () => {
     });
   });
 
-  it('add song button opens picker and selecting song posts', async () => {
+  it('add song button keeps picker open and clicking a suggestion posts immediately', async () => {
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse })
       .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'song-3', title: 'Song Three' }] })
@@ -73,14 +73,13 @@ describe('PlaylistDetail', () => {
     await waitFor(() => expect(screen.getByTestId('playlist-song-suggestion-song-3')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('playlist-song-suggestion-song-3'));
 
-    fireEvent.click(screen.getByTestId('playlist-song-add-submit'));
-
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/songs', expect.objectContaining({ method: 'POST' }));
     });
 
     expect(onEditSong).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('playlist-song-search')).not.toBeInTheDocument();
+    expect(screen.getByTestId('playlist-song-search')).toBeInTheDocument();
+    expect(screen.queryByTestId('playlist-song-add-submit')).not.toBeInTheDocument();
   });
 
   it('creates a new song inline and adds it to the playlist', async () => {
@@ -106,7 +105,26 @@ describe('PlaylistDetail', () => {
     });
 
     expect(onEditSong).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('playlist-song-search')).not.toBeInTheDocument();
+    expect(screen.getByTestId('playlist-song-search')).toBeInTheDocument();
+  });
+
+  it('renames the playlist from the detail view', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => playlistResponse })
+      .mockResolvedValueOnce({ ok: true });
+
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+
+    const input = await screen.findByTestId('playlist-detail-name-input');
+    fireEvent.change(input, { target: { value: 'June Set' } });
+    fireEvent.click(screen.getByTestId('playlist-detail-name-save'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1', expect.objectContaining({ method: 'PATCH' }));
+    });
+    const renameCall = mockFetch.mock.calls.find(([url, init]) => url === '/api/playlists/pl-1' && init?.method === 'PATCH');
+    expect(JSON.parse(String(renameCall?.[1]?.body))).toEqual({ name: 'June Set' });
+    expect(screen.getByTestId('playlist-detail-name-input')).toHaveValue('June Set');
   });
 
   it('pressing escape in song search closes the picker', async () => {
@@ -218,6 +236,110 @@ describe('PlaylistDetail', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/public', expect.objectContaining({ method: 'DELETE' }));
       expect(screen.getByTestId('playlist-share-link')).toHaveAttribute('href', expect.stringContaining('/share/playlists/share-token-1'));
     });
+  });
+
+  it('checks an imported playlist source and imports selected songs manually', async () => {
+    const importedPlaylist = {
+      ...playlistResponse,
+      sourcePlaylistId: 'source-pl',
+      sourceOwnerId: 'owner-1',
+      sourceShareToken: 'share-token',
+      songs: [
+        { ...playlistResponse.songs[0], sourceSongId: 'source-song-1' },
+      ],
+    };
+    const refreshedPlaylist = {
+      ...importedPlaylist,
+      songs: [
+        { id: 'song-9', sourceSongId: 'source-song-1', title: 'Song One Updated', artist: 'Artist', audioUrl: '', segments: [], createdAt: '2026-01-01T00:00:00.000Z', position: 0 },
+      ],
+    };
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => importedPlaylist })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sourcePlaylist: {
+            id: 'source-pl',
+            name: 'Shared Set',
+            owner: { id: 'owner-1', displayName: 'Owner Name', username: 'owner' },
+          },
+          candidates: [
+            {
+              sourceSongId: 'source-song-1',
+              currentSongId: 'song-1',
+              title: 'Song One Updated',
+              artist: 'Artist',
+              position: 0,
+              status: 'refreshable',
+              segmentCount: 2,
+              hasPartAudio: true,
+              hasBlendAudio: false,
+            },
+            {
+              sourceSongId: 'source-song-3',
+              currentSongId: null,
+              title: 'Song Three',
+              position: 2,
+              status: 'new',
+              segmentCount: 1,
+              hasPartAudio: true,
+              hasBlendAudio: true,
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ importedCount: 1, playlist: refreshedPlaylist }),
+      });
+
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+
+    await waitFor(() => expect(screen.getByTestId('playlist-refresh-panel')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('playlist-refresh-check'));
+
+    await waitFor(() => expect(screen.getByTestId('playlist-refresh-song-source-song-1')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('playlist-refresh-song-source-song-3'));
+    fireEvent.click(screen.getByTestId('playlist-refresh-import'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/refresh', expect.objectContaining({ method: 'POST' }));
+      expect(screen.getByText('Song One Updated')).toBeInTheDocument();
+    });
+    const importCall = mockFetch.mock.calls.find(([url, init]) => url === '/api/playlists/pl-1/refresh' && init?.method === 'POST');
+    expect(JSON.parse(String(importCall?.[1]?.body))).toEqual({ sourceSongIds: ['source-song-1'] });
+  });
+
+  it('shows an up-to-date message when the shared source has no changes', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ...playlistResponse, sourcePlaylistId: 'source-pl', sourceOwnerId: 'owner-1' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sourcePlaylist: {
+            id: 'source-pl',
+            name: 'Shared Set',
+            owner: { id: 'owner-1', displayName: 'Owner Name', username: 'owner' },
+          },
+          candidates: [],
+        }),
+      });
+
+    render(<PlaylistDetail playlistId="pl-1" onBack={onBack} onPractice={onPractice} onEditSong={onEditSong} />);
+
+    await waitFor(() => expect(screen.getByTestId('playlist-refresh-check')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('playlist-refresh-check'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-refresh-message')).toHaveTextContent('This copy is up to date with the shared playlist.');
+    });
+    expect(screen.queryByTestId('playlist-refresh-import')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('playlist-refresh-toggle-all')).not.toBeInTheDocument();
   });
 
   it('back button calls onBack', async () => {

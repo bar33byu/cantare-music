@@ -174,6 +174,7 @@ export interface PromoteDraftRecordingResult {
 
 export interface PlaylistSongItem {
   id: string;
+  sourceSongId?: string | null;
   title: string;
   artist?: string;
   audioUrl: string;
@@ -922,14 +923,16 @@ export async function getUserByEmail(email: string): Promise<PublicUser | null> 
 export async function updateUserProfile(
   id: string,
   data: {
+    username?: string;
     name?: string;
     avatarUrl?: string | null;
     profileVisibility?: string;
   }
 ): Promise<PublicUser | null> {
-  const updates: Partial<Pick<UserRow, "name" | "avatarUrl" | "profileVisibility" | "updatedAt">> = {
+  const updates: Partial<Pick<UserRow, "username" | "name" | "avatarUrl" | "profileVisibility" | "updatedAt">> = {
     updatedAt: new Date(),
   };
+  if (data.username !== undefined) updates.username = data.username;
   if (data.name !== undefined) updates.name = data.name;
   if (data.avatarUrl !== undefined) updates.avatarUrl = data.avatarUrl;
   if (data.profileVisibility !== undefined) updates.profileVisibility = data.profileVisibility;
@@ -1056,29 +1059,61 @@ export async function upsertUser(data: {
 // ── Songs ──────────────────────────────────────────────────────────────────
 
 export async function getOrCreateUserForEmail(email: string): Promise<PublicUser> {
+  const result = await getOrCreateUserForEmailWithStatus(email);
+  return result.user;
+}
+
+export interface PlaylistRefreshCandidate {
+  sourceSongId: string;
+  currentSongId?: string | null;
+  title: string;
+  artist?: string;
+  position: number;
+  status: "new" | "refreshable";
+  segmentCount: number;
+  hasPartAudio: boolean;
+  hasBlendAudio: boolean;
+}
+
+export interface PlaylistRefreshPreview {
+  sourcePlaylist: {
+    id: string;
+    name: string;
+    owner: SharedPlaylistDetail["owner"];
+  };
+  candidates: PlaylistRefreshCandidate[];
+}
+
+export interface RefreshImportedPlaylistResult {
+  importedCount: number;
+  playlist: PlaylistDetail;
+}
+
+export async function getOrCreateUserForEmailWithStatus(email: string): Promise<{ user: PublicUser; created: boolean }> {
   const normalizedEmail = normalizeEmail(email);
   const existing = await getUserByEmail(normalizedEmail);
   if (existing) {
-    return existing;
+    return { user: existing, created: false };
   }
 
   const baseUsername = usernameFromEmail(normalizedEmail);
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const username = attempt === 0 ? baseUsername : `${baseUsername}-${attempt + 1}`;
     try {
-      return await upsertUser({
+      const user = await upsertUser({
         id: crypto.randomUUID(),
         username,
         name: normalizedEmail.split("@")[0] || "Cantare Singer",
         email: normalizedEmail,
         profileVisibility: "private",
       });
+      return { user, created: true };
     } catch (error) {
       const message = error instanceof Error ? error.message.toLowerCase() : "";
       if (message.includes("users_username_unique") || message.includes("users_email_unique")) {
         const racedUser = await getUserByEmail(normalizedEmail);
         if (racedUser) {
-          return racedUser;
+          return { user: racedUser, created: false };
         }
         continue;
       }
@@ -1086,13 +1121,14 @@ export async function getOrCreateUserForEmail(email: string): Promise<PublicUser
     }
   }
 
-  return upsertUser({
+  const user = await upsertUser({
     id: crypto.randomUUID(),
     username: `${baseUsername}-${Math.random().toString(36).slice(2, 8)}`,
     name: normalizedEmail.split("@")[0] || "Cantare Singer",
     email: normalizedEmail,
     profileVisibility: "private",
   });
+  return { user, created: true };
 }
 
 export interface UserAccountDeletionStatus {
@@ -3874,7 +3910,7 @@ export async function getAllPlaylists(
   const midiSongIds = new Set(midiContourRows.map((row) => row.songId));
   const statsByPlaylist = new Map<string, ReturnType<typeof emptyPlaylistHealthStats>>();
   const knowledgeNumeratorByPlaylist = new Map<string, number>();
-  const knowledgeSegmentCountByPlaylist = new Map<string, number>();
+  const knowledgeSongCountByPlaylist = new Map<string, number>();
 
   for (const linkedSong of linkedSongs) {
     const stats = statsByPlaylist.get(linkedSong.playlistId) ?? emptyPlaylistHealthStats();
@@ -3888,15 +3924,15 @@ export async function getAllPlaylists(
     const segmentCount = segmentCountBySong.get(linkedSong.songId) ?? 0;
     if (segmentCount > 0) {
       stats.songsWithSegments += 1;
-      knowledgeNumeratorByPlaylist.set(
-        linkedSong.playlistId,
-        (knowledgeNumeratorByPlaylist.get(linkedSong.playlistId) ?? 0) + (knowledgeBySong[linkedSong.songId] ?? 0) * segmentCount
-      );
-      knowledgeSegmentCountByPlaylist.set(
-        linkedSong.playlistId,
-        (knowledgeSegmentCountByPlaylist.get(linkedSong.playlistId) ?? 0) + segmentCount
-      );
     }
+    knowledgeNumeratorByPlaylist.set(
+      linkedSong.playlistId,
+      (knowledgeNumeratorByPlaylist.get(linkedSong.playlistId) ?? 0) + (segmentCount > 0 ? (knowledgeBySong[linkedSong.songId] ?? 0) : 0)
+    );
+    knowledgeSongCountByPlaylist.set(
+      linkedSong.playlistId,
+      (knowledgeSongCountByPlaylist.get(linkedSong.playlistId) ?? 0) + 1
+    );
     if (midiSongIds.has(linkedSong.songId)) {
       stats.songsWithMidiContour += 1;
     }
@@ -3904,10 +3940,10 @@ export async function getAllPlaylists(
   }
 
   return summaries.map((playlist) => {
-    const segmentCount = knowledgeSegmentCountByPlaylist.get(playlist.id) ?? 0;
+    const songCount = knowledgeSongCountByPlaylist.get(playlist.id) ?? 0;
     return {
       ...playlist,
-      knowledgePercent: segmentCount > 0 ? Math.round((knowledgeNumeratorByPlaylist.get(playlist.id) ?? 0) / segmentCount) : 0,
+      knowledgePercent: songCount > 0 ? Math.round((knowledgeNumeratorByPlaylist.get(playlist.id) ?? 0) / songCount) : 0,
       healthStats: statsByPlaylist.get(playlist.id) ?? emptyPlaylistHealthStats(),
     };
   });
@@ -3981,6 +4017,7 @@ export async function getPlaylistById(
     pitchContourNotes: SongRow["pitchContourNotes"];
     createdAt: Date | null;
     lastPracticedAt: Date | null;
+    sourceSongId: string | null;
   }>;
   try {
     linkedSongs = await db()
@@ -3995,6 +4032,7 @@ export async function getPlaylistById(
         pitchContourNotes: songs.pitchContourNotes,
         createdAt: songs.createdAt,
         lastPracticedAt: songs.lastPracticedAt,
+        sourceSongId: songs.sourceSongId,
       })
       .from(playlistSongs)
       .innerJoin(songs, eq(playlistSongs.songId, songs.id))
@@ -4017,6 +4055,7 @@ export async function getPlaylistById(
         pitchContourNotes: sql<SongRow["pitchContourNotes"]>`'[]'::jsonb`,
         createdAt: songs.createdAt,
         lastPracticedAt: songs.lastPracticedAt,
+        sourceSongId: sql<string | null>`null`,
       })
       .from(playlistSongs)
       .innerJoin(songs, eq(playlistSongs.songId, songs.id))
@@ -4035,11 +4074,12 @@ export async function getPlaylistById(
 
   const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow) => ({
     id: songRow.songId,
+    sourceSongId: songRow.sourceSongId,
     title: songRow.title,
     artist: songRow.artist ?? undefined,
     audioUrl: songRow.audioKey ? getPublicUrl(songRow.audioKey) : "",
     alternateAudioUrl: songRow.alternateAudioKey ? getPublicUrl(songRow.alternateAudioKey) : undefined,
-    pitchContourNotes: [],
+    pitchContourNotes: songRow.pitchContourNotes ?? [],
     hasMidiContour: midiContourEntries[songRow.songId] ?? false,
     ratingCount: ratingCounts[songRow.songId] ?? 0,
     segments: segmentsBySong[songRow.songId] ?? [],
@@ -4397,6 +4437,246 @@ export async function getPlaylistImportsForSource(
 
   const countMap = Object.fromEntries(songCounts.map((row) => [row.playlistId, row.count]));
   return rows.map((row) => mapPlaylistSummary(row, countMap[row.id] ?? 0));
+}
+
+async function getRefreshSourceForImportedPlaylist(playlist: PlaylistDetail, userId: string): Promise<SharedPlaylistDetail | null> {
+  if (!playlist.sourcePlaylistId) {
+    return null;
+  }
+
+  if (playlist.sourceShareToken) {
+    const sharedSource = await getSharedPlaylistByToken(playlist.sourceShareToken);
+    if (sharedSource?.id === playlist.sourcePlaylistId && sharedSource.owner.id !== userId) {
+      return sharedSource;
+    }
+  }
+
+  return getPublicPlaylistById(playlist.sourcePlaylistId, userId);
+}
+
+function getCanonicalSourceSongId(song: Pick<PlaylistSongItem, "id" | "sourceSongId">): string {
+  return song.sourceSongId ?? song.id;
+}
+
+function getComparableSegmentContent(segment: SegmentRow) {
+  return {
+    order: segment.order,
+    label: segment.label,
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    lyricText: segment.lyricText ?? "",
+    pitchContourNotes: segment.pitchContourNotes ?? [],
+  };
+}
+
+function isImportedTitleVariant(sourceTitle: string, currentTitle: string): boolean {
+  return currentTitle === sourceTitle ||
+    currentTitle.startsWith(`${sourceTitle} (from `) ||
+    currentTitle.startsWith(`${sourceTitle} (import `);
+}
+
+export function hasSharedSongContentChanged(source: PlaylistSongItem, current: PlaylistSongItem): boolean {
+  const sourceSegments = [...source.segments]
+    .sort((a, b) => a.order - b.order)
+    .map(getComparableSegmentContent);
+  const currentSegments = [...current.segments]
+    .sort((a, b) => a.order - b.order)
+    .map(getComparableSegmentContent);
+
+  return !isImportedTitleVariant(source.title, current.title) ||
+    source.artist !== current.artist ||
+    source.audioUrl !== current.audioUrl ||
+    source.alternateAudioUrl !== current.alternateAudioUrl ||
+    source.hasMidiContour !== current.hasMidiContour ||
+    JSON.stringify(source.pitchContourNotes ?? []) !== JSON.stringify(current.pitchContourNotes ?? []) ||
+    JSON.stringify(sourceSegments) !== JSON.stringify(currentSegments);
+}
+
+export async function getImportedPlaylistRefreshPreview(
+  playlistId: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PlaylistRefreshPreview | null> {
+  const playlist = await getPlaylistById(playlistId, userId);
+  if (!playlist) {
+    throw Object.assign(new Error("Playlist not found"), { code: "PLAYLIST_NOT_FOUND" });
+  }
+
+  const source = await getRefreshSourceForImportedPlaylist(playlist, userId);
+  if (!source) {
+    return null;
+  }
+
+  const currentBySourceSongId = new Map(
+    playlist.songs.map((song) => [getCanonicalSourceSongId(song), song])
+  );
+
+  const candidates = [...source.songs]
+    .sort((a, b) => a.position - b.position)
+    .flatMap((song): PlaylistRefreshCandidate[] => {
+      const sourceSongId = getCanonicalSourceSongId(song);
+      const currentSong = currentBySourceSongId.get(sourceSongId);
+      if (currentSong && !hasSharedSongContentChanged(song, currentSong)) {
+        return [];
+      }
+      return [{
+        sourceSongId,
+        currentSongId: currentSong?.id ?? null,
+        title: song.title,
+        artist: song.artist,
+        position: song.position,
+        status: currentSong ? "refreshable" : "new",
+        segmentCount: song.segments.length,
+        hasPartAudio: Boolean(song.audioUrl?.trim()),
+        hasBlendAudio: Boolean(song.alternateAudioUrl?.trim()),
+      }];
+    });
+
+  return {
+    sourcePlaylist: {
+      id: source.id,
+      name: source.name,
+      owner: source.owner,
+    },
+    candidates,
+  };
+}
+
+async function cloneSharedSongIntoLibrary(
+  sourceSongId: string,
+  sourceSongRow: SongRow,
+  userId: string,
+  importedPlaylistName: string,
+  knownSongTitles: string[],
+  shareAudioMode: PlaylistShareAudioMode
+): Promise<string> {
+  const importedTitle = getImportedSongTitle(sourceSongRow.title, importedPlaylistName, knownSongTitles);
+  const importedSongId = crypto.randomUUID();
+
+  await db()
+    .insert(songs)
+    .values({
+      id: importedSongId,
+      userId,
+      title: importedTitle,
+      artist: sourceSongRow.artist ?? null,
+      audioKey: shareAudioMode === "blend" ? null : sourceSongRow.audioKey ?? null,
+      alternateAudioKey: shareAudioMode === "part" ? null : sourceSongRow.alternateAudioKey ?? null,
+      audioTrimStartMs: sourceSongRow.audioTrimStartMs ?? null,
+      audioTrimEndMs: sourceSongRow.audioTrimEndMs ?? null,
+      pitchContourNotes: sourceSongRow.pitchContourNotes ?? [],
+      sourceSongId,
+      lastPracticedAt: null,
+    });
+  knownSongTitles.push(importedTitle);
+
+  const sourceSegments = await getSegmentsBySongId(sourceSongRow.id);
+  if (sourceSegments.length > 0) {
+    await db().insert(segments).values(
+      sourceSegments.map((segment) => ({
+        id: crypto.randomUUID(),
+        songId: importedSongId,
+        label: segment.label,
+        order: segment.order,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+        lyricText: segment.lyricText ?? "",
+        sourceSegmentId: segment.sourceSegmentId ?? segment.id,
+        pitchContourNotes: segment.pitchContourNotes ?? [],
+      }))
+    );
+  }
+
+  await cloneMidiDataForImportedSong(sourceSongRow.id, importedSongId);
+  return importedSongId;
+}
+
+export async function refreshImportedPlaylistSongs(
+  playlistId: string,
+  sourceSongIds: string[],
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<RefreshImportedPlaylistResult> {
+  const playlist = await getPlaylistById(playlistId, userId);
+  if (!playlist) {
+    throw Object.assign(new Error("Playlist not found"), { code: "PLAYLIST_NOT_FOUND" });
+  }
+
+  const source = await getRefreshSourceForImportedPlaylist(playlist, userId);
+  if (!source) {
+    throw Object.assign(new Error("Shared playlist not found"), { code: "SHARED_PLAYLIST_NOT_FOUND" });
+  }
+
+  const selectedSourceSongIds = new Set(sourceSongIds.filter((id) => typeof id === "string" && id.trim()));
+  if (selectedSourceSongIds.size === 0) {
+    return { importedCount: 0, playlist };
+  }
+
+  const sourceItemsBySourceSongId = new Map(
+    source.songs.map((song) => [getCanonicalSourceSongId(song), song])
+  );
+  const currentBySourceSongId = new Map(
+    playlist.songs.map((song) => [getCanonicalSourceSongId(song), song])
+  );
+
+  const existingSongTitleRows = await db()
+    .select({ title: songs.title })
+    .from(songs)
+    .where(eq(songs.userId, userId));
+  const knownSongTitles = existingSongTitleRows.map((row) => row.title);
+  let nextPosition = playlist.songs.reduce((max, song) => Math.max(max, song.position), -1) + 1;
+  let importedCount = 0;
+  const shareAudioMode = normalizeShareAudioMode(
+    playlist.sourceShareToken ? source.shareAudioMode : source.publicShareAudioMode
+  );
+
+  for (const sourceSongId of selectedSourceSongIds) {
+    const sourceItem = sourceItemsBySourceSongId.get(sourceSongId);
+    if (!sourceItem) {
+      continue;
+    }
+
+    const sourceSongRows = await db()
+      .select()
+      .from(songs)
+      .where(eq(songs.id, sourceItem.id))
+      .limit(1);
+    const sourceSongRow = sourceSongRows[0];
+    if (!sourceSongRow) {
+      continue;
+    }
+
+    const importedSongId = await cloneSharedSongIntoLibrary(
+      sourceSongId,
+      sourceSongRow,
+      userId,
+      playlist.name,
+      knownSongTitles,
+      shareAudioMode
+    );
+    const currentSong = currentBySourceSongId.get(sourceSongId);
+    const position = currentSong?.position ?? nextPosition++;
+
+    if (currentSong) {
+      await db()
+        .delete(playlistSongs)
+        .where(and(eq(playlistSongs.playlistId, playlistId), eq(playlistSongs.songId, currentSong.id)));
+    }
+
+    await db()
+      .insert(playlistSongs)
+      .values({
+        playlistId,
+        songId: importedSongId,
+        position,
+      });
+    importedCount += 1;
+  }
+
+  const refreshedPlaylist = await getPlaylistById(playlistId, userId);
+  if (!refreshedPlaylist) {
+    throw Object.assign(new Error("Playlist not found"), { code: "PLAYLIST_NOT_FOUND" });
+  }
+
+  return { importedCount, playlist: refreshedPlaylist };
 }
 
 async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId: string): Promise<void> {

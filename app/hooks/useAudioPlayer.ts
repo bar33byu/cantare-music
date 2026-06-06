@@ -112,6 +112,7 @@ export function useAudioPlayer(
   const mountedRef = useRef(true);
   const audioFactoryRef = useRef(audioFactory);
   const optionsRef = useRef(options);
+  const currentAudioUrlRef = useRef(audioUrl);
   const previousAudioUrlRef = useRef<string | null>(null);
   const audioUrlChangeCountRef = useRef(0);
   const audioInitRunsRef = useRef(0);
@@ -147,7 +148,7 @@ export function useAudioPlayer(
 
       return {
         ...previous,
-        src: audioUrl,
+        src: currentAudioUrlRef.current,
         elementSrc: audio?.src ?? previous.elementSrc,
         currentSrc: nextCurrentSrc,
         currentSrcChanges: didCurrentSrcChange ? (previous.currentSrcChanges ?? 0) + 1 : (previous.currentSrcChanges ?? 0),
@@ -170,7 +171,7 @@ export function useAudioPlayer(
         errorMessage: audio?.error?.message ?? previous.errorMessage,
       };
     });
-  }, [audioUrl]);
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -182,6 +183,10 @@ export function useAudioPlayer(
   useEffect(() => {
     optionsRef.current = options;
   }, [options]);
+
+  useEffect(() => {
+    audioFactoryRef.current = audioFactory;
+  }, [audioFactory]);
 
   const applyCurrentTime = useCallback(
     (audio: HTMLAudioElement, ms: number, eventName: string) => {
@@ -280,50 +285,23 @@ export function useAudioPlayer(
     }
   }, [applyCurrentTime, updateDebugInfo]);
 
-  useLayoutEffect(() => {
-    audioInitRunsRef.current += 1;
-    if (previousAudioUrlRef.current !== audioUrl) {
-      audioUrlChangeCountRef.current += 1;
-      previousAudioUrlRef.current = audioUrl;
-    }
-    // Reset the hook snapshot while replacing the underlying audio element.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsReady(false);
-    setIsPlaying(false);
-    setCurrentMs(0);
-    setDurationMs(0);
-    setEndedCount(0);
-    setPlaybackError(null);
-    setDebugInfo(makeDefaultDebugInfo(audioUrl));
-    endMsRef.current = 0;
-    pendingPlayRangeRef.current = null;
-
-    if (!audioUrl) {
-      audioRef.current = null;
+  const flushPendingPlay = useCallback((audio: HTMLAudioElement) => {
+    if (!pendingPlayRangeRef.current) {
       return;
     }
 
-    const audio = audioFactoryRef.current(audioUrl);
+    const { startMs, endMs } = pendingPlayRangeRef.current;
+    pendingPlayRangeRef.current = null;
+    startPlayback(audio, startMs, endMs);
+  }, [startPlayback]);
+
+  useLayoutEffect(() => {
+    audioInitRunsRef.current += 1;
+    const audio = audioFactoryRef.current(currentAudioUrlRef.current);
     audioInstancesCreatedRef.current += 1;
     audioInstanceIdRef.current += 1;
     audioRef.current = audio;
     updateDebugInfo(audio, 'audio-created');
-
-    if ('preload' in audio) {
-      audio.preload = 'metadata';
-    }
-    audio.load?.();
-    audio.playbackRate = playbackRateRef.current;
-
-    const flushPendingPlay = () => {
-      if (!pendingPlayRangeRef.current) {
-        return;
-      }
-
-      const { startMs, endMs } = pendingPlayRangeRef.current;
-      pendingPlayRangeRef.current = null;
-      startPlayback(audio, startMs, endMs);
-    };
 
     const handleTimeUpdate = () => {
       const ms = audio.currentTime * 1000;
@@ -348,7 +326,7 @@ export function useAudioPlayer(
     const handleCanPlay = () => {
       setIsReady(true);
       updateDebugInfo(audio, 'canplay');
-      flushPendingPlay();
+      flushPendingPlay(audio);
     };
     const handleLoadedMetadata = () => {
       if (Number.isFinite(audio.duration)) {
@@ -362,7 +340,7 @@ export function useAudioPlayer(
       }
       if (audio.readyState >= 2) {
         setIsReady(true);
-        flushPendingPlay();
+        flushPendingPlay(audio);
       }
     };
     const handleError = () => {
@@ -405,22 +383,6 @@ export function useAudioPlayer(
     audio.addEventListener('playing', handlePlaying);
     audio.addEventListener('pause', handlePauseDebug);
 
-    if (pendingSeekMsRef.current !== null) {
-      applyCurrentTime(audio, pendingSeekMsRef.current, 'apply-pending-seek');
-    }
-
-    // If user clicked Play before audio element initialization completed,
-    // immediately consume the queued play request to avoid a deadlock.
-    if (pendingPlayRangeRef.current) {
-      flushPendingPlay();
-    }
-
-    if (audio.readyState >= 2) {
-      setIsReady(true);
-      updateDebugInfo(audio, 'already-ready');
-      flushPendingPlay();
-    }
-
     return () => {
       playRequestIdRef.current += 1;
       audio.removeEventListener('timeupdate', handleTimeUpdate);
@@ -438,7 +400,59 @@ export function useAudioPlayer(
       audio.removeEventListener('pause', handlePauseDebug);
       audio.pause();
     };
-  }, [applyCurrentTime, audioUrl, startPlayback, updateDebugInfo]);
+  }, [applyCurrentTime, flushPendingPlay, updateDebugInfo]);
+
+  useLayoutEffect(() => {
+    currentAudioUrlRef.current = audioUrl;
+    if (previousAudioUrlRef.current !== audioUrl) {
+      audioUrlChangeCountRef.current += 1;
+      previousAudioUrlRef.current = audioUrl;
+    }
+
+    // Reset the hook snapshot while replacing the media source, but keep the
+    // same audio element so mobile browsers do not lose the unlocked element.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsReady(false);
+    setIsPlaying(false);
+    setCurrentMs(0);
+    setDurationMs(0);
+    setEndedCount(0);
+    setPlaybackError(null);
+    setDebugInfo(makeDefaultDebugInfo(audioUrl));
+    endMsRef.current = 0;
+
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    if (!audioUrl) {
+      audio.pause();
+      audio.removeAttribute?.('src');
+      updateDebugInfo(audio, 'audio-src-cleared');
+      return;
+    }
+
+    if (audio.src !== audioUrl) {
+      audio.src = audioUrl;
+    }
+    if ('preload' in audio) {
+      audio.preload = 'metadata';
+    }
+    audio.playbackRate = playbackRateRef.current;
+    audio.load?.();
+    updateDebugInfo(audio, 'audio-src-updated');
+
+    if (pendingSeekMsRef.current !== null) {
+      applyCurrentTime(audio, pendingSeekMsRef.current, 'apply-pending-seek');
+    }
+
+    if (audio.readyState >= 2) {
+      setIsReady(true);
+      updateDebugInfo(audio, 'already-ready');
+      flushPendingPlay(audio);
+    }
+  }, [applyCurrentTime, audioUrl, flushPendingPlay, updateDebugInfo]);
 
   const play = useCallback((startMs: number, endMs: number) => {
     hasUserPlayIntentRef.current = true;

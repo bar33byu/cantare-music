@@ -145,6 +145,14 @@ export function getGuestSongRatings(songId: string): SegmentRating[] {
   }
 }
 
+export function getGuestProgressSummary(): { songCount: number; ratingCount: number } {
+  const songIds = getGuestProgressSongIds();
+  return {
+    songCount: songIds.length,
+    ratingCount: songIds.reduce((total, songId) => total + getGuestSongRatings(songId).length, 0),
+  };
+}
+
 export function saveGuestSongRatings(songId: string, ratings: SegmentRating[]): void {
   if (!songId.trim()) {
     return;

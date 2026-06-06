@@ -2,7 +2,7 @@
 
 import { DragEvent, useCallback, useEffect, useState } from 'react';
 import { withUserIdHeader } from '../lib/userContext';
-import type { Playlist, Song } from '../types';
+import type { Playlist, PlaylistRefreshPreview, Song } from '../types';
 
 interface PlaylistDetailProps {
   playlistId: string;
@@ -15,7 +15,6 @@ interface PlaylistDetailProps {
 export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, userId }: PlaylistDetailProps) {
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
-  const [selectedSongId, setSelectedSongId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -31,6 +30,16 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const [publicMessage, setPublicMessage] = useState<string | null>(null);
   const [shareAudioMode, setShareAudioMode] = useState<'part' | 'blend' | 'both'>('both');
   const [publicShareAudioMode, setPublicShareAudioMode] = useState<'part' | 'blend' | 'both'>('both');
+  const [playlistNameDraft, setPlaylistNameDraft] = useState('');
+  const [playlistNameSaving, setPlaylistNameSaving] = useState(false);
+  const [playlistNameError, setPlaylistNameError] = useState<string | null>(null);
+  const [addingSongIds, setAddingSongIds] = useState<Set<string>>(new Set());
+  const [refreshPreview, setRefreshPreview] = useState<PlaylistRefreshPreview | null>(null);
+  const [refreshLoading, setRefreshLoading] = useState(false);
+  const [refreshImporting, setRefreshImporting] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [selectedRefreshSongIds, setSelectedRefreshSongIds] = useState<Set<string>>(new Set());
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     return withUserIdHeader(init, userId);
@@ -50,8 +59,13 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     }
     const data = (await response.json()) as Playlist;
     setPlaylist(data);
+    setPlaylistNameDraft(data.name);
     setShareAudioMode(data.shareAudioMode ?? 'both');
     setPublicShareAudioMode(data.publicShareAudioMode ?? 'both');
+    setRefreshPreview(null);
+    setSelectedRefreshSongIds(new Set());
+    setRefreshError(null);
+    setRefreshMessage(null);
     setLoading(false);
   }, [playlistId, request]);
 
@@ -76,45 +90,41 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     setPickerOpen(false);
     setShowSuggestions(false);
     setSearchQuery('');
-    setSelectedSongId('');
     setPickerError(null);
   };
 
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
-    setSelectedSongId('');
     setShowSuggestions(true);
     setPickerError(null);
   };
 
-  const handleSelectSong = (songId: string) => {
-    if (existingIds.has(songId)) {
+  const handleAddSongById = async (songId: string) => {
+    if (!songId || existingIds.has(songId) || addingSongIds.has(songId)) {
       return;
     }
-    setSelectedSongId(songId);
-    setSearchQuery('');
-    setShowSuggestions(false);
+    setAddingSongIds((previous) => new Set(previous).add(songId));
     setPickerError(null);
-  };
 
-  const handleAddSong = async () => {
-    if (!selectedSongId) {
-      return;
-    }
     const response = await request(`/api/playlists/${playlistId}/songs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ songId: selectedSongId }),
+      body: JSON.stringify({ songId }),
     });
 
     if (response.ok) {
-      setSelectedSongId('');
       setSearchQuery('');
-      setShowSuggestions(false);
+      setShowSuggestions(true);
       setPickerError(null);
       await fetchPlaylist();
-      closeSongPicker();
+    } else {
+      setPickerError('Unable to add that song right now.');
     }
+    setAddingSongIds((previous) => {
+      const next = new Set(previous);
+      next.delete(songId);
+      return next;
+    });
   };
 
   const handleCreateSongAndAdd = async () => {
@@ -151,10 +161,8 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
 
       setSongs((previous) => [...previous, { ...createdSong, segments: createdSong.segments ?? [] }]);
       setSearchQuery('');
-      setSelectedSongId('');
-      setShowSuggestions(false);
+      setShowSuggestions(true);
       await fetchPlaylist();
-      closeSongPicker();
     } catch (error) {
       setPickerError(error instanceof Error ? error.message : 'Unable to create song right now.');
     } finally {
@@ -168,6 +176,33 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     });
     if (response.ok) {
       await fetchPlaylist();
+    }
+  };
+
+  const handleSavePlaylistName = async () => {
+    const nextName = playlistNameDraft.trim();
+    if (!playlist || nextName.length === 0 || nextName === playlist.name) {
+      return;
+    }
+
+    setPlaylistNameSaving(true);
+    setPlaylistNameError(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nextName }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Unable to rename playlist right now.');
+      }
+
+      setPlaylist((current) => current ? { ...current, name: nextName } : current);
+    } catch (error) {
+      setPlaylistNameError(error instanceof Error ? error.message : 'Unable to rename playlist right now.');
+    } finally {
+      setPlaylistNameSaving(false);
     }
   };
 
@@ -269,6 +304,88 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     }
   };
 
+  const handleLoadRefreshPreview = async () => {
+    setRefreshLoading(true);
+    setRefreshError(null);
+    setRefreshMessage(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}/refresh`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(payload.error || 'Unable to check the shared source right now.');
+      }
+      const preview = (await response.json()) as PlaylistRefreshPreview;
+      setRefreshPreview(preview);
+      setSelectedRefreshSongIds(new Set(preview.candidates.map((candidate) => candidate.sourceSongId)));
+      if (preview.candidates.length === 0) {
+        setRefreshMessage('This copy is up to date with the shared playlist.');
+      }
+    } catch (error) {
+      setRefreshError(error instanceof Error ? error.message : 'Unable to check the shared source right now.');
+    } finally {
+      setRefreshLoading(false);
+    }
+  };
+
+  const toggleRefreshSong = (sourceSongId: string) => {
+    setSelectedRefreshSongIds((current) => {
+      const next = new Set(current);
+      if (next.has(sourceSongId)) {
+        next.delete(sourceSongId);
+      } else {
+        next.add(sourceSongId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleAllRefreshSongs = () => {
+    if (!refreshPreview) {
+      return;
+    }
+    setSelectedRefreshSongIds((current) => {
+      if (current.size === refreshPreview.candidates.length) {
+        return new Set();
+      }
+      return new Set(refreshPreview.candidates.map((candidate) => candidate.sourceSongId));
+    });
+  };
+
+  const handleImportRefreshSongs = async () => {
+    const sourceSongIds = Array.from(selectedRefreshSongIds);
+    if (sourceSongIds.length === 0) {
+      return;
+    }
+
+    setRefreshImporting(true);
+    setRefreshError(null);
+    setRefreshMessage(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceSongIds }),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string; importedCount?: number; playlist?: Playlist };
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to import updates right now.');
+      }
+      if (payload.playlist) {
+        setPlaylist(payload.playlist);
+        setPlaylistNameDraft(payload.playlist.name);
+      } else {
+        await fetchPlaylist();
+      }
+      setRefreshMessage(`Imported ${payload.importedCount ?? sourceSongIds.length} song${(payload.importedCount ?? sourceSongIds.length) === 1 ? '' : 's'}.`);
+      setRefreshPreview(null);
+      setSelectedRefreshSongIds(new Set());
+    } catch (error) {
+      setRefreshError(error instanceof Error ? error.message : 'Unable to import updates right now.');
+    } finally {
+      setRefreshImporting(false);
+    }
+  };
+
   const handleDrop = async (targetSongId: string) => {
     if (!playlist || !draggedSongId || draggedSongId === targetSongId) {
       setDraggedSongId(null);
@@ -311,6 +428,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
 
   const sortedSongs = [...playlist.songs].sort((a, b) => a.position - b.position);
   const existingIds = new Set(sortedSongs.map((song) => song.id));
+  const importedSourceAvailable = Boolean(playlist.sourcePlaylistId);
 
   // Filter songs based on search query
   const filteredSongs = searchQuery.trim() === ''
@@ -326,14 +444,40 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const exactExistingSong = songs.find((song) => song.title.trim().toLowerCase() === creatableTitle.toLowerCase());
   const canCreateSong = creatableTitle.length > 0 && !exactExistingSong;
 
-  // Get the selected song details for display
-  const selectedSong = songs.find((s) => s.id === selectedSongId);
-
   return (
     <section data-testid="playlist-detail" className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 data-testid="playlist-detail-name" className="text-2xl font-bold">{playlist.name}</h2>
+        <div className="min-w-0 flex-1">
+          <div className="flex max-w-2xl flex-wrap items-center gap-2">
+            <label htmlFor="playlist-name-input" className="sr-only">Playlist title</label>
+            <input
+              id="playlist-name-input"
+              data-testid="playlist-detail-name-input"
+              value={playlistNameDraft}
+              onChange={(event) => {
+                setPlaylistNameDraft(event.target.value);
+                setPlaylistNameError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleSavePlaylistName();
+                }
+              }}
+              className="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-2xl font-bold text-gray-950"
+            />
+            <button
+              type="button"
+              data-testid="playlist-detail-name-save"
+              className="rounded border border-indigo-300 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+              disabled={playlistNameSaving || playlistNameDraft.trim().length === 0 || playlistNameDraft.trim() === playlist.name}
+              onClick={() => void handleSavePlaylistName()}
+            >
+              {playlistNameSaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+          <h2 data-testid="playlist-detail-name" className="sr-only">{playlist.name}</h2>
+          {playlistNameError ? <p data-testid="playlist-detail-name-error" className="mt-1 text-sm text-red-600">{playlistNameError}</p> : null}
           {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
         </div>
         <div className="flex gap-2">
@@ -454,9 +598,92 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
         </div>
         {publicError ? <p data-testid="playlist-public-error" className="mt-2 text-sm text-red-600">{publicError}</p> : null}
         {publicMessage ? <p data-testid="playlist-public-message" className="mt-2 text-sm text-gray-600">{publicMessage}</p> : null}
+        {importedSourceAvailable ? (
+          <div className="mt-3 border-t border-gray-100 pt-3" data-testid="playlist-refresh-panel">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-800">Source updates</p>
+                <p className="text-xs text-gray-500">
+                  Check the shared playlist and choose which songs to import into this copy.
+                </p>
+              </div>
+              <button
+                type="button"
+                data-testid="playlist-refresh-check"
+                className="rounded border border-indigo-300 px-3 py-1 text-sm text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                disabled={refreshLoading || refreshImporting}
+                onClick={() => void handleLoadRefreshPreview()}
+              >
+                {refreshLoading ? 'Checking...' : 'Check source'}
+              </button>
+            </div>
+            {refreshPreview ? (
+              <div className="mt-3 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm text-gray-600">
+                    {refreshPreview.sourcePlaylist.name} by {refreshPreview.sourcePlaylist.owner.displayName}
+                  </p>
+                  {refreshPreview.candidates.length > 0 ? (
+                    <button
+                      type="button"
+                      data-testid="playlist-refresh-toggle-all"
+                      className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+                      onClick={handleToggleAllRefreshSongs}
+                    >
+                      {selectedRefreshSongIds.size === refreshPreview.candidates.length ? 'Clear all' : 'Select all'}
+                    </button>
+                  ) : null}
+                </div>
+                {refreshPreview.candidates.length > 0 ? (
+                  <>
+                    <ul className="max-h-64 space-y-2 overflow-y-auto">
+                      {refreshPreview.candidates.map((candidate) => (
+                        <li key={candidate.sourceSongId} className="rounded border border-gray-200 p-2">
+                          <label className="flex cursor-pointer items-start gap-3">
+                            <input
+                              data-testid={`playlist-refresh-song-${candidate.sourceSongId}`}
+                              type="checkbox"
+                              className="mt-1"
+                              checked={selectedRefreshSongIds.has(candidate.sourceSongId)}
+                              onChange={() => toggleRefreshSong(candidate.sourceSongId)}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block font-medium text-gray-900">{candidate.title}</span>
+                              {candidate.artist ? <span className="block text-sm text-gray-500">{candidate.artist}</span> : null}
+                              <span className="mt-1 flex flex-wrap gap-1 text-xs">
+                                <span className={`rounded-full px-2 py-0.5 ${candidate.status === 'new' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'}`}>
+                                  {candidate.status === 'new' ? 'New to this playlist' : 'Refresh available'}
+                                </span>
+                                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">{candidate.segmentCount} segments</span>
+                                {candidate.hasPartAudio ? <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">Part</span> : null}
+                                {candidate.hasBlendAudio ? <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">Blend</span> : null}
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      type="button"
+                      data-testid="playlist-refresh-import"
+                      className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                      disabled={refreshImporting || selectedRefreshSongIds.size === 0}
+                      onClick={() => void handleImportRefreshSongs()}
+                    >
+                      {refreshImporting ? 'Importing...' : `Import selected (${selectedRefreshSongIds.size})`}
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+            {refreshError ? <p data-testid="playlist-refresh-error" className="mt-2 text-sm text-red-600">{refreshError}</p> : null}
+            {refreshMessage ? <p data-testid="playlist-refresh-message" className="mt-2 text-sm text-gray-600">{refreshMessage}</p> : null}
+          </div>
+        ) : null}
         {pickerOpen ? (
           <div className="mt-3 space-y-2">
-            <div className="relative">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
               <input
                 data-testid="playlist-song-search"
                 type="text"
@@ -481,17 +708,27 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
                     <li
                       key={song.id}
                       data-testid={`playlist-song-suggestion-${song.id}`}
-                      onClick={() => handleSelectSong(song.id)}
+                      onClick={() => void handleAddSongById(song.id)}
                       className={`cursor-pointer px-3 py-2 hover:bg-indigo-50 ${
-                        existingIds.has(song.id) ? 'opacity-50 cursor-not-allowed' : ''
-                      } ${selectedSongId === song.id ? 'bg-indigo-100' : ''}`}
+                        existingIds.has(song.id) || addingSongIds.has(song.id) ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
                     >
                       <div className="font-medium">{song.title}</div>
                       {song.artist ? <div className="text-sm text-gray-500">{song.artist}</div> : null}
+                      {addingSongIds.has(song.id) ? <div className="text-xs text-indigo-700">Adding...</div> : null}
                     </li>
                   ))}
                 </ul>
               )}
+              </div>
+              <button
+                type="button"
+                data-testid="playlist-song-picker-close"
+                className="rounded border border-gray-300 px-3 py-2 text-gray-700 hover:bg-gray-50"
+                onClick={closeSongPicker}
+              >
+                Close
+              </button>
             </div>
             {canCreateSong ? (
               <button
@@ -508,21 +745,6 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
                 {pickerError}
               </p>
             ) : null}
-            {selectedSong && (
-              <div className="flex items-center justify-between gap-2 rounded bg-indigo-50 px-3 py-2">
-                <div>
-                  <div className="font-medium">{selectedSong.title}</div>
-                  {selectedSong.artist ? <div className="text-sm text-gray-500">{selectedSong.artist}</div> : null}
-                </div>
-                <button
-                  data-testid="playlist-song-add-submit"
-                  className="rounded bg-indigo-600 px-3 py-1 text-white hover:bg-indigo-700"
-                  onClick={() => void handleAddSong()}
-                >
-                  Add
-                </button>
-              </div>
-            )}
           </div>
         ) : null}
       </div>
