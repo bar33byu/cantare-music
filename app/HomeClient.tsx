@@ -768,11 +768,13 @@ function SettingsSection({
   children,
   tone = "default",
   testId,
+  defaultOpen = false,
 }: {
   title: string;
   children: ReactNode;
   tone?: "default" | "admin" | "muted";
   testId: string;
+  defaultOpen?: boolean;
 }) {
   const toneClass =
     tone === "admin"
@@ -782,7 +784,7 @@ function SettingsSection({
         : "border-gray-200 bg-white text-gray-800";
 
   return (
-    <details data-testid={testId} className={`group rounded-lg border ${toneClass}`}>
+    <details data-testid={testId} className={`group rounded-lg border ${toneClass}`} {...(defaultOpen ? { open: true } : {})}>
       <summary
         data-testid={`${testId}-toggle`}
         className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-semibold"
@@ -820,7 +822,9 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [authMessage, setAuthMessage] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [profileDisplayName, setProfileDisplayName] = useState("");
+  const [profileUsername, setProfileUsername] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
+  const [profileSetupPrompt, setProfileSetupPrompt] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [accountDeletion, setAccountDeletion] = useState<AccountDeletionState | null>(null);
   const [accountDeletionLoading, setAccountDeletionLoading] = useState(false);
@@ -913,6 +917,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
     const params = new URLSearchParams(window.location.search);
     const shouldCleanAuthParam = params.get("auth") === "signed-in";
+    const shouldPromptForUsername = shouldCleanAuthParam && params.get("setup") === "username";
     const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
     if ((cookieUserId === DEFAULT_USER_ID || isAnonymousUserId(cookieUserId)) && !shouldCleanAuthParam) {
       return;
@@ -928,6 +933,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         const payload = (await response.json()) as AuthSessionPayload;
         if (!cancelled && (payload.user || payload.effectiveUser)) {
           applyAuthSessionPayload(payload);
+          if (shouldPromptForUsername) {
+            setSettingsOpen(true);
+            setProfileSetupPrompt(true);
+          }
           if (shouldCleanAuthParam) {
             window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
           }
@@ -955,9 +964,12 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   useEffect(() => {
     if (settingsOpen) {
       setProfileDisplayName(currentUser.name);
-      setProfileMessage("");
+      setProfileUsername(currentUser.username);
+      if (!profileSetupPrompt) {
+        setProfileMessage("");
+      }
     }
-  }, [currentUser.name, settingsOpen]);
+  }, [currentUser.name, currentUser.username, profileSetupPrompt, settingsOpen]);
 
   useEffect(() => {
     if (!settingsOpen || !isSignedIn) {
@@ -1156,8 +1168,13 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const handleProfileSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const displayName = profileDisplayName.trim();
+    const username = normalizeUsername(profileUsername);
     if (!displayName) {
       setProfileMessage("Display name is required.");
+      return;
+    }
+    if (!username) {
+      setProfileMessage("Username must contain letters or numbers.");
       return;
     }
 
@@ -1167,20 +1184,23 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       const response = await fetch("/api/users/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName }),
+        body: JSON.stringify({ displayName, username }),
       });
       if (!response.ok) {
-        throw new Error("Failed to update profile");
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? "Failed to update profile");
       }
       const payload = (await response.json()) as AuthSessionPayload;
       if (payload.user) {
         applyAuthenticatedUser(payload.user);
         setProfileDisplayName(payload.user.name);
+        setProfileUsername(payload.user.username);
       }
+      setProfileSetupPrompt(false);
       setProfileMessage("Profile saved.");
       usersHydratedFromDbRef.current = false;
-    } catch {
-      setProfileMessage("Could not save profile.");
+    } catch (error) {
+      setProfileMessage(error instanceof Error ? error.message : "Could not save profile.");
     } finally {
       setProfileSaving(false);
     }
@@ -2012,9 +2032,14 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
                 </SettingsSection>
 
-                <SettingsSection title="Account" testId="settings-section-account">
+                <SettingsSection title="Account" testId="settings-section-account" defaultOpen={profileSetupPrompt}>
                   {isSignedIn ? (
                     <>
+                      {profileSetupPrompt ? (
+                        <p className="mt-3 rounded border border-indigo-200 bg-indigo-50 p-2 text-sm text-indigo-900" role="status">
+                          Choose a username for your Cantare profile.
+                        </p>
+                      ) : null}
                       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded border border-gray-200 bg-gray-50 p-2 text-sm">
                         <dt className="font-medium text-gray-700">Email</dt>
                         <dd data-testid="settings-current-email" className="break-all text-gray-800">
@@ -2037,9 +2062,28 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                           onChange={(event) => setProfileDisplayName(event.target.value)}
                           className="min-w-0 rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
                         />
+                        <label htmlFor="profile-username" className="text-sm font-medium text-gray-700">
+                          Username
+                        </label>
+                        <div className="flex min-w-0 items-center rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-800 focus-within:border-indigo-400">
+                          <span className="shrink-0 text-gray-500">@</span>
+                          <input
+                            id="profile-username"
+                            data-testid="profile-username"
+                            type="text"
+                            value={profileUsername}
+                            onChange={(event) => setProfileUsername(event.target.value)}
+                            className="min-w-0 flex-1 border-0 bg-transparent px-1 text-sm text-gray-800 outline-none"
+                          />
+                        </div>
                         <button
                           type="submit"
-                          disabled={profileSaving || !profileDisplayName.trim() || profileDisplayName.trim() === currentUser.name}
+                          disabled={
+                            profileSaving ||
+                            !profileDisplayName.trim() ||
+                            !normalizeUsername(profileUsername) ||
+                            (profileDisplayName.trim() === currentUser.name && normalizeUsername(profileUsername) === currentUser.username)
+                          }
                           className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Save profile

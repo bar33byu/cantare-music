@@ -922,14 +922,16 @@ export async function getUserByEmail(email: string): Promise<PublicUser | null> 
 export async function updateUserProfile(
   id: string,
   data: {
+    username?: string;
     name?: string;
     avatarUrl?: string | null;
     profileVisibility?: string;
   }
 ): Promise<PublicUser | null> {
-  const updates: Partial<Pick<UserRow, "name" | "avatarUrl" | "profileVisibility" | "updatedAt">> = {
+  const updates: Partial<Pick<UserRow, "username" | "name" | "avatarUrl" | "profileVisibility" | "updatedAt">> = {
     updatedAt: new Date(),
   };
+  if (data.username !== undefined) updates.username = data.username;
   if (data.name !== undefined) updates.name = data.name;
   if (data.avatarUrl !== undefined) updates.avatarUrl = data.avatarUrl;
   if (data.profileVisibility !== undefined) updates.profileVisibility = data.profileVisibility;
@@ -1056,29 +1058,35 @@ export async function upsertUser(data: {
 // ── Songs ──────────────────────────────────────────────────────────────────
 
 export async function getOrCreateUserForEmail(email: string): Promise<PublicUser> {
+  const result = await getOrCreateUserForEmailWithStatus(email);
+  return result.user;
+}
+
+export async function getOrCreateUserForEmailWithStatus(email: string): Promise<{ user: PublicUser; created: boolean }> {
   const normalizedEmail = normalizeEmail(email);
   const existing = await getUserByEmail(normalizedEmail);
   if (existing) {
-    return existing;
+    return { user: existing, created: false };
   }
 
   const baseUsername = usernameFromEmail(normalizedEmail);
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const username = attempt === 0 ? baseUsername : `${baseUsername}-${attempt + 1}`;
     try {
-      return await upsertUser({
+      const user = await upsertUser({
         id: crypto.randomUUID(),
         username,
         name: normalizedEmail.split("@")[0] || "Cantare Singer",
         email: normalizedEmail,
         profileVisibility: "private",
       });
+      return { user, created: true };
     } catch (error) {
       const message = error instanceof Error ? error.message.toLowerCase() : "";
       if (message.includes("users_username_unique") || message.includes("users_email_unique")) {
         const racedUser = await getUserByEmail(normalizedEmail);
         if (racedUser) {
-          return racedUser;
+          return { user: racedUser, created: false };
         }
         continue;
       }
@@ -1086,13 +1094,14 @@ export async function getOrCreateUserForEmail(email: string): Promise<PublicUser
     }
   }
 
-  return upsertUser({
+  const user = await upsertUser({
     id: crypto.randomUUID(),
     username: `${baseUsername}-${Math.random().toString(36).slice(2, 8)}`,
     name: normalizedEmail.split("@")[0] || "Cantare Singer",
     email: normalizedEmail,
     profileVisibility: "private",
   });
+  return { user, created: true };
 }
 
 export interface UserAccountDeletionStatus {

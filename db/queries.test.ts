@@ -188,6 +188,37 @@ describe("users", () => {
     ]);
   });
 
+  it("updateUserProfile can change the username", async () => {
+    const row = {
+      id: "internal-user-2",
+      username: "updated-singer",
+      name: "Singer Two",
+      email: "singer@example.com",
+      avatarUrl: null,
+      profileVisibility: "private",
+    };
+    const chain = makeChain([row]);
+    updateSpy.mockReturnValue(chain);
+
+    const { updateUserProfile } = await getQueries();
+    const result = await updateUserProfile("internal-user-2", {
+      username: "updated-singer",
+      name: "Singer Two",
+    });
+
+    expect(updateSpy).toHaveBeenCalledWith(users);
+    const setSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
+    expect(setSpy).toHaveBeenCalledWith(expect.objectContaining({
+      username: "updated-singer",
+      name: "Singer Two",
+    }));
+    expect(result).toEqual({
+      ...row,
+      accountDeletionRequestedAt: null,
+      accountDeletionScheduledFor: null,
+    });
+  });
+
   it("createMagicLinkToken stores only a token hash", async () => {
     const expiresAt = new Date("2026-05-24T12:15:00.000Z");
     const row = {

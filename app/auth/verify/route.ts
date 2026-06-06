@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { consumeMagicLinkToken, createUserSession, getOrCreateUserForEmail, logAuditEvent } from "../../../db/queries";
+import { consumeMagicLinkToken, createUserSession, getOrCreateUserForEmailWithStatus, logAuditEvent } from "../../../db/queries";
 import { AUTH_SESSION_COOKIE_NAME, createOpaqueToken, getAppBaseUrl, hashAuthToken, SESSION_TTL_MS } from "../../lib/authTokens";
 import { getSafeAuthReturnPath } from "../../lib/authRedirects";
 import { USER_COOKIE_NAME } from "../../lib/userContext";
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(redirectUrl);
     }
 
-    const user = await getOrCreateUserForEmail(consumedToken.email);
+    const { user, created } = await getOrCreateUserForEmailWithStatus(consumedToken.email);
     const sessionToken = createOpaqueToken();
     const maxAgeSeconds = Math.floor(SESSION_TTL_MS / 1000);
     await createUserSession({
@@ -55,6 +55,9 @@ export async function GET(request: NextRequest) {
     });
 
     redirectUrl.searchParams.set("auth", "signed-in");
+    if (created) {
+      redirectUrl.searchParams.set("setup", "username");
+    }
     const response = NextResponse.redirect(redirectUrl);
     response.cookies.set(AUTH_SESSION_COOKIE_NAME, sessionToken, cookieOptions(maxAgeSeconds, true));
     response.cookies.set(USER_COOKIE_NAME, user.id, cookieOptions(maxAgeSeconds, false));

@@ -588,7 +588,7 @@ describe('Home page', () => {
       ],
     }));
     document.cookie = 'cantare-user-id=test-user; path=/';
-    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/auth/session') {
         return {
           ok: true,
@@ -597,6 +597,14 @@ describe('Home page', () => {
             actor: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
             effectiveUser: { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
             isImpersonating: false,
+          }),
+        } as Response;
+      }
+      if (String(input) === '/api/users/me' && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({
+            user: { id: 'test-user', username: 'new-singer', name: 'Test User', email: 'test@example.com' },
           }),
         } as Response;
       }
@@ -620,8 +628,52 @@ describe('Home page', () => {
     });
     expect(screen.getByTestId('settings-current-username')).toHaveTextContent('@test-user');
     expect(screen.getByTestId('profile-display-name')).toHaveValue('Test User');
+    expect(screen.getByTestId('profile-username')).toHaveValue('test-user');
+
+    fireEvent.change(screen.getByTestId('profile-username'), { target: { value: 'New Singer!' } });
+    fireEvent.click(screen.getByText('Save profile'));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/users/me', expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ displayName: 'Test User', username: 'new-singer' }),
+      }));
+    });
     expect(screen.queryByText('Add')).not.toBeInTheDocument();
     expect(screen.queryByTestId('active-user-select')).not.toBeInTheDocument();
+  });
+
+  it('opens account settings after first magic-link setup', async () => {
+    window.history.pushState(null, '', '/?auth=signed-in&setup=username');
+    document.cookie = 'cantare-user-id=new-user; path=/';
+    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') {
+        return {
+          ok: true,
+          json: async () => ({
+            user: { id: 'new-user', username: 'singer', name: 'singer', email: 'singer@example.com' },
+            actor: { id: 'new-user', username: 'singer', name: 'singer', email: 'singer@example.com' },
+            effectiveUser: { id: 'new-user', username: 'singer', name: 'singer', email: 'singer@example.com' },
+            isImpersonating: false,
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-overlay')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Choose a username for your Cantare profile.')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('profile-username')).toHaveValue('singer');
+    });
+    expect(window.location.search).toBe('');
   });
 
   it('allows impersonated sessions to browse Shared even when the effective user has no email', async () => {
