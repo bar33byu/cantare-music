@@ -229,6 +229,10 @@ describe("PracticeView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    window.localStorage.setItem("practice-control-explainer:part", "seen");
+    window.localStorage.setItem("practice-control-explainer:blend", "seen");
+    window.localStorage.setItem("practice-control-explainer:contour", "seen");
+    window.localStorage.setItem("practice-control-explainer:tap", "seen");
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
@@ -687,6 +691,40 @@ describe("PracticeView", () => {
     expect(mockPlay).toHaveBeenCalledWith(5000, 16000);
   });
 
+  it("shows first-click Part and Blend introductions before changing audio", async () => {
+    window.localStorage.removeItem("practice-control-explainer:part");
+    window.localStorage.removeItem("practice-control-explainer:blend");
+    const song: Song = {
+      ...makeSong(),
+      alternateAudioUrl: "https://cdn.example.com/audio/song-1/blend.mp3",
+    };
+
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-audio-version-straight"));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Practice control")).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "Practice with your part" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Hear your vocal part clearly so you can learn the notes, rhythm, and entrances.")).toBeInTheDocument();
+    expect(dialog.firstElementChild).toHaveClass("max-w-md", "rounded-xl", "border-indigo-100", "shadow-xl");
+
+    fireEvent.click(screen.getByTestId("practice-control-explainer-continue"));
+    expect(window.localStorage.getItem("practice-control-explainer:part")).toBe("seen");
+
+    fireEvent.click(screen.getByTestId("practice-audio-version-blend"));
+    expect(screen.getByRole("heading", { name: "Practice with the full blend" })).toBeInTheDocument();
+    expect(screen.getByText("Hear your part within the complete ensemble and practice fitting your voice into the group.")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.audioUrl);
+
+    fireEvent.click(screen.getByTestId("practice-control-explainer-continue"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.alternateAudioUrl);
+    });
+    expect(window.localStorage.getItem("practice-control-explainer:blend")).toBe("seen");
+  });
+
   it("cycles lyric visibility mode between full, hints, and hidden", async () => {
     const song = makeSong();
     await renderAndWaitForRatings(song);
@@ -1004,6 +1042,34 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
     expect(segmentCard).toHaveAttribute("data-show-contour-map", "true");
+  });
+
+  it("shows first-click Contour and Tap introductions with MIDI setup guidance", async () => {
+    window.localStorage.removeItem("practice-control-explainer:contour");
+    window.localStorage.removeItem("practice-control-explainer:tap");
+    mockPracticeFetchWithMidiAnswerKey();
+    const song = makeSong(1);
+
+    await renderAndWaitForRatings(song);
+
+    fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
+
+    expect(screen.getByRole("heading", { name: "See the melodic contour" })).toBeInTheDocument();
+    expect(screen.getByText("Contour is available when you add a simple, single-track MIDI file while setting up the song.")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
+
+    fireEvent.click(screen.getByTestId("practice-control-explainer-continue"));
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "true");
+
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    expect(screen.getByRole("heading", { name: "Practice the melody by tapping" })).toBeInTheDocument();
+    expect(screen.getByText(/Primary Chorister Mode/)).toBeInTheDocument();
+    expect(screen.getByText("Tap practice is available when you add a simple, single-track MIDI file while setting up the song.")).toBeInTheDocument();
+    expect(screen.queryByTestId("practice-tap-bar")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("practice-control-explainer-continue"));
+    expect(screen.getByTestId("practice-tap-bar")).toBeInTheDocument();
   });
 
   it("hides the card contour toggle when the song has no tap data", async () => {
