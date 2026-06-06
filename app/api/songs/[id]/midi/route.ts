@@ -2,19 +2,15 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { NextRequest, NextResponse } from "next/server";
 import {
   createMidiSource,
-  getLatestCompleteMidiAlignmentForSource,
-  getLatestMidiAlignmentForSource,
   getLatestMidiSourceForSong,
-  getSegmentsBySongId,
   getSongById,
   updateMidiSourceCleanup,
 } from "../../../../../db/queries";
 import { BUCKET, generateMidiUploadKey, r2Client } from "../../../../../lib/r2";
 import { resolveEffectiveRequestUserId } from "../../../_user";
+import { buildMidiStatus } from "../../../../lib/midiStatus";
 import {
   cleanMidiNotes,
-  deriveSegmentAnswerKeys,
-  deriveWholeSongAnswerKey,
   parseMidiFile,
   type MidiCleanupSettings,
 } from "../../../../lib/midiGuidedTapPractice";
@@ -42,52 +38,6 @@ function isMidiFilename(filename: string): boolean {
 
 function clampThreshold(value: unknown): number {
   return Math.max(0, Math.min(300, typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 100));
-}
-
-async function buildMidiStatus(songId: string, userId: string) {
-  const source = await getLatestMidiSourceForSong(songId, userId);
-  const alignment = source ? await getLatestMidiAlignmentForSource(source.id, userId) : null;
-  const completeAlignment = source ? await getLatestCompleteMidiAlignmentForSource(source.id, userId) : null;
-  const wholeSongAnswerKey = source && completeAlignment
-    ? deriveWholeSongAnswerKey(songId, source.id, source.cleanedNotes, completeAlignment)
-    : null;
-  const segments = wholeSongAnswerKey ? await getSegmentsBySongId(songId) : [];
-  const segmentAnswerKeys = wholeSongAnswerKey
-    ? deriveSegmentAnswerKeys(wholeSongAnswerKey, segments)
-    : {};
-
-  return {
-    source,
-    alignment,
-    completeAlignment,
-    wholeSongAnswerKey,
-    segmentAnswerKeys,
-    summary: source
-      ? {
-          hasMidi: true,
-          rawNoteCount: source.rawNoteCount,
-          cleanedNoteCount: source.cleanedNoteCount,
-          ignoredShortNoteCount: source.ignoredShortNoteCount,
-          shortNoteThresholdMs: source.cleanupSettings.shortNoteThresholdMs,
-          alignedCount: alignment?.tappedStartTimesSeconds.length ?? 0,
-          retainedMidiNoteCount: source.cleanedNoteCount,
-          hasCompleteAlignment: Boolean(completeAlignment),
-          hasDerivedAnswerKey: Boolean(wholeSongAnswerKey),
-          latestAlignmentDate: alignment?.updatedAt ?? null,
-        }
-      : {
-          hasMidi: false,
-          rawNoteCount: 0,
-          cleanedNoteCount: 0,
-          ignoredShortNoteCount: 0,
-          shortNoteThresholdMs: DEFAULT_CLEANUP_SETTINGS.shortNoteThresholdMs,
-          alignedCount: 0,
-          retainedMidiNoteCount: 0,
-          hasCompleteAlignment: false,
-          hasDerivedAnswerKey: false,
-          latestAlignmentDate: null,
-        },
-  };
 }
 
 export async function GET(

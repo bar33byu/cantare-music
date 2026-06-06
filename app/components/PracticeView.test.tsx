@@ -378,6 +378,29 @@ describe("PracticeView", () => {
     expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith("/tap-sessions"))).toBe(false);
   });
 
+  it("loads guest MIDI contour controls through the shared playlist token route", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+    const sharedSong = { ...makeSong(), hasMidiContour: true };
+
+    render(
+      <PracticeView
+        song={sharedSong}
+        sharedPlaylistToken="share-token"
+        persistProgress={false}
+        progressStorage="local"
+        initialSession={makeSession(sharedSong)}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+    });
+
+    const midiCall = mockFetch.mock.calls.find(([url]) => String(url).includes("/api/share/playlists/"));
+    expect(midiCall?.[0]).toBe("/api/share/playlists/share-token/songs/song-1/midi");
+    expect(new Headers(midiCall?.[1]?.headers).get("X-User-ID")).toBeNull();
+  });
+
   it("does not show draft recording tools on the practice screen", async () => {
     const song: Song = {
       ...makeSong(),

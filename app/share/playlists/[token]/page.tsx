@@ -105,7 +105,7 @@ export default async function SharedPlaylistPage({
           ) : null}
         </header>
 
-        <SharedPlaylistGuestPractice playlist={practicePlaylist} />
+        <SharedPlaylistGuestPractice playlist={practicePlaylist} shareToken={token} />
       </section>
     </main>
   );

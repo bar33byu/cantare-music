@@ -11,9 +11,10 @@ type PracticeMode = "preview" | "playlist" | "song";
 
 interface SharedPlaylistGuestPracticeProps {
   playlist: Playlist;
+  shareToken: string;
 }
 
-export function SharedPlaylistGuestPractice({ playlist }: SharedPlaylistGuestPracticeProps) {
+export function SharedPlaylistGuestPractice({ playlist, shareToken }: SharedPlaylistGuestPracticeProps) {
   const [mode, setMode] = useState<PracticeMode>("preview");
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [preferredAudioVersion, setPreferredAudioVersion] = useState<PreferredAudioVersion>("part");
@@ -42,6 +43,7 @@ export function SharedPlaylistGuestPractice({ playlist }: SharedPlaylistGuestPra
           persistProgress={false}
           progressStorage="local"
           revalidatePlaylist={false}
+          sharedPlaylistToken={shareToken}
           preferredAudioVersion={preferredAudioVersion}
           onPreferredAudioVersionChange={setPreferredAudioVersion}
           onExit={() => setMode("preview")}
@@ -58,6 +60,7 @@ export function SharedPlaylistGuestPractice({ playlist }: SharedPlaylistGuestPra
           song={selectedSong}
           persistProgress={false}
           progressStorage="local"
+          sharedPlaylistToken={shareToken}
           initialSession={selectedSongSession}
           breadcrumbRootLabel={playlist.name}
           onBreadcrumbRootClick={() => setMode("preview")}
