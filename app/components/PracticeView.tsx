@@ -80,6 +80,56 @@ interface PracticeViewProps {
 
 type LyricVisibilityMode = "full" | "hint" | "hidden";
 type AudioVersion = TapAudioVersion;
+type ExplainedPracticeControl = "part" | "blend" | "contour" | "tap";
+
+const PRACTICE_CONTROL_EXPLAINER_STORAGE_KEY_PREFIX = "practice-control-explainer:";
+const practiceControlExplainerCopy: Record<
+  ExplainedPracticeControl,
+  { title: string; description: string; detail?: string }
+> = {
+  part: {
+    title: "Practice with your part",
+    description: "Hear your vocal part clearly so you can learn the notes, rhythm, and entrances.",
+  },
+  blend: {
+    title: "Practice with the full blend",
+    description: "Hear your part within the complete ensemble and practice fitting your voice into the group.",
+  },
+  contour: {
+    title: "See the melodic contour",
+    description: "Show the melody's shape beneath the lyrics. Colors highlight areas from recent Tap attempts that may need more practice.",
+    detail: "Contour is available when you add a simple, single-track MIDI file while setting up the song.",
+  },
+  tap: {
+    title: "Practice the melody by tapping",
+    description: 'Also called "Primary Chorister Mode." Tap along with the music using the vertical bar. Tap higher or lower as the melody moves, and Cantare will compare your contour with the song.',
+    detail: "Tap practice is available when you add a simple, single-track MIDI file while setting up the song.",
+  },
+};
+
+function hasSeenPracticeControlExplainer(control: ExplainedPracticeControl): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(`${PRACTICE_CONTROL_EXPLAINER_STORAGE_KEY_PREFIX}${control}`) === "seen";
+  } catch {
+    return false;
+  }
+}
+
+function markPracticeControlExplainerSeen(control: ExplainedPracticeControl): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(`${PRACTICE_CONTROL_EXPLAINER_STORAGE_KEY_PREFIX}${control}`, "seen");
+  } catch {
+    // Ignore storage failures; the explainer can show again.
+  }
+}
 export type ProgressStorageMode = "account" | "local" | "none";
 
 const LYRIC_MODE_LABELS: Record<LyricVisibilityMode, string> = {
@@ -239,6 +289,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [isLooping, setIsLooping] = React.useState(defaultLooping);
   const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
   const [showCardContourMap, setShowCardContourMap] = React.useState(false);
+  const [practiceControlExplainer, setPracticeControlExplainer] = React.useState<ExplainedPracticeControl | null>(null);
   const [tapSessionSummaries, setTapSessionSummaries] = React.useState<TapSessionSummaryPayload[]>([]);
   const [midiSegmentAnswerKeys, setMidiSegmentAnswerKeys] = React.useState<Record<string, MidiSegmentAnswerKey>>({});
   const [localMidiScoreAttemptsBySegment, setLocalMidiScoreAttemptsBySegment] = React.useState<Record<string, TapScoreResult[]>>({});
@@ -1132,6 +1183,48 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       setAudioVersion(nextVersion);
     });
   }, [activeAudioVersion, currentMs, currentSegment, durationMs, hasBothAudioVersions, isLooping, isPlaying, onPreferredAudioVersionChange]);
+
+  const activatePracticeControl = React.useCallback((control: ExplainedPracticeControl) => {
+    if (control === "part" || control === "blend") {
+      handleAudioVersionChange(control === "blend" ? "blend" : "straight");
+      return;
+    }
+
+    if (control === "contour") {
+      setShowCardContourMap((previous) => !previous);
+      if (!showCardContourMap) {
+        setTapHeatMapRefreshToken((previous) => previous + 1);
+      }
+      return;
+    }
+
+    setIsTapPracticeMode((previous) => !previous);
+    activeTapCaptureRef.current = null;
+  }, [handleAudioVersionChange, showCardContourMap]);
+
+  const requestPracticeControlChange = React.useCallback((control: ExplainedPracticeControl) => {
+    if (!hasSeenPracticeControlExplainer(control)) {
+      setPracticeControlExplainer(control);
+      return;
+    }
+
+    activatePracticeControl(control);
+  }, [activatePracticeControl]);
+
+  const dismissPracticeControlExplainer = React.useCallback(() => {
+    setPracticeControlExplainer(null);
+  }, []);
+
+  const confirmPracticeControlExplainer = React.useCallback(() => {
+    if (!practiceControlExplainer) {
+      return;
+    }
+
+    markPracticeControlExplainerSeen(practiceControlExplainer);
+    const control = practiceControlExplainer;
+    setPracticeControlExplainer(null);
+    activatePracticeControl(control);
+  }, [activatePracticeControl, practiceControlExplainer]);
 
   const getTapLane = React.useCallback((clientY: number) => {
     const rect = tapBarRef.current?.getBoundingClientRect();
@@ -2070,6 +2163,43 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         </p>
       </header>
 
+      {practiceControlExplainer ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4" role="dialog" aria-modal="true" aria-labelledby="practice-control-explainer-title">
+          <div className="w-full max-w-md rounded-xl border border-indigo-100 bg-white p-5 shadow-xl">
+            <p className="text-sm font-semibold uppercase tracking-wide text-indigo-700">Practice control</p>
+            <h3 id="practice-control-explainer-title" className="mt-2 text-xl font-semibold text-gray-950">
+              {practiceControlExplainerCopy[practiceControlExplainer].title}
+            </h3>
+            <p className="mt-3 text-sm leading-6 text-gray-700">
+              {practiceControlExplainerCopy[practiceControlExplainer].description}
+            </p>
+            {practiceControlExplainerCopy[practiceControlExplainer].detail ? (
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                {practiceControlExplainerCopy[practiceControlExplainer].detail}
+              </p>
+            ) : null}
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                data-testid="practice-control-explainer-cancel"
+                onClick={dismissPracticeControlExplainer}
+                className="rounded border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="practice-control-explainer-continue"
+                onClick={confirmPracticeControlExplainer}
+                className="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div
         data-testid="practice-shell"
         data-compact-layout={isCompactLandscapeLayout ? "true" : "false"}
@@ -2111,7 +2241,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                   type="button"
                   data-testid={`practice-audio-version-${version}`}
                   aria-pressed={activeAudioVersion === version}
-                  onClick={() => handleAudioVersionChange(version)}
+                  onClick={() => requestPracticeControlChange(version === "straight" ? "part" : "blend")}
                   className={`${isTapPracticeMode ? "rounded-full px-2.5 py-1 text-xs" : "rounded-full px-3 py-1 text-sm"} font-semibold transition ${
                     activeAudioVersion === version
                       ? "bg-indigo-600 text-white"
@@ -2127,12 +2257,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             <button
               type="button"
               data-testid="practice-card-contour-toggle"
-              onClick={() => {
-                setShowCardContourMap((previous) => !previous);
-                if (!showCardContourMap) {
-                  setTapHeatMapRefreshToken((previous) => previous + 1);
-                }
-              }}
+              onClick={() => requestPracticeControlChange("contour")}
               aria-pressed={showCardContourMap}
               className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
                 showCardContourMap
@@ -2149,10 +2274,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               data-testid="practice-tap-mode-toggle"
               aria-label={isTapPracticeMode ? "Exit tap practice mode" : "Enter tap practice mode"}
               aria-pressed={isTapPracticeMode}
-              onClick={() => {
-                setIsTapPracticeMode((previous) => !previous);
-                activeTapCaptureRef.current = null;
-              }}
+              onClick={() => requestPracticeControlChange("tap")}
               className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
                 isTapPracticeMode
                   ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
