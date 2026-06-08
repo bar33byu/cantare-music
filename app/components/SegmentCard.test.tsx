@@ -204,4 +204,24 @@ describe("SegmentCard", () => {
 
     expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("Line one Line two Line three");
   });
+
+  it("lights the contour note at the current segment-local playback time", () => {
+    render(
+      <SegmentCard
+        {...defaultProps}
+        playbackMs={5500}
+        showContourMap
+        segment={{
+          ...mockSegment,
+          startMs: 5000,
+          endMs: 15000,
+          pitchContourNotes: [
+            { id: "n-1", timeOffsetMs: 0, durationMs: 1000, lane: 0.5 },
+          ],
+        }}
+      />
+    );
+
+    expect(screen.getByTestId("pitch-contour-thumbnail-active-halo")).toHaveAttribute("data-active-note-id", "n-1");
+  });
 });

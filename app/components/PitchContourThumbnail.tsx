@@ -5,6 +5,7 @@ interface PitchContourThumbnailProps {
   segmentDurationMs: number;
   className?: string;
   noteHeatMap?: Record<string, ContourNoteHeatStat>;
+  activeTimeMs?: number;
 }
 
 const MIN_HEATMAP_SESSION_COUNT = 2;
@@ -41,7 +42,7 @@ function getContourHeatOpacity(stat?: ContourNoteHeatStat): number {
   return Math.min(0.98, 0.62 + Math.min(stat.sessionCount, 10) * 0.03);
 }
 
-export function PitchContourThumbnail({ notes = [], segmentDurationMs, className, noteHeatMap }: PitchContourThumbnailProps) {
+export function PitchContourThumbnail({ notes = [], segmentDurationMs, className, noteHeatMap, activeTimeMs }: PitchContourThumbnailProps) {
   const safeDurationMs = Math.max(1, segmentDurationMs);
 
   return (
@@ -53,27 +54,53 @@ export function PitchContourThumbnail({ notes = [], segmentDurationMs, className
       ].join(' ').trim()}
     >
       <svg viewBox="0 0 100 24" preserveAspectRatio="none" className="h-full w-full">
+        <defs>
+          <filter id="active-contour-note-glow" x="-100%" y="-200%" width="300%" height="500%">
+            <feGaussianBlur stdDeviation="2.2" />
+          </filter>
+        </defs>
         <rect x="0" y="11.5" width="100" height="1" fill="rgb(165 180 252)" />
         {notes.length === 0 ? null : notes.map((note) => {
           const x = Math.max(0, Math.min(100, (note.timeOffsetMs / safeDurationMs) * 100));
           const width = Math.max(1, Math.min(100 - x, (note.durationMs / safeDurationMs) * 100));
           const y = (1 - note.lane) * 20;
           const stat = noteHeatMap?.[note.id];
+          const isActive = activeTimeMs !== undefined
+            && activeTimeMs >= note.timeOffsetMs
+            && activeTimeMs < note.timeOffsetMs + note.durationMs;
 
           return (
-            <rect
-              key={note.id}
-              data-testid="pitch-contour-thumbnail-note"
-              data-note-heat-rate={stat ? stat.missRate.toFixed(3) : undefined}
-              data-note-heat-sessions={stat ? String(stat.sessionCount) : undefined}
-              x={x}
-              y={Math.max(0, Math.min(20, y))}
-              width={width}
-              height={4}
-              rx={1}
-              fill={getContourHeatColor(stat)}
-              opacity={getContourHeatOpacity(stat)}
-            />
+            <g key={note.id}>
+              {isActive ? (
+                <rect
+                  data-testid="pitch-contour-thumbnail-active-halo"
+                  data-active-note-id={note.id}
+                  x={x - 1}
+                  y={Math.max(0, Math.min(20, y)) - 1}
+                  width={width + 2}
+                  height={6}
+                  rx={3}
+                  fill="rgb(250 204 21)"
+                  opacity={0.9}
+                  filter="url(#active-contour-note-glow)"
+                />
+              ) : null}
+              <rect
+                data-testid="pitch-contour-thumbnail-note"
+                data-note-heat-rate={stat ? stat.missRate.toFixed(3) : undefined}
+                data-note-heat-sessions={stat ? String(stat.sessionCount) : undefined}
+                data-active={isActive ? "true" : undefined}
+                x={x}
+                y={Math.max(0, Math.min(20, y))}
+                width={width}
+                height={4}
+                rx={1}
+                fill={getContourHeatColor(stat)}
+                opacity={isActive ? 1 : getContourHeatOpacity(stat)}
+                stroke={isActive ? "rgb(255 255 255)" : undefined}
+                strokeWidth={isActive ? 0.8 : undefined}
+              />
+            </g>
           );
         })}
       </svg>

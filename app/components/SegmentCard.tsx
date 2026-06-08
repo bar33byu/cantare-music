@@ -321,6 +321,11 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
             notes={segment.pitchContourNotes ?? []}
             segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
             noteHeatMap={contourHeatMap}
+            activeTimeMs={
+              playbackMs !== undefined && playbackMs >= segment.startMs && playbackMs < segment.endMs
+                ? playbackMs - segment.startMs
+                : undefined
+            }
           />
         </div>
       ) : null}
