@@ -16,6 +16,7 @@ vi.mock('../../../../db/queries', () => ({
   getSegmentsBySongId: vi.fn(),
   getDraftRecordingsForSong: vi.fn(),
   getArchivedDraftRecordingsForSong: vi.fn(),
+  isStorageKeyReferenced: vi.fn(),
   recordOrphanedAudioKey: vi.fn(),
 }));
 
@@ -36,6 +37,7 @@ import {
   getSegmentsBySongId,
   getDraftRecordingsForSong,
   getArchivedDraftRecordingsForSong,
+  isStorageKeyReferenced,
 } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import { deleteSongStorageAssets } from '../../../lib/accountDeletion';
@@ -44,6 +46,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getDraftRecordingsForSong).mockResolvedValue([]);
   vi.mocked(getArchivedDraftRecordingsForSong).mockResolvedValue([]);
+  vi.mocked(isStorageKeyReferenced).mockResolvedValue(false);
 });
 
 describe('GET /api/songs/[id]', () => {
@@ -206,6 +209,24 @@ describe('PATCH /api/songs/[id]', () => {
     const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
 
     expect(response.status).toBe(200);
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
+  it('does not delete a replaced object that another record still references', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: '123', title: 'Song 1', audioKey: 'shared-key' } as any);
+    vi.mocked(isStorageKeyReferenced).mockResolvedValue(true);
+
+    const request = new Request('http://localhost/api/songs/123', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioKey: 'new-key' }),
+    });
+
+    const response = await PATCH(request as any, { params: Promise.resolve({ id: '123' }) });
+
+    expect(response.status).toBe(200);
+    expect(updateSong).toHaveBeenCalledBefore(vi.mocked(isStorageKeyReferenced));
+    expect(isStorageKeyReferenced).toHaveBeenCalledWith('shared-key');
     expect(deleteObject).not.toHaveBeenCalled();
   });
 

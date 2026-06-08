@@ -6,6 +6,7 @@ import {
   getSegmentsBySongId,
   getDraftRecordingsForSong,
   getArchivedDraftRecordingsForSong,
+  isStorageKeyReferenced,
 } from '../../../../db/queries';
 import { deleteObject, getPublicUrl } from '../../../../lib/r2';
 import type { SongRow } from '../../../../db/schema';
@@ -135,22 +136,23 @@ export async function PATCH(
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    if (
-      updates.audioKey !== undefined &&
-      existingSong.audioKey &&
-      existingSong.audioKey !== updates.audioKey
-    ) {
-      await deleteObject(existingSong.audioKey);
-    }
-    if (
-      updates.alternateAudioKey !== undefined &&
-      existingSong.alternateAudioKey &&
-      existingSong.alternateAudioKey !== updates.alternateAudioKey
-    ) {
-      await deleteObject(existingSong.alternateAudioKey);
+    await updateSong(id, updates, userId);
+
+    const replacedKeys = [
+      updates.audioKey !== undefined && existingSong.audioKey !== updates.audioKey
+        ? existingSong.audioKey
+        : null,
+      updates.alternateAudioKey !== undefined && existingSong.alternateAudioKey !== updates.alternateAudioKey
+        ? existingSong.alternateAudioKey
+        : null,
+    ].filter((key): key is string => Boolean(key));
+
+    for (const key of new Set(replacedKeys)) {
+      if (!(await isStorageKeyReferenced(key))) {
+        await deleteObject(key);
+      }
     }
 
-    await updateSong(id, updates, userId);
     return NextResponse.json({ success: true });
   } catch (error) {
     const errorCode = (error as { code?: string })?.code;

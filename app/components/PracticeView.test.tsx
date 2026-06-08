@@ -526,6 +526,51 @@ describe("PracticeView", () => {
     expect(mockPlay).toHaveBeenCalledWith(0, 4000);
   });
 
+  it("reports the latest playback error when auto-play fails", async () => {
+    const song = makeSong();
+    const session = { ...makeSession(song), currentSegmentIndex: 0 };
+    const onAutoPlayBlocked = vi.fn();
+    let playbackError: string | null = null;
+
+    mockUseAudioPlayer.mockImplementation(() => ({
+      isPlaying: false,
+      isReady: playbackError === null,
+      currentMs: 0,
+      durationMs: 12000,
+      playbackError,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    }));
+
+    const view = render(
+      <PracticeView
+        song={song}
+        initialSession={session}
+        playScope="segment"
+        autoPlayToken={1}
+        onAutoPlayBlocked={onAutoPlayBlocked}
+      />
+    );
+
+    playbackError = "Unable to load audio (code 4)";
+    view.rerender(
+      <PracticeView
+        song={song}
+        initialSession={session}
+        playScope="segment"
+        autoPlayToken={1}
+        onAutoPlayBlocked={onAutoPlayBlocked}
+      />
+    );
+
+    await waitFor(() => {
+      expect(onAutoPlayBlocked).toHaveBeenCalledWith("Unable to load audio (code 4)");
+    }, { timeout: 2500 });
+  });
+
   it("auto-plays the updated segment when the initial session index changes", async () => {
     const song = makeSong();
     const session = { ...makeSession(song), currentSegmentIndex: 0 };

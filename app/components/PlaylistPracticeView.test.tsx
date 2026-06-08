@@ -1477,7 +1477,7 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
-  it('ignores stale Auto Drill completion events while announcing the next same-song segment', async () => {
+  it('continues through consecutive rating-5 Auto Drill segments without a prompt or preroll', async () => {
     class MockSpeechSynthesisUtterance {
       text: string;
       onend: (() => void) | null = null;
@@ -1626,27 +1626,22 @@ describe('PlaylistPracticeView', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Second');
-      expect(screen.getByTestId('auto-drill-live')).toHaveTextContent('Next');
+      expect(screen.getByTestId('auto-drill-live')).toHaveTextContent('Playing Second.');
+      expect(play).toHaveBeenCalledWith(1000, 2000);
+      expect(play).toHaveBeenCalledTimes(2);
     });
-    expect(play).toHaveBeenCalledTimes(1);
+    expect(spoken.map((utterance) => utterance.text)).not.toContain('Next');
 
     act(() => {
       latestAudioOptions?.onRangeEnd?.();
     });
 
-    expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Second');
-    expect(screen.getByTestId('auto-drill-live')).toHaveTextContent('Next');
-    expect(play).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      spoken.find((utterance) => utterance.text === 'Next')?.onend?.();
-    });
-
     await waitFor(() => {
-      expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Second');
-      expect(play).toHaveBeenCalledWith(500, 2000);
-      expect(play).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Third');
+      expect(play).toHaveBeenCalledWith(2000, 3000);
+      expect(play).toHaveBeenCalledTimes(3);
     });
+    expect(spoken.map((utterance) => utterance.text)).not.toContain('Next');
   });
 
   it('uses hands-free Auto Drill voice prompts without countdowns', async () => {
@@ -1990,6 +1985,81 @@ describe('PlaylistPracticeView', () => {
 
     expect(warning).toContain('Automatic audio or voice prompts are blocked');
     expect(warning).not.toContain('request is not allowed');
+  });
+
+  it('retries Hands Free with alternate audio when the preferred recording fails', async () => {
+    installImmediateSpeechSynthesis();
+    const onPreferredAudioVersionChange = vi.fn();
+    const playlistWithAlternate: Playlist = {
+      ...playlist,
+      songs: [
+        {
+          ...playlist.songs[0],
+          alternateAudioUrl: 'https://example.com/alpha-blend.mp3',
+        },
+      ],
+    };
+
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
+      isPlaying: false,
+      isReady: false,
+      currentMs: 0,
+      durationMs: 30000,
+      playbackRate: 1,
+      playbackError: audioUrl.endsWith('alpha.mp3') ? 'Unable to load audio (code 4)' : null,
+      debugInfo: {
+        src: audioUrl,
+        currentSrc: audioUrl,
+        readyState: 0,
+        networkState: 3,
+        preload: 'metadata',
+        hasUserPlayIntent: true,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'error',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 1,
+        errorCode: 4,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    }));
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/songs/') && url.includes('/ratings')) {
+        return { ok: true, json: async () => ({ ratings: [] }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(playlistWithAlternate), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return { ok: true, json: async () => ({ score: 67 }) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(
+      <PlaylistPracticeView
+        playlist={playlistWithAlternate}
+        preferredAudioVersion="part"
+        onPreferredAudioVersionChange={onPreferredAudioVersionChange}
+        onExit={() => undefined}
+        onSelectSong={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('playlist-mode-auto'));
+
+    await waitFor(() => {
+      expect(onPreferredAudioVersionChange).toHaveBeenCalledWith('blend');
+    }, { timeout: 3000 });
+    expect(screen.getByTestId('auto-drill-playback-warning')).toHaveTextContent(
+      'Part audio could not load. Retrying with Blend audio.'
+    );
   });
 
   it('exits Auto Drill with Escape', async () => {

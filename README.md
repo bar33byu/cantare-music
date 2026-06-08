@@ -2,7 +2,7 @@
 
 Cantare 3.0 is a practice application for singers to learn and master songs through deliberate, segment-based repetition, two-version audio playback, MIDI-guided melodic contour training, playlist practice modes, draft rehearsal recordings, and playlist sharing.
 
-> **Credits:** Cantare is a clone built to replicate the core functionality of [Musicators.com](https://www.musicators.com). All credit for the original concept and feature design goes to the Musicators team.
+> **Credits:** Cantare is a clone built to replicate the core functionality of Musicators Digital Memorization (https://musicators.com/memory). All credit for the original concept and feature design goes to the Musicators team.
 
 ## What It Does
 

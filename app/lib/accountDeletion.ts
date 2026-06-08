@@ -1,6 +1,7 @@
 import {
   getSongStorageKeys,
   getUserStorageKeys,
+  isStorageKeyReferenced,
   purgeUserAccountData,
   recordOrphanedAudioKey,
 } from "../../db/queries";
@@ -23,10 +24,17 @@ function dedupeKeys(keys: string[]): string[] {
   return Array.from(new Set(keys.filter((value) => value.trim().length > 0)));
 }
 
-async function deleteStorageKeys(keys: string[], orphanUserId?: string): Promise<string[]> {
+async function deleteStorageKeys(
+  keys: string[],
+  orphanUserId?: string,
+  referenceExclusions: { songId?: string; userId?: string } = {}
+): Promise<string[]> {
   const failedKeys: string[] = [];
 
   for (const key of dedupeKeys(keys)) {
+    if (await isStorageKeyReferenced(key, referenceExclusions)) {
+      continue;
+    }
     try {
       await deleteObject(key);
     } catch (error) {
@@ -47,7 +55,7 @@ async function deleteStorageKeys(keys: string[], orphanUserId?: string): Promise
 
 export async function deleteSongStorageAssets(songId: string, userId: string): Promise<string[]> {
   const keys = await getSongStorageKeys(songId, userId);
-  return deleteStorageKeys(keys, userId);
+  return deleteStorageKeys(keys, userId, { songId });
 }
 
 export async function purgeUserAccount(userId: string): Promise<{ deleted: boolean; failedStorageKeys: string[] }> {
@@ -59,7 +67,8 @@ export async function purgeUserAccount(userId: string): Promise<{ deleted: boole
       ...storageKeys.midiStorageKeys,
       ...storageKeys.orphanedAudioKeys,
     ],
-    userId
+    userId,
+    { userId }
   );
   const deleted = await purgeUserAccountData(userId);
 
