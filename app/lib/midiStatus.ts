@@ -26,6 +26,9 @@ export async function buildMidiStatus(songId: string, userId: string) {
   const segmentAnswerKeys = wholeSongAnswerKey
     ? deriveSegmentAnswerKeys(wholeSongAnswerKey, segments)
     : {};
+  const segmentsWithDerivedNotes = Object.values(segmentAnswerKeys)
+    .filter((answerKey) => answerKey.notes.length > 0)
+    .length;
 
   return {
     source,
@@ -44,6 +47,8 @@ export async function buildMidiStatus(songId: string, userId: string) {
           retainedMidiNoteCount: source.cleanedNoteCount,
           hasCompleteAlignment: Boolean(completeAlignment),
           hasDerivedAnswerKey: Boolean(wholeSongAnswerKey),
+          derivedSegmentCount: segments.length,
+          segmentsWithDerivedNotes,
           latestAlignmentDate: alignment?.updatedAt ?? null,
         }
       : {
@@ -56,6 +61,8 @@ export async function buildMidiStatus(songId: string, userId: string) {
           retainedMidiNoteCount: 0,
           hasCompleteAlignment: false,
           hasDerivedAnswerKey: false,
+          derivedSegmentCount: 0,
+          segmentsWithDerivedNotes: 0,
           latestAlignmentDate: null,
         },
   };

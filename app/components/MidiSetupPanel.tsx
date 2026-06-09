@@ -46,6 +46,8 @@ interface MidiStatusPayload {
     retainedMidiNoteCount: number;
     hasCompleteAlignment: boolean;
     hasDerivedAnswerKey: boolean;
+    derivedSegmentCount: number;
+    segmentsWithDerivedNotes: number;
     latestAlignmentDate: string | null;
   };
 }
@@ -54,6 +56,12 @@ interface MidiSetupPanelProps {
   songId: string;
   audioPlayer: Pick<AudioPlayerControls, "currentMs" | "durationMs">;
   request: (url: string, init?: RequestInit) => Promise<Response>;
+  refreshKey?: number;
+}
+
+interface PanelMessage {
+  text: string;
+  tone: "success" | "error";
 }
 
 const PIANO_ROLL_NOW_PERCENT = 28;
@@ -91,6 +99,8 @@ function emptySummary(): MidiStatusPayload["summary"] {
     retainedMidiNoteCount: 0,
     hasCompleteAlignment: false,
     hasDerivedAnswerKey: false,
+    derivedSegmentCount: 0,
+    segmentsWithDerivedNotes: 0,
     latestAlignmentDate: null,
   };
 }
@@ -128,11 +138,13 @@ function updateStatusAlignment(status: MidiStatusPayload, alignment: MidiStatusA
   };
 }
 
-export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelProps) {
+export function MidiSetupPanel({ songId, audioPlayer, request, refreshKey = 0 }: MidiSetupPanelProps) {
   const [status, setStatus] = useState<MidiStatusPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<PanelMessage | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [applyingOffset, setApplyingOffset] = useState(false);
+  const [offsetDirty, setOffsetDirty] = useState(false);
   const [firstAudioStartDraftSeconds, setFirstAudioStartDraftSeconds] = useState(0);
   const currentMsRef = useRef(0);
   const { currentMs, durationMs } = audioPlayer;
@@ -152,8 +164,9 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
       }
       const payload = normalizeStatus(await response.json() as Partial<MidiStatusPayload>);
       setStatus(payload);
+      setMessage(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load MIDI status.");
+      setMessage({ text: error instanceof Error ? error.message : "Failed to load MIDI status.", tone: "error" });
     } finally {
       if (options.showLoading ?? true) {
         setLoading(false);
@@ -163,13 +176,23 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
 
   useEffect(() => {
     void loadStatus();
-  }, [loadStatus]);
+  }, [loadStatus, refreshKey]);
+
+  useEffect(() => {
+    if (message?.tone !== "success") {
+      return;
+    }
+    const timer = window.setTimeout(() => setMessage(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
 
   const summary = status?.summary ?? emptySummary();
   const firstMidiStartSeconds = status?.source?.cleanedNotes[0]?.midiStartSeconds ?? 0;
   const offsetSliderMaxSeconds = Math.max(60, Math.ceil(durationMs / 1000), Math.ceil(firstAudioStartDraftSeconds + 10));
   const setClampedFirstAudioStartDraftSeconds = useCallback((value: number) => {
     setFirstAudioStartDraftSeconds(clamp(value, 0, Math.max(60, Math.ceil(durationMs / 1000), value)));
+    setOffsetDirty(true);
+    setMessage(null);
   }, [durationMs]);
   const offsetPreviewNotes = useMemo(
     () => (status?.source?.cleanedNotes ?? []).filter((note) => {
@@ -192,6 +215,7 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
         ? existingFirstAudioStartSeconds
         : currentMsRef.current / 1000
     );
+    setOffsetDirty(false);
   }, [status?.alignment?.tappedStartTimesSeconds, status?.alignment?.updatedAt, status?.source]);
 
   const uploadMidi = async (file: File | null) => {
@@ -207,9 +231,9 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
         throw new Error(payload.error ?? `MIDI upload failed (${response.status})`);
       }
       setStatus(normalizeStatus(await response.json() as Partial<MidiStatusPayload>));
-      setMessage("MIDI uploaded and parsed.");
+      setMessage({ text: "MIDI uploaded and parsed.", tone: "success" });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "MIDI upload failed.");
+      setMessage({ text: error instanceof Error ? error.message : "MIDI upload failed.", tone: "error" });
     } finally {
       setUploading(false);
     }
@@ -239,12 +263,24 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
   };
 
   const applyStartOffset = async () => {
+    setApplyingOffset(true);
+    setMessage(null);
     try {
       const firstAudioStartSeconds = firstAudioStartDraftSeconds;
       await postAlignmentAction({ action: "offset", firstAudioStartSeconds });
-      setMessage("MIDI start offset applied.");
+      await loadStatus({ showLoading: false });
+      setOffsetDirty(false);
+      setMessage({
+        text: "MIDI start offset synced. Contours now use the current section boundaries.",
+        tone: "success",
+      });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not apply MIDI start offset.");
+      setMessage({
+        text: error instanceof Error ? error.message : "Could not apply MIDI start offset.",
+        tone: "error",
+      });
+    } finally {
+      setApplyingOffset(false);
     }
   };
 
@@ -287,6 +323,15 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
             <p><span className="font-semibold text-slate-900">Notes:</span> {summary.cleanedNoteCount} notes</p>
             <p><span className="font-semibold text-slate-900">Alignment:</span> {summary.alignedCount} / {summary.retainedMidiNoteCount} notes</p>
             <p><span className="font-semibold text-slate-900">Derived key:</span> {summary.hasDerivedAnswerKey ? "Ready" : "Not ready"}</p>
+            <p data-testid="midi-contour-sync-status">
+              <span className="font-semibold text-slate-900">Contour sync:</span>{" "}
+              {summary.hasDerivedAnswerKey
+                ? `${summary.segmentsWithDerivedNotes} of ${summary.derivedSegmentCount} sections contain MIDI notes`
+                : "Waiting for a start offset"}
+            </p>
+            <p className="mt-1 text-slate-500">
+              Contours recalculate automatically after section boundaries change.
+            </p>
           </div>
         </div>
       )}
@@ -390,15 +435,27 @@ export function MidiSetupPanel({ songId, audioPlayer, request }: MidiSetupPanelP
               type="button"
               data-testid="midi-apply-start-offset"
               onClick={() => { void applyStartOffset(); }}
+              disabled={applyingOffset}
               className="rounded-full bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white"
             >
-              {summary.hasDerivedAnswerKey ? "Update start offset" : "Set start offset here"}
+              {applyingOffset
+                ? "Syncing..."
+                : offsetDirty
+                  ? "Apply start offset"
+                  : summary.hasDerivedAnswerKey
+                    ? "Start offset synced"
+                    : "Set start offset here"}
             </button>
+            {offsetDirty ? <span className="text-xs font-medium text-amber-700">Unapplied offset change</span> : null}
           </div>
         </div>
       ) : null}
 
-      {message ? <p className="mt-2 text-xs text-amber-700">{message}</p> : null}
+      {message ? (
+        <p className={`mt-2 text-xs ${message.tone === "error" ? "text-red-700" : "text-indigo-700"}`}>
+          {message.text}
+        </p>
+      ) : null}
     </section>
   );
 }
