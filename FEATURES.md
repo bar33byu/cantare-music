@@ -91,6 +91,15 @@ The near-term priority is stabilization: keep the current workflows reliable on 
 - [x] Discard draft recordings without permanently deleting the source object immediately
 - [x] Mobile-friendly recording status with visible input level
 
+## Version 3.2: Practice and Setup Stabilization
+
+- [x] Highlight the active MIDI contour note during playback
+- [x] Recalculate segment MIDI contours automatically after section moves, resizes, creates, deletes, restores, and bulk imports
+- [x] Refresh song practice data after section timing changes so playback highlighting uses the latest boundaries
+- [x] Report how many current sections contain derived MIDI notes in MIDI setup
+- [x] Distinguish synced MIDI start offsets from unapplied offset changes
+- [x] Replace sticky MIDI success messages with temporary notices while preserving visible errors
+
 ## Deferred From Version 2
 
 ### Spaced Repetition Scheduling

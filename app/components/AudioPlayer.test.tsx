@@ -196,6 +196,13 @@ describe("AudioPlayer", () => {
     delete process.env.NEXT_PUBLIC_SHOW_AUDIO_DEBUG;
   });
 
+  it("shows playback errors without requiring the debug panel", () => {
+    render(<AudioPlayer {...defaultProps} playbackError="Unable to load audio (code 4)" />);
+
+    expect(screen.getByTestId("audio-playback-error")).toHaveTextContent("Audio could not play.");
+    expect(screen.getByTestId("audio-playback-error")).toHaveTextContent("Unable to load audio (code 4)");
+  });
+
   it("disables controls while audio is loading", () => {
     render(<AudioPlayer {...defaultProps} isReady={false} />);
     expect(screen.getByTestId("audio-play-pause")).not.toBeDisabled();

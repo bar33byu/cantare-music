@@ -289,9 +289,10 @@ export function PlaylistPracticeView({
   const listenStartedSongIdRef = useRef<string | null>(null);
   const pendingListenAudioSwitchRef = useRef<{ songId: string; currentMs: number; wasPlaying: boolean } | null>(null);
   const autoDrillRunIdRef = useRef(0);
-  const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again'>('full');
+  const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again' | 'continuous'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
   const autoDrillPlaybackRecoveryKeyRef = useRef<string | null>(null);
+  const autoDrillAudioFallbackItemRef = useRef<string | null>(null);
   const [modeExplainer, setModeExplainer] = useState<ExplainedMode | null>(null);
 
   const userScopedHeaders = useMemo(() => {
@@ -860,6 +861,7 @@ export function PlaylistPracticeView({
     setAutoDrillIndex(0);
     setAutoDrillCompletedPasses({});
     setAutoDrillRunRatings({});
+    autoDrillAudioFallbackItemRef.current = null;
     setAutoDrillPlaybackWarning(null);
     setAutoDrillMessage(`${HANDS_FREE_LABEL} starting`);
     setAutoDrillState(autoDrillQueue.length > 0 ? 'announcing' : 'complete');
@@ -916,7 +918,10 @@ export function PlaylistPracticeView({
     setRefetchTrigger((prev) => prev + 1);
   }, [currentAutoDrillItem]);
 
-  const advanceAutoDrillSegment = useCallback((fromItem: AutoDrillQueueItem) => {
+  const advanceAutoDrillSegment = useCallback((
+    fromItem: AutoDrillQueueItem,
+    options?: { continueWithoutPrompt?: boolean }
+  ) => {
     if (autoDrillIndex >= autoDrillQueue.length - 1) {
       setAutoDrillState('complete');
       setAutoDrillMessage('Playlist complete.');
@@ -925,11 +930,16 @@ export function PlaylistPracticeView({
     }
 
     const nextItem = autoDrillQueue[autoDrillIndex + 1];
-    autoDrillTransitionRef.current = nextItem?.song.id === fromItem.song.id ? 'quick' : 'full';
+    const continuesMasteredSong = options?.continueWithoutPrompt && nextItem?.song.id === fromItem.song.id;
+    autoDrillTransitionRef.current = continuesMasteredSong
+      ? 'continuous'
+      : nextItem?.song.id === fromItem.song.id ? 'quick' : 'full';
     setAutoDrillIndex((prev) => Math.min(prev + 1, Math.max(autoDrillQueue.length - 1, 0)));
     setAutoDrillState('announcing');
     setAutoDrillPlaybackWarning(null);
-    setAutoDrillMessage(nextItem?.song.id === fromItem.song.id ? 'Next' : `${nextItem?.song.title ?? ''}`);
+    setAutoDrillMessage(continuesMasteredSong
+      ? `Playing ${nextItem?.segment.label ?? ''}.`
+      : nextItem?.song.id === fromItem.song.id ? 'Next' : `${nextItem?.song.title ?? ''}`);
   }, [autoDrillIndex, autoDrillQueue]);
 
   const jumpAutoDrillSegment = useCallback((targetIndex: number, direction: 'previous' | 'next') => {
@@ -1012,7 +1022,9 @@ export function PlaylistPracticeView({
       return;
     }
 
-    advanceAutoDrillSegment(currentAutoDrillItem);
+    advanceAutoDrillSegment(currentAutoDrillItem, {
+      continueWithoutPrompt: activeRating === 5,
+    });
   }, [
     advanceAutoDrillSegment,
     autoDrillCompletedPasses,
@@ -1053,12 +1065,48 @@ export function PlaylistPracticeView({
       }
     }
 
+    const alternateVersion: PreferredAudioVersion | null =
+      preferredAudioVersion === 'part' && currentAutoDrillItem?.song.alternateAudioUrl?.trim()
+        ? 'blend'
+        : preferredAudioVersion === 'blend' && currentAutoDrillItem?.song.audioUrl?.trim()
+          ? 'part'
+          : null;
+    if (
+      message &&
+      !isPlaybackPermissionBlockMessage(message) &&
+      alternateVersion &&
+      onPreferredAudioVersionChange &&
+      currentAutoDrillItem &&
+      autoDrillAudioFallbackItemRef.current !== currentAutoDrillItem.id
+    ) {
+      autoDrillAudioFallbackItemRef.current = currentAutoDrillItem.id;
+      onPreferredAudioVersionChange(alternateVersion);
+      autoDrillTransitionRef.current = 'again';
+      setAutoDrillPlaybackWarning(
+        `${preferredAudioVersion === 'part' ? 'Part' : 'Blend'} audio could not load. Retrying with ${alternateVersion === 'part' ? 'Part' : 'Blend'} audio.`
+      );
+      setAutoDrillMessage(`Retrying with ${alternateVersion === 'part' ? 'Part' : 'Blend'} audio.`);
+      setAutoDrillState('repeating');
+      return;
+    }
+
+    if (
+      message &&
+      !isPlaybackPermissionBlockMessage(message) &&
+      currentAutoDrillItem &&
+      autoDrillAudioFallbackItemRef.current === currentAutoDrillItem.id
+    ) {
+      return;
+    }
+
     setAutoDrillPlaybackWarning(getAutoDrillPlaybackWarning(message));
   }, [
     autoDrillPlayToken,
     autoDrillState,
     autoDrillVoiceEnabled,
     currentAutoDrillItem,
+    onPreferredAudioVersionChange,
+    preferredAudioVersion,
     practiceMode,
   ]);
 
@@ -1083,7 +1131,9 @@ export function PlaylistPracticeView({
       const completedPasses = autoDrillCompletedPasses[currentAutoDrillItem.id] ?? 0;
       const targetPasses = getAutoDrillTargetPasses(rating);
       if (completedPasses >= targetPasses) {
-        advanceAutoDrillSegment(currentAutoDrillItem);
+        advanceAutoDrillSegment(currentAutoDrillItem, {
+          continueWithoutPrompt: rating === 5,
+        });
         return;
       }
       autoDrillTransitionRef.current = 'again';
@@ -1136,7 +1186,9 @@ export function PlaylistPracticeView({
     const runPromptSequence = async () => {
       const transition = autoDrillTransitionRef.current;
 
-      if (autoDrillState === 'repeating' || transition === 'again') {
+      if (transition === 'continuous') {
+        // A mastered same-song segment should flow directly into the next segment.
+      } else if (autoDrillState === 'repeating' || transition === 'again') {
         setAutoDrillMessage('Again');
         await speakPrompt('Again', autoDrillVoiceEnabled);
       } else if (transition === 'previous') {
@@ -1157,7 +1209,6 @@ export function PlaylistPracticeView({
 
       setAutoDrillState('playing');
       setAutoDrillMessage(`Playing ${currentAutoDrillItem.segment.label}.`);
-      setAutoDrillPlaybackWarning(null);
       autoDrillHandledCompletionRef.current = null;
       setAutoDrillPlayToken((prev) => prev + 1);
     };
@@ -1800,7 +1851,7 @@ export function PlaylistPracticeView({
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel={HANDS_FREE_LABEL}
-                    segmentPrerollMs={AUTO_DRILL_PREROLL_MS}
+                    segmentPrerollMs={autoDrillTransitionRef.current === 'continuous' ? 0 : AUTO_DRILL_PREROLL_MS}
                     preferredAudioVersion={preferredAudioVersion}
                     onPreferredAudioVersionChange={onPreferredAudioVersionChange}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}

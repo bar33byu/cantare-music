@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { promoteDraftRecordingToSongVersion, recordOrphanedAudioKey } from '../../../../../../../db/queries';
+import { isStorageKeyReferenced, promoteDraftRecordingToSongVersion, recordOrphanedAudioKey } from '../../../../../../../db/queries';
 import { deleteObject } from '../../../../../../../lib/r2';
 import { resolveEffectiveRequestUserId } from '../../../../../_user';
 
@@ -56,7 +56,9 @@ export async function POST(
 
     if (result.previousAudioKey && result.previousAudioKey !== result.draftRecording.audioKey) {
       try {
-        await deleteObject(result.previousAudioKey);
+        if (!(await isStorageKeyReferenced(result.previousAudioKey))) {
+          await deleteObject(result.previousAudioKey);
+        }
       } catch (audioDeleteError) {
         console.warn('Failed to delete replaced song audio during draft promotion:', {
           songId: id,

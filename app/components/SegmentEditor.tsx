@@ -106,6 +106,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
   const [titleDraft, setTitleDraft] = useState('');
   const [showReplaceAudio, setShowReplaceAudio] = useState(false);
   const [showMidiSetup, setShowMidiSetup] = useState(false);
+  const [midiRefreshKey, setMidiRefreshKey] = useState(0);
   const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
   const [savingSegmentId, setSavingSegmentId] = useState<string | null>(null);
   const [savingTitle, setSavingTitle] = useState(false);
@@ -157,6 +158,11 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
     return fetch(url, withUserHeader(init));
   }, [withUserHeader]);
 
+  const markSegmentTimingChanged = useCallback(() => {
+    setMidiRefreshKey((previous) => previous + 1);
+    onSongUpdated?.();
+  }, [onSongUpdated]);
+
   const updateLocalSegment = useCallback((segmentId: string, updates: Partial<Segment>) => {
     setSegments((previous) =>
       previous.map((segment) => (segment.id === segmentId ? { ...segment, ...updates } : segment))
@@ -175,10 +181,13 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
       if (!response.ok) {
         throw new Error('Patch failed');
       }
+      if (updates.startMs !== undefined || updates.endMs !== undefined) {
+        markSegmentTimingChanged();
+      }
     } finally {
       setSavingSegmentId(null);
     }
-  }, [request, songId]);
+  }, [markSegmentTimingChanged, request, songId]);
 
   const getNextSectionNumber = useCallback(() => {
     const numbers = segments
@@ -213,6 +222,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
 
     setSelectedSegmentId(payload.id);
     setRefreshKey((previous) => previous + 1);
+    markSegmentTimingChanged();
   };
 
   const handleAddNew = async () => {
@@ -483,6 +493,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
 
       setRefreshKey((previous) => previous + 1);
       setSelectedSegmentId(null);
+      markSegmentTimingChanged();
 
       if (failures.length > 0) {
         const failedSections = failures.map((failure) => failure.section).join(', ');
@@ -520,6 +531,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
       if (undoDismissTimer) clearTimeout(undoDismissTimer);
       setUndoDismissTimer(setTimeout(dismissUndo, 10_000));
       setRefreshKey((prev) => prev + 1);
+      markSegmentTimingChanged();
     } catch {
       setDeleteError('Failed to delete section. Please try again.');
     }
@@ -544,6 +556,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
       if (!response.ok) throw new Error('Restore failed');
       setSelectedSegmentId(restored.id);
       setRefreshKey((prev) => prev + 1);
+      markSegmentTimingChanged();
     } catch {
       setDeleteError('Failed to restore section. Please try again.');
     }
@@ -1012,7 +1025,12 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
           onToggle={() => setShowMidiSetup((previous) => !previous)}
           testId="segment-editor-midi-panel"
         >
-          <MidiSetupPanel songId={songId} audioPlayer={audioPlayer} request={request} />
+          <MidiSetupPanel
+            songId={songId}
+            audioPlayer={audioPlayer}
+            request={request}
+            refreshKey={midiRefreshKey}
+          />
         </EditorDisclosure>
       </div>
 

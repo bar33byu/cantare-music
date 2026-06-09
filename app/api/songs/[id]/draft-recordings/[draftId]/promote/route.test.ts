@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../../../../../db/queries', () => ({
+  isStorageKeyReferenced: vi.fn(),
   promoteDraftRecordingToSongVersion: vi.fn(),
   recordOrphanedAudioKey: vi.fn(),
 }));
@@ -10,11 +11,12 @@ vi.mock('../../../../../../../lib/r2', () => ({
 }));
 
 import { POST } from './route';
-import { promoteDraftRecordingToSongVersion, recordOrphanedAudioKey } from '../../../../../../../db/queries';
+import { isStorageKeyReferenced, promoteDraftRecordingToSongVersion, recordOrphanedAudioKey } from '../../../../../../../db/queries';
 import { deleteObject } from '../../../../../../../lib/r2';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isStorageKeyReferenced).mockResolvedValue(false);
 });
 
 describe('POST /api/songs/[id]/draft-recordings/[draftId]/promote', () => {
@@ -73,6 +75,34 @@ describe('POST /api/songs/[id]/draft-recordings/[draftId]/promote', () => {
     const response = await POST(request as any, { params: Promise.resolve({ id: 'song-1', draftId: 'draft-1' }) });
 
     expect(response.status).toBe(200);
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
+  it('does not delete replaced audio that another record still references', async () => {
+    vi.mocked(promoteDraftRecordingToSongVersion).mockResolvedValue({
+      draftRecording: {
+        id: 'draft-1',
+        songId: 'song-1',
+        title: null,
+        audioKey: 'audio/song-1/draft.webm',
+        status: 'archived',
+        trimStartMs: null,
+        trimEndMs: null,
+        createdAt: '2026-05-25T14:30:00.000Z',
+        archivedAt: '2026-05-25T15:00:00.000Z',
+      },
+      previousAudioKey: 'audio/shared/old.mp3',
+    });
+    vi.mocked(isStorageKeyReferenced).mockResolvedValue(true);
+
+    const request = new Request('http://localhost/api/songs/song-1/draft-recordings/draft-1/promote', {
+      method: 'POST',
+    });
+
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'song-1', draftId: 'draft-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(isStorageKeyReferenced).toHaveBeenCalledWith('audio/shared/old.mp3');
     expect(deleteObject).not.toHaveBeenCalled();
   });
 

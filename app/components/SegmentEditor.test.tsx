@@ -983,7 +983,8 @@ describe('SegmentEditor', () => {
   });
 
   it('drags start edge and saves updated bounds', async () => {
-    render(<SegmentEditor songId="song-1" />);
+    const onSongUpdated = vi.fn();
+    render(<SegmentEditor songId="song-1" onSongUpdated={onSongUpdated} />);
 
     const board = await screen.findByTestId('segment-editor-board');
     vi.spyOn(board, 'getBoundingClientRect').mockReturnValue({
@@ -1011,6 +1012,7 @@ describe('SegmentEditor', () => {
       expect(patchCall).toBeTruthy();
       const body = JSON.parse(String(patchCall?.[1]?.body ?? '{}'));
       expect(body.startMs).toBe(6000);
+      expect(onSongUpdated).toHaveBeenCalledTimes(1);
     });
   });
 

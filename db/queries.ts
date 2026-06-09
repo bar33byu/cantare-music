@@ -1,4 +1,4 @@
-import { eq, asc, desc, inArray, and, count, lte, sql, isNull } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, count, lte, sql, isNull, ne, or } from "drizzle-orm";
 import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow } from "./schema";
@@ -1307,6 +1307,40 @@ export async function getSongStorageKeys(songId: string, userId: string = DEFAUL
     ...draftRows.map((row) => row.audioKey).filter((value): value is string => Boolean(value)),
     ...midiRows.map((row) => row.storageKey).filter((value): value is string => Boolean(value)),
   ];
+}
+
+export async function isStorageKeyReferenced(
+  storageKey: string,
+  exclusions: { songId?: string; userId?: string } = {}
+): Promise<boolean> {
+  const songConditions = [
+    or(eq(songs.audioKey, storageKey), eq(songs.alternateAudioKey, storageKey)),
+    exclusions.songId ? ne(songs.id, exclusions.songId) : undefined,
+    exclusions.userId ? ne(songs.userId, exclusions.userId) : undefined,
+  ].filter(Boolean);
+  const draftConditions = [
+    eq(draftRecordings.audioKey, storageKey),
+    exclusions.songId ? ne(draftRecordings.songId, exclusions.songId) : undefined,
+    exclusions.userId ? ne(draftRecordings.userId, exclusions.userId) : undefined,
+  ].filter(Boolean);
+  const midiConditions = [
+    eq(midiSources.storageKey, storageKey),
+    exclusions.songId ? ne(midiSources.songId, exclusions.songId) : undefined,
+    exclusions.userId ? ne(songs.userId, exclusions.userId) : undefined,
+  ].filter(Boolean);
+
+  const [songRows, draftRows, midiRows] = await Promise.all([
+    db().select({ id: songs.id }).from(songs).where(and(...songConditions)).limit(1),
+    db().select({ id: draftRecordings.id }).from(draftRecordings).where(and(...draftConditions)).limit(1),
+    db()
+      .select({ id: midiSources.id })
+      .from(midiSources)
+      .innerJoin(songs, eq(midiSources.songId, songs.id))
+      .where(and(...midiConditions))
+      .limit(1),
+  ]);
+
+  return songRows.length > 0 || draftRows.length > 0 || midiRows.length > 0;
 }
 
 export async function purgeUserAccountData(userId: string): Promise<boolean> {

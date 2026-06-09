@@ -78,4 +78,41 @@ describe('PitchContourThumbnail', () => {
 
     expect(screen.getByTestId('pitch-contour-thumbnail-note')).toHaveAttribute('fill', 'rgb(239 68 68)');
   });
+
+  it('lights the note that contains the active playback time without replacing its heat color', () => {
+    render(
+      <PitchContourThumbnail
+        segmentDurationMs={10000}
+        activeTimeMs={5400}
+        notes={[
+          { id: 'n-1', timeOffsetMs: 1000, durationMs: 800, lane: 0.2 },
+          { id: 'n-2', timeOffsetMs: 5000, durationMs: 1000, lane: 0.8 },
+        ]}
+        noteHeatMap={{
+          'n-2': { sessionCount: 5, missCount: 5, missRate: 1 },
+        }}
+      />
+    );
+
+    const notes = screen.getAllByTestId('pitch-contour-thumbnail-note');
+    expect(notes[0]).not.toHaveAttribute('data-active');
+    expect(notes[1]).toHaveAttribute('data-active', 'true');
+    expect(notes[1]).toHaveAttribute('fill', 'rgb(239 68 68)');
+    expect(screen.getByTestId('pitch-contour-thumbnail-active-halo')).toHaveAttribute('data-active-note-id', 'n-2');
+  });
+
+  it('does not light a note during a gap in the contour', () => {
+    render(
+      <PitchContourThumbnail
+        segmentDurationMs={10000}
+        activeTimeMs={3000}
+        notes={[
+          { id: 'n-1', timeOffsetMs: 1000, durationMs: 800, lane: 0.2 },
+          { id: 'n-2', timeOffsetMs: 5000, durationMs: 1000, lane: 0.8 },
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId('pitch-contour-thumbnail-active-halo')).not.toBeInTheDocument();
+  });
 });

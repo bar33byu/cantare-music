@@ -92,6 +92,8 @@ describe("MidiSetupPanel", () => {
     fireEvent.change(screen.getByTestId("midi-start-offset-slider"), { target: { value: "2.5" } });
 
     expect(screen.getByText("First MIDI note at 2.50s")).toBeInTheDocument();
+    expect(screen.getByText("Unapplied offset change")).toBeInTheDocument();
+    expect(screen.getByTestId("midi-apply-start-offset")).toHaveTextContent("Apply start offset");
     expect(screen.getByTestId("midi-offset-note-1")).toHaveStyle({ left: "28%" });
 
     fireEvent.click(screen.getByTestId("midi-apply-start-offset"));
@@ -202,5 +204,36 @@ describe("MidiSetupPanel", () => {
     const formData = postCall?.[1]?.body as FormData;
     expect(formData.get("file")).toBe(file);
     expect(formData.has("shortNoteThresholdMs")).toBe(false);
+  });
+
+  it("reloads derived contour status when section timings change", async () => {
+    request.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        source: null,
+        alignment: null,
+        summary: {
+          hasMidi: true,
+          hasDerivedAnswerKey: true,
+          derivedSegmentCount: 3,
+          segmentsWithDerivedNotes: 2,
+        },
+      }),
+    });
+
+    const { rerender } = render(
+      <MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} refreshKey={0} />
+    );
+
+    expect(await screen.findByTestId("midi-contour-sync-status")).toHaveTextContent(
+      "2 of 3 sections contain MIDI notes"
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+
+    rerender(<MidiSetupPanel songId="song-1" audioPlayer={audioPlayer} request={request} refreshKey={1} />);
+
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledTimes(2);
+    });
   });
 });

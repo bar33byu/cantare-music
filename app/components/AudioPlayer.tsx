@@ -257,6 +257,16 @@ export function AudioPlayer({
 
   return (
     <div data-testid="audio-player" className="space-y-2">
+      {playbackError ? (
+        <div
+          role="alert"
+          data-testid="audio-playback-error"
+          className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
+        >
+          <p className="font-semibold">Audio could not play.</p>
+          <p className="mt-0.5 break-words text-xs text-rose-700">{playbackError}</p>
+        </div>
+      ) : null}
       <div className="flex items-center justify-center gap-2">
         {!reducedControls ? (
           <button

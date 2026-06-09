@@ -2,7 +2,7 @@
 
 Cantare 3.0 is a practice application for singers to learn and master songs through deliberate, segment-based repetition, two-version audio playback, MIDI-guided melodic contour training, playlist practice modes, draft rehearsal recordings, and playlist sharing.
 
-> **Credits:** Cantare is a clone built to replicate the core functionality of [Musicators.com](https://www.musicators.com). All credit for the original concept and feature design goes to the Musicators team.
+> **Credits:** Cantare is a clone built to replicate the core functionality of Musicators Digital Memorization (https://musicators.com/memory). All credit for the original concept and feature design goes to the Musicators team.
 
 ## What It Does
 
@@ -16,8 +16,9 @@ Cantare lets you upload songs, divide them into labeled segments, add lyrics, an
 - **Draft recordings** - capture audio-only rehearsal takes from the library or a song page, review them later, trim non-destructively, promote a draft to the song's audio version, archive promoted drafts, or discard drafts without deleting source files immediately.
 - **Visual segment editor** - create, move, resize, overlap, and label sections on a timeline; manual new sections insert at the current playhead.
 - **Bulk lyric import** - paste lyrics into a larger bulk editor, split sections by blank lines by default, keep custom delimiters available, and start the workflow at 300% zoom.
-- **MIDI-guided contour setup** - upload MIDI files, filter short notes, align by start offset with a scrubber/preview, or fall back to full tap-by-note realignment.
-- **Segment-aware MIDI contour** - MIDI notes are stored at the song level and projected into any segment window they overlap, so contours follow later boundary edits and overlapping sections.
+- **MIDI-guided contour setup** - upload MIDI files, filter short notes, align by start offset with a scrubber/preview, and see whether the offset is synced or has unapplied changes.
+- **Segment-aware MIDI contour** - MIDI notes are stored at the song level and projected into any segment window they overlap. Contours recalculate after section timing changes, including moves, resizes, creates, deletes, restores, and bulk imports.
+- **Visible MIDI sync status** - the setup panel reports whether the derived contour is ready and how many current sections contain MIDI notes, while temporary success notices clear automatically.
 - **Practice view** - practice one segment at a time with lyric visibility controls, segment navigation, ratings, knowledge tracking, and compact mobile-friendly controls.
 - **Tap practice** - tap along only when a MIDI contour is available, compare attempts against the MIDI-derived up/down/same key, and persist recent attempts.
 - **Contour heat map** - color the card contour from recent tap misses so trouble spots become visible immediately and improve as more attempts are saved.
@@ -98,6 +99,7 @@ npm test
 - Replacing audio from the editor can target either the Part or Blend version while preserving existing segment timings and lyrics.
 - Draft recording trims are metadata-only until promotion; source draft audio is not rewritten by the trim UI.
 - Playlist URL sharing and public Shared-tab publishing have separate audio-mode settings.
-- MIDI contour data is song-level; segment-level contours are derived from the current segment boundaries.
+- MIDI contour data is song-level; segment-level contours are derived from the current section boundaries and refreshed automatically after timing changes.
+- MIDI setup distinguishes a synced start offset from an unapplied draft and reports how many sections currently contain derived MIDI notes.
 - Tap practice depends on a MIDI contour. Songs without MIDI contour data do not show the Tap button.
 - Tap heat-map data is refreshed after successful tap persistence so practice feedback stays current.

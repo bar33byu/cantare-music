@@ -367,6 +367,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const loopHandledRef = React.useRef<string | null>(null);
   const autoPlayHandledKeyRef = React.useRef<string | null>(null);
   const autoPlayTokenHandledRef = React.useRef<number>(0);
+  const playbackErrorRef = React.useRef(playbackError);
+  const autoPlayErrorReportedRef = React.useRef<string | null>(null);
   const playbackCompleteNotifiedRef = React.useRef<string | null>(null);
   const lastHandledEndedCountRef = React.useRef(endedCount);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
@@ -393,6 +395,24 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   React.useEffect(() => {
     onSegmentPlaybackCompleteRef.current = onSegmentPlaybackComplete;
   }, [onSegmentPlaybackComplete]);
+
+  React.useEffect(() => {
+    playbackErrorRef.current = playbackError;
+  }, [playbackError]);
+
+  React.useEffect(() => {
+    if (!playbackError || autoPlayToken <= 0 || playScope !== "segment") {
+      return;
+    }
+
+    const reportKey = `${autoPlayToken}:${playbackError}`;
+    if (autoPlayErrorReportedRef.current === reportKey) {
+      return;
+    }
+
+    autoPlayErrorReportedRef.current = reportKey;
+    onAutoPlayBlocked?.(playbackError);
+  }, [autoPlayToken, onAutoPlayBlocked, playbackError, playScope]);
 
   React.useEffect(() => {
     playScopeRef.current = playScope;
@@ -743,6 +763,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     pausedByUserRef.current = false;
     autoPlayHandledKeyRef.current = null;
     autoPlayTokenHandledRef.current = 0;
+    autoPlayErrorReportedRef.current = null;
     playbackCompleteNotifiedRef.current = null;
     loopHandledRef.current = null;
     setRatingsLoading(true);
@@ -1533,8 +1554,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     const blockedCheckTimer = window.setTimeout(() => {
       const state = playbackStateRef.current;
-      if (!state.isPlaying && state.currentSegment?.id === currentSegment.id) {
-        onAutoPlayBlocked?.(playbackError ?? "Your browser blocked automatic audio. Press Play once to continue Auto Drill.");
+      const reportedCurrentTokenError = autoPlayErrorReportedRef.current?.startsWith(`${autoPlayToken}:`) ?? false;
+      if (!state.isPlaying && state.currentSegment?.id === currentSegment.id && !reportedCurrentTokenError) {
+        onAutoPlayBlocked?.(playbackErrorRef.current ?? "Your browser blocked automatic audio. Press Play once to continue Hands Free.");
       }
     }, 1200);
 
@@ -1549,7 +1571,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     initialSession.currentSegmentIndex,
     isTapPracticeMode,
     onAutoPlayBlocked,
-    playbackError,
     playScope,
     session.currentSegmentIndex,
     song.segments.length,
