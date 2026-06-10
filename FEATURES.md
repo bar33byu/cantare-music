@@ -41,7 +41,7 @@ The near-term priority is stabilization: keep the current workflows reliable on 
 ## Version 2.3: Hands-Free Auto-Practice Modes
 
 - [x] Add Auto Drill mode to playlist practice
-- [x] Implement voice prompts for segment transitions
+- [x] Keep hands-free segment transitions silent
 - [x] Reduce header and toolbar chrome in auto mode
 - [x] Auto-repeat segments based on rating
 - [x] Use existing card arrows to move backward and forward in auto-drill

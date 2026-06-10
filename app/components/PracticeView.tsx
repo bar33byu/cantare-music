@@ -385,7 +385,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const canUsePrevSegment = canUsePrevSegmentOverride ?? (hasSegments && (!isFirst || canRestartCurrentSegment));
   const canUseNextSegment = canUseNextSegmentOverride ?? (hasSegments && !isLast);
   const isCompactLandscapeLayout = (
-    !reducedControls &&
     !isTapPracticeMode &&
     viewportSize.width > viewportSize.height &&
     viewportSize.height > 0 &&

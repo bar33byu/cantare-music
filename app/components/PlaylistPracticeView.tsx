@@ -29,7 +29,7 @@ const FOCUS_MASTERED_RATING = 5;
 const AUTO_DRILL_PREROLL_MS = 500;
 const HANDS_FREE_LABEL = 'Hands Free';
 const AUTO_DRILL_PERMISSION_WARNING =
-  'Automatic audio or voice prompts are blocked on this device. Tap Play once to continue; voice prompts have been turned off.';
+  'Automatic audio is blocked on this device. Tap Play once to continue.';
 
 const sortKeyLabel: Record<SortKey, string> = {
   alphabetical: 'Alphabetical',
@@ -62,7 +62,7 @@ const modeExplainerCopy: Record<ExplainedMode, { title: string; description: str
   },
   auto: {
     title: HANDS_FREE_LABEL,
-    description: `${HANDS_FREE_LABEL} steps through the playlist for you, announces each target, and keeps repeating segments until it is time to advance.`,
+    description: `${HANDS_FREE_LABEL} steps through the playlist for you and keeps repeating segments until it is time to advance.`,
     detail: 'It is meant for situations where you want the app to keep moving with minimal tapping.',
   },
   listen: {
@@ -136,40 +136,6 @@ export function getAutoDrillPlaybackWarning(message: string | null): string | nu
   }
 
   return isPlaybackPermissionBlockMessage(message) ? AUTO_DRILL_PERMISSION_WARNING : message;
-}
-
-function speakPrompt(text: string, enabled = true): Promise<void> {
-  if (
-    !enabled ||
-    typeof window === 'undefined' ||
-    !('speechSynthesis' in window) ||
-    typeof SpeechSynthesisUtterance === 'undefined'
-  ) {
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    let settled = false;
-    const fallbackMs = Math.min(8000, Math.max(1800, text.split(/\s+/).length * 650));
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      window.clearTimeout(fallbackTimer);
-      resolve();
-    };
-    const fallbackTimer = window.setTimeout(finish, fallbackMs);
-    utterance.onend = finish;
-    utterance.onerror = finish;
-    try {
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
-    } catch {
-      finish();
-    }
-  });
 }
 
 function getLastPracticedLabel(value?: string | null): string {
@@ -272,7 +238,6 @@ export function PlaylistPracticeView({
   const [autoDrillPlayToken, setAutoDrillPlayToken] = useState(0);
   const [autoDrillMessage, setAutoDrillMessage] = useState(`${HANDS_FREE_LABEL} idle`);
   const [autoDrillPlaybackWarning, setAutoDrillPlaybackWarning] = useState<string | null>(null);
-  const [autoDrillVoiceEnabled, setAutoDrillVoiceEnabled] = useState(true);
   const [autoDrillCompletedPasses, setAutoDrillCompletedPasses] = useState<Record<string, number>>({});
   const [autoDrillRunRatings, setAutoDrillRunRatings] = useState<Record<string, MemoryRating>>({});
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
@@ -291,7 +256,6 @@ export function PlaylistPracticeView({
   const autoDrillRunIdRef = useRef(0);
   const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again' | 'continuous'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
-  const autoDrillPlaybackRecoveryKeyRef = useRef<string | null>(null);
   const autoDrillAudioFallbackItemRef = useRef<string | null>(null);
   const [modeExplainer, setModeExplainer] = useState<ExplainedMode | null>(null);
 
@@ -843,9 +807,6 @@ export function PlaylistPracticeView({
 
   const stopAutoDrill = useCallback(() => {
     autoDrillRunIdRef.current += 1;
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
     setPracticeMode('manual');
     setAutoDrillState('idle');
     setAutoDrillMessage(`${HANDS_FREE_LABEL} idle`);
@@ -875,9 +836,6 @@ export function PlaylistPracticeView({
 
     if (practiceMode === 'auto-drill') {
       autoDrillRunIdRef.current += 1;
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
       setPracticeMode('manual');
       setAutoDrillState('idle');
     }
@@ -1036,35 +994,6 @@ export function PlaylistPracticeView({
   ]);
 
   const handleAutoDrillPlaybackBlocked = useCallback((message: string | null) => {
-    if (isPlaybackPermissionBlockMessage(message)) {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-      setAutoDrillVoiceEnabled(false);
-    }
-
-    if (
-      practiceMode === 'auto-drill' &&
-      currentAutoDrillItem &&
-      autoDrillState === 'playing' &&
-      autoDrillVoiceEnabled &&
-      isPlaybackPermissionBlockMessage(message)
-    ) {
-      const recoveryKey = `${currentAutoDrillItem.id}:${autoDrillPlayToken}`;
-      if (autoDrillPlaybackRecoveryKeyRef.current !== recoveryKey) {
-        autoDrillPlaybackRecoveryKeyRef.current = recoveryKey;
-        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
-        }
-        setAutoDrillVoiceEnabled(false);
-        setAutoDrillPlaybackWarning(null);
-        autoDrillTransitionRef.current = 'again';
-        setAutoDrillState('repeating');
-        setAutoDrillMessage('Retrying without voice.');
-        return;
-      }
-    }
-
     const alternateVersion: PreferredAudioVersion | null =
       preferredAudioVersion === 'part' && currentAutoDrillItem?.song.alternateAudioUrl?.trim()
         ? 'blend'
@@ -1101,13 +1030,9 @@ export function PlaylistPracticeView({
 
     setAutoDrillPlaybackWarning(getAutoDrillPlaybackWarning(message));
   }, [
-    autoDrillPlayToken,
-    autoDrillState,
-    autoDrillVoiceEnabled,
     currentAutoDrillItem,
     onPreferredAudioVersionChange,
     preferredAudioVersion,
-    practiceMode,
   ]);
 
   const handleAutoDrillRatingSubmitted = useCallback((rating: MemoryRating) => {
@@ -1166,7 +1091,6 @@ export function PlaylistPracticeView({
     if (autoDrillState === 'complete') {
       autoDrillRunIdRef.current += 1;
       setAutoDrillMessage('Playlist complete.');
-      void speakPrompt('Playlist complete.', autoDrillVoiceEnabled);
       return;
     }
 
@@ -1183,25 +1107,22 @@ export function PlaylistPracticeView({
     autoDrillRunIdRef.current = runId;
     let cancelled = false;
 
-    const runPromptSequence = async () => {
+    const runTransition = async () => {
       const transition = autoDrillTransitionRef.current;
 
       if (transition === 'continuous') {
         // A mastered same-song segment should flow directly into the next segment.
       } else if (autoDrillState === 'repeating' || transition === 'again') {
         setAutoDrillMessage('Again');
-        await speakPrompt('Again', autoDrillVoiceEnabled);
       } else if (transition === 'previous') {
         setAutoDrillMessage('Previous');
-        await speakPrompt('Previous', autoDrillVoiceEnabled);
       } else if (transition === 'quick') {
         setAutoDrillMessage('Next');
-        await speakPrompt('Next', autoDrillVoiceEnabled);
       } else {
-        const songMessage = currentAutoDrillItem.song.title;
-        setAutoDrillMessage(songMessage);
-        await speakPrompt(songMessage, autoDrillVoiceEnabled);
+        setAutoDrillMessage(currentAutoDrillItem.song.title);
       }
+
+      await Promise.resolve();
 
       if (cancelled || autoDrillRunIdRef.current !== runId) {
         return;
@@ -1213,12 +1134,12 @@ export function PlaylistPracticeView({
       setAutoDrillPlayToken((prev) => prev + 1);
     };
 
-    void runPromptSequence();
+    void runTransition();
 
     return () => {
       cancelled = true;
     };
-  }, [autoDrillIndex, autoDrillState, autoDrillVoiceEnabled, currentAutoDrillItem, practiceMode]);
+  }, [autoDrillIndex, autoDrillState, currentAutoDrillItem, practiceMode]);
 
   useEffect(() => {
     try {
@@ -1704,7 +1625,7 @@ export function PlaylistPracticeView({
               </div>
 
               {focusPracticeSession ? (
-                <div className="min-h-[720px] rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="focus-practice-surface">
+                <div className="min-h-0 rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="focus-practice-surface">
                   <PracticeView
                     key={`${currentFocusItem.song.id}:${currentFocusItem.segment.id}`}
                     song={currentFocusItem.song}
@@ -1828,19 +1749,10 @@ export function PlaylistPracticeView({
                     Start
                   </button>
                 )}
-                <label className="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700">
-                  <input
-                    type="checkbox"
-                    data-testid="auto-drill-voice-toggle"
-                    checked={autoDrillVoiceEnabled}
-                    onChange={(event) => setAutoDrillVoiceEnabled(event.target.checked)}
-                  />
-                  Voice
-                </label>
-                  </div>
+              </div>
 
               {autoDrillPracticeSession ? (
-                <div className="min-h-[720px] rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="auto-drill-practice-surface">
+                <div className="min-h-0 rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="auto-drill-practice-surface">
                   <PracticeView
                     song={currentAutoDrillItem.song}
                     userId={userId}
