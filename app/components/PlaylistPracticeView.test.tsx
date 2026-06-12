@@ -315,6 +315,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('focus-practice-surface')).toBeInTheDocument();
     expect(screen.getByTestId('focus-practice-surface').className).toContain('min-h-0');
     expect(screen.getByTestId('focus-practice-surface').className).not.toContain('min-h-[720px]');
+    expect(screen.getByTestId('segment-lyric-text')).toHaveStyle({ fontSize: 'clamp(2rem, 7vw, 4.5rem)' });
     expect(screen.getByTestId('song-title')).toHaveTextContent('Beta');
     expect(screen.getByTestId('segment-counter')).toHaveTextContent('Segment 1 of 1');
     expect(screen.getByTestId('practice-tap-mode-toggle')).toBeInTheDocument();
@@ -1257,7 +1258,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-2')).toHaveTextContent('Not practiced yet');
   });
 
-  it('plays unrated Auto Drill segments five times and advances on a high rating', async () => {
+  it('plays unrated Auto Drill segments three times and advances on a high rating', async () => {
     const play = vi.fn();
     let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
     const audioState = {
@@ -1325,7 +1326,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('practice-next-segment')).not.toBeDisabled();
     expect(screen.queryByTestId('audio-skip-back')).not.toBeInTheDocument();
 
-    for (let expectedPlayCount = 2; expectedPlayCount <= 5; expectedPlayCount += 1) {
+    for (let expectedPlayCount = 2; expectedPlayCount <= 3; expectedPlayCount += 1) {
       act(() => {
         latestAudioOptions?.onRangeEnd?.();
       });
@@ -1343,7 +1344,7 @@ describe('PlaylistPracticeView', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Beta');
-      expect(play).toHaveBeenCalledTimes(6);
+      expect(play).toHaveBeenCalledTimes(4);
     });
 
     fireEvent.click(screen.getByTestId('rating-button-5'));
@@ -1366,7 +1367,7 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
-  it('repeats a rating-2 Auto Drill segment four total plays before advancing', async () => {
+  it('repeats a rating-2 Auto Drill segment three total plays before advancing', async () => {
     const play = vi.fn();
     let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
     const audioState = {
@@ -1429,7 +1430,7 @@ describe('PlaylistPracticeView', () => {
 
     fireEvent.keyDown(window, { key: '2' });
 
-    for (let expectedPlayCount = 2; expectedPlayCount <= 4; expectedPlayCount += 1) {
+    for (let expectedPlayCount = 2; expectedPlayCount <= 3; expectedPlayCount += 1) {
       act(() => {
         latestAudioOptions?.onRangeEnd?.();
       });
@@ -1446,7 +1447,7 @@ describe('PlaylistPracticeView', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Beta');
-      expect(play).toHaveBeenCalledTimes(5);
+      expect(play).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -2055,6 +2056,7 @@ describe('PlaylistPracticeView', () => {
     await waitFor(() => expect(screen.getByTestId('playlist-auto-drill')).toBeInTheDocument());
     expect(screen.getByTestId('auto-drill-practice-surface').className).toContain('min-h-0');
     expect(screen.getByTestId('auto-drill-practice-surface').className).not.toContain('min-h-[720px]');
+    expect(screen.getByTestId('segment-lyric-text')).toHaveStyle({ fontSize: 'clamp(2rem, 7vw, 4.5rem)' });
 
     fireEvent.keyDown(window, { key: 'Escape' });
 

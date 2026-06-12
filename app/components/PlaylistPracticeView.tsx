@@ -1641,6 +1641,7 @@ export function PlaylistPracticeView({
                     preferredAudioVersion={preferredAudioVersion}
                     onPreferredAudioVersionChange={onPreferredAudioVersionChange}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
+                    lyricSize="large"
                     defaultLooping
                     playScope="segment"
                     autoPlayOnMount={focusAutoPlayItemId === currentFocusItem.id}
@@ -1767,6 +1768,7 @@ export function PlaylistPracticeView({
                     preferredAudioVersion={preferredAudioVersion}
                     onPreferredAudioVersionChange={onPreferredAudioVersionChange}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
+                    lyricSize="large"
                     playScope="segment"
                     autoPlayToken={autoDrillPlayToken}
                     reducedControls={practiceMode === 'auto-drill'}

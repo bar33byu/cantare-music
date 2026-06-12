@@ -6,11 +6,26 @@ import RatingBar from "./RatingBar";
 import { PitchContourThumbnail } from "./PitchContourThumbnail";
 
 const LYRIC_FONT_MAX_REM = 2.25; // 36px
+const LARGE_LYRIC_FONT_MAX_REM = 4.5; // 72px
 const LYRIC_FONT_MIN_REM = 0.95; // 15.2px
 const LYRIC_FIT_TOLERANCE_PX = 1;
 
-function getAdaptiveLyricFontSize(text: string): string {
+function getAdaptiveLyricFontSize(text: string, lyricSize: "default" | "large"): string {
   const length = text.trim().length;
+
+  if (lyricSize === "large") {
+    if (length <= 80) {
+      return `clamp(2rem, 7vw, ${LARGE_LYRIC_FONT_MAX_REM}rem)`;
+    }
+
+    if (length <= 180) {
+      return "clamp(1.6rem, 5.5vw, 3.5rem)";
+    }
+
+    if (length <= 320) {
+      return "clamp(1.2rem, 4vw, 2.5rem)";
+    }
+  }
 
   if (length <= 80) {
     return `clamp(1.4rem, 4.4vw, ${LYRIC_FONT_MAX_REM}rem)`;
@@ -35,6 +50,7 @@ interface SegmentCardProps {
   onSeek?: (ms: number) => void;
   masteryPercent?: number;
   lyricVisibilityMode?: "full" | "hint" | "hidden";
+  lyricSize?: "default" | "large";
   collapseLyricLineBreaks?: boolean;
   showContourMap?: boolean;
   contourHeatMap?: Record<string, ContourNoteHeatStat>;
@@ -106,6 +122,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   playbackMs,
   onSeek,
   lyricVisibilityMode = "full",
+  lyricSize = "default",
   collapseLyricLineBreaks = false,
   showContourMap = false,
   contourHeatMap,
@@ -124,8 +141,8 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
 
   const hasLyrics = lyricText.trim().length > 0;
   const lyricFontSize = React.useMemo(
-    () => getAdaptiveLyricFontSize(lyricText),
-    [lyricText]
+    () => getAdaptiveLyricFontSize(lyricText, lyricSize),
+    [lyricSize, lyricText]
   );
   const [fittedLyricFontSize, setFittedLyricFontSize] = React.useState(lyricFontSize);
   const displayLyricContent = React.useMemo(() => {

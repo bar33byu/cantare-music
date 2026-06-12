@@ -11,9 +11,8 @@ export type AutoDrillState =
   | "repeating"
   | "complete";
 
-export const AUTO_DRILL_REPEAT_THRESHOLD: MemoryRating = 2;
 export const DEFAULT_MAX_AUTO_REPEATS = 2;
-export const AUTO_DRILL_DEFAULT_TARGET_PASSES = 5;
+export const AUTO_DRILL_DEFAULT_TARGET_PASSES = 3;
 
 export function getAutoDrillTargetPasses(rating?: MemoryRating): number {
   if (rating === 5) {
@@ -21,12 +20,6 @@ export function getAutoDrillTargetPasses(rating?: MemoryRating): number {
   }
   if (rating === 4) {
     return 2;
-  }
-  if (rating === 3) {
-    return 3;
-  }
-  if (rating === 2) {
-    return 4;
   }
   return AUTO_DRILL_DEFAULT_TARGET_PASSES;
 }
@@ -36,7 +29,8 @@ export function shouldRepeatAutoDrillSegment(
   repeatCount: number,
   maxRepeats = DEFAULT_MAX_AUTO_REPEATS
 ): boolean {
-  return rating <= AUTO_DRILL_REPEAT_THRESHOLD && repeatCount < maxRepeats;
+  const targetRepeats = Math.min(getAutoDrillTargetPasses(rating) - 1, maxRepeats);
+  return repeatCount < targetRepeats;
 }
 
 export function getNextAutoDrillStateAfterRating(options: {

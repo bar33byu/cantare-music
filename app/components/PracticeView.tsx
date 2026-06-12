@@ -62,6 +62,7 @@ interface PracticeViewProps {
   readOnlyDataUserId?: string;
   sharedPlaylistToken?: string;
   collapseLyricLineBreaks?: boolean;
+  lyricSize?: "default" | "large";
   defaultLooping?: boolean;
   playScope?: "song" | "segment";
   autoPlayOnMount?: boolean;
@@ -233,6 +234,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   readOnlyDataUserId,
   sharedPlaylistToken,
   collapseLyricLineBreaks = false,
+  lyricSize = "default",
   defaultLooping = false,
   playScope = "song",
   autoPlayOnMount = false,
@@ -2397,6 +2399,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     onSeek={seek}
                     masteryPercent={masteryPercentForSegment(currentSegment.id)}
                     lyricVisibilityMode={lyricVisibilityMode}
+                    lyricSize={lyricSize}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
                     showContourMap={showCardContourMap && hasCardContourData}
                     contourHeatMap={currentMidiContourHeatMap}

@@ -49,6 +49,7 @@ vi.mock("./SegmentCard", () => ({
     onRate,
     currentRating,
     lyricVisibilityMode,
+    lyricSize,
     showContourMap,
     contourHeatMap,
   }: {
@@ -56,6 +57,7 @@ vi.mock("./SegmentCard", () => ({
     onRate: (r: MemoryRating) => void;
     currentRating?: MemoryRating;
     lyricVisibilityMode?: "full" | "hint" | "hidden";
+    lyricSize?: "default" | "large";
     showContourMap?: boolean;
     contourHeatMap?: Record<string, unknown>;
   }) => (
@@ -63,6 +65,7 @@ vi.mock("./SegmentCard", () => ({
       data-testid="mock-segment-card"
       data-segment-id={segment.id}
       data-lyric-mode={lyricVisibilityMode}
+      data-lyric-size={lyricSize}
       data-show-contour-map={showContourMap ? "true" : "false"}
       data-contour-heat-count={Object.keys(contourHeatMap ?? {}).length}
       data-contour-heat-miss-total={Object.values(contourHeatMap ?? {}).reduce((total, value) => {
@@ -361,6 +364,15 @@ describe("PracticeView", () => {
     expect(screen.queryByTestId("practice-top-bar")).not.toBeInTheDocument();
     expect(screen.getByTestId("practice-transport").className).not.toContain("fixed");
     expect(screen.getByTestId("practice-transport").className).toContain("rounded-2xl");
+  });
+
+  it("forwards the requested lyric size to the segment card", async () => {
+    const song = makeSong();
+    render(<PracticeView song={song} initialSession={makeSession(song)} lyricSize="large" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-lyric-size", "large");
+    });
   });
 
   it("keeps the regular practice card stretchable and the side navigation compact on narrow screens", async () => {
