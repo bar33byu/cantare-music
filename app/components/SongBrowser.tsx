@@ -3,6 +3,7 @@
 import { useCallback, useState, useEffect, useMemo } from 'react';
 import { getMasteryColor } from '../lib/masteryColors';
 import { buildUserScopedCacheKey, readCachedJson, writeCachedJson } from '../lib/localJsonCache';
+import { compareNaturalText } from '../lib/naturalSort';
 import { withUserIdHeader } from '../lib/userContext';
 import { SongReadinessIcons } from './SongReadinessIcons';
 
@@ -136,7 +137,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
     return [...result].sort((a, b) => {
       switch (sort.key) {
         case 'alphabetical':
-          return dir * a.title.localeCompare(b.title);
+          return dir * compareNaturalText(a.title, b.title);
         case 'date-added':
           return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
         case 'date-practiced': {

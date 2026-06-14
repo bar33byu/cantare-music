@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { flushSync } from 'react-dom';
 import type { Playlist } from '../types';
 import { getMasteryColor } from '../lib/masteryColors';
+import { compareNaturalText } from '../lib/naturalSort';
 import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
 import { SongReadinessIcons } from './SongReadinessIcons';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
@@ -354,7 +355,7 @@ export function PlaylistPracticeView({
     return [...songsWithProgress].sort((a, b) => {
       switch (sort.key) {
         case 'alphabetical':
-          return dir * a.title.localeCompare(b.title);
+          return dir * compareNaturalText(a.title, b.title);
         case 'date-added':
           return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
         case 'date-practiced': {

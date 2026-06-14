@@ -82,6 +82,32 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByRole('button', { name: 'Hands Free' })).toBeInTheDocument();
   });
 
+  it('sorts numeric song-title prefixes numerically in alphabetical order', async () => {
+    const numericPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        { ...playlist.songs[0], id: 'song-1000', title: '1000 Voices' },
+        { ...playlist.songs[0], id: 'song-100', title: '100 Songs' },
+        { ...playlist.songs[0], id: 'song-20', title: '20 Questions' },
+      ],
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={numericPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-sort-toggle'));
+    fireEvent.click(screen.getByTestId('playlist-sort-alphabetical'));
+
+    const titles = screen
+      .getAllByTestId(/^playlist-practice-song-song-(?:20|100|1000)$/)
+      .map((card) => card.textContent);
+    expect(titles).toEqual([
+      expect.stringContaining('20 Questions'),
+      expect.stringContaining('100 Songs'),
+      expect.stringContaining('1000 Voices'),
+    ]);
+  });
+
   it('shows a first-run explainer before entering Focus mode', async () => {
     window.localStorage.removeItem('playlist-practice-mode-explainer:focus');
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
