@@ -108,6 +108,45 @@ describe('PlaylistPracticeView', () => {
     ]);
   });
 
+  it('only sorts memory score from lowest to highest', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-sort-toggle'));
+    fireEvent.click(screen.getByTestId('playlist-sort-memory-score'));
+
+    expect(screen.getByTestId('playlist-sort-toggle')).toHaveTextContent('Lowest');
+    expect(screen.getAllByTestId(/^playlist-practice-song-song-[12]$/).map((card) => card.textContent)).toEqual([
+      expect.stringContaining('Beta'),
+      expect.stringContaining('Alpha'),
+    ]);
+
+    fireEvent.click(screen.getByTestId('playlist-sort-toggle'));
+    fireEvent.click(screen.getByTestId('playlist-sort-memory-score'));
+
+    expect(screen.getByTestId('playlist-sort-toggle')).toHaveTextContent('Lowest');
+    expect(JSON.parse(window.localStorage.getItem('playlist-practice-sort') ?? 'null')).toEqual({
+      key: 'memory-score',
+      asc: true,
+    });
+  });
+
+  it('normalizes a saved descending memory-score sort', async () => {
+    window.localStorage.setItem('playlist-practice-sort', JSON.stringify({ key: 'memory-score', asc: false }));
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-sort-toggle')).toHaveTextContent('Lowest');
+    });
+    expect(screen.getAllByTestId(/^playlist-practice-song-song-[12]$/).map((card) => card.textContent)).toEqual([
+      expect.stringContaining('Beta'),
+      expect.stringContaining('Alpha'),
+    ]);
+  });
+
   it('shows a first-run explainer before entering Focus mode', async () => {
     window.localStorage.removeItem('playlist-practice-mode-explainer:focus');
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;

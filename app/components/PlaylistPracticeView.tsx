@@ -43,10 +43,14 @@ const sortDirLabel: Record<SortKey, [string, string]> = {
   alphabetical: ['Z–A', 'A–Z'],
   'date-added': ['Newest', 'Oldest'],
   'date-practiced': ['Recent', 'Oldest'],
-  'memory-score': ['Highest', 'Lowest'],
+  'memory-score': ['Lowest', 'Lowest'],
 };
 
-const defaultAscForKey = (key: SortKey) => key === 'alphabetical';
+const defaultAscForKey = (key: SortKey) => key === 'alphabetical' || key === 'memory-score';
+
+const normalizeSort = (sort: SortState): SortState => (
+  sort.key === 'memory-score' ? { ...sort, asc: true } : sort
+);
 
 const modeLabel: Record<PlaylistMode, string> = {
   practice: 'Songs',
@@ -1154,7 +1158,7 @@ export function PlaylistPracticeView({
           ['alphabetical', 'date-added', 'date-practiced', 'memory-score'].includes((parsed as SortState).key) &&
           typeof (parsed as SortState).asc === 'boolean'
         ) {
-          setSort(parsed as SortState);
+          setSort(normalizeSort(parsed as SortState));
         }
       }
     } catch {
@@ -1163,8 +1167,9 @@ export function PlaylistPracticeView({
   }, []);
 
   const updateSort = (next: SortState) => {
-    setSort(next);
-    try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    const normalized = normalizeSort(next);
+    setSort(normalized);
+    try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(normalized)); } catch { /* ignore */ }
   };
 
   useEffect(() => {
