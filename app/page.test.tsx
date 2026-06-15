@@ -223,6 +223,61 @@ describe('Home page', () => {
     ).toBe(false);
   });
 
+  it('trusts a previously authenticated local user immediately when session hydration is offline', async () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      currentUserId: 'test-user',
+      users: [
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+      ],
+    }));
+    document.cookie = 'cantare-user-id=test-user; path=/';
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    expect(screen.getByText('Cantare Music')).toBeInTheDocument();
+    expect(screen.queryByText('Cantare Music (Guest)')).not.toBeInTheDocument();
+    expect(playlistBrowserMock.mock.calls.at(-1)?.[0]).toEqual({ userId: 'test-user' });
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/auth/session');
+    });
+    expect(screen.getByText('Cantare Music')).toBeInTheDocument();
+  });
+
+  it('falls back to a guest after an online session check rejects a cached authenticated user', async () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      currentUserId: 'test-user',
+      users: [
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+      ],
+    }));
+    document.cookie = 'cantare-user-id=test-user; path=/';
+    global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') {
+        return {
+          ok: true,
+          json: async () => ({ user: null, actor: null, effectiveUser: null, isImpersonating: false }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    expect(screen.getByText('Cantare Music')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Cantare Music (Guest)')).toBeInTheDocument();
+    });
+  });
+
   it('falls back to playlists when the hash view is missing or invalid', async () => {
     window.history.replaceState(null, '', '/#view=unknown');
 

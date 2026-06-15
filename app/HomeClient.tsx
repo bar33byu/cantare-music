@@ -209,6 +209,18 @@ function getGuestUserSettings(storedSettings: UserSettings, storage: Storage): U
   };
 }
 
+function getLocallyTrustedUserSettings(storedSettings: UserSettings, storage: Storage): UserSettings {
+  const currentUser = storedSettings.users.find((user) => user.id === storedSettings.currentUserId);
+  const hasPreviouslyAuthenticatedUser = Boolean(
+    currentUser &&
+    currentUser.id !== DEFAULT_USER_ID &&
+    !isAnonymousUserId(currentUser.id) &&
+    currentUser.email?.trim()
+  );
+
+  return hasPreviouslyAuthenticatedUser ? storedSettings : getGuestUserSettings(storedSettings, storage);
+}
+
 function mergeUsersWithDatabase(cachedUsers: KnownUser[], dbUsers: KnownUser[]): KnownUser[] {
   const merged = new Map<string, KnownUser>();
 
@@ -817,7 +829,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    return getGuestUserSettings(storedSettings, window.localStorage);
+    return getLocallyTrustedUserSettings(storedSettings, window.localStorage);
   });
   const [authEmail, setAuthEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
@@ -907,7 +919,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    setUserSettings(getGuestUserSettings(storedSettings, window.localStorage));
+    setUserSettings(getLocallyTrustedUserSettings(storedSettings, window.localStorage));
     settingsLoadedRef.current = true;
   }, []);
 
@@ -920,7 +932,17 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     const shouldCleanAuthParam = params.get("auth") === "signed-in";
     const shouldPromptForUsername = shouldCleanAuthParam && params.get("setup") === "username";
     const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
-    if ((cookieUserId === DEFAULT_USER_ID || isAnonymousUserId(cookieUserId)) && !shouldCleanAuthParam) {
+    const storedSettings = getLocallyTrustedUserSettings(
+      parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY)),
+      window.localStorage
+    );
+    const locallyTrustedUser = storedSettings.users.find((user) => user.id === storedSettings.currentUserId);
+    const hasLocallyTrustedSession = Boolean(locallyTrustedUser?.email?.trim());
+    if (
+      (cookieUserId === DEFAULT_USER_ID || isAnonymousUserId(cookieUserId)) &&
+      !shouldCleanAuthParam &&
+      !hasLocallyTrustedSession
+    ) {
       return;
     }
 
@@ -932,14 +954,20 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           return;
         }
         const payload = (await response.json()) as AuthSessionPayload;
-        if (!cancelled && (payload.user || payload.effectiveUser)) {
-          applyAuthSessionPayload(payload);
-          if (shouldPromptForUsername) {
-            setSettingsOpen(true);
-            setProfileSetupPrompt(true);
-          }
-          if (shouldCleanAuthParam) {
-            window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+        if (!cancelled) {
+          if (payload.user || payload.effectiveUser) {
+            applyAuthSessionPayload(payload);
+            if (shouldPromptForUsername) {
+              setSettingsOpen(true);
+              setProfileSetupPrompt(true);
+            }
+            if (shouldCleanAuthParam) {
+              window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+            }
+          } else {
+            setSessionActor(null);
+            setImpersonation(null);
+            setUserSettings((previous) => getGuestUserSettings(previous, window.localStorage));
           }
         }
       } catch {

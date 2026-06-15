@@ -53,33 +53,6 @@ const playlist: Playlist = {
   ],
 };
 
-function installImmediateSpeechSynthesis() {
-  class MockSpeechSynthesisUtterance {
-    text: string;
-    onend: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-
-    constructor(text: string) {
-      this.text = text;
-    }
-  }
-
-  Object.defineProperty(window, 'SpeechSynthesisUtterance', {
-    configurable: true,
-    value: MockSpeechSynthesisUtterance,
-  });
-  vi.stubGlobal('SpeechSynthesisUtterance', MockSpeechSynthesisUtterance);
-  Object.defineProperty(window, 'speechSynthesis', {
-    configurable: true,
-    value: {
-      cancel: vi.fn(),
-      speak: vi.fn((utterance: MockSpeechSynthesisUtterance) => {
-        utterance.onend?.();
-      }),
-    },
-  });
-}
-
 describe('PlaylistPracticeView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -107,6 +80,71 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByRole('heading', { name: 'Alpha' })).toHaveClass('text-gray-900');
     expect(screen.getByTestId('playlist-practice-song-song-2')).toHaveTextContent('Beta');
     expect(screen.getByRole('button', { name: 'Hands Free' })).toBeInTheDocument();
+  });
+
+  it('sorts numeric song-title prefixes numerically in alphabetical order', async () => {
+    const numericPlaylist: Playlist = {
+      ...playlist,
+      songs: [
+        { ...playlist.songs[0], id: 'song-1000', title: '1000 Voices' },
+        { ...playlist.songs[0], id: 'song-100', title: '100 Songs' },
+        { ...playlist.songs[0], id: 'song-20', title: '20 Questions' },
+      ],
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={numericPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-sort-toggle'));
+    fireEvent.click(screen.getByTestId('playlist-sort-alphabetical'));
+
+    const titles = screen
+      .getAllByTestId(/^playlist-practice-song-song-(?:20|100|1000)$/)
+      .map((card) => card.textContent);
+    expect(titles).toEqual([
+      expect.stringContaining('20 Questions'),
+      expect.stringContaining('100 Songs'),
+      expect.stringContaining('1000 Voices'),
+    ]);
+  });
+
+  it('only sorts memory score from lowest to highest', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-sort-toggle'));
+    fireEvent.click(screen.getByTestId('playlist-sort-memory-score'));
+
+    expect(screen.getByTestId('playlist-sort-toggle')).toHaveTextContent('Lowest');
+    expect(screen.getAllByTestId(/^playlist-practice-song-song-[12]$/).map((card) => card.textContent)).toEqual([
+      expect.stringContaining('Beta'),
+      expect.stringContaining('Alpha'),
+    ]);
+
+    fireEvent.click(screen.getByTestId('playlist-sort-toggle'));
+    fireEvent.click(screen.getByTestId('playlist-sort-memory-score'));
+
+    expect(screen.getByTestId('playlist-sort-toggle')).toHaveTextContent('Lowest');
+    expect(JSON.parse(window.localStorage.getItem('playlist-practice-sort') ?? 'null')).toEqual({
+      key: 'memory-score',
+      asc: true,
+    });
+  });
+
+  it('normalizes a saved descending memory-score sort', async () => {
+    window.localStorage.setItem('playlist-practice-sort', JSON.stringify({ key: 'memory-score', asc: false }));
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlist-sort-toggle')).toHaveTextContent('Lowest');
+    });
+    expect(screen.getAllByTestId(/^playlist-practice-song-song-[12]$/).map((card) => card.textContent)).toEqual([
+      expect.stringContaining('Beta'),
+      expect.stringContaining('Alpha'),
+    ]);
   });
 
   it('shows a first-run explainer before entering Focus mode', async () => {
@@ -340,6 +378,9 @@ describe('PlaylistPracticeView', () => {
     });
 
     expect(screen.getByTestId('focus-practice-surface')).toBeInTheDocument();
+    expect(screen.getByTestId('focus-practice-surface').className).toContain('min-h-0');
+    expect(screen.getByTestId('focus-practice-surface').className).not.toContain('min-h-[720px]');
+    expect(screen.getByTestId('segment-lyric-text')).toHaveStyle({ fontSize: 'clamp(2rem, 7vw, 4.5rem)' });
     expect(screen.getByTestId('song-title')).toHaveTextContent('Beta');
     expect(screen.getByTestId('segment-counter')).toHaveTextContent('Segment 1 of 1');
     expect(screen.getByTestId('practice-tap-mode-toggle')).toBeInTheDocument();
@@ -1282,8 +1323,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-2')).toHaveTextContent('Not practiced yet');
   });
 
-  it('plays unrated Auto Drill segments five times and advances on a high rating', async () => {
-    installImmediateSpeechSynthesis();
+  it('plays unrated Auto Drill segments three times and advances on a high rating', async () => {
     const play = vi.fn();
     let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
     const audioState = {
@@ -1351,7 +1391,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('practice-next-segment')).not.toBeDisabled();
     expect(screen.queryByTestId('audio-skip-back')).not.toBeInTheDocument();
 
-    for (let expectedPlayCount = 2; expectedPlayCount <= 5; expectedPlayCount += 1) {
+    for (let expectedPlayCount = 2; expectedPlayCount <= 3; expectedPlayCount += 1) {
       act(() => {
         latestAudioOptions?.onRangeEnd?.();
       });
@@ -1369,7 +1409,7 @@ describe('PlaylistPracticeView', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Beta');
-      expect(play).toHaveBeenCalledTimes(6);
+      expect(play).toHaveBeenCalledTimes(4);
     });
 
     fireEvent.click(screen.getByTestId('rating-button-5'));
@@ -1392,8 +1432,7 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
-  it('repeats a rating-2 Auto Drill segment four total plays before advancing', async () => {
-    installImmediateSpeechSynthesis();
+  it('repeats a rating-2 Auto Drill segment three total plays before advancing', async () => {
     const play = vi.fn();
     let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
     const audioState = {
@@ -1456,7 +1495,7 @@ describe('PlaylistPracticeView', () => {
 
     fireEvent.keyDown(window, { key: '2' });
 
-    for (let expectedPlayCount = 2; expectedPlayCount <= 4; expectedPlayCount += 1) {
+    for (let expectedPlayCount = 2; expectedPlayCount <= 3; expectedPlayCount += 1) {
       act(() => {
         latestAudioOptions?.onRangeEnd?.();
       });
@@ -1473,37 +1512,11 @@ describe('PlaylistPracticeView', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Beta');
-      expect(play).toHaveBeenCalledTimes(5);
+      expect(play).toHaveBeenCalledTimes(4);
     });
   });
 
   it('continues through consecutive rating-5 Auto Drill segments without a prompt or preroll', async () => {
-    class MockSpeechSynthesisUtterance {
-      text: string;
-      onend: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-
-      constructor(text: string) {
-        this.text = text;
-      }
-    }
-
-    const spoken: MockSpeechSynthesisUtterance[] = [];
-    Object.defineProperty(window, 'SpeechSynthesisUtterance', {
-      configurable: true,
-      value: MockSpeechSynthesisUtterance,
-    });
-    vi.stubGlobal('SpeechSynthesisUtterance', MockSpeechSynthesisUtterance);
-    Object.defineProperty(window, 'speechSynthesis', {
-      configurable: true,
-      value: {
-        cancel: vi.fn(),
-        speak: vi.fn((utterance: MockSpeechSynthesisUtterance) => {
-          spoken.push(utterance);
-        }),
-      },
-    });
-
     const oneSongPlaylist: Playlist = {
       ...playlist,
       songs: [
@@ -1610,11 +1623,6 @@ describe('PlaylistPracticeView', () => {
       expect(fetchMock.mock.calls.some(([input]) => input === '/api/songs/song-1/ratings')).toBe(true);
     });
 
-    await waitFor(() => expect(spoken.map((utterance) => utterance.text)).toContain('Alpha'));
-    act(() => {
-      [...spoken].reverse().find((utterance) => utterance.text === 'Alpha')?.onend?.();
-    });
-
     await waitFor(() => {
       expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('First');
       expect(play).toHaveBeenCalledWith(0, 1000);
@@ -1630,7 +1638,6 @@ describe('PlaylistPracticeView', () => {
       expect(play).toHaveBeenCalledWith(1000, 2000);
       expect(play).toHaveBeenCalledTimes(2);
     });
-    expect(spoken.map((utterance) => utterance.text)).not.toContain('Next');
 
     act(() => {
       latestAudioOptions?.onRangeEnd?.();
@@ -1641,11 +1648,17 @@ describe('PlaylistPracticeView', () => {
       expect(play).toHaveBeenCalledWith(2000, 3000);
       expect(play).toHaveBeenCalledTimes(3);
     });
-    expect(spoken.map((utterance) => utterance.text)).not.toContain('Next');
   });
 
-  it('uses hands-free Auto Drill voice prompts without countdowns', async () => {
-    installImmediateSpeechSynthesis();
+  it('keeps hands-free Auto Drill silent', async () => {
+    const speak = vi.fn();
+    Object.defineProperty(window, 'speechSynthesis', {
+      configurable: true,
+      value: {
+        cancel: vi.fn(),
+        speak,
+      },
+    });
     const play = vi.fn();
     let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
     const audioState = {
@@ -1706,9 +1719,8 @@ describe('PlaylistPracticeView', () => {
       expect(play).toHaveBeenCalledWith(0, 1000);
     });
 
-    const speak = window.speechSynthesis.speak as unknown as ReturnType<typeof vi.fn>;
-    expect(speak.mock.calls.map(([utterance]) => utterance.text)).toContain('Alpha');
-    expect(speak.mock.calls.map(([utterance]) => utterance.text)).not.toContain('Starting in 3. 2. 1.');
+    expect(speak).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('auto-drill-voice-toggle')).not.toBeInTheDocument();
 
     act(() => {
       latestAudioOptions?.onRangeEnd?.();
@@ -1717,11 +1729,10 @@ describe('PlaylistPracticeView', () => {
     await waitFor(() => {
       expect(play).toHaveBeenCalledTimes(2);
     });
-    expect(speak.mock.calls.map(([utterance]) => utterance.text)).toContain('Again');
+    expect(speak).not.toHaveBeenCalled();
   });
 
   it('uses card arrows for Auto Drill navigation and restarts the target card loop count', async () => {
-    installImmediateSpeechSynthesis();
     const play = vi.fn();
     let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
     const audioState = {
@@ -1983,12 +1994,11 @@ describe('PlaylistPracticeView', () => {
 
     const warning = getAutoDrillPlaybackWarning(rawPermissionMessage);
 
-    expect(warning).toContain('Automatic audio or voice prompts are blocked');
+    expect(warning).toContain('Automatic audio is blocked');
     expect(warning).not.toContain('request is not allowed');
   });
 
   it('retries Hands Free with alternate audio when the preferred recording fails', async () => {
-    installImmediateSpeechSynthesis();
     const onPreferredAudioVersionChange = vi.fn();
     const playlistWithAlternate: Playlist = {
       ...playlist,
@@ -2063,7 +2073,6 @@ describe('PlaylistPracticeView', () => {
   });
 
   it('exits Auto Drill with Escape', async () => {
-    installImmediateSpeechSynthesis();
     vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation(() => ({
       isPlaying: false,
       isReady: true,
@@ -2110,6 +2119,9 @@ describe('PlaylistPracticeView', () => {
 
     fireEvent.click(screen.getByTestId('playlist-mode-auto'));
     await waitFor(() => expect(screen.getByTestId('playlist-auto-drill')).toBeInTheDocument());
+    expect(screen.getByTestId('auto-drill-practice-surface').className).toContain('min-h-0');
+    expect(screen.getByTestId('auto-drill-practice-surface').className).not.toContain('min-h-[720px]');
+    expect(screen.getByTestId('segment-lyric-text')).toHaveStyle({ fontSize: 'clamp(2rem, 7vw, 4.5rem)' });
 
     fireEvent.keyDown(window, { key: 'Escape' });
 
