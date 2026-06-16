@@ -2141,6 +2141,22 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     };
   }, [accountProgressEnabled, hasMidiTapAnswers, request, song.id, tapHeatMapRefreshToken]);
 
+  const contourMapToggle = hasSegments && currentSegment && hasCardContourData ? (
+    <button
+      type="button"
+      data-testid="practice-card-contour-toggle"
+      onClick={() => requestPracticeControlChange("contour")}
+      aria-pressed={showCardContourMap}
+      className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+        showCardContourMap
+          ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
+          : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+      }`}
+    >
+      Contour
+    </button>
+  ) : null;
+
   return (
     <div
       data-testid="practice-layout"
@@ -2285,6 +2301,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         }
       >
 
+      {reducedControls && contourMapToggle ? (
+        <div
+          className={
+            isCompactLandscapeLayout
+              ? "col-start-2 row-start-1 flex justify-end"
+              : "flex justify-end px-4 md:px-8"
+          }
+          data-testid="practice-reduced-contour-controls"
+        >
+          {contourMapToggle}
+        </div>
+      ) : null}
+
       {!reducedControls ? (
       <div
         className={
@@ -2328,21 +2357,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               ))}
             </div>
           ) : null}
-          {hasSegments && currentSegment && hasCardContourData ? (
-            <button
-              type="button"
-              data-testid="practice-card-contour-toggle"
-              onClick={() => requestPracticeControlChange("contour")}
-              aria-pressed={showCardContourMap}
-              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
-                showCardContourMap
-                  ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
-                  : "border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
-              }`}
-            >
-              Contour
-            </button>
-          ) : null}
+          {contourMapToggle}
           {hasSegments && (hasMidiTapAnswers || isTapPracticeMode) ? (
             <button
               type="button"

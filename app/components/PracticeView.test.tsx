@@ -366,6 +366,25 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport").className).toContain("rounded-2xl");
   });
 
+  it("allows the contour map to be toggled with reduced controls", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
+    const song = { ...makeSong(1), pitchContourNotes: [] };
+    render(<PracticeView song={song} initialSession={makeSession(song)} reducedControls />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("practice-top-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("practice-reduced-contour-controls")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
+
+    fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
+
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "true");
+  });
+
   it("forwards the requested lyric size to the segment card", async () => {
     const song = makeSong();
     render(<PracticeView song={song} initialSession={makeSession(song)} lyricSize="large" />);
