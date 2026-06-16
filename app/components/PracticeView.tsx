@@ -152,6 +152,11 @@ const TAP_MATCH_OPTIONS = {
   sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   durationToleranceRatio: 0.6,
 } as const;
+const TAP_KEYBOARD_ROWS = [
+  { keys: "zxcvbnm", minLane: 0, maxLane: 0.28 },
+  { keys: "asdfghjkl", minLane: 0.36, maxLane: 0.64 },
+  { keys: "qwertyuiop", minLane: 0.72, maxLane: 1 },
+] as const;
 
 interface ActiveTapCapture {
   id: string;
@@ -204,6 +209,22 @@ function toDirectionTaps(notes: PitchContourNote[]): DirectionTap[] {
     timeOffsetMs: note.timeOffsetMs,
     direction: index === 0 ? "same" : classifyContourDirection(note.lane - sorted[index - 1].lane, TAP_MATCH_OPTIONS.sameDeadZone),
   }));
+}
+
+function getTapKeyboardLane(key: string): number | null {
+  const normalizedKey = key.toLowerCase();
+  for (const row of TAP_KEYBOARD_ROWS) {
+    const keyIndex = row.keys.indexOf(normalizedKey);
+    if (keyIndex === -1) {
+      continue;
+    }
+    if (row.keys.length === 1) {
+      return row.minLane;
+    }
+    const rowProgress = keyIndex / (row.keys.length - 1);
+    return row.minLane + (row.maxLane - row.minLane) * rowProgress;
+  }
+  return null;
 }
 
 function isTapScoreResult(value: unknown): value is TapScoreResult {
@@ -1295,6 +1316,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     const segmentId = currentSegment.id;
     const latestForSegment = tapAttemptsRef.current[segmentId] ?? [];
     const nextSegmentNotes = [...latestForSegment, note].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+    tapAttemptsRef.current = {
+      ...tapAttemptsRef.current,
+      [segmentId]: nextSegmentNotes,
+    };
     const directionTaps = toDirectionTaps(nextSegmentNotes);
     const noteDirection = directionTaps.find((tap) => tap.id === note.id)?.direction ?? "same";
     const immediateScore = currentMidiSegmentAnswerKey
@@ -1330,6 +1355,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     activeTapCaptureRef.current = null;
   }, [currentCardContourNotes, currentMidiSegmentAnswerKey, currentMs, currentSegment, queuePersistedTap, showAccuracyToast]);
+
+  const recordKeyboardTap = React.useCallback((lane: number) => {
+    if (!currentSegment) {
+      return;
+    }
+
+    const segmentDurationMs = Math.max(1, currentSegment.endMs - currentSegment.startMs);
+    const startOffsetMs = Math.min(
+      segmentDurationMs,
+      Math.max(0, Math.round(currentMs - currentSegment.startMs))
+    );
+    activeTapCaptureRef.current = {
+      id: crypto.randomUUID(),
+      startOffsetMs,
+      lane,
+      pointerId: -1,
+    };
+    finalizeTapCapture(lane);
+  }, [currentMs, currentSegment, finalizeTapCapture]);
 
   const recordCurrentMidiContourAttempt = React.useCallback(() => {
     if (!currentSegment || !currentMidiSegmentAnswerKey || currentMidiSegmentAnswerKey.taps.length === 0) {
@@ -1635,6 +1679,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
 
+      if (isTapPracticeMode && !event.repeat) {
+        const tapLane = getTapKeyboardLane(event.key);
+        if (tapLane !== null) {
+          event.preventDefault();
+          recordKeyboardTap(tapLane);
+          return;
+        }
+      }
+
       if (event.key === " ") {
         event.preventDefault();
         handleTogglePlay();
@@ -1711,7 +1764,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, ratingKeysEnabled]);
+}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, isTapPracticeMode, ratingKeysEnabled, recordKeyboardTap]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
