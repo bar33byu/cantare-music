@@ -1432,6 +1432,73 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
+  it('starts Hands Free in the currently displayed playlist order', async () => {
+    const play = vi.fn();
+    const audioState = {
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 30000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play,
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    };
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockReturnValue(audioState);
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/api/songs/') && url.includes('/ratings')) {
+        return { ok: true, json: async () => ({ ratings: [] }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1/knowledge')) {
+        return { ok: true, json: async () => ({ score: 67 }) } as Response;
+      }
+      if (url.includes('/api/playlists/playlist-1')) {
+        return new Response(JSON.stringify(playlist), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-sort-toggle'));
+    fireEvent.click(screen.getByTestId('playlist-sort-memory-score'));
+
+    expect(screen.getAllByTestId(/^playlist-practice-song-song-[12]$/).map((card) => card.textContent)).toEqual([
+      expect.stringContaining('Beta'),
+      expect.stringContaining('Alpha'),
+    ]);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-auto'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auto-drill-current-segment')).toHaveTextContent('Beta');
+      expect(play).toHaveBeenCalledWith(0, 1000);
+    });
+  });
+
   it('repeats a rating-2 Auto Drill segment three total plays before advancing', async () => {
     const play = vi.fn();
     let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
