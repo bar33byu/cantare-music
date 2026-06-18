@@ -366,6 +366,25 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport").className).toContain("rounded-2xl");
   });
 
+  it("allows the contour map to be toggled with reduced controls", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+
+    const song = { ...makeSong(1), pitchContourNotes: [] };
+    render(<PracticeView song={song} initialSession={makeSession(song)} reducedControls />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("practice-top-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("practice-reduced-contour-controls")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
+
+    fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
+
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "true");
+  });
+
   it("forwards the requested lyric size to the segment card", async () => {
     const song = makeSong();
     render(<PracticeView song={song} initialSession={makeSession(song)} lyricSize="large" />);
@@ -1203,6 +1222,56 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("practice-tap-feedback")).toHaveTextContent("100%");
       expect(screen.getByTestId("practice-piano-roll-overlay")).toBeInTheDocument();
+    });
+  });
+
+  it("uses the letter keyboard as a tap practice pitch surface", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+
+    mockPracticeFetchWithMidiAnswerKey();
+
+    const song = makeSong(1);
+
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    await waitFor(() => {
+      expectTapSessionStarted(song.id);
+    });
+
+    fireEvent.keyDown(window, { key: "z" });
+    fireEvent.keyDown(window, { key: "x", repeat: true });
+    fireEvent.keyDown(window, { key: "P" });
+    fireEvent.keyDown(window, { key: "j" });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("practice-attempt-dot")).toHaveLength(3);
+    });
+    expect(mockSeek).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      const tapPersistCalls = mockFetch.mock.calls.filter(([calledUrl, calledInit]) => (
+        String(calledUrl).includes("/tap-sessions/tap-session-1") && calledInit?.method === "POST"
+      ));
+      expect(tapPersistCalls).toHaveLength(3);
+      const directions = tapPersistCalls.map(([, calledInit]) => JSON.parse(String(calledInit?.body ?? "{}")).direction);
+      const lanes = tapPersistCalls.map(([, calledInit]) => JSON.parse(String(calledInit?.body ?? "{}")).lane);
+      expect(directions).toEqual(["same", "up", "down"]);
+      expect(lanes[0]).toBeLessThan(0.1);
+      expect(lanes[1]).toBeGreaterThan(0.9);
+      expect(lanes[2]).toBeGreaterThan(0.45);
+      expect(lanes[2]).toBeLessThan(0.65);
     });
   });
 
