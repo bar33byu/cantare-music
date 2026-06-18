@@ -949,7 +949,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch("/api/auth/session");
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
         if (!response.ok) {
           return;
         }

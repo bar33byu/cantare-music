@@ -242,7 +242,7 @@ describe('Home page', () => {
     expect(playlistBrowserMock.mock.calls.at(-1)?.[0]).toEqual({ userId: 'test-user' });
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith('/api/auth/session');
+      expect(global.fetch).toHaveBeenCalledWith('/api/auth/session', { cache: 'no-store' });
     });
     expect(screen.getByText('Cantare Music')).toBeInTheDocument();
   });
