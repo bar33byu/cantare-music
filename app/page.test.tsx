@@ -775,6 +775,7 @@ describe('Home page', () => {
   });
 
   it('allows impersonated sessions to browse Shared even when the effective user has no email', async () => {
+    window.history.replaceState(null, '', '/');
     window.localStorage.setItem('cantare:user-settings', JSON.stringify({
       segmentPrerollMs: 500,
       currentUserId: 'test-user',
