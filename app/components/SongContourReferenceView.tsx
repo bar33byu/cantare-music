@@ -1,9 +1,11 @@
 "use client";
 
 import React from "react";
-import type { PitchContourNote, Segment, Song } from "../types";
+import type { ContourNoteHeatStat, PitchContourNote, Segment, Song } from "../types";
 import type { MidiSegmentAnswerKey } from "../lib/midiGuidedTapPractice";
+import { toPlayableAudioUrl } from "../lib/audioUrls";
 import { withUserIdHeader } from "../lib/userContext";
+import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { PitchContourThumbnail } from "./PitchContourThumbnail";
 
 interface SongContourReferenceViewProps {
@@ -55,14 +57,21 @@ export function SongContourReferenceView({
   onBack,
 }: SongContourReferenceViewProps) {
   const [midiSegmentAnswerKeys, setMidiSegmentAnswerKeys] = React.useState<Record<string, MidiSegmentAnswerKey>>({});
+  const [tapHeatMapBySegment, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
   const [isMidiLoading, setIsMidiLoading] = React.useState(false);
   const [midiLoadFailed, setMidiLoadFailed] = React.useState(false);
+  const [playingSegmentId, setPlayingSegmentId] = React.useState<string | null>(null);
+  const playbackUrl = React.useMemo(() => toPlayableAudioUrl(song.audioUrl), [song.audioUrl]);
+  const { isPlaying, currentMs, play, pause } = useAudioPlayer(playbackUrl, undefined, {
+    onRangeEnd: () => setPlayingSegmentId(null),
+  });
 
   React.useEffect(() => {
     let cancelled = false;
     setIsMidiLoading(true);
     setMidiLoadFailed(false);
     setMidiSegmentAnswerKeys({});
+    setTapHeatMapBySegment({});
 
     const loadMidiStatus = async () => {
       try {
@@ -87,6 +96,28 @@ export function SongContourReferenceView({
 
     void loadMidiStatus();
 
+    const loadTapHeatMap = async () => {
+      try {
+        const response = await fetch(
+          `/api/songs/${song.id}/tap-heatmap`,
+          withUserIdHeader({ cache: "no-store" }, userId)
+        );
+        if (!response.ok) {
+          return;
+        }
+        const payload = await response.json() as {
+          heatMapBySegment?: Record<string, Record<string, ContourNoteHeatStat>>;
+        };
+        if (!cancelled) {
+          setTapHeatMapBySegment(payload.heatMapBySegment ?? {});
+        }
+      } catch {
+        // The contour remains useful when score history is unavailable.
+      }
+    };
+
+    void loadTapHeatMap();
+
     return () => {
       cancelled = true;
     };
@@ -101,6 +132,16 @@ export function SongContourReferenceView({
   );
   const segmentRowsWithContour = segmentRows.filter((row) => row.notes.length > 0);
   const hasAnyContour = segmentRowsWithContour.length > 0;
+
+  const handleSegmentPlay = React.useCallback((segment: Segment) => {
+    if (playingSegmentId === segment.id && isPlaying) {
+      pause();
+      return;
+    }
+
+    setPlayingSegmentId(segment.id);
+    play(segment.startMs, segment.endMs);
+  }, [isPlaying, pause, play, playingSegmentId]);
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-4 text-slate-950 print:bg-white print:px-0 print:py-0">
@@ -162,19 +203,38 @@ export function SongContourReferenceView({
                 data-testid={`contour-reference-card-${segment.id}`}
                 className="break-inside-avoid rounded-lg border border-slate-200 bg-white p-3 shadow-sm print:border-slate-300 print:p-2 print:shadow-none"
               >
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] print:grid-cols-[minmax(0,1fr)_minmax(14rem,20rem)] print:gap-2">
-                  <div className="min-w-0">
-                    <h2 className="mb-2 truncate text-base font-semibold text-slate-900 print:text-sm">
-                      {segment.label}
-                    </h2>
+                <div
+                  data-testid={`contour-reference-scroller-${segment.id}`}
+                  className="flex snap-x snap-mandatory gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] lg:overflow-visible print:grid print:grid-cols-[minmax(0,1fr)_minmax(14rem,20rem)] print:gap-2 print:overflow-visible"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSegmentPlay(segment)}
+                    aria-label={`${playingSegmentId === segment.id && isPlaying ? "Pause" : "Play"} ${segment.label}`}
+                    className="min-w-full shrink-0 snap-start rounded-md text-left outline-none transition hover:bg-indigo-50 focus-visible:ring-2 focus-visible:ring-indigo-500 lg:min-w-0 print:min-w-0 print:hover:bg-transparent"
+                  >
+                    <span className="mb-2 flex items-center justify-between gap-2">
+                      <span className="truncate text-base font-semibold text-slate-900 print:text-sm">
+                        {segment.label}
+                      </span>
+                      {segment.lyricText.trim() ? (
+                        <span className="shrink-0 text-xs font-semibold text-indigo-600 lg:hidden print:hidden">
+                          Lyrics <span aria-hidden="true">&#x2192;</span>
+                        </span>
+                      ) : null}
+                    </span>
                     <PitchContourThumbnail
                       notes={notes}
                       segmentDurationMs={getSegmentDurationMs(segment)}
+                      noteHeatMap={tapHeatMapBySegment[segment.id]}
+                      activeTimeMs={playingSegmentId === segment.id && isPlaying
+                        ? Math.max(0, currentMs - segment.startMs)
+                        : undefined}
                       className="h-20 rounded-md border-indigo-200 bg-indigo-50/60 print:h-14"
                     />
-                  </div>
+                  </button>
                   {segment.lyricText.trim() ? (
-                    <div className="hidden min-w-0 border-l border-slate-200 pl-3 text-sm leading-6 text-slate-700 lg:block print:block print:pl-2 print:text-xs print:leading-5">
+                    <div className="min-w-full shrink-0 snap-start border-l border-slate-200 px-3 text-sm leading-6 text-slate-700 lg:min-w-0 lg:px-0 lg:pl-3 print:min-w-0 print:pl-2 print:text-xs print:leading-5">
                       <p className="whitespace-pre-wrap">{segment.lyricText}</p>
                     </div>
                   ) : null}

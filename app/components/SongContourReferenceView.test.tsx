@@ -6,6 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SongContourReferenceView } from "./SongContourReferenceView";
 import type { Song } from "../types";
 
+const mockPlay = vi.fn();
+const mockPause = vi.fn();
+
+vi.mock("../hooks/useAudioPlayer", () => ({
+  useAudioPlayer: () => ({
+    isPlaying: false,
+    currentMs: 0,
+    play: mockPlay,
+    pause: mockPause,
+  }),
+}));
+
 const makeSong = (): Song => ({
   id: "song-1",
   title: "Reference Song",
@@ -37,9 +49,15 @@ const makeSong = (): Song => ({
 describe("SongContourReferenceView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    global.fetch = vi.fn().mockResolvedValue({
+    global.fetch = vi.fn().mockImplementation((url: string) => Promise.resolve({
       ok: true,
-      json: async () => ({
+      json: async () => url.endsWith("/tap-heatmap") ? ({
+        heatMapBySegment: {
+          "seg-1": {
+            "midi-contour-seg-1-1": { sessionCount: 4, missCount: 4, missRate: 1 },
+          },
+        },
+      }) : ({
         segmentAnswerKeys: {
           "seg-1": {
             segmentId: "seg-1",
@@ -71,7 +89,7 @@ describe("SongContourReferenceView", () => {
           },
         },
       }),
-    }) as unknown as typeof fetch;
+    })) as unknown as typeof fetch;
   });
 
   afterEach(() => {
@@ -91,6 +109,7 @@ describe("SongContourReferenceView", () => {
 
     expect(screen.getByText("Verse 1")).toBeInTheDocument();
     expect(screen.getByText("First verse words")).toBeInTheDocument();
+    expect(screen.getByTestId("contour-reference-scroller-seg-1")).toHaveClass("overflow-x-auto", "snap-mandatory");
     expect(screen.getByTestId("pitch-contour-thumbnail")).toBeInTheDocument();
     expect(screen.queryByText("Verse 2")).not.toBeInTheDocument();
     expect(global.fetch).toHaveBeenCalledWith(
@@ -100,6 +119,25 @@ describe("SongContourReferenceView", () => {
         headers: expect.objectContaining({ "X-User-ID": "user-1" }),
       })
     );
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/songs/song-1/tap-heatmap",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: expect.objectContaining({ "X-User-ID": "user-1" }),
+      })
+    );
+    await waitFor(() => {
+      expect(screen.getAllByTestId("pitch-contour-thumbnail-note")[0]).toHaveAttribute("fill", "rgb(239 68 68)");
+    });
+  });
+
+  it("plays the selected segment when its contour is clicked", async () => {
+    render(<SongContourReferenceView song={makeSong()} onBack={vi.fn()} />);
+
+    const playButton = await screen.findByRole("button", { name: "Play Verse 1" });
+    await userEvent.click(playButton);
+
+    expect(mockPlay).toHaveBeenCalledWith(0, 4000);
   });
 
   it("prints the reference sheet", async () => {
