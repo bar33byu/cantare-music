@@ -37,6 +37,8 @@ describe("DebugPitchPracticePage", () => {
     expect(screen.getByRole("checkbox", { name: "Adapt timing to active MIDI duration" })).toBeChecked();
     expect(screen.getByText("MIDI and detected pitch piano roll")).toBeInTheDocument();
     expect(screen.getByLabelText("Expected MIDI and detected pitch piano roll")).toBeInTheDocument();
+    expect(screen.getByText("Shareable diagnostic report")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start diagnostic capture" })).toBeDisabled();
     expect(fetchMock).toHaveBeenCalledWith("/api/songs/0e513a82-8fd5-4dd2-9b54-c046a46ceaed", { cache: "no-store" });
     expect(getUserMedia).not.toHaveBeenCalled();
   });

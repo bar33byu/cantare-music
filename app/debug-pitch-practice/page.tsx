@@ -28,6 +28,7 @@ interface PitchSnapshot {
   requiredStabilityMs: number;
   transitionGraceMs: number;
   inTransitionGrace: boolean;
+  expectedMidiPitch: number | null;
 }
 
 const inputClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900";
@@ -44,6 +45,22 @@ function microphoneError(error: unknown): string {
 
 function formatNumber(value: number | null | undefined, digits = 2): string {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "--";
+}
+
+function percentile(values: number[], fraction: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))];
+}
+
+function commonPitchNames(frames: PitchSnapshot[], acceptedOnly: boolean): string {
+  const counts = new Map<string, number>();
+  for (const frame of frames) {
+    if (acceptedOnly && !frame.accepted) continue;
+    const name = midiToPitchName(frame.midiPitch);
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => `${name}:${count}`).join(", ") || "none";
 }
 
 function nearestMidiNote(notes: WholeSongMidiAnswerKeyNote[], playbackMs: number): WholeSongMidiAnswerKeyNote | null {
@@ -84,6 +101,9 @@ export default function DebugPitchPracticePage() {
   const [waveform, setWaveform] = React.useState<number[]>([]);
   const [history, setHistory] = React.useState<PitchSnapshot[]>([]);
   const [audioInfo, setAudioInfo] = React.useState<{ sampleRate: number; contextState: string; trackSettings: MediaTrackSettings } | null>(null);
+  const [captureActive, setCaptureActive] = React.useState(false);
+  const [diagnosticReport, setDiagnosticReport] = React.useState("");
+  const [copyStatus, setCopyStatus] = React.useState("");
 
   const streamRef = React.useRef<MediaStream | null>(null);
   const contextRef = React.useRef<AudioContext | null>(null);
@@ -94,6 +114,10 @@ export default function DebugPitchPracticePage() {
   const wholeSongKeyRef = React.useRef(wholeSongKey);
   const adaptiveTimingEnabledRef = React.useRef(adaptiveTimingEnabled);
   const detectorTargetIndexRef = React.useRef<number | null>(null);
+  const captureActiveRef = React.useRef(false);
+  const captureStartedAtRef = React.useRef<number | null>(null);
+  const diagnosticFramesRef = React.useRef<PitchSnapshot[]>([]);
+  const noCandidateFramesRef = React.useRef(0);
 
   React.useEffect(() => {
     settingsRef.current = { minFrequencyHz, maxFrequencyHz, yinThreshold, minRms, minConfidence, stabilityMs, maxSpreadCents };
@@ -256,12 +280,17 @@ export default function DebugPitchPracticePage() {
             rms: raw.rms,
           } : null, { stabilityMs: requiredStabilityMs, maxSpreadCents: settings.maxSpreadCents });
           stabilityRef.current = stability.state;
-          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: playbackMsRef.current, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace };
+          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: playbackMsRef.current, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace, expectedMidiPitch: target?.note.midiPitch ?? null };
           setSnapshot(nextSnapshot);
           setHistory((current) => [...current, nextSnapshot].slice(-300));
+          if (captureActiveRef.current) {
+            diagnosticFramesRef.current.push(nextSnapshot);
+            if (diagnosticFramesRef.current.length > 5000) diagnosticFramesRef.current.shift();
+          }
         } else {
           stabilityRef.current = { frames: [] };
           setSnapshot(null);
+          if (captureActiveRef.current) noCandidateFramesRef.current += 1;
         }
         animationRef.current = requestAnimationFrame(analyze);
       };
@@ -313,6 +342,78 @@ export default function DebugPitchPracticePage() {
   const currentStablePitch = snapshot?.stableMidiPitch ?? null;
   const currentPitchMatches = currentStablePitch !== null && Math.abs(centsBetween(currentStablePitch, effectiveTargetMidiPitch)) <= 50;
   const waveformPoints = waveform.map((sample, index) => `${(index / Math.max(1, waveform.length - 1)) * 100},${50 - sample * 45}`).join(" ");
+
+  const startDiagnosticCapture = React.useCallback(() => {
+    diagnosticFramesRef.current = [];
+    noCandidateFramesRef.current = 0;
+    captureStartedAtRef.current = performance.now();
+    captureActiveRef.current = true;
+    setCaptureActive(true);
+    setDiagnosticReport("");
+    setCopyStatus("");
+  }, []);
+
+  const stopAndBuildDiagnosticReport = React.useCallback(() => {
+    captureActiveRef.current = false;
+    setCaptureActive(false);
+    const frames = diagnosticFramesRef.current;
+    const noCandidateFrames = noCandidateFramesRef.current;
+    const elapsedMs = Math.max(0, performance.now() - (captureStartedAtRef.current ?? performance.now()));
+    const rmsValues = frames.map((frame) => frame.rms);
+    const confidenceValues = frames.map((frame) => frame.confidence);
+    const belowRms = frames.filter((frame) => frame.rms < minRms).length;
+    const belowConfidence = frames.filter((frame) => frame.rms >= minRms && frame.confidence < minConfidence).length;
+    const inGrace = frames.filter((frame) => frame.accepted && frame.inTransitionGrace).length;
+    const acceptedFrames = frames.filter((frame) => frame.accepted && !frame.inTransitionGrace);
+    const stableFrames = acceptedFrames.filter((frame) => frame.stableMidiPitch !== null);
+    const comparableStableFrames = stableFrames.filter((frame) => frame.expectedMidiPitch !== null);
+    const matchedFrames = comparableStableFrames.filter((frame) => Math.abs(centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch!)) <= 50);
+    const playbackMovedMs = frames.length > 1 ? Math.max(...frames.map((frame) => frame.songPlaybackMs)) - Math.min(...frames.map((frame) => frame.songPlaybackMs)) : 0;
+    const mostlyQuiet = percentile(rmsValues, 0.9) < minRms;
+    const recentStable = stableFrames.slice(-20).map((frame) => {
+      const expected = frame.expectedMidiPitch === null ? "none" : `${midiToPitchName(frame.expectedMidiPitch)}(${frame.expectedMidiPitch})`;
+      const cents = frame.expectedMidiPitch === null ? "n/a" : String(centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch));
+      return `  t=${(frame.songPlaybackMs / 1000).toFixed(2)}s voice=${midiToPitchName(frame.stableMidiPitch!)}(${frame.stableMidiPitch!.toFixed(2)}) expected=${expected} cents=${cents} rms=${frame.rms.toFixed(4)} conf=${frame.confidence.toFixed(3)}`;
+    });
+    const report = [
+      "Cantare pitch diagnostic report",
+      `Generated: ${new Date().toISOString()}`,
+      `Song: ${song?.title ?? "not loaded"} (${song?.id ?? songIdInput})`,
+      `Capture duration: ${(elapsedMs / 1000).toFixed(1)}s; playback moved: ${(playbackMovedMs / 1000).toFixed(1)}s`,
+      "",
+      "Important: a raw YIN candidate is not an accepted vocal pitch.",
+      `Frames: ${frames.length + noCandidateFrames}; raw candidates: ${frames.length}; no candidate: ${noCandidateFrames}`,
+      `Rejected below RMS: ${belowRms}; rejected below confidence: ${belowConfidence}; rejected in transition grace: ${inGrace}`,
+      `Accepted voiced frames: ${acceptedFrames.length}; stable frames: ${stableFrames.length}`,
+      `Stable MIDI matches (±50 cents): ${matchedFrames.length}/${comparableStableFrames.length}`,
+      `Quiet-input assessment: ${mostlyQuiet ? "90% of RMS readings were below the voice gate" : "RMS exceeded the voice gate during at least 10% of capture"}`,
+      "",
+      `RMS min/p50/p90/max: ${(rmsValues.length ? Math.min(...rmsValues) : 0).toFixed(5)} / ${percentile(rmsValues, 0.5).toFixed(5)} / ${percentile(rmsValues, 0.9).toFixed(5)} / ${(rmsValues.length ? Math.max(...rmsValues) : 0).toFixed(5)} (gate ${minRms.toFixed(5)})`,
+      `Confidence p50/p90: ${percentile(confidenceValues, 0.5).toFixed(3)} / ${percentile(confidenceValues, 0.9).toFixed(3)} (gate ${minConfidence.toFixed(3)})`,
+      `Most common raw candidates: ${commonPitchNames(frames, false)}`,
+      `Most common accepted candidates: ${commonPitchNames(frames, true)}`,
+      "",
+      `Detector: FFT=${fftSize}; frequency=${minFrequencyHz}-${maxFrequencyHz}Hz; YIN threshold=${yinThreshold}; max spread=${maxSpreadCents} cents`,
+      `Timing: adaptive=${adaptiveTimingEnabled}; fallback stability=${stabilityMs}ms`,
+      `Browser processing requested: echo=${echoCancellation}; noiseSuppression=${noiseSuppression}; autoGain=${autoGainControl}`,
+      `Audio context: sampleRate=${audioInfo?.sampleRate ?? "unknown"}; state=${audioInfo?.contextState ?? "unknown"}`,
+      `Track settings: ${JSON.stringify(audioInfo?.trackSettings ?? {})}`,
+      "",
+      "Last stable frames:",
+      ...(recentStable.length > 0 ? recentStable : ["  none"]),
+    ].join("\n");
+    setDiagnosticReport(report);
+  }, [adaptiveTimingEnabled, audioInfo, autoGainControl, echoCancellation, fftSize, maxFrequencyHz, maxSpreadCents, minConfidence, minFrequencyHz, minRms, noiseSuppression, song, songIdInput, stabilityMs, yinThreshold]);
+
+  const copyDiagnosticReport = React.useCallback(async () => {
+    if (!diagnosticReport) return;
+    try {
+      await navigator.clipboard.writeText(diagnosticReport);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus("Select the report text and copy it manually");
+    }
+  }, [diagnosticReport]);
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 md:px-8">
@@ -366,11 +467,20 @@ export default function DebugPitchPracticePage() {
           ) : null}
         </section>
 
+        <section className="mt-5 rounded-2xl border border-cyan-200 bg-white p-4 shadow-sm" data-testid="pitch-diagnostic-report">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><h2 className="text-lg font-bold">Shareable diagnostic report</h2><p className="mt-1 max-w-3xl text-sm text-slate-600">Start the microphone, begin capture, stay quiet for about 5 seconds, then play and sing for 10–20 seconds. Stop the capture and share the generated text. No audio is recorded or saved.</p></div>
+            <div className="flex flex-wrap gap-2"><button type="button" onClick={startDiagnosticCapture} disabled={status !== "running" || captureActive} className="rounded-lg bg-cyan-700 px-3 py-2 text-sm font-bold text-white disabled:opacity-40">Start diagnostic capture</button><button type="button" onClick={stopAndBuildDiagnosticReport} disabled={!captureActive} className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-bold text-white disabled:opacity-40">Stop and generate report</button></div>
+          </div>
+          {captureActive ? <p className="mt-3 font-semibold text-cyan-700">Capturing pitch decisions now...</p> : null}
+          {diagnosticReport ? <div className="mt-4"><div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Copy everything below</span><button type="button" onClick={() => void copyDiagnosticReport()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold">Copy report</button></div><textarea readOnly value={diagnosticReport} aria-label="Pitch diagnostic report text" className="h-96 w-full rounded-xl border border-slate-300 bg-slate-950 p-3 font-mono text-xs leading-5 text-emerald-200" />{copyStatus ? <p className="mt-2 text-sm font-medium text-slate-600">{copyStatus}</p> : null}</div> : null}
+        </section>
+
         <div className="mt-5 grid gap-5 lg:grid-cols-[1.4fr_1fr]">
           <div className="space-y-5">
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Metric label="Raw frequency" value={`${formatNumber(snapshot?.frequencyHz, 1)} Hz`} />
+                <Metric label="Raw YIN candidate" value={`${formatNumber(snapshot?.frequencyHz, 1)} Hz`} />
                 <Metric label="Detected note" value={snapshot ? `${midiToPitchName(snapshot.midiPitch)} (${snapshot.midiPitch.toFixed(2)})` : "--"} />
                 <Metric label="Confidence" value={formatNumber(snapshot?.confidence, 3)} tone={snapshot && snapshot.confidence >= minConfidence ? "good" : "warn"} />
                 <Metric label="RMS level" value={formatNumber(snapshot?.rms, 4)} tone={snapshot && snapshot.rms >= minRms ? "good" : "warn"} />
