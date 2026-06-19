@@ -48,17 +48,19 @@ export function centsBetween(detectedMidiPitch: number, expectedMidiPitch: numbe
 export function detectPitchYin(
   samples: Float32Array,
   sampleRate: number,
-  options: { minFrequencyHz?: number; maxFrequencyHz?: number; threshold?: number } = {}
+  options: { minFrequencyHz?: number; maxFrequencyHz?: number; threshold?: number; minRms?: number; minConfidence?: number } = {}
 ): PitchDetection | null {
   const minFrequencyHz = options.minFrequencyHz ?? 65;
   const maxFrequencyHz = options.maxFrequencyHz ?? 1050;
   const threshold = options.threshold ?? 0.15;
+  const minRms = options.minRms ?? MIN_PITCH_RMS;
+  const minConfidence = options.minConfidence ?? MIN_PITCH_CONFIDENCE;
   if (samples.length < 32 || sampleRate <= 0) return null;
 
   let squareSum = 0;
   for (const sample of samples) squareSum += sample * sample;
   const rms = Math.sqrt(squareSum / samples.length);
-  if (rms < MIN_PITCH_RMS) return null;
+  if (rms < minRms) return null;
 
   const minTau = Math.max(2, Math.floor(sampleRate / maxFrequencyHz));
   const maxTau = Math.min(Math.floor(sampleRate / minFrequencyHz), Math.floor(samples.length / 2));
@@ -98,7 +100,7 @@ export function detectPitchYin(
     }
   }
   const confidence = selectedTau > 0 ? 1 - normalized[selectedTau] : 0;
-  if (selectedTau < 0 || confidence < MIN_PITCH_CONFIDENCE) return null;
+  if (selectedTau < 0 || confidence < minConfidence) return null;
 
   const before = normalized[selectedTau - 1] ?? normalized[selectedTau];
   const center = normalized[selectedTau];

@@ -28,6 +28,14 @@ describe("pitch practice", () => {
     expect(detectPitchYin(samples, sampleRate)?.frequencyHz).toBeCloseTo(440, 0);
   });
 
+  it("can expose a raw low-level candidate when debug gates are disabled", () => {
+    const samples = new Float32Array(2048);
+    const detection = detectPitchYin(samples, 48000, { minRms: 0, minConfidence: 0 });
+    expect(detection).not.toBeNull();
+    expect(detection?.rms).toBe(0);
+    expect(detection?.confidence).toBe(0);
+  });
+
   it("requires a stable pitch window", () => {
     let state: PitchStabilityState = { frames: [] };
     let result = updatePitchStability(state, { atMs: 0, midiPitch: 60, confidence: 0.9, rms: 0.1 });
