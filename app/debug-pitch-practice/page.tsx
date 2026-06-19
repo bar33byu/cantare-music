@@ -2,6 +2,8 @@
 
 import * as React from "react";
 import Link from "next/link";
+import type { Song } from "../types";
+import type { WholeSongMidiAnswerKey, WholeSongMidiAnswerKeyNote } from "../lib/midiGuidedTapPractice";
 import {
   centsBetween,
   detectPitchYin,
@@ -25,6 +27,7 @@ interface PitchSnapshot {
 
 const inputClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900";
 const labelClass = "text-xs font-semibold uppercase tracking-wide text-slate-600";
+const DEFAULT_DEBUG_SONG_ID = "0e513a82-8fd5-4dd2-9b54-c046a46ceaed";
 
 function microphoneError(error: unknown): string {
   const name = error instanceof DOMException ? error.name : "";
@@ -52,6 +55,14 @@ export default function DebugPitchPracticePage() {
   const [stabilityMs, setStabilityMs] = React.useState(120);
   const [maxSpreadCents, setMaxSpreadCents] = React.useState(35);
   const [targetMidiPitch, setTargetMidiPitch] = React.useState(60);
+  const [songIdInput, setSongIdInput] = React.useState(DEFAULT_DEBUG_SONG_ID);
+  const [song, setSong] = React.useState<Song | null>(null);
+  const [songLoading, setSongLoading] = React.useState(false);
+  const [songError, setSongError] = React.useState<string | null>(null);
+  const [wholeSongKey, setWholeSongKey] = React.useState<WholeSongMidiAnswerKey | null>(null);
+  const [playbackMs, setPlaybackMs] = React.useState(0);
+  const [followPlayback, setFollowPlayback] = React.useState(true);
+  const [audioVersion, setAudioVersion] = React.useState<"part" | "blend">("part");
   const [echoCancellation, setEchoCancellation] = React.useState(true);
   const [noiseSuppression, setNoiseSuppression] = React.useState(false);
   const [autoGainControl, setAutoGainControl] = React.useState(false);
@@ -82,6 +93,37 @@ export default function DebugPitchPracticePage() {
     navigator.mediaDevices?.addEventListener?.("devicechange", refreshDevices);
     return () => navigator.mediaDevices?.removeEventListener?.("devicechange", refreshDevices);
   }, [refreshDevices]);
+
+  const loadSong = React.useCallback(async (requestedSongId: string) => {
+    const normalizedSongId = requestedSongId.trim();
+    if (!normalizedSongId) return;
+    setSongLoading(true);
+    setSongError(null);
+    try {
+      const [songResponse, midiResponse] = await Promise.all([
+        fetch(`/api/songs/${encodeURIComponent(normalizedSongId)}`, { cache: "no-store" }),
+        fetch(`/api/songs/${encodeURIComponent(normalizedSongId)}/midi`, { cache: "no-store" }),
+      ]);
+      if (!songResponse.ok) throw new Error(`Song request failed (${songResponse.status})`);
+      if (!midiResponse.ok) throw new Error(`MIDI request failed (${midiResponse.status})`);
+      const nextSong = await songResponse.json() as Song;
+      const midiPayload = await midiResponse.json() as { wholeSongAnswerKey?: WholeSongMidiAnswerKey | null };
+      setSong(nextSong);
+      setWholeSongKey(midiPayload.wholeSongAnswerKey ?? null);
+      setPlaybackMs(0);
+      if (!midiPayload.wholeSongAnswerKey?.notes.length) setSongError("This song does not have a complete aligned MIDI answer key.");
+    } catch (caught) {
+      setSong(null);
+      setWholeSongKey(null);
+      setSongError(caught instanceof Error ? caught.message : "Could not load song context.");
+    } finally {
+      setSongLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadSong(DEFAULT_DEBUG_SONG_ID);
+  }, [loadSong]);
 
   const stop = React.useCallback(() => {
     if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
@@ -190,9 +232,21 @@ export default function DebugPitchPracticePage() {
     }
   }, [autoGainControl, deviceId, echoCancellation, fftSize, noiseSuppression, refreshDevices, stop]);
 
-  const detectedCents = snapshot ? centsBetween(snapshot.midiPitch, targetMidiPitch) : null;
+  const activeMidiNote = React.useMemo<WholeSongMidiAnswerKeyNote | null>(() => {
+    const notes = wholeSongKey?.notes ?? [];
+    if (notes.length === 0) return null;
+    const playbackSeconds = playbackMs / 1000;
+    return notes.reduce((closest, note) => (
+      Math.abs(note.tappedStartTimeSeconds - playbackSeconds) < Math.abs(closest.tappedStartTimeSeconds - playbackSeconds) ? note : closest
+    ), notes[0]);
+  }, [playbackMs, wholeSongKey]);
+  const effectiveTargetMidiPitch = followPlayback && activeMidiNote ? activeMidiNote.midiPitch : targetMidiPitch;
+  const activeSegment = song?.segments.find((segment) => playbackMs >= segment.startMs && playbackMs < segment.endMs) ?? null;
+  const activeNoteIndex = activeMidiNote ? (wholeSongKey?.notes.findIndex((note) => note.index === activeMidiNote.index) ?? -1) : -1;
+  const nearbyNotes = activeNoteIndex >= 0 ? wholeSongKey?.notes.slice(Math.max(0, activeNoteIndex - 4), activeNoteIndex + 5) ?? [] : wholeSongKey?.notes.slice(0, 9) ?? [];
+  const detectedCents = snapshot ? centsBetween(snapshot.midiPitch, effectiveTargetMidiPitch) : null;
   const stableCents = snapshot?.stableMidiPitch !== null && snapshot?.stableMidiPitch !== undefined
-    ? centsBetween(snapshot.stableMidiPitch, targetMidiPitch)
+    ? centsBetween(snapshot.stableMidiPitch, effectiveTargetMidiPitch)
     : null;
   const rejectionReason = !snapshot
     ? "No periodic pitch candidate"
@@ -206,7 +260,7 @@ export default function DebugPitchPracticePage() {
 
   const pitchPoints = history.map((item, index) => {
     const x = history.length <= 1 ? 0 : (index / (history.length - 1)) * 100;
-    const y = 50 - (item.midiPitch - targetMidiPitch) * 12.5;
+    const y = 50 - (item.midiPitch - effectiveTargetMidiPitch) * 12.5;
     return `${x},${Math.max(0, Math.min(100, y))}`;
   }).join(" ");
   const waveformPoints = waveform.map((sample, index) => `${(index / Math.max(1, waveform.length - 1)) * 100},${50 - sample * 45}`).join(" ");
@@ -232,6 +286,36 @@ export default function DebugPitchPracticePage() {
           <p className={`mt-3 text-sm font-semibold ${snapshot?.stableMidiPitch !== null && snapshot ? "text-emerald-700" : snapshot?.accepted ? "text-amber-700" : "text-slate-600"}`}>{status === "running" ? rejectionReason : "Microphone stopped"}</p>
         </section>
 
+        <section className="mt-5 rounded-2xl border border-indigo-200 bg-white p-4 shadow-sm" data-testid="pitch-debug-song-context">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="min-w-72 flex-1"><span className={labelClass}>Song ID</span><input className={inputClass} value={songIdInput} onChange={(event) => setSongIdInput(event.target.value)} /></label>
+            <button type="button" onClick={() => void loadSong(songIdInput)} disabled={songLoading} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50">{songLoading ? "Loading..." : "Load song"}</button>
+          </div>
+          {songError ? <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">{songError}</p> : null}
+          {song ? (
+            <div className="mt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><p className="text-lg font-bold">{song.title}</p><p className="text-sm text-slate-500">{song.artist || "Unknown artist"} · {wholeSongKey?.notes.length ?? 0} aligned MIDI notes</p></div>
+                {song.alternateAudioUrl ? <div className="inline-flex rounded-full border border-indigo-200 p-0.5">{(["part", "blend"] as const).map((version) => <button key={version} type="button" onClick={() => setAudioVersion(version)} className={`rounded-full px-3 py-1 text-xs font-semibold ${audioVersion === version ? "bg-indigo-600 text-white" : "text-indigo-700"}`}>{version === "part" ? "Part" : "Blend"}</button>)}</div> : null}
+              </div>
+              <audio
+                className="mt-3 w-full"
+                controls
+                src={audioVersion === "blend" && song.alternateAudioUrl ? song.alternateAudioUrl : song.audioUrl}
+                onTimeUpdate={(event) => setPlaybackMs(event.currentTarget.currentTime * 1000)}
+                onSeeked={(event) => setPlaybackMs(event.currentTarget.currentTime * 1000)}
+              />
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+                <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={followPlayback} onChange={(event) => setFollowPlayback(event.target.checked)} />Follow aligned MIDI during playback</label>
+                <span>Time: {(playbackMs / 1000).toFixed(2)}s</span>
+                <span>Section: {activeSegment?.label ?? "Outside sections"}</span>
+                <span className="font-bold text-indigo-700">Expected: {activeMidiNote?.pitchName ?? "--"} ({activeMidiNote?.midiPitch ?? "--"})</span>
+              </div>
+              {nearbyNotes.length > 0 ? <div className="mt-3 flex flex-wrap gap-1.5">{nearbyNotes.map((note) => <button key={note.index} type="button" onClick={() => { setFollowPlayback(false); setTargetMidiPitch(note.midiPitch); }} className={`rounded-lg border px-2 py-1 text-xs font-semibold ${note.index === activeMidiNote?.index && followPlayback ? "border-indigo-500 bg-indigo-100 text-indigo-900" : "border-slate-200 bg-slate-50 text-slate-700"}`} title={`${note.tappedStartTimeSeconds.toFixed(2)} seconds`}>{note.pitchName} · {note.tappedStartTimeSeconds.toFixed(1)}s</button>)}</div> : null}
+            </div>
+          ) : null}
+        </section>
+
         <div className="mt-5 grid gap-5 lg:grid-cols-[1.4fr_1fr]">
           <div className="space-y-5">
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -241,7 +325,7 @@ export default function DebugPitchPracticePage() {
                 <Metric label="Confidence" value={formatNumber(snapshot?.confidence, 3)} tone={snapshot && snapshot.confidence >= minConfidence ? "good" : "warn"} />
                 <Metric label="RMS level" value={formatNumber(snapshot?.rms, 4)} tone={snapshot && snapshot.rms >= minRms ? "good" : "warn"} />
                 <Metric label="Stable note" value={snapshot?.stableMidiPitch !== null && snapshot?.stableMidiPitch !== undefined ? `${midiToPitchName(snapshot.stableMidiPitch)} (${snapshot.stableMidiPitch.toFixed(2)})` : "--"} />
-                <Metric label="Target note" value={`${midiToPitchName(targetMidiPitch)} (${targetMidiPitch})`} />
+                <Metric label="Target note" value={`${midiToPitchName(effectiveTargetMidiPitch)} (${effectiveTargetMidiPitch})`} />
                 <Metric label="Raw cents to target" value={detectedCents === null ? "--" : `${detectedCents > 0 ? "+" : ""}${detectedCents}`} tone={detectedCents !== null && Math.abs(detectedCents) <= 50 ? "good" : "warn"} />
                 <Metric label="Stable cents" value={stableCents === null ? "--" : `${stableCents > 0 ? "+" : ""}${stableCents}`} tone={stableCents !== null && Math.abs(stableCents) <= 50 ? "good" : "warn"} />
               </div>
@@ -256,7 +340,7 @@ export default function DebugPitchPracticePage() {
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="font-semibold">Pitch trace around target</h2>
               <p className="text-xs text-slate-500">Vertical range is approximately ±4 semitones. Green points passed RMS and confidence gates; the line shows all raw candidates.</p>
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-3 h-48 w-full rounded-xl bg-slate-950"><line x1="0" y1="50" x2="100" y2="50" stroke="rgb(250 204 21)" strokeWidth="0.7" /><polyline points={pitchPoints} fill="none" stroke="rgb(96 165 250)" strokeWidth="0.8" />{history.map((item, index) => <circle key={`${item.atMs}-${index}`} cx={history.length <= 1 ? 0 : index / (history.length - 1) * 100} cy={Math.max(0, Math.min(100, 50 - (item.midiPitch - targetMidiPitch) * 12.5))} r="0.8" fill={item.accepted ? "rgb(52 211 153)" : "rgb(251 113 133)"} />)}</svg>
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-3 h-48 w-full rounded-xl bg-slate-950"><line x1="0" y1="50" x2="100" y2="50" stroke="rgb(250 204 21)" strokeWidth="0.7" /><polyline points={pitchPoints} fill="none" stroke="rgb(96 165 250)" strokeWidth="0.8" />{history.map((item, index) => <circle key={`${item.atMs}-${index}`} cx={history.length <= 1 ? 0 : index / (history.length - 1) * 100} cy={Math.max(0, Math.min(100, 50 - (item.midiPitch - effectiveTargetMidiPitch) * 12.5))} r="0.8" fill={item.accepted ? "rgb(52 211 153)" : "rgb(251 113 133)"} />)}</svg>
             </section>
           </div>
 
@@ -264,7 +348,7 @@ export default function DebugPitchPracticePage() {
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="font-semibold">Detector settings</h2>
               <div className="mt-3 grid grid-cols-2 gap-3">
-                <NumberSetting label="Target MIDI" value={targetMidiPitch} min={24} max={108} step={1} onChange={setTargetMidiPitch} />
+                <NumberSetting label="Manual target MIDI" value={targetMidiPitch} min={24} max={108} step={1} onChange={(value) => { setFollowPlayback(false); setTargetMidiPitch(value); }} />
                 <label><span className={labelClass}>FFT size</span><select className={inputClass} value={fftSize} onChange={(event) => setFftSize(Number(event.target.value))} disabled={status === "running"}>{[2048, 4096, 8192].map((size) => <option key={size}>{size}</option>)}</select></label>
                 <NumberSetting label="Min frequency" value={minFrequencyHz} min={30} max={500} step={1} onChange={setMinFrequencyHz} />
                 <NumberSetting label="Max frequency" value={maxFrequencyHz} min={200} max={2000} step={10} onChange={setMaxFrequencyHz} />
