@@ -192,32 +192,74 @@ describe("midiGuidedTapPractice", () => {
     expect(score.scorePercent).toBe(100);
   });
 
-  it("accepts directionally correct taps that are slightly late within the shared tolerance", () => {
+  it("ignores timing when directionally correct taps are closest to the expected MIDI notes", () => {
     const notes: CleanedMidiNote[] = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
     const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
     const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
     const score = scoreTapAttemptAgainstMidiKey(segmentKey, [
       { timeOffsetMs: 0, direction: "same" },
-      { timeOffsetMs: 1500, direction: "up" },
+      { timeOffsetMs: 1800, direction: "up" },
     ], DEFAULT_TAP_TIMING_TOLERANCE_MS);
 
     expect(score.scorePercent).toBe(100);
+    expect(score.details.map((detail) => detail.status)).toEqual(["matched", "matched"]);
+  });
+
+  it("ignores extra taps and recovers on later closest MIDI notes", () => {
+    const notes: CleanedMidiNote[] = cleanMidiNotes([
+      raw(0, 60, 0, 1),
+      raw(1, 62, 1, 1),
+      raw(2, 60, 2, 1),
+    ], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(3, [5, 6, 7]));
+    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 8000 });
+    const score = scoreTapAttemptAgainstMidiKey(segmentKey, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 300, direction: "down" },
+      { timeOffsetMs: 1000, direction: "up" },
+      { timeOffsetMs: 2000, direction: "down" },
+    ], 0);
+
+    expect(score.scorePercent).toBe(100);
+    expect(score.extraTaps).toBe(1);
+    expect(score.details.map((detail) => detail.status)).toEqual(["matched", "matched", "matched", "extra"]);
+  });
+
+  it("does not penalize skipped MIDI notes in the contour score", () => {
+    const notes: CleanedMidiNote[] = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
+    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
+    const score = scoreTapAttemptAgainstMidiKey(segmentKey, [{ timeOffsetMs: 0, direction: "same" }], 400);
+
+    expect(score.scorePercent).toBe(100);
+    expect(score.details.map((detail) => detail.status)).toEqual(["matched", "missing"]);
   });
 
   it("builds a blend heat map from MIDI score details", () => {
     const notes = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
     const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
     const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
-    const score = scoreTapAttemptAgainstMidiKey(segmentKey, [{ timeOffsetMs: 0, direction: "same" }], 400);
+    const score = scoreTapAttemptAgainstMidiKey(segmentKey, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 1000, direction: "down" },
+    ], 400);
 
-    expect(buildMidiBlendTapHeatMap(segmentKey, [score])[1].missingCount).toBe(1);
+    expect(buildMidiBlendTapHeatMap(segmentKey, [score])[1]).toEqual(expect.objectContaining({
+      missingCount: 0,
+      directionMissCount: 1,
+      timingMissCount: 0,
+      missRate: 1,
+    }));
   });
 
   it("builds capped contour heat stats from MIDI score details", () => {
     const notes = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
     const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
     const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
-    const missed = scoreTapAttemptAgainstMidiKey(segmentKey, [{ timeOffsetMs: 0, direction: "same" }], 400);
+    const missed = scoreTapAttemptAgainstMidiKey(segmentKey, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 1000, direction: "down" },
+    ], 400);
     const matched = scoreTapAttemptAgainstMidiKey(segmentKey, [
       { timeOffsetMs: 0, direction: "same" },
       { timeOffsetMs: 1000, direction: "up" },

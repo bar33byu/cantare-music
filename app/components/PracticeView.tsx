@@ -153,11 +153,7 @@ const TAP_MATCH_OPTIONS = {
   sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   durationToleranceRatio: 0.6,
 } as const;
-const TAP_KEYBOARD_ROWS = [
-  { keys: "zxcvbnm", minLane: 0, maxLane: 0.28 },
-  { keys: "asdfghjkl", minLane: 0.36, maxLane: 0.64 },
-  { keys: "qwertyuiop", minLane: 0.72, maxLane: 1 },
-] as const;
+const TAP_KEYBOARD_KEYS = "zxcvbnm,./asdfghjkl;'qwertyuiop[]\\";
 
 interface ActiveTapCapture {
   id: string;
@@ -214,18 +210,14 @@ function toDirectionTaps(notes: PitchContourNote[]): DirectionTap[] {
 
 function getTapKeyboardLane(key: string): number | null {
   const normalizedKey = key.toLowerCase();
-  for (const row of TAP_KEYBOARD_ROWS) {
-    const keyIndex = row.keys.indexOf(normalizedKey);
-    if (keyIndex === -1) {
-      continue;
-    }
-    if (row.keys.length === 1) {
-      return row.minLane;
-    }
-    const rowProgress = keyIndex / (row.keys.length - 1);
-    return row.minLane + (row.maxLane - row.minLane) * rowProgress;
+  const keyIndex = TAP_KEYBOARD_KEYS.indexOf(normalizedKey);
+  if (keyIndex === -1) {
+    return null;
   }
-  return null;
+  if (TAP_KEYBOARD_KEYS.length === 1) {
+    return 0;
+  }
+  return keyIndex / (TAP_KEYBOARD_KEYS.length - 1);
 }
 
 function isTapScoreResult(value: unknown): value is TapScoreResult {
@@ -242,7 +234,6 @@ function hasCompletedScoreSummary(summary: TapSessionSummaryPayload): boolean {
 const PracticeView: React.FC<PracticeViewProps> = ({
   song,
   userId,
-  onOpenContourReferenceClick,
   persistProgress = true,
   progressStorage: progressStorageOverride,
   initialSession,
@@ -251,6 +242,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   breadcrumbRootLabel,
   onBreadcrumbRootClick,
   onEditSongClick,
+  onOpenContourReferenceClick,
   segmentPrerollMs = 500,
   preferredAudioVersion = "part",
   onPreferredAudioVersionChange,
@@ -374,12 +366,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     lastActionAt: new Date().toISOString(),
   });
   const hasSegments = song.segments.length > 0;
-  const hasContourReferenceData = (
-    Object.values(midiSegmentAnswerKeys).some((key) => key.notes.length > 0) ||
-    song.segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0) ||
-    (song.pitchContourNotes?.length ?? 0) > 0 ||
-    Boolean(song.hasMidiContour)
-  );
   const segmentTimingSignature = useMemo(
     () => song.segments.map((segment) => `${segment.id}:${segment.startMs}-${segment.endMs}`).join("|"),
     [song.segments]
@@ -387,6 +373,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const hasMidiTapAnswers = (
     Object.values(midiSegmentAnswerKeys).some((key) => key.taps.length > 0) ||
     (song.pitchContourNotes?.length ?? 0) > 0
+  );
+  const hasContourReferenceData = (
+    Object.values(midiSegmentAnswerKeys).some((key) => key.notes.length > 0) ||
+    song.segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0) ||
+    (song.pitchContourNotes?.length ?? 0) > 0 ||
+    Boolean(song.hasMidiContour)
   );
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
   const tapBarRef = React.useRef<HTMLDivElement | null>(null);
@@ -403,6 +395,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const playbackCompleteNotifiedRef = React.useRef<string | null>(null);
   const lastHandledEndedCountRef = React.useRef(endedCount);
   const tapAttemptsRef = React.useRef<Record<string, PitchContourNote[]>>({});
+  const previousTapPracticeSegmentIdRef = React.useRef<string | null>(null);
   const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
   const tapSessionIdRef = React.useRef<string | null>(null);
   const tapSessionGenerationRef = React.useRef(0);
@@ -1406,13 +1399,29 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }));
   }, [currentMidiSegmentAnswerKey, currentSegment]);
 
-  const resetTapPracticeRun = React.useCallback(() => {
+  const clearTapPracticeAttempts = React.useCallback((segmentId?: string) => {
     activeTapCaptureRef.current = null;
-    loopHandledRef.current = null;
     pendingPersistedTapsRef.current = [];
+    if (segmentId) {
+      tapAttemptsRef.current = {
+        ...tapAttemptsRef.current,
+        [segmentId]: [],
+      };
+      setTapAttemptsBySegment((previous) => ({
+        ...previous,
+        [segmentId]: [],
+      }));
+      return;
+    }
+    tapAttemptsRef.current = {};
     setTapAttemptsBySegment({});
-    setTapSessionResetToken((previous) => previous + 1);
   }, []);
+
+  const resetTapPracticeRun = React.useCallback(() => {
+    loopHandledRef.current = null;
+    clearTapPracticeAttempts();
+    setTapSessionResetToken((previous) => previous + 1);
+  }, [clearTapPracticeAttempts]);
 
   const cancelTapPracticeCountIn = React.useCallback(() => {
     if (tapCountInIntervalRef.current !== null) {
@@ -1688,6 +1697,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       }
 
       if (isTapPracticeMode && !event.repeat) {
+        if (event.key === "9") {
+          event.preventDefault();
+          handlePrevSegment();
+          return;
+        }
+
+        if (event.key === "0") {
+          event.preventDefault();
+          handleNextSegment();
+          return;
+        }
+
         const tapLane = getTapKeyboardLane(event.key);
         if (tapLane !== null) {
           event.preventDefault();
@@ -1817,14 +1838,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         showAccuracyToast(`Loop accuracy ${Math.round(loopMatch.score * 100)}%`);
         recordCurrentMidiContourAttempt();
       }
-      setTapAttemptsBySegment((previous) => ({
-        ...previous,
-        [currentSegment.id]: [],
-      }));
-      activeTapCaptureRef.current = null;
+      clearTapPracticeAttempts(currentSegment.id);
+      setTapSessionResetToken((previous) => previous + 1);
       requestPlay(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs);
     }
   }, [
+    clearTapPracticeAttempts,
     currentCardContourNotes,
     currentMs,
     currentSegment,
@@ -1962,8 +1981,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [accountProgressEnabled, activeAudioVersion, clearTapPersistenceWarning, currentSegment?.id, flushPersistedTaps, isTapPracticeMode, request, showTapPersistenceWarning, song.id, tapSessionResetToken, userId]);
 
   useEffect(() => {
-    activeTapCaptureRef.current = null;
-  }, [currentSegment?.id]);
+    const segmentId = currentSegment?.id ?? null;
+    const previousSegmentId = previousTapPracticeSegmentIdRef.current;
+    previousTapPracticeSegmentIdRef.current = segmentId;
+
+    if (!isTapPracticeMode || !segmentId || previousSegmentId === null || previousSegmentId === segmentId) {
+      activeTapCaptureRef.current = null;
+      return;
+    }
+
+    clearTapPracticeAttempts(segmentId);
+  }, [clearTapPracticeAttempts, currentSegment?.id, isTapPracticeMode]);
 
   useEffect(() => {
     if (isTapPracticeMode) {
@@ -1976,7 +2004,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     cancelTapPracticeCountIn();
     setTapAttemptsBySegment({});
     setIsTapPracticeMode(false);
-    setShowCardContourMap(false);
     setTapSessionSummaries([]);
     setMidiSegmentAnswerKeys({});
     setLocalMidiScoreAttemptsBySegment({});

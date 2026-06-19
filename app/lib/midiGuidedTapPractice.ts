@@ -521,39 +521,73 @@ export function scoreTapAttemptAgainstMidiKey(
   attemptTaps: DirectionTap[],
   timeToleranceMs: number
 ): TapScoreResult {
+  void timeToleranceMs;
   const totalTaps = segmentKey.taps.length;
   const details: TapScoreResult["details"] = [];
+  const assignments = new Map<number, { tap: DirectionTap; attemptIndex: number; distanceMs: number }>();
+  const assignedAttemptIndexes = new Set<number>();
   let matchedTaps = 0;
+
+  const sortedAttemptTaps = [...attemptTaps].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
+  for (let attemptIndex = 0; attemptIndex < sortedAttemptTaps.length; attemptIndex += 1) {
+    const actual = sortedAttemptTaps[attemptIndex];
+    let closestExpectedIndex = -1;
+    let closestDistanceMs = Number.POSITIVE_INFINITY;
+
+    for (let expectedIndex = 0; expectedIndex < totalTaps; expectedIndex += 1) {
+      const expected = segmentKey.taps[expectedIndex];
+      const distanceMs = Math.abs(actual.timeOffsetMs - expected.timeOffsetMs);
+      if (distanceMs < closestDistanceMs) {
+        closestExpectedIndex = expectedIndex;
+        closestDistanceMs = distanceMs;
+      }
+    }
+
+    if (closestExpectedIndex === -1) {
+      continue;
+    }
+
+    const existing = assignments.get(closestExpectedIndex);
+    if (!existing || closestDistanceMs < existing.distanceMs) {
+      if (existing) {
+        assignedAttemptIndexes.delete(existing.attemptIndex);
+      }
+      assignments.set(closestExpectedIndex, { tap: actual, attemptIndex, distanceMs: closestDistanceMs });
+      assignedAttemptIndexes.add(attemptIndex);
+    }
+  }
 
   for (let index = 0; index < totalTaps; index += 1) {
     const expected = segmentKey.taps[index];
-    const actual = attemptTaps[index];
-    if (!actual) {
+    const assignment = assignments.get(index);
+    if (!assignment) {
       details.push({ index, expected, status: "missing" });
       continue;
     }
 
+    const actual = assignment.tap;
     const timingDeltaMs = actual.timeOffsetMs - expected.timeOffsetMs;
     let status: TapMissKind = "matched";
     if (actual.direction !== expected.direction) {
       status = "direction";
-    } else if (Math.abs(timingDeltaMs) > timeToleranceMs) {
-      status = "timing";
     } else {
       matchedTaps += 1;
     }
     details.push({ index, expected, actual, status, timingDeltaMs });
   }
 
-  for (let index = totalTaps; index < attemptTaps.length; index += 1) {
-    details.push({ index, actual: attemptTaps[index], status: "extra" });
+  for (let index = 0; index < sortedAttemptTaps.length; index += 1) {
+    if (!assignedAttemptIndexes.has(index)) {
+      details.push({ index: totalTaps + index, actual: sortedAttemptTaps[index], status: "extra" });
+    }
   }
 
+  const attemptedExpectedTaps = details.filter((detail) => detail.expected && detail.actual).length;
   return {
     matchedTaps,
     totalTaps,
-    extraTaps: Math.max(0, attemptTaps.length - totalTaps),
-    scorePercent: totalTaps === 0 ? 100 : Math.max(0, Math.min(100, Math.round((matchedTaps / totalTaps) * 100))),
+    extraTaps: Math.max(0, sortedAttemptTaps.length - assignedAttemptIndexes.size),
+    scorePercent: totalTaps === 0 ? 100 : attemptedExpectedTaps === 0 ? 0 : Math.max(0, Math.min(100, Math.round((matchedTaps / attemptedExpectedTaps) * 100))),
     details,
   };
 }
@@ -567,17 +601,16 @@ export function buildMidiBlendTapHeatMap(
   }
 
   return segmentKey.notes.map((note, index) => {
-    let missingCount = 0;
+    const missingCount = 0;
     let timingMissCount = 0;
     let directionMissCount = 0;
     let missCount = 0;
     for (const attempt of scoredAttempts) {
       const detail = attempt.details.find((item) => item.index === index);
-      if (!detail || detail.status === "matched" || detail.status === "extra") {
+      if (!detail || detail.status === "matched" || detail.status === "extra" || detail.status === "missing") {
         continue;
       }
       missCount += 1;
-      if (detail.status === "missing") missingCount += 1;
       if (detail.status === "timing") timingMissCount += 1;
       if (detail.status === "direction") directionMissCount += 1;
     }
@@ -610,7 +643,7 @@ export function buildMidiContourTapHeatMap(
       let missCount = 0;
       for (const attempt of recentAttempts) {
         const detail = attempt.details.find((item) => item.index === index);
-        if (detail && detail.status !== "matched" && detail.status !== "extra") {
+        if (detail && detail.status !== "matched" && detail.status !== "extra" && detail.status !== "missing") {
           missCount += 1;
         }
       }
