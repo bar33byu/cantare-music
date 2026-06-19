@@ -68,7 +68,7 @@ vi.mock("./SegmentCard", () => ({
       data-lyric-size={lyricSize}
       data-show-contour-map={showContourMap ? "true" : "false"}
       data-contour-heat-count={Object.keys(contourHeatMap ?? {}).length}
-      data-contour-heat-miss-total={Object.values(contourHeatMap ?? {}).reduce((total, value) => {
+      data-contour-heat-miss-total={Object.values(contourHeatMap ?? {}).reduce<number>((total, value) => {
         const missCount = typeof value === "object" && value && "missCount" in value
           ? Number((value as { missCount?: number }).missCount ?? 0)
           : 0;

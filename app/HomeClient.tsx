@@ -10,6 +10,7 @@ import { SharedBrowser } from "./components/SharedBrowser";
 import { SongForm } from "./components/SongForm";
 import { SongBrowser } from "./components/SongBrowser";
 import { SegmentEditor } from "./components/SegmentEditor";
+import { SongContourReferenceView } from "./components/SongContourReferenceView";
 import { makeSession } from "./lib/factories";
 import {
   clearGuestProgress,
@@ -47,6 +48,7 @@ interface SongListItem {
 type AppView =
   | "library"
   | "song_practice"
+  | "song_contour_reference"
   | "song_segment_editor"
   | "song_add"
   | "playlists"
@@ -252,6 +254,7 @@ function parseHashRoute(hash: string): HashRouteState {
 
   const safeView: AppView =
     view === "song_practice" ||
+    view === "song_contour_reference" ||
     view === "song_segment_editor" ||
     view === "song_add" ||
     view === "playlists" ||
@@ -1520,7 +1523,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         return;
       }
 
-      if (route.view === "song_practice" || route.view === "song_segment_editor") {
+      if (route.view === "song_practice" || route.view === "song_contour_reference" || route.view === "song_segment_editor") {
         if (!route.songId) {
           setActiveView("library");
           return;
@@ -1578,6 +1581,14 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     if (activeView === "song_practice" && selectedSong) {
       return buildHashRoute({
         view: "song_practice",
+        songId: selectedSong.id,
+        playlistId: selectedPlaylist?.id,
+      });
+    }
+
+    if (activeView === "song_contour_reference" && selectedSong) {
+      return buildHashRoute({
+        view: "song_contour_reference",
         songId: selectedSong.id,
         playlistId: selectedPlaylist?.id,
       });
@@ -1817,8 +1828,30 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               setSongEditorReturnView("song_practice");
               setActiveView("song_segment_editor");
             }}
+            onOpenContourReferenceClick={() => {
+              setActiveView("song_contour_reference");
+            }}
           />
         </div>
+      </div>
+    );
+  }
+
+  if (activeView === "song_contour_reference" && selectedSong) {
+    const breadcrumbLabel = selectedPlaylist?.name ?? "Practice";
+
+    return (
+      <div className="min-h-screen bg-gray-50">
+        {impersonationBanner}
+        {guestClaimPrompt}
+        <SongContourReferenceView
+          song={selectedSong}
+          userId={activeUserId}
+          breadcrumbLabel={breadcrumbLabel}
+          onBack={() => {
+            setActiveView("song_practice");
+          }}
+        />
       </div>
     );
   }

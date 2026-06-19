@@ -56,6 +56,7 @@ interface PracticeViewProps {
   breadcrumbRootLabel?: string;
   onBreadcrumbRootClick?: () => void;
   onEditSongClick?: () => void;
+  onOpenContourReferenceClick?: () => void;
   segmentPrerollMs?: number;
   preferredAudioVersion?: PreferredAudioVersion;
   onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
@@ -241,6 +242,7 @@ function hasCompletedScoreSummary(summary: TapSessionSummaryPayload): boolean {
 const PracticeView: React.FC<PracticeViewProps> = ({
   song,
   userId,
+  onOpenContourReferenceClick,
   persistProgress = true,
   progressStorage: progressStorageOverride,
   initialSession,
@@ -372,6 +374,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     lastActionAt: new Date().toISOString(),
   });
   const hasSegments = song.segments.length > 0;
+  const hasContourReferenceData = (
+    Object.values(midiSegmentAnswerKeys).some((key) => key.notes.length > 0) ||
+    song.segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0) ||
+    (song.pitchContourNotes?.length ?? 0) > 0 ||
+    Boolean(song.hasMidiContour)
+  );
   const segmentTimingSignature = useMemo(
     () => song.segments.map((segment) => `${segment.id}:${segment.startMs}-${segment.endMs}`).join("|"),
     [song.segments]
@@ -2224,27 +2232,55 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               </span>
             </h1>
           )}
-          {onEditSongClick ? (
-            <button
-              onClick={onEditSongClick}
-              aria-label="Edit song"
-              title="Edit song"
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                className="h-4 w-4"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" />
-              </svg>
-            </button>
+          {onOpenContourReferenceClick || onEditSongClick ? (
+            <div className="flex shrink-0 items-center gap-2">
+              {onOpenContourReferenceClick && hasContourReferenceData ? (
+                <button
+                  type="button"
+                  onClick={onOpenContourReferenceClick}
+                  aria-label="Open contour reference"
+                  title="Open contour reference"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-indigo-200 bg-white text-indigo-700 shadow-sm hover:border-indigo-500 hover:bg-indigo-50"
+                  data-testid="open-contour-reference"
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    className="h-4 w-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M3 16c2.4-6 4.8-6 7.2 0s4.8 6 7.2 0L21 7" />
+                    <path d="M3 20h18" />
+                  </svg>
+                </button>
+              ) : null}
+              {onEditSongClick ? (
+                <button
+                  onClick={onEditSongClick}
+                  aria-label="Edit song"
+                  title="Edit song"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700"
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    className="h-4 w-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
         <p className="sr-only" data-testid="segment-counter">

@@ -4,6 +4,7 @@ import Home from './page';
 
 const practiceViewMock = vi.fn();
 const playlistBrowserMock = vi.fn();
+const contourReferenceViewMock = vi.fn();
 
 const samplePlaylist = {
   id: 'playlist-1',
@@ -29,6 +30,7 @@ vi.mock('./components/PracticeView', () => ({
     breadcrumbRootLabel,
     onBreadcrumbRootClick,
     onEditSongClick,
+    onOpenContourReferenceClick,
     segmentPrerollMs,
     preferredAudioVersion,
     onPreferredAudioVersionChange,
@@ -37,6 +39,7 @@ vi.mock('./components/PracticeView', () => ({
     breadcrumbRootLabel?: string;
     onBreadcrumbRootClick?: () => void;
     onEditSongClick?: () => void;
+    onOpenContourReferenceClick?: () => void;
     segmentPrerollMs?: number;
     preferredAudioVersion?: 'part' | 'blend';
     onPreferredAudioVersionChange?: (version: 'part' | 'blend') => void;
@@ -54,6 +57,21 @@ vi.mock('./components/PracticeView', () => ({
         {onEditSongClick ? (
           <button aria-label="Edit song" onClick={onEditSongClick}>Edit</button>
         ) : null}
+        {onOpenContourReferenceClick ? (
+          <button aria-label="Open contour reference" onClick={onOpenContourReferenceClick}>Contours</button>
+        ) : null}
+      </div>
+    );
+  },
+}));
+
+vi.mock('./components/SongContourReferenceView', () => ({
+  SongContourReferenceView: ({ song, breadcrumbLabel, onBack }: { song: { title: string }; breadcrumbLabel?: string; onBack: () => void }) => {
+    contourReferenceViewMock({ song, breadcrumbLabel });
+    return (
+      <div data-testid="mock-contour-reference-view">
+        Contours for {song.title}
+        <button data-testid="mock-contour-reference-back" onClick={onBack}>Back</button>
       </div>
     );
   },
@@ -159,6 +177,7 @@ describe('Home page', () => {
     vi.clearAllMocks();
     practiceViewMock.mockReset();
     playlistBrowserMock.mockReset();
+    contourReferenceViewMock.mockReset();
     window.history.replaceState(null, '', '/');
     window.localStorage.clear();
     global.fetch = vi.fn().mockResolvedValue({
@@ -455,6 +474,25 @@ describe('Home page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Songs' }));
     expect(await screen.findByTestId('mock-select-song')).toBeInTheDocument();
+  });
+
+  it('opens the contour reference view from song practice and returns to practice', async () => {
+    render(<Home />);
+
+    fireEvent.click(screen.getByTestId('library-tab'));
+    fireEvent.click(screen.getByTestId('mock-select-song'));
+    expect(await screen.findByTestId('mock-practice-view')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open contour reference' }));
+    expect(await screen.findByTestId('mock-contour-reference-view')).toHaveTextContent('Contours for Song One');
+    expect(window.location.hash).toContain('view=song_contour_reference');
+
+    const lastCall = contourReferenceViewMock.mock.calls.at(-1)?.[0] as { breadcrumbLabel?: string } | undefined;
+    expect(lastCall?.breadcrumbLabel).toBe('Practice');
+
+    fireEvent.click(screen.getByTestId('mock-contour-reference-back'));
+    expect(await screen.findByTestId('mock-practice-view')).toBeInTheDocument();
+    expect(window.location.hash).toContain('view=song_practice');
   });
 
   it('opens segment editor immediately after creating a song', async () => {
