@@ -17,6 +17,7 @@ type DebugStatus = "idle" | "starting" | "running" | "error";
 
 interface PitchSnapshot {
   atMs: number;
+  songPlaybackMs: number;
   frequencyHz: number;
   midiPitch: number;
   confidence: number;
@@ -39,6 +40,14 @@ function microphoneError(error: unknown): string {
 
 function formatNumber(value: number | null | undefined, digits = 2): string {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "--";
+}
+
+function nearestMidiNote(notes: WholeSongMidiAnswerKeyNote[], playbackMs: number): WholeSongMidiAnswerKeyNote | null {
+  if (notes.length === 0) return null;
+  const playbackSeconds = playbackMs / 1000;
+  return notes.reduce((closest, note) => (
+    Math.abs(note.tappedStartTimeSeconds - playbackSeconds) < Math.abs(closest.tappedStartTimeSeconds - playbackSeconds) ? note : closest
+  ), notes[0]);
 }
 
 export default function DebugPitchPracticePage() {
@@ -76,10 +85,15 @@ export default function DebugPitchPracticePage() {
   const animationRef = React.useRef<number | null>(null);
   const stabilityRef = React.useRef<PitchStabilityState>({ frames: [] });
   const settingsRef = React.useRef({ minFrequencyHz, maxFrequencyHz, yinThreshold, minRms, minConfidence, stabilityMs, maxSpreadCents });
+  const playbackMsRef = React.useRef(playbackMs);
 
   React.useEffect(() => {
     settingsRef.current = { minFrequencyHz, maxFrequencyHz, yinThreshold, minRms, minConfidence, stabilityMs, maxSpreadCents };
   }, [maxFrequencyHz, maxSpreadCents, minConfidence, minFrequencyHz, minRms, stabilityMs, yinThreshold]);
+
+  React.useEffect(() => {
+    playbackMsRef.current = playbackMs;
+  }, [playbackMs]);
 
   const refreshDevices = React.useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -216,9 +230,9 @@ export default function DebugPitchPracticePage() {
             rms: raw.rms,
           } : null, { stabilityMs: settings.stabilityMs, maxSpreadCents: settings.maxSpreadCents });
           stabilityRef.current = stability.state;
-          const nextSnapshot: PitchSnapshot = { atMs: now, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted };
+          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: playbackMsRef.current, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted };
           setSnapshot(nextSnapshot);
-          setHistory((current) => [...current, nextSnapshot].slice(-150));
+          setHistory((current) => [...current, nextSnapshot].slice(-300));
         } else {
           stabilityRef.current = { frames: [] };
           setSnapshot(null);
@@ -233,12 +247,7 @@ export default function DebugPitchPracticePage() {
   }, [autoGainControl, deviceId, echoCancellation, fftSize, noiseSuppression, refreshDevices, stop]);
 
   const activeMidiNote = React.useMemo<WholeSongMidiAnswerKeyNote | null>(() => {
-    const notes = wholeSongKey?.notes ?? [];
-    if (notes.length === 0) return null;
-    const playbackSeconds = playbackMs / 1000;
-    return notes.reduce((closest, note) => (
-      Math.abs(note.tappedStartTimeSeconds - playbackSeconds) < Math.abs(closest.tappedStartTimeSeconds - playbackSeconds) ? note : closest
-    ), notes[0]);
+    return nearestMidiNote(wholeSongKey?.notes ?? [], playbackMs);
   }, [playbackMs, wholeSongKey]);
   const effectiveTargetMidiPitch = followPlayback && activeMidiNote ? activeMidiNote.midiPitch : targetMidiPitch;
   const activeSegment = song?.segments.find((segment) => playbackMs >= segment.startMs && playbackMs < segment.endMs) ?? null;
@@ -258,11 +267,22 @@ export default function DebugPitchPracticePage() {
           ? "Pitch candidate accepted; waiting for stability"
           : "Stable pitch accepted";
 
-  const pitchPoints = history.map((item, index) => {
-    const x = history.length <= 1 ? 0 : (index / (history.length - 1)) * 100;
-    const y = 50 - (item.midiPitch - effectiveTargetMidiPitch) * 12.5;
-    return `${x},${Math.max(0, Math.min(100, y))}`;
-  }).join(" ");
+  const rollStartMs = Math.max(0, playbackMs - 4000);
+  const rollEndMs = rollStartMs + 8000;
+  const rollCenterPitch = activeMidiNote?.midiPitch ?? effectiveTargetMidiPitch;
+  const rollMinPitch = rollCenterPitch - 6;
+  const rollMaxPitch = rollCenterPitch + 6;
+  const rollX = (ms: number) => ((ms - rollStartMs) / (rollEndMs - rollStartMs)) * 100;
+  const rollY = (midiPitch: number) => ((rollMaxPitch - midiPitch) / (rollMaxPitch - rollMinPitch)) * 100;
+  const rollNotes = (wholeSongKey?.notes ?? []).filter((note) => {
+    const noteStartMs = note.tappedStartTimeSeconds * 1000;
+    const noteEndMs = noteStartMs + note.effectiveDurationSeconds * 1000;
+    return noteEndMs >= rollStartMs && noteStartMs <= rollEndMs && note.midiPitch >= rollMinPitch && note.midiPitch <= rollMaxPitch;
+  });
+  const rollDetections = history.filter((item) => item.songPlaybackMs >= rollStartMs && item.songPlaybackMs <= rollEndMs && item.midiPitch >= rollMinPitch && item.midiPitch <= rollMaxPitch);
+  const rawRollPoints = rollDetections.map((item) => `${rollX(item.songPlaybackMs)},${rollY(item.midiPitch)}`).join(" ");
+  const currentStablePitch = snapshot?.stableMidiPitch ?? null;
+  const currentPitchMatches = currentStablePitch !== null && Math.abs(centsBetween(currentStablePitch, effectiveTargetMidiPitch)) <= 50;
   const waveformPoints = waveform.map((sample, index) => `${(index / Math.max(1, waveform.length - 1)) * 100},${50 - sample * 45}`).join(" ");
 
   return (
@@ -337,10 +357,34 @@ export default function DebugPitchPracticePage() {
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-3 h-36 w-full rounded-xl bg-slate-950"><line x1="0" y1="50" x2="100" y2="50" stroke="rgb(71 85 105)" strokeWidth="0.5" /><polyline points={waveformPoints} fill="none" stroke="rgb(52 211 153)" strokeWidth="0.8" /></svg>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="font-semibold">Pitch trace around target</h2>
-              <p className="text-xs text-slate-500">Vertical range is approximately ±4 semitones. Green points passed RMS and confidence gates; the line shows all raw candidates.</p>
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-3 h-48 w-full rounded-xl bg-slate-950"><line x1="0" y1="50" x2="100" y2="50" stroke="rgb(250 204 21)" strokeWidth="0.7" /><polyline points={pitchPoints} fill="none" stroke="rgb(96 165 250)" strokeWidth="0.8" />{history.map((item, index) => <circle key={`${item.atMs}-${index}`} cx={history.length <= 1 ? 0 : index / (history.length - 1) * 100} cy={Math.max(0, Math.min(100, 50 - (item.midiPitch - effectiveTargetMidiPitch) * 12.5))} r="0.8" fill={item.accepted ? "rgb(52 211 153)" : "rgb(251 113 133)"} />)}</svg>
+            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="pitch-comparison-roll">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><h2 className="font-semibold">MIDI and detected pitch piano roll</h2><p className="text-xs text-slate-500">MIDI blocks and your detected pitch share the same time and pitch axes. The bold line is the current playback position.</p></div>
+                <div className={`rounded-full px-3 py-1 text-sm font-bold ${currentStablePitch === null ? "bg-slate-100 text-slate-600" : currentPitchMatches ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>
+                  {currentStablePitch === null ? "Waiting for stable pitch" : currentPitchMatches ? "MATCH" : "OFF PITCH"}
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-3 text-xs font-medium text-slate-600"><span><i className="mr-1 inline-block h-2.5 w-4 rounded-sm bg-indigo-500" />Expected MIDI</span><span><i className="mr-1 inline-block h-2.5 w-4 rounded-sm bg-sky-400" />Raw detected pitch</span><span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />Matched stable pitch</span><span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-rose-500" />Off-pitch stable pitch</span></div>
+              <div className="mt-3 grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+                <div className="relative h-72 text-[10px] font-semibold text-slate-500">{Array.from({ length: 13 }, (_, index) => { const pitch = rollMaxPitch - index; return <span key={pitch} className="absolute right-0 -translate-y-1/2" style={{ top: `${rollY(pitch)}%` }}>{midiToPitchName(pitch)}</span>; })}</div>
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-72 w-full rounded-xl bg-slate-950" aria-label="Expected MIDI and detected pitch piano roll">
+                  {Array.from({ length: 13 }, (_, index) => { const pitch = rollMaxPitch - index; return <line key={`grid-${pitch}`} x1="0" y1={rollY(pitch)} x2="100" y2={rollY(pitch)} stroke={pitch % 12 === 0 ? "rgb(100 116 139)" : "rgb(51 65 85)"} strokeWidth="0.35" />; })}
+                  {rollNotes.map((note) => {
+                    const startMs = note.tappedStartTimeSeconds * 1000;
+                    const width = Math.max(0.8, (note.effectiveDurationSeconds * 1000 / (rollEndMs - rollStartMs)) * 100);
+                    return <rect key={`midi-${note.index}`} x={Math.max(0, rollX(startMs))} y={rollY(note.midiPitch) - 3.2} width={Math.min(width, 100 - Math.max(0, rollX(startMs)))} height="6.4" rx="1" fill="rgb(99 102 241)" opacity={note.index === activeMidiNote?.index ? "1" : "0.68"}><title>{`${note.pitchName} at ${note.tappedStartTimeSeconds.toFixed(2)}s`}</title></rect>;
+                  })}
+                  <polyline points={rawRollPoints} fill="none" stroke="rgb(56 189 248)" strokeWidth="0.8" opacity="0.8" />
+                  {rollDetections.filter((item) => item.stableMidiPitch !== null).map((item, index) => {
+                    const stablePitch = item.stableMidiPitch!;
+                    const expected = nearestMidiNote(wholeSongKey?.notes ?? [], item.songPlaybackMs);
+                    const matched = expected ? Math.abs(centsBetween(stablePitch, expected.midiPitch)) <= 50 : false;
+                    return <circle key={`stable-${item.atMs}-${index}`} cx={rollX(item.songPlaybackMs)} cy={rollY(stablePitch)} r="1.4" fill={matched ? "rgb(34 197 94)" : "rgb(244 63 94)"}><title>{`${midiToPitchName(stablePitch)} ${expected ? `vs ${expected.pitchName}` : ""}`}</title></circle>;
+                  })}
+                  <line x1={rollX(playbackMs)} y1="0" x2={rollX(playbackMs)} y2="100" stroke="rgb(250 204 21)" strokeWidth="1.1" />
+                </svg>
+              </div>
+              <div className="ml-16 mt-1 flex justify-between text-[10px] text-slate-500"><span>{(rollStartMs / 1000).toFixed(1)}s</span><span>{(playbackMs / 1000).toFixed(1)}s</span><span>{(rollEndMs / 1000).toFixed(1)}s</span></div>
             </section>
           </div>
 
