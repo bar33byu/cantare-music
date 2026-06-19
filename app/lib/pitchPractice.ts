@@ -1,5 +1,5 @@
 import type { TapScoreResult } from "./enhancedTapPractice";
-import type { MidiSegmentAnswerKey } from "./midiGuidedTapPractice";
+import type { MidiSegmentAnswerKey, WholeSongMidiAnswerKeyNote } from "./midiGuidedTapPractice";
 
 export const PITCH_TOLERANCE_CENTS = 50;
 export const PITCH_STABILITY_MS = 120;
@@ -28,6 +28,47 @@ export interface VoicePitchAttempt {
 
 export interface PitchStabilityState {
   frames: StablePitchFrame[];
+}
+
+export interface AdaptivePitchTiming {
+  stabilityMs: number;
+  transitionGraceMs: number;
+}
+
+export interface WholeSongPitchTarget {
+  note: WholeSongMidiAnswerKeyNote;
+  noteIndex: number;
+  timing: AdaptivePitchTiming;
+  inTransitionGrace: boolean;
+}
+
+export function getAdaptivePitchTiming(noteDurationMs: number): AdaptivePitchTiming {
+  const safeDurationMs = Math.max(1, noteDurationMs);
+  return {
+    stabilityMs: Math.round(Math.max(40, Math.min(100, safeDurationMs * 0.25))),
+    transitionGraceMs: Math.round(Math.min(60, safeDurationMs * 0.15)),
+  };
+}
+
+export function getWholeSongPitchTarget(
+  notes: WholeSongMidiAnswerKeyNote[],
+  playbackMs: number
+): WholeSongPitchTarget | null {
+  if (notes.length === 0) return null;
+  const startsMs = notes.map((note) => note.tappedStartTimeSeconds * 1000);
+  let noteIndex = 0;
+  for (let index = 1; index < startsMs.length; index += 1) {
+    if (Math.abs(startsMs[index] - playbackMs) < Math.abs(startsMs[noteIndex] - playbackMs)) noteIndex = index;
+  }
+  const note = notes[noteIndex];
+  const timing = getAdaptivePitchTiming(note.effectiveDurationSeconds * 1000);
+  const previousBoundaryMs = noteIndex === 0 ? Number.NEGATIVE_INFINITY : (startsMs[noteIndex - 1] + startsMs[noteIndex]) / 2;
+  const nextBoundaryMs = noteIndex === notes.length - 1 ? Number.POSITIVE_INFINITY : (startsMs[noteIndex] + startsMs[noteIndex + 1]) / 2;
+  const inTransitionGrace = (
+    (Number.isFinite(previousBoundaryMs) && playbackMs - previousBoundaryMs < timing.transitionGraceMs) ||
+    (Number.isFinite(nextBoundaryMs) && nextBoundaryMs - playbackMs < timing.transitionGraceMs)
+  );
+  return { note, noteIndex, timing, inTransitionGrace };
 }
 
 export function frequencyToMidi(frequencyHz: number): number {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centsBetween, detectPitchYin, frequencyToMidi, mergeVoicePitchAttempt, scoreVoicePitchAttempts, updatePitchStability, type PitchStabilityState } from "./pitchPractice";
+import { centsBetween, detectPitchYin, frequencyToMidi, getAdaptivePitchTiming, getWholeSongPitchTarget, mergeVoicePitchAttempt, scoreVoicePitchAttempts, updatePitchStability, type PitchStabilityState } from "./pitchPractice";
 import type { MidiSegmentAnswerKey } from "./midiGuidedTapPractice";
 
 const key: MidiSegmentAnswerKey = {
@@ -59,5 +59,25 @@ describe("pitch practice", () => {
     const score = scoreVoicePitchAttempts(key, [{ sourceWholeSongNoteIndex: 1, detectedMidiPitch: 72, centsError: 1200 }]);
     expect(score.scorePercent).toBe(0);
     expect(score.details[0].status).toBe("pitch");
+  });
+
+  it.each([
+    [100, 40, 15],
+    [200, 50, 30],
+    [400, 100, 60],
+    [800, 100, 60],
+  ])("adapts timing for a %d ms MIDI note", (durationMs, stabilityMs, transitionGraceMs) => {
+    expect(getAdaptivePitchTiming(durationMs)).toEqual({ stabilityMs, transitionGraceMs });
+  });
+
+  it("identifies transition grace around MIDI ownership boundaries", () => {
+    const notes = [
+      { index: 0, sourceCleanedMidiNoteIndex: 0, midiPitch: 60, pitchName: "C4", movementFromPrevious: "start" as const, tappedStartTimeSeconds: 0, midiDurationSeconds: 0.4, effectiveDurationSeconds: 0.4 },
+      { index: 1, sourceCleanedMidiNoteIndex: 1, midiPitch: 62, pitchName: "D4", movementFromPrevious: "up" as const, tappedStartTimeSeconds: 0.4, midiDurationSeconds: 0.4, effectiveDurationSeconds: 0.4 },
+    ];
+    expect(getWholeSongPitchTarget(notes, 150)?.inTransitionGrace).toBe(true);
+    expect(getWholeSongPitchTarget(notes, 50)?.inTransitionGrace).toBe(false);
+    expect(getWholeSongPitchTarget(notes, 250)?.note.midiPitch).toBe(62);
+    expect(getWholeSongPitchTarget(notes, 250)?.inTransitionGrace).toBe(true);
   });
 });

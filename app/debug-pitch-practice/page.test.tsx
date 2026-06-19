@@ -33,6 +33,8 @@ describe("DebugPitchPracticePage", () => {
     expect(await screen.findByRole("option", { name: "Test microphone" })).toBeInTheDocument();
     expect(await screen.findByText("Diagnostic Song")).toBeInTheDocument();
     expect(screen.getByText("Expected: E4 (64)")).toBeInTheDocument();
+    expect(screen.getByText(/Adaptive: 100 ms stable/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Adapt timing to active MIDI duration" })).toBeChecked();
     expect(screen.getByText("MIDI and detected pitch piano roll")).toBeInTheDocument();
     expect(screen.getByLabelText("Expected MIDI and detected pitch piano roll")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/songs/0e513a82-8fd5-4dd2-9b54-c046a46ceaed", { cache: "no-store" });

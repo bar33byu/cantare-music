@@ -8,6 +8,7 @@ import {
   centsBetween,
   detectPitchYin,
   frequencyToMidi,
+  getWholeSongPitchTarget,
   midiToPitchName,
   updatePitchStability,
   type PitchStabilityState,
@@ -24,6 +25,9 @@ interface PitchSnapshot {
   rms: number;
   stableMidiPitch: number | null;
   accepted: boolean;
+  requiredStabilityMs: number;
+  transitionGraceMs: number;
+  inTransitionGrace: boolean;
 }
 
 const inputClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900";
@@ -63,6 +67,7 @@ export default function DebugPitchPracticePage() {
   const [minConfidence, setMinConfidence] = React.useState(0.72);
   const [stabilityMs, setStabilityMs] = React.useState(120);
   const [maxSpreadCents, setMaxSpreadCents] = React.useState(35);
+  const [adaptiveTimingEnabled, setAdaptiveTimingEnabled] = React.useState(true);
   const [targetMidiPitch, setTargetMidiPitch] = React.useState(60);
   const [songIdInput, setSongIdInput] = React.useState(DEFAULT_DEBUG_SONG_ID);
   const [song, setSong] = React.useState<Song | null>(null);
@@ -86,6 +91,9 @@ export default function DebugPitchPracticePage() {
   const stabilityRef = React.useRef<PitchStabilityState>({ frames: [] });
   const settingsRef = React.useRef({ minFrequencyHz, maxFrequencyHz, yinThreshold, minRms, minConfidence, stabilityMs, maxSpreadCents });
   const playbackMsRef = React.useRef(playbackMs);
+  const wholeSongKeyRef = React.useRef(wholeSongKey);
+  const adaptiveTimingEnabledRef = React.useRef(adaptiveTimingEnabled);
+  const detectorTargetIndexRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     settingsRef.current = { minFrequencyHz, maxFrequencyHz, yinThreshold, minRms, minConfidence, stabilityMs, maxSpreadCents };
@@ -94,6 +102,15 @@ export default function DebugPitchPracticePage() {
   React.useEffect(() => {
     playbackMsRef.current = playbackMs;
   }, [playbackMs]);
+
+  React.useEffect(() => {
+    wholeSongKeyRef.current = wholeSongKey;
+  }, [wholeSongKey]);
+
+  React.useEffect(() => {
+    adaptiveTimingEnabledRef.current = adaptiveTimingEnabled;
+    stabilityRef.current = { frames: [] };
+  }, [adaptiveTimingEnabled]);
 
   const refreshDevices = React.useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -223,14 +240,23 @@ export default function DebugPitchPracticePage() {
         if (raw) {
           const midiPitch = frequencyToMidi(raw.frequencyHz);
           const accepted = raw.rms >= settings.minRms && raw.confidence >= settings.minConfidence;
-          const stability = updatePitchStability(stabilityRef.current, accepted ? {
+          const target = getWholeSongPitchTarget(wholeSongKeyRef.current?.notes ?? [], playbackMsRef.current);
+          if (target && detectorTargetIndexRef.current !== target.noteIndex) {
+            stabilityRef.current = { frames: [] };
+            detectorTargetIndexRef.current = target.noteIndex;
+          }
+          const adaptiveTiming = target?.timing;
+          const requiredStabilityMs = adaptiveTimingEnabledRef.current && adaptiveTiming ? adaptiveTiming.stabilityMs : settings.stabilityMs;
+          const transitionGraceMs = adaptiveTimingEnabledRef.current && adaptiveTiming ? adaptiveTiming.transitionGraceMs : 0;
+          const inTransitionGrace = Boolean(adaptiveTimingEnabledRef.current && target?.inTransitionGrace);
+          const stability = updatePitchStability(stabilityRef.current, accepted && !inTransitionGrace ? {
             atMs: now,
             midiPitch,
             confidence: raw.confidence,
             rms: raw.rms,
-          } : null, { stabilityMs: settings.stabilityMs, maxSpreadCents: settings.maxSpreadCents });
+          } : null, { stabilityMs: requiredStabilityMs, maxSpreadCents: settings.maxSpreadCents });
           stabilityRef.current = stability.state;
-          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: playbackMsRef.current, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted };
+          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: playbackMsRef.current, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace };
           setSnapshot(nextSnapshot);
           setHistory((current) => [...current, nextSnapshot].slice(-300));
         } else {
@@ -247,8 +273,9 @@ export default function DebugPitchPracticePage() {
   }, [autoGainControl, deviceId, echoCancellation, fftSize, noiseSuppression, refreshDevices, stop]);
 
   const activeMidiNote = React.useMemo<WholeSongMidiAnswerKeyNote | null>(() => {
-    return nearestMidiNote(wholeSongKey?.notes ?? [], playbackMs);
+    return getWholeSongPitchTarget(wholeSongKey?.notes ?? [], playbackMs)?.note ?? null;
   }, [playbackMs, wholeSongKey]);
+  const activeAdaptiveTarget = React.useMemo(() => getWholeSongPitchTarget(wholeSongKey?.notes ?? [], playbackMs), [playbackMs, wholeSongKey]);
   const effectiveTargetMidiPitch = followPlayback && activeMidiNote ? activeMidiNote.midiPitch : targetMidiPitch;
   const activeSegment = song?.segments.find((segment) => playbackMs >= segment.startMs && playbackMs < segment.endMs) ?? null;
   const activeNoteIndex = activeMidiNote ? (wholeSongKey?.notes.findIndex((note) => note.index === activeMidiNote.index) ?? -1) : -1;
@@ -263,8 +290,10 @@ export default function DebugPitchPracticePage() {
       ? `Below RMS gate (${snapshot.rms.toFixed(4)} < ${minRms.toFixed(4)})`
       : snapshot.confidence < minConfidence
         ? `Below confidence gate (${snapshot.confidence.toFixed(3)} < ${minConfidence.toFixed(3)})`
+        : snapshot.inTransitionGrace
+          ? `Inside ${snapshot.transitionGraceMs} ms transition grace`
         : snapshot.stableMidiPitch === null
-          ? "Pitch candidate accepted; waiting for stability"
+          ? `Pitch candidate accepted; waiting for ${snapshot.requiredStabilityMs} ms stability`
           : "Stable pitch accepted";
 
   const rollStartMs = Math.max(0, playbackMs - 4000);
@@ -330,6 +359,7 @@ export default function DebugPitchPracticePage() {
                 <span>Time: {(playbackMs / 1000).toFixed(2)}s</span>
                 <span>Section: {activeSegment?.label ?? "Outside sections"}</span>
                 <span className="font-bold text-indigo-700">Expected: {activeMidiNote?.pitchName ?? "--"} ({activeMidiNote?.midiPitch ?? "--"})</span>
+                {activeAdaptiveTarget ? <span className="font-semibold text-emerald-700">Adaptive: {activeAdaptiveTarget.timing.stabilityMs} ms stable · {activeAdaptiveTarget.timing.transitionGraceMs} ms grace/side{activeAdaptiveTarget.inTransitionGrace ? " · in grace now" : ""}</span> : null}
               </div>
               {nearbyNotes.length > 0 ? <div className="mt-3 flex flex-wrap gap-1.5">{nearbyNotes.map((note) => <button key={note.index} type="button" onClick={() => { setFollowPlayback(false); setTargetMidiPitch(note.midiPitch); }} className={`rounded-lg border px-2 py-1 text-xs font-semibold ${note.index === activeMidiNote?.index && followPlayback ? "border-indigo-500 bg-indigo-100 text-indigo-900" : "border-slate-200 bg-slate-50 text-slate-700"}`} title={`${note.tappedStartTimeSeconds.toFixed(2)} seconds`}>{note.pitchName} · {note.tappedStartTimeSeconds.toFixed(1)}s</button>)}</div> : null}
             </div>
@@ -391,6 +421,7 @@ export default function DebugPitchPracticePage() {
           <aside className="space-y-5">
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="font-semibold">Detector settings</h2>
+              <label className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900"><span>Adapt timing to active MIDI duration</span><input type="checkbox" checked={adaptiveTimingEnabled} onChange={(event) => setAdaptiveTimingEnabled(event.target.checked)} /></label>
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <NumberSetting label="Manual target MIDI" value={targetMidiPitch} min={24} max={108} step={1} onChange={(value) => { setFollowPlayback(false); setTargetMidiPitch(value); }} />
                 <label><span className={labelClass}>FFT size</span><select className={inputClass} value={fftSize} onChange={(event) => setFftSize(Number(event.target.value))} disabled={status === "running"}>{[2048, 4096, 8192].map((size) => <option key={size}>{size}</option>)}</select></label>
@@ -399,7 +430,7 @@ export default function DebugPitchPracticePage() {
                 <NumberSetting label="YIN threshold" value={yinThreshold} min={0.05} max={0.5} step={0.01} onChange={setYinThreshold} />
                 <NumberSetting label="Minimum RMS" value={minRms} min={0} max={0.1} step={0.001} onChange={setMinRms} />
                 <NumberSetting label="Min confidence" value={minConfidence} min={0} max={1} step={0.01} onChange={setMinConfidence} />
-                <NumberSetting label="Stability ms" value={stabilityMs} min={40} max={500} step={10} onChange={setStabilityMs} />
+                <NumberSetting label={adaptiveTimingEnabled ? "Fallback stability ms" : "Stability ms"} value={stabilityMs} min={40} max={500} step={10} onChange={setStabilityMs} />
                 <NumberSetting label="Max spread cents" value={maxSpreadCents} min={5} max={150} step={5} onChange={setMaxSpreadCents} />
               </div>
             </section>
