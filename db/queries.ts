@@ -3,7 +3,7 @@ import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow } from "./schema";
 import { getPublicUrl } from "../lib/r2";
-import type { SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
+import type { PracticeInputMethod, SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
 import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
 
 const DEFAULT_QUERY_USER_ID = "default";
@@ -113,6 +113,7 @@ export interface PersistedTapPracticeSessionSummary {
   segmentId?: string;
   audioVersion: TapAudioVersion;
   mode: TapPracticeMode;
+  inputMethod?: PracticeInputMethod;
   startedAt: string;
   completedAt?: string;
   finalizedAt?: string;
@@ -128,6 +129,7 @@ export interface PersistedTapPracticeSessionDetail {
   segmentId?: string;
   audioVersion: TapAudioVersion;
   mode: TapPracticeMode;
+  inputMethod?: PracticeInputMethod;
   startedAt: string;
   completedAt?: string;
   finalizedAt?: string;
@@ -624,6 +626,7 @@ function isMissingEnhancedTapPracticeColumnError(error: unknown): boolean {
     "segment_id",
     "audio_version",
     "mode",
+    "input_method",
     "completed_at",
     "finalized_at",
     "auto_score_percent",
@@ -2917,12 +2920,16 @@ function normalizeTapPracticeMode(value: string | null | undefined): TapPractice
   return value === "answer_key" ? "answer_key" : "practice";
 }
 
+function normalizePracticeInputMethod(value: string | null | undefined): PracticeInputMethod {
+  return value === "voice" ? "voice" : "tap";
+}
+
 function normalizeTapDirection(value: string | null | undefined): TapDirection | undefined {
   return value === "up" || value === "down" || value === "same" ? value : undefined;
 }
 
 type TapPracticeSessionProjection = Pick<TapPracticeSessionRow, "id" | "songId" | "startedAt"> &
-  Partial<Pick<TapPracticeSessionRow, "segmentId" | "audioVersion" | "mode" | "completedAt" | "finalizedAt" | "autoScorePercent" | "selfRating" | "scoreDetails">>;
+  Partial<Pick<TapPracticeSessionRow, "segmentId" | "audioVersion" | "mode" | "inputMethod" | "completedAt" | "finalizedAt" | "autoScorePercent" | "selfRating" | "scoreDetails">>;
 
 const TAP_PRACTICE_SESSION_KEEP_LIMIT = 5;
 
@@ -2933,6 +2940,7 @@ function mapTapPracticeSession(row: TapPracticeSessionProjection): PersistedTapP
     songId: row.songId,
     audioVersion: normalizeTapAudioVersion(row.audioVersion),
     mode: normalizeTapPracticeMode(row.mode),
+    inputMethod: normalizePracticeInputMethod(row.inputMethod),
     startedAt: row.startedAt.toISOString(),
     ...(row.segmentId ? { segmentId: row.segmentId } : {}),
     ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
@@ -3054,6 +3062,7 @@ export async function createTapPracticeSession(
     segmentId?: string;
     audioVersion?: TapAudioVersion;
     mode?: TapPracticeMode;
+    inputMethod?: PracticeInputMethod;
   } = {}
 ): Promise<PersistedTapPracticeSessionSummary> {
   try {
@@ -3066,6 +3075,7 @@ export async function createTapPracticeSession(
         segmentId: options.segmentId ?? null,
         audioVersion: options.audioVersion ?? "straight",
         mode: options.mode ?? "practice",
+        inputMethod: options.inputMethod ?? "tap",
         startedAt,
       })
       .returning();
@@ -3262,6 +3272,7 @@ export async function listTapPracticeSessionsForSong(
         segmentId: tapPracticeSessions.segmentId,
         audioVersion: tapPracticeSessions.audioVersion,
         mode: tapPracticeSessions.mode,
+        inputMethod: tapPracticeSessions.inputMethod,
         startedAt: tapPracticeSessions.startedAt,
         completedAt: tapPracticeSessions.completedAt,
         finalizedAt: tapPracticeSessions.finalizedAt,
@@ -3283,6 +3294,7 @@ export async function listTapPracticeSessionsForSong(
           segmentId: tapPracticeSessions.segmentId,
           audioVersion: tapPracticeSessions.audioVersion,
           mode: tapPracticeSessions.mode,
+          inputMethod: tapPracticeSessions.inputMethod,
           startedAt: tapPracticeSessions.startedAt,
           completedAt: tapPracticeSessions.completedAt,
           finalizedAt: tapPracticeSessions.finalizedAt,
@@ -3347,6 +3359,7 @@ export async function getTapPracticeSessionDetail(
         segmentId: tapPracticeSessions.segmentId,
         audioVersion: tapPracticeSessions.audioVersion,
         mode: tapPracticeSessions.mode,
+        inputMethod: tapPracticeSessions.inputMethod,
         startedAt: tapPracticeSessions.startedAt,
         completedAt: tapPracticeSessions.completedAt,
         finalizedAt: tapPracticeSessions.finalizedAt,
@@ -3368,6 +3381,7 @@ export async function getTapPracticeSessionDetail(
           segmentId: tapPracticeSessions.segmentId,
           audioVersion: tapPracticeSessions.audioVersion,
           mode: tapPracticeSessions.mode,
+          inputMethod: tapPracticeSessions.inputMethod,
           startedAt: tapPracticeSessions.startedAt,
           completedAt: tapPracticeSessions.completedAt,
           finalizedAt: tapPracticeSessions.finalizedAt,
@@ -3424,6 +3438,7 @@ export async function getTapPracticeSessionDetail(
     songId: sessionRow.songId,
     audioVersion: normalizeTapAudioVersion(sessionRow.audioVersion),
     mode: normalizeTapPracticeMode(sessionRow.mode),
+    inputMethod: normalizePracticeInputMethod(sessionRow.inputMethod),
     startedAt: sessionRow.startedAt.toISOString(),
     ...(sessionRow.segmentId ? { segmentId: sessionRow.segmentId } : {}),
     ...(sessionRow.completedAt ? { completedAt: sessionRow.completedAt.toISOString() } : {}),

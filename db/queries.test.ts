@@ -1325,6 +1325,7 @@ describe("tap practice persistence", () => {
       songId: "song-1",
       audioVersion: "straight",
       mode: "practice",
+      inputMethod: "tap",
       startedAt: startedAt.toISOString(),
       tapCount: 0,
     });
@@ -1392,6 +1393,7 @@ describe("tap practice persistence", () => {
         songId: "song-1",
         audioVersion: "straight",
         mode: "practice",
+        inputMethod: "tap",
         startedAt: "2026-04-11T12:00:00.000Z",
         tapCount: 2,
       },
@@ -1430,6 +1432,7 @@ describe("tap practice persistence", () => {
       songId: "song-1",
       audioVersion: "straight",
       mode: "practice",
+      inputMethod: "tap",
       startedAt: "2026-04-11T12:00:00.000Z",
       taps: [
         {

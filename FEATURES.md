@@ -16,6 +16,7 @@ The near-term priority is stabilization: keep the current workflows reliable on 
 - [x] Tap-practice persistence with buffered early taps
 - [x] Card contour heat map refreshed from saved tap attempts
 - [x] Tap-practice history reset when contour answer keys change
+- [x] MIDI pitch practice with local microphone analysis and shared contour scoring
 
 ## Version 2.1: Two-Version Audio Support
 

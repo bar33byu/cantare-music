@@ -152,6 +152,7 @@ describe("schema tables", () => {
     expect(cols).toContain("userId");
     expect(cols).toContain("songId");
     expect(cols).toContain("startedAt");
+    expect(cols).toContain("inputMethod");
   });
 
   it("tapPracticeTaps table has expected columns", () => {

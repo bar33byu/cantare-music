@@ -10,7 +10,7 @@ vi.mock('../../../../../../db/queries', () => ({
   updateTapPracticeSessionProgress: vi.fn(),
 }));
 
-import { GET, POST } from './route';
+import { GET, POST, PUT } from './route';
 import {
   addTapPracticeTap,
   getLatestCompleteMidiAlignmentForSource,
@@ -131,5 +131,20 @@ describe('POST /api/songs/[id]/tap-sessions/[sessionId]', () => {
     expect(response.status).toBe(400);
     expect(data.error).toContain('lane');
     expect(addTapPracticeTap).not.toHaveBeenCalled();
+  });
+});
+
+describe('PUT /api/songs/[id]/tap-sessions/[sessionId]', () => {
+  it('rejects voice snapshots for tap sessions', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: 'song-1' } as Awaited<ReturnType<typeof getSongById>>);
+    vi.mocked(getTapPracticeSessionDetail).mockResolvedValue({
+      id: 'session-1', songId: 'song-1', inputMethod: 'tap', audioVersion: 'straight', mode: 'practice', segmentId: 'segment-1', startedAt: new Date().toISOString(), taps: [],
+    } as Awaited<ReturnType<typeof getTapPracticeSessionDetail>>);
+    const request = new Request('http://localhost/api/songs/song-1/tap-sessions/session-1', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attempts: [] }),
+    });
+    const response = await PUT(request as Parameters<typeof PUT>[0], { params: Promise.resolve({ id: 'song-1', sessionId: 'session-1' }) });
+    expect(response.status).toBe(400);
+    expect(updateTapPracticeSessionProgress).not.toHaveBeenCalled();
   });
 });

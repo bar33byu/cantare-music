@@ -1,6 +1,7 @@
 export type TapAudioVersion = "blend" | "straight";
 export type TapDirection = "up" | "same" | "down";
 export type TapPracticeMode = "practice" | "answer_key";
+export type PracticeInputMethod = "tap" | "voice";
 export type AnswerKeyStatusCode = "none" | "one" | "two" | "ready" | "unaligned";
 export type SelfRating = 1 | 2 | 3 | 4 | 5;
 
@@ -32,7 +33,7 @@ export interface AnswerKeyStatus {
   derivedKey: DerivedAnswerKey | null;
 }
 
-export type TapMissKind = "matched" | "missing" | "extra" | "timing" | "direction";
+export type TapMissKind = "matched" | "missing" | "extra" | "timing" | "direction" | "pitch";
 
 export interface TapScoreDetail {
   index: number;
@@ -40,6 +41,9 @@ export interface TapScoreDetail {
   actual?: DirectionTap;
   status: TapMissKind;
   timingDeltaMs?: number;
+  expectedMidiPitch?: number;
+  detectedMidiPitch?: number;
+  centsError?: number;
 }
 
 export interface TapScoreResult {
@@ -49,6 +53,8 @@ export interface TapScoreResult {
   scorePercent: number;
   details: TapScoreDetail[];
 }
+
+export type ContourScoreResult = TapScoreResult;
 
 export interface TapAttemptSummary {
   id: string;
