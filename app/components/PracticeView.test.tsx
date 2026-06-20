@@ -12,6 +12,7 @@ const mockPause = vi.fn();
 const mockSeek = vi.fn();
 const mockSetPlaybackEndMs = vi.fn();
 const mockUseAudioPlayer = vi.fn();
+const mockUsePitchPractice = vi.fn();
 const mockFetch = vi.fn();
 
 function makeFetchResponse(payload: unknown, ok = true, status = ok ? 200 : 500) {
@@ -91,6 +92,10 @@ vi.mock("./KnowledgeBar", () => ({
 
 vi.mock("../hooks/useAudioPlayer", () => ({
   useAudioPlayer: (...args: unknown[]) => mockUseAudioPlayer(...args),
+}));
+
+vi.mock("../hooks/usePitchPractice", () => ({
+  usePitchPractice: (...args: unknown[]) => mockUsePitchPractice(...args),
 }));
 
 vi.mock("./AudioPlayer", () => ({
@@ -236,6 +241,7 @@ describe("PracticeView", () => {
     window.localStorage.setItem("practice-control-explainer:blend", "seen");
     window.localStorage.setItem("practice-control-explainer:contour", "seen");
     window.localStorage.setItem("practice-control-explainer:tap", "seen");
+    window.localStorage.setItem("practice-control-explainer:sing", "seen");
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/ratings") && (!init || init.method === undefined)) {
@@ -270,6 +276,37 @@ describe("PracticeView", () => {
       seek: mockSeek,
       setPlaybackEndMs: mockSetPlaybackEndMs,
     });
+    mockUsePitchPractice.mockReturnValue({
+      status: "off",
+      error: null,
+      attempts: [],
+      score: null,
+      live: null,
+      clear: vi.fn(),
+      stop: vi.fn(),
+    });
+  });
+
+  it("shows cumulative and per-segment scores during a Sing run", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+    mockUsePitchPractice.mockReturnValue({
+      status: "listening",
+      error: null,
+      attempts: [{ sourceWholeSongNoteIndex: 1, detectedMidiPitch: 60, centsError: 0 }],
+      score: { matchedTaps: 1, totalTaps: 2, scorePercent: 50, details: [] },
+      live: null,
+      clear: vi.fn(),
+      stop: vi.fn(),
+    });
+
+    const song = makeSong(2);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-sing-mode-toggle"));
+
+    expect(screen.getByTestId("practice-sing-scoreboard")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-sing-cumulative-score")).toHaveTextContent("50%");
+    expect(screen.getByTestId("practice-sing-segment-score-seg-0")).toHaveTextContent("1/2 matched; 2/2 attempted");
+    expect(screen.getByTestId("practice-sing-segment-score-seg-1")).toHaveTextContent("--");
   });
 
   it("replaces the active session when the song prop changes without remounting", async () => {

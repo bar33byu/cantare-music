@@ -39,6 +39,7 @@ export function usePitchPractice(input: {
   const [status, setStatus] = React.useState<PitchPracticeStatus>("off");
   const [error, setError] = React.useState<string | null>(null);
   const [attempts, setAttempts] = React.useState<VoicePitchAttempt[]>([]);
+  const [attemptSegmentId, setAttemptSegmentId] = React.useState<string | null>(input.answerKey?.segmentId ?? null);
   const [live, setLive] = React.useState<{ detectedMidiPitch: number; detectedName: string; targetMidiPitch?: number; targetName?: string; centsError?: number; level: number } | null>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
   const contextRef = React.useRef<AudioContext | null>(null);
@@ -167,6 +168,7 @@ export function usePitchPractice(input: {
           if (scoringNote && stability.stableMidiPitch !== null) {
             const stableMidiPitch = stability.stableMidiPitch;
             const stableCentsError = centsBetween(stableMidiPitch, scoringNote.midiPitch);
+            setAttemptSegmentId(current.answerKey.segmentId);
             setAttempts((previous) => mergeVoicePitchAttempt(previous, {
               sourceWholeSongNoteIndex: scoringNote.sourceWholeSongNoteIndex,
               detectedMidiPitch: stableMidiPitch,
@@ -192,12 +194,13 @@ export function usePitchPractice(input: {
 
   React.useEffect(() => {
     setAttempts([]);
+    setAttemptSegmentId(input.answerKey?.segmentId ?? null);
     stabilityRef.current = { frames: [] };
   }, [input.answerKey?.segmentId, input.resetToken]);
 
   const score = React.useMemo(
-    () => input.answerKey ? scoreVoicePitchAttempts(input.answerKey, attempts) : null,
-    [attempts, input.answerKey]
+    () => input.answerKey && attemptSegmentId === input.answerKey.segmentId ? scoreVoicePitchAttempts(input.answerKey, attempts) : null,
+    [attemptSegmentId, attempts, input.answerKey]
   );
 
   return { status, error, attempts, score, live, clear: () => setAttempts([]), stop };

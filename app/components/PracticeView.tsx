@@ -318,6 +318,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [tapSessionSummaries, setTapSessionSummaries] = React.useState<TapSessionSummaryPayload[]>([]);
   const [midiSegmentAnswerKeys, setMidiSegmentAnswerKeys] = React.useState<Record<string, MidiSegmentAnswerKey>>({});
   const [localMidiScoreAttemptsBySegment, setLocalMidiScoreAttemptsBySegment] = React.useState<Record<string, TapScoreResult[]>>({});
+  const [voiceRunScoresBySegment, setVoiceRunScoresBySegment] = React.useState<Record<string, TapScoreResult>>({});
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, PitchContourNote[]>>({});
   const [, setTapHeatMapBySegment] = React.useState<Record<string, Record<string, ContourNoteHeatStat>>>({});
   const [tapHeatMapRefreshToken, setTapHeatMapRefreshToken] = React.useState(0);
@@ -478,6 +479,36 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const voiceAttemptsRef = React.useRef(pitchPractice.attempts);
   voiceAttemptsRef.current = pitchPractice.attempts;
   const voiceSnapshotTimerRef = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    if (!isSingPracticeMode || !currentSegment || !pitchPractice.score || pitchPractice.score.totalTaps === 0) {
+      return;
+    }
+    setVoiceRunScoresBySegment((previous) => ({
+      ...previous,
+      [currentSegment.id]: pitchPractice.score!,
+    }));
+  }, [currentSegment, isSingPracticeMode, pitchPractice.score]);
+  const displayedVoiceRunScores = useMemo(() => {
+    if (!isSingPracticeMode || !currentSegment || !pitchPractice.score || pitchPractice.score.totalTaps === 0) {
+      return voiceRunScoresBySegment;
+    }
+    return {
+      ...voiceRunScoresBySegment,
+      [currentSegment.id]: pitchPractice.score,
+    };
+  }, [currentSegment, isSingPracticeMode, pitchPractice.score, voiceRunScoresBySegment]);
+  const voiceRunTotals = useMemo(() => {
+    const scores = Object.values(displayedVoiceRunScores);
+    const matched = scores.reduce((total, score) => total + score.matchedTaps, 0);
+    const attempted = scores.reduce((total, score) => total + score.totalTaps, 0);
+    const available = song.segments.reduce((total, segment) => total + (midiSegmentAnswerKeys[segment.id]?.notes.length ?? 0), 0);
+    return {
+      matched,
+      attempted,
+      available,
+      percent: attempted > 0 ? Math.round(matched / attempted * 100) : 0,
+    };
+  }, [displayedVoiceRunScores, midiSegmentAnswerKeys, song.segments]);
   const currentMidiPitchContourNotes = useMemo<PitchContourNote[]>(() => {
     if (!currentMidiSegmentAnswerKey || currentMidiSegmentAnswerKey.notes.length === 0) {
       return [];
@@ -1286,6 +1317,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     if (control === "sing") {
+      if (!isSingPracticeMode) {
+        setVoiceRunScoresBySegment({});
+      }
       setIsSingPracticeMode((previous) => !previous);
       setIsTapPracticeMode(false);
       activeTapCaptureRef.current = null;
@@ -1295,7 +1329,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setIsTapPracticeMode((previous) => !previous);
     setIsSingPracticeMode(false);
     activeTapCaptureRef.current = null;
-  }, [handleAudioVersionChange, showCardContourMap]);
+  }, [handleAudioVersionChange, isSingPracticeMode, showCardContourMap]);
 
   const requestPracticeControlChange = React.useCallback((control: ExplainedPracticeControl) => {
     if (!hasSeenPracticeControlExplainer(control)) {
@@ -2097,6 +2131,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setTapSessionSummaries([]);
     setMidiSegmentAnswerKeys({});
     setLocalMidiScoreAttemptsBySegment({});
+    setVoiceRunScoresBySegment({});
     setAccuracyToast(null);
     activeTapCaptureRef.current = null;
     loopHandledRef.current = null;
@@ -2590,10 +2625,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       <main
         data-testid="practice-main"
-        className={`flex flex-1 justify-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 min-h-0 overflow-y-auto px-1 pt-0" : "px-2 pt-1 sm:px-3 sm:pt-2 md:px-8"} ${isGuidedPracticeMode ? "min-h-0 overflow-hidden" : isCompactLandscapeLayout ? "" : "overflow-y-auto"}`}
+        className={`flex flex-1 justify-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 min-h-0 overflow-y-auto px-1 pt-0" : "px-2 pt-1 sm:px-3 sm:pt-2 md:px-8"} ${isGuidedPracticeMode ? "min-h-0 overflow-y-auto" : isCompactLandscapeLayout ? "" : "overflow-y-auto"}`}
         style={isCompactLandscapeLayout ? undefined : { paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 8px)" }}
       >
-        <section data-testid="practice-focus" className={`flex min-h-full w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isGuidedPracticeMode ? "max-w-4xl items-start" : isCompactLandscapeLayout ? "items-stretch max-w-none" : "items-stretch max-w-3xl"}`}>
+        <section data-testid="practice-focus" className={`flex min-h-full w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isGuidedPracticeMode ? "max-w-4xl flex-col items-stretch md:flex-row md:items-start" : isCompactLandscapeLayout ? "items-stretch max-w-none" : "items-stretch max-w-3xl"}`}>
           {!isGuidedPracticeMode && showSegmentNavigationControls ? (
             <button
               type="button"
@@ -2711,6 +2746,54 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               </div>
             )}
           </div>
+          {isSingPracticeMode ? (
+            <aside
+              data-testid="practice-sing-scoreboard"
+              className="w-full shrink-0 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm md:max-h-full md:w-72"
+            >
+              <div className="border-b border-emerald-100 bg-emerald-50 px-3 py-2.5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h2 className="text-sm font-bold text-emerald-950">Sing run</h2>
+                  <span data-testid="practice-sing-cumulative-score" className="text-lg font-bold text-emerald-800">
+                    {voiceRunTotals.percent}%
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-emerald-900">
+                  {voiceRunTotals.matched}/{voiceRunTotals.attempted} attempted notes matched
+                </p>
+                <p className="text-[11px] text-emerald-700">
+                  {voiceRunTotals.attempted}/{voiceRunTotals.available} song notes attempted
+                </p>
+              </div>
+              <ol className="max-h-64 divide-y divide-slate-100 overflow-y-auto md:max-h-[calc(100vh-18rem)]">
+                {song.segments.map((segment, index) => {
+                  const score = displayedVoiceRunScores[segment.id];
+                  const noteCount = midiSegmentAnswerKeys[segment.id]?.notes.length ?? 0;
+                  const isCurrent = segment.id === currentSegment?.id;
+                  return (
+                    <li
+                      key={segment.id}
+                      data-testid={`practice-sing-segment-score-${segment.id}`}
+                      className={`px-3 py-2 ${isCurrent ? "bg-indigo-50/70" : "bg-white"}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-xs font-semibold text-slate-800">
+                          {index + 1}. {segment.label || `Segment ${index + 1}`}
+                        </span>
+                        <span className={`shrink-0 text-sm font-bold ${score ? "text-emerald-700" : "text-slate-400"}`}>
+                          {score ? `${score.scorePercent}%` : "--"}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        {score ? `${score.matchedTaps}/${score.totalTaps} matched; ${score.totalTaps}/${noteCount} attempted` : `${noteCount} MIDI notes`}
+                        {isCurrent ? " · current" : ""}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ol>
+            </aside>
+          ) : null}
           {isTapPracticeMode && hasSegments && currentSegment ? (
             <div
               ref={tapBarRef}
