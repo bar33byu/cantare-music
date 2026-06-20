@@ -9,6 +9,7 @@ import {
   detectPitchYin,
   frequencyToMidi,
   getWholeSongPitchTarget,
+  midiToFrequency,
   midiToPitchName,
   updatePitchStability,
   type PitchStabilityState,
@@ -47,10 +48,6 @@ function microphoneError(error: unknown): string {
 
 function formatNumber(value: number | null | undefined, digits = 2): string {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "--";
-}
-
-function midiToFrequency(midiPitch: number): number {
-  return 440 * 2 ** ((midiPitch - 69) / 12);
 }
 
 function percentile(values: number[], fraction: number): number {

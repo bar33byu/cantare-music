@@ -77,6 +77,10 @@ export function frequencyToMidi(frequencyHz: number): number {
   return 69 + 12 * Math.log2(frequencyHz / 440);
 }
 
+export function midiToFrequency(midiPitch: number): number {
+  return 440 * 2 ** ((midiPitch - 69) / 12);
+}
+
 export function midiToPitchName(midiPitch: number): string {
   const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
   const rounded = Math.round(midiPitch);

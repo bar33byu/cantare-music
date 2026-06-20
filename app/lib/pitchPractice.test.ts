@@ -40,6 +40,13 @@ describe("pitch practice", () => {
     expect(guided?.frequencyHz).toBeCloseTo(220, 0);
   });
 
+  it("does not manufacture an expected pitch from a wrong out-of-band tone", () => {
+    const sampleRate = 48000;
+    const samples = Float32Array.from({ length: 4096 }, (_, index) => 0.4 * Math.sin(2 * Math.PI * 330 * index / sampleRate));
+    const guided = detectPitchYin(samples, sampleRate, { minFrequencyHz: 196, maxFrequencyHz: 247 });
+    expect(guided).toBeNull();
+  });
+
   it("can expose a raw low-level candidate when debug gates are disabled", () => {
     const samples = new Float32Array(2048);
     const detection = detectPitchYin(samples, 48000, { minRms: 0, minConfidence: 0 });

@@ -7,7 +7,9 @@ import {
   detectPitchYin,
   findMidiNoteAtOffset,
   frequencyToMidi,
+  getAdaptivePitchTiming,
   mergeVoicePitchAttempt,
+  midiToFrequency,
   midiToPitchName,
   scoreVoicePitchAttempts,
   updatePitchStability,
@@ -42,6 +44,7 @@ export function usePitchPractice(input: {
   const contextRef = React.useRef<AudioContext | null>(null);
   const animationRef = React.useRef<number | null>(null);
   const stabilityRef = React.useRef<PitchStabilityState>({ frames: [] });
+  const targetNoteIndexRef = React.useRef<number | null>(null);
   const inputRef = React.useRef(input);
   React.useEffect(() => {
     inputRef.current = input;
@@ -114,41 +117,59 @@ export function usePitchPractice(input: {
         }
         lastAnalysisAt = now;
         analyser.getFloatTimeDomainData(samples);
-        const detection = detectPitchYin(samples, context.sampleRate);
         const current = inputRef.current;
         if (!current.isPlaying || !current.answerKey) {
           stabilityRef.current = { frames: [] };
+          targetNoteIndexRef.current = null;
           setStatus("listening");
-        } else if (!detection) {
-          stabilityRef.current = { frames: [] };
-          if (now - quietSince > 1500) setStatus("quiet");
         } else {
+          const liveCurrentMs = current.getCurrentMs?.() ?? current.currentMs;
+          const offsetMs = liveCurrentMs - current.segmentStartMs;
+          const targetNote = findMidiNoteAtOffset(current.answerKey, offsetMs, 0);
+          const timing = targetNote ? getAdaptivePitchTiming(targetNote.effectiveDurationSeconds * 1000) : null;
+          const scoringNote = targetNote && timing
+            ? findMidiNoteAtOffset(current.answerKey, offsetMs, timing.transitionGraceMs)
+            : null;
+          if (targetNote && targetNoteIndexRef.current !== targetNote.sourceWholeSongNoteIndex) {
+            stabilityRef.current = { frames: [] };
+            targetNoteIndexRef.current = targetNote.sourceWholeSongNoteIndex;
+          }
+          const broadDetection = detectPitchYin(samples, context.sampleRate);
+          const guidedDetection = targetNote ? detectPitchYin(samples, context.sampleRate, {
+            minFrequencyHz: midiToFrequency(targetNote.midiPitch - 2),
+            maxFrequencyHz: midiToFrequency(targetNote.midiPitch + 2),
+          }) : null;
+          const detection = guidedDetection ?? broadDetection;
+          if (!detection) {
+            stabilityRef.current = { frames: [] };
+            if (now - quietSince > 1500) setStatus("quiet");
+            animationRef.current = requestAnimationFrame(analyze);
+            return;
+          }
           quietSince = now;
           setStatus("listening");
           const detectedMidiPitch = frequencyToMidi(detection.frequencyHz);
-          const stability = updatePitchStability(stabilityRef.current, {
+          const stability = updatePitchStability(stabilityRef.current, scoringNote ? {
             atMs: now,
             midiPitch: detectedMidiPitch,
             confidence: detection.confidence,
             rms: detection.rms,
-          });
+          } : null, { stabilityMs: timing?.stabilityMs });
           stabilityRef.current = stability.state;
-          const liveCurrentMs = current.getCurrentMs?.() ?? current.currentMs;
-          const note = findMidiNoteAtOffset(current.answerKey, liveCurrentMs - current.segmentStartMs);
-          const centsError = note ? centsBetween(detectedMidiPitch, note.midiPitch) : undefined;
+          const centsError = targetNote ? centsBetween(detectedMidiPitch, targetNote.midiPitch) : undefined;
           setLive({
             detectedMidiPitch,
             detectedName: midiToPitchName(detectedMidiPitch),
-            targetMidiPitch: note?.midiPitch,
-            targetName: note?.pitchName,
+            targetMidiPitch: targetNote?.midiPitch,
+            targetName: targetNote?.pitchName,
             centsError,
             level: detection.rms,
           });
-          if (note && stability.stableMidiPitch !== null) {
+          if (scoringNote && stability.stableMidiPitch !== null) {
             const stableMidiPitch = stability.stableMidiPitch;
-            const stableCentsError = centsBetween(stableMidiPitch, note.midiPitch);
+            const stableCentsError = centsBetween(stableMidiPitch, scoringNote.midiPitch);
             setAttempts((previous) => mergeVoicePitchAttempt(previous, {
-              sourceWholeSongNoteIndex: note.sourceWholeSongNoteIndex,
+              sourceWholeSongNoteIndex: scoringNote.sourceWholeSongNoteIndex,
               detectedMidiPitch: stableMidiPitch,
               centsError: stableCentsError,
             }));
