@@ -28,6 +28,18 @@ describe("pitch practice", () => {
     expect(detectPitchYin(samples, sampleRate)?.frequencyHz).toBeCloseTo(440, 0);
   });
 
+  it("can recover an expected fundamental with a target-frequency pass", () => {
+    const sampleRate = 48000;
+    const samples = Float32Array.from({ length: 4096 }, (_, index) => {
+      const seconds = index / sampleRate;
+      return 0.12 * Math.sin(2 * Math.PI * 220 * seconds) + 0.35 * Math.sin(2 * Math.PI * 440 * seconds);
+    });
+    const broad = detectPitchYin(samples, sampleRate, { minFrequencyHz: 85, maxFrequencyHz: 330, minRms: 0, minConfidence: 0 });
+    const guided = detectPitchYin(samples, sampleRate, { minFrequencyHz: 196, maxFrequencyHz: 247, minRms: 0, minConfidence: 0 });
+    expect(broad).not.toBeNull();
+    expect(guided?.frequencyHz).toBeCloseTo(220, 0);
+  });
+
   it("can expose a raw low-level candidate when debug gates are disabled", () => {
     const samples = new Float32Array(2048);
     const detection = detectPitchYin(samples, 48000, { minRms: 0, minConfidence: 0 });

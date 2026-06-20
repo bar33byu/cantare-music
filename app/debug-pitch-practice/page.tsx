@@ -29,6 +29,8 @@ interface PitchSnapshot {
   transitionGraceMs: number;
   inTransitionGrace: boolean;
   expectedMidiPitch: number | null;
+  broadMidiPitch: number;
+  guidedCandidateUsed: boolean;
 }
 
 const inputClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900";
@@ -45,6 +47,10 @@ function microphoneError(error: unknown): string {
 
 function formatNumber(value: number | null | undefined, digits = 2): string {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "--";
+}
+
+function midiToFrequency(midiPitch: number): number {
+  return 440 * 2 ** ((midiPitch - 69) / 12);
 }
 
 function percentile(values: number[], fraction: number): number {
@@ -249,20 +255,29 @@ export default function DebugPitchPracticePage() {
         lastAnalysisAt = now;
         analyser.getFloatTimeDomainData(samples);
         const settings = settingsRef.current;
-        const raw = detectPitchYin(samples, context.sampleRate, {
+        const precisePlaybackMs = songAudioRef.current ? songAudioRef.current.currentTime * 1000 : playbackMsRef.current;
+        const target = getWholeSongPitchTarget(wholeSongKeyRef.current?.notes ?? [], precisePlaybackMs);
+        const broad = detectPitchYin(samples, context.sampleRate, {
           minFrequencyHz: settings.minFrequencyHz,
           maxFrequencyHz: settings.maxFrequencyHz,
           threshold: settings.yinThreshold,
           minRms: 0,
           minConfidence: 0,
         });
+        const guided = target ? detectPitchYin(samples, context.sampleRate, {
+          minFrequencyHz: midiToFrequency(target.note.midiPitch - 2),
+          maxFrequencyHz: midiToFrequency(target.note.midiPitch + 2),
+          threshold: settings.yinThreshold,
+          minRms: 0,
+          minConfidence: 0,
+        }) : null;
+        const guidedCandidateUsed = Boolean(guided && guided.rms >= settings.minRms && guided.confidence >= settings.minConfidence);
+        const raw = guidedCandidateUsed ? guided : broad;
         const sampledWaveform = Array.from({ length: 128 }, (_, index) => samples[Math.floor(index * samples.length / 128)] ?? 0);
         setWaveform(sampledWaveform);
         if (raw) {
           const midiPitch = frequencyToMidi(raw.frequencyHz);
           const accepted = raw.rms >= settings.minRms && raw.confidence >= settings.minConfidence;
-          const precisePlaybackMs = songAudioRef.current ? songAudioRef.current.currentTime * 1000 : playbackMsRef.current;
-          const target = getWholeSongPitchTarget(wholeSongKeyRef.current?.notes ?? [], precisePlaybackMs);
           if (target && detectorTargetIndexRef.current !== target.noteIndex) {
             stabilityRef.current = { frames: [] };
             detectorTargetIndexRef.current = target.noteIndex;
@@ -278,7 +293,7 @@ export default function DebugPitchPracticePage() {
             rms: raw.rms,
           } : null, { stabilityMs: requiredStabilityMs, maxSpreadCents: settings.maxSpreadCents });
           stabilityRef.current = stability.state;
-          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: precisePlaybackMs, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace, expectedMidiPitch: target?.note.midiPitch ?? null };
+          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: precisePlaybackMs, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace, expectedMidiPitch: target?.note.midiPitch ?? null, broadMidiPitch: broad ? frequencyToMidi(broad.frequencyHz) : midiPitch, guidedCandidateUsed };
           setSnapshot(nextSnapshot);
           setHistory((current) => [...current, nextSnapshot].slice(-300));
           if (captureActiveRef.current) {
@@ -366,12 +381,13 @@ export default function DebugPitchPracticePage() {
     const stableFrames = acceptedFrames.filter((frame) => frame.stableMidiPitch !== null);
     const comparableStableFrames = stableFrames.filter((frame) => frame.expectedMidiPitch !== null);
     const matchedFrames = comparableStableFrames.filter((frame) => Math.abs(centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch!)) <= 50);
+    const guidedFrames = frames.filter((frame) => frame.guidedCandidateUsed);
     const playbackMovedMs = frames.length > 1 ? Math.max(...frames.map((frame) => frame.songPlaybackMs)) - Math.min(...frames.map((frame) => frame.songPlaybackMs)) : 0;
     const mostlyQuiet = percentile(rmsValues, 0.9) < minRms;
     const recentStable = stableFrames.slice(-20).map((frame) => {
       const expected = frame.expectedMidiPitch === null ? "none" : `${midiToPitchName(frame.expectedMidiPitch)}(${frame.expectedMidiPitch})`;
       const cents = frame.expectedMidiPitch === null ? "n/a" : String(centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch));
-      return `  t=${(frame.songPlaybackMs / 1000).toFixed(2)}s voice=${midiToPitchName(frame.stableMidiPitch!)}(${frame.stableMidiPitch!.toFixed(2)}) expected=${expected} cents=${cents} rms=${frame.rms.toFixed(4)} conf=${frame.confidence.toFixed(3)}`;
+      return `  t=${(frame.songPlaybackMs / 1000).toFixed(2)}s voice=${midiToPitchName(frame.stableMidiPitch!)}(${frame.stableMidiPitch!.toFixed(2)}) expected=${expected} cents=${cents} source=${frame.guidedCandidateUsed ? "target-band" : "broad"} broad=${midiToPitchName(frame.broadMidiPitch)}(${frame.broadMidiPitch.toFixed(2)}) rms=${frame.rms.toFixed(4)} conf=${frame.confidence.toFixed(3)}`;
     });
     const report = [
       "Cantare pitch diagnostic report",
@@ -383,13 +399,14 @@ export default function DebugPitchPracticePage() {
       `Frames: ${frames.length + noCandidateFrames}; raw candidates: ${frames.length}; no candidate: ${noCandidateFrames}`,
       `Rejected below RMS: ${belowRms}; rejected below confidence: ${belowConfidence}; rejected in transition grace: ${inGrace}`,
       `Accepted voiced frames: ${acceptedFrames.length}; stable frames: ${stableFrames.length}`,
+      `Target-band overrides: ${guidedFrames.length}/${frames.length}`,
       `Stable MIDI matches (±50 cents): ${matchedFrames.length}/${comparableStableFrames.length}`,
       `Quiet-input assessment: ${mostlyQuiet ? "90% of RMS readings were below the voice gate" : "RMS exceeded the voice gate during at least 10% of capture"}`,
       "",
       `RMS min/p50/p90/max: ${(rmsValues.length ? Math.min(...rmsValues) : 0).toFixed(5)} / ${percentile(rmsValues, 0.5).toFixed(5)} / ${percentile(rmsValues, 0.9).toFixed(5)} / ${(rmsValues.length ? Math.max(...rmsValues) : 0).toFixed(5)} (gate ${minRms.toFixed(5)})`,
       `Confidence p50/p90: ${percentile(confidenceValues, 0.5).toFixed(3)} / ${percentile(confidenceValues, 0.9).toFixed(3)} (gate ${minConfidence.toFixed(3)})`,
-      `Most common raw candidates: ${commonPitchNames(frames, false)}`,
-      `Most common accepted candidates: ${commonPitchNames(frames, true)}`,
+      `Most common selected candidates: ${commonPitchNames(frames, false)}`,
+      `Most common accepted selected candidates: ${commonPitchNames(frames, true)}`,
       "",
       `Detector: FFT=${fftSize}; frequency=${minFrequencyHz}-${maxFrequencyHz}Hz; YIN threshold=${yinThreshold}; max spread=${maxSpreadCents} cents`,
       `Timing: adaptive=${adaptiveTimingEnabled}; fallback stability=${stabilityMs}ms`,
@@ -479,8 +496,8 @@ export default function DebugPitchPracticePage() {
           <div className="space-y-5">
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Metric label="Raw YIN candidate" value={`${formatNumber(snapshot?.frequencyHz, 1)} Hz`} />
-                <Metric label="Detected note" value={snapshot ? `${midiToPitchName(snapshot.midiPitch)} (${snapshot.midiPitch.toFixed(2)})` : "--"} />
+                <Metric label="Broad YIN candidate" value={snapshot ? `${midiToPitchName(snapshot.broadMidiPitch)} (${snapshot.broadMidiPitch.toFixed(2)})` : "--"} />
+                <Metric label={snapshot?.guidedCandidateUsed ? "Target-band detected" : "Broad detected"} value={snapshot ? `${midiToPitchName(snapshot.midiPitch)} (${snapshot.midiPitch.toFixed(2)})` : "--"} />
                 <Metric label="Confidence" value={formatNumber(snapshot?.confidence, 3)} tone={snapshot && snapshot.confidence >= minConfidence ? "good" : "warn"} />
                 <Metric label="RMS level" value={formatNumber(snapshot?.rms, 4)} tone={snapshot && snapshot.rms >= minRms ? "good" : "warn"} />
                 <Metric label="Stable note" value={snapshot?.stableMidiPitch !== null && snapshot?.stableMidiPitch !== undefined ? `${midiToPitchName(snapshot.stableMidiPitch)} (${snapshot.stableMidiPitch.toFixed(2)})` : "--"} />
