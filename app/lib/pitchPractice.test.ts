@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centsBetween, detectPitchYin, frequencyToMidi, getAdaptivePitchTiming, getWholeSongPitchTarget, mergeVoicePitchAttempt, scoreVoicePitchAttempts, updatePitchStability, type PitchStabilityState } from "./pitchPractice";
+import { centsBetween, detectPitchYin, findMidiNoteAtOffset, frequencyToMidi, getAdaptivePitchTiming, getWholeSongPitchTarget, mergeVoicePitchAttempt, scoreVoicePitchAttempts, updatePitchStability, type PitchStabilityState } from "./pitchPractice";
 import type { MidiSegmentAnswerKey } from "./midiGuidedTapPractice";
 
 const key: MidiSegmentAnswerKey = {
@@ -61,6 +61,13 @@ describe("pitch practice", () => {
     expect(score.details[0].status).toBe("pitch");
   });
 
+  it("holds the active target until the next MIDI onset", () => {
+    expect(findMidiNoteAtOffset(key, 750, 100)?.midiPitch).toBe(60);
+    expect(findMidiNoteAtOffset(key, 950, 100)).toBeNull();
+    expect(findMidiNoteAtOffset(key, 1050, 100)).toBeNull();
+    expect(findMidiNoteAtOffset(key, 1200, 100)?.midiPitch).toBe(62);
+  });
+
   it.each([
     [100, 40, 15],
     [200, 50, 30],
@@ -75,9 +82,10 @@ describe("pitch practice", () => {
       { index: 0, sourceCleanedMidiNoteIndex: 0, midiPitch: 60, pitchName: "C4", movementFromPrevious: "start" as const, tappedStartTimeSeconds: 0, midiDurationSeconds: 0.4, effectiveDurationSeconds: 0.4 },
       { index: 1, sourceCleanedMidiNoteIndex: 1, midiPitch: 62, pitchName: "D4", movementFromPrevious: "up" as const, tappedStartTimeSeconds: 0.4, midiDurationSeconds: 0.4, effectiveDurationSeconds: 0.4 },
     ];
-    expect(getWholeSongPitchTarget(notes, 150)?.inTransitionGrace).toBe(true);
+    expect(getWholeSongPitchTarget(notes, 350)?.note.midiPitch).toBe(60);
+    expect(getWholeSongPitchTarget(notes, 350)?.inTransitionGrace).toBe(true);
     expect(getWholeSongPitchTarget(notes, 50)?.inTransitionGrace).toBe(false);
-    expect(getWholeSongPitchTarget(notes, 250)?.note.midiPitch).toBe(62);
-    expect(getWholeSongPitchTarget(notes, 250)?.inTransitionGrace).toBe(true);
+    expect(getWholeSongPitchTarget(notes, 450)?.note.midiPitch).toBe(62);
+    expect(getWholeSongPitchTarget(notes, 450)?.inTransitionGrace).toBe(true);
   });
 });

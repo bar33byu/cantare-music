@@ -56,14 +56,16 @@ export function getWholeSongPitchTarget(
 ): WholeSongPitchTarget | null {
   if (notes.length === 0) return null;
   const startsMs = notes.map((note) => note.tappedStartTimeSeconds * 1000);
+  if (playbackMs < startsMs[0]) return null;
   let noteIndex = 0;
   for (let index = 1; index < startsMs.length; index += 1) {
-    if (Math.abs(startsMs[index] - playbackMs) < Math.abs(startsMs[noteIndex] - playbackMs)) noteIndex = index;
+    if (startsMs[index] <= playbackMs) noteIndex = index;
+    else break;
   }
   const note = notes[noteIndex];
   const timing = getAdaptivePitchTiming(note.effectiveDurationSeconds * 1000);
-  const previousBoundaryMs = noteIndex === 0 ? Number.NEGATIVE_INFINITY : (startsMs[noteIndex - 1] + startsMs[noteIndex]) / 2;
-  const nextBoundaryMs = noteIndex === notes.length - 1 ? Number.POSITIVE_INFINITY : (startsMs[noteIndex] + startsMs[noteIndex + 1]) / 2;
+  const previousBoundaryMs = noteIndex === 0 ? Number.NEGATIVE_INFINITY : startsMs[noteIndex];
+  const nextBoundaryMs = noteIndex === notes.length - 1 ? Number.POSITIVE_INFINITY : startsMs[noteIndex + 1];
   const inTransitionGrace = (
     (Number.isFinite(previousBoundaryMs) && playbackMs - previousBoundaryMs < timing.transitionGraceMs) ||
     (Number.isFinite(nextBoundaryMs) && nextBoundaryMs - playbackMs < timing.transitionGraceMs)
@@ -177,16 +179,20 @@ export function findMidiNoteAtOffset(
 ) {
   if (key.notes.length === 0) return null;
   const starts = key.notes.map((note) => note.segmentLocalStartTimeSeconds * 1000);
-  let closestIndex = 0;
+  if (offsetMs < starts[0]) return null;
+  let activeIndex = 0;
   for (let index = 1; index < starts.length; index += 1) {
-    if (Math.abs(starts[index] - offsetMs) < Math.abs(starts[closestIndex] - offsetMs)) closestIndex = index;
+    if (starts[index] <= offsetMs) activeIndex = index;
+    else break;
   }
-  const previousBoundary = closestIndex === 0 ? Number.NEGATIVE_INFINITY : (starts[closestIndex - 1] + starts[closestIndex]) / 2;
-  const nextBoundary = closestIndex === starts.length - 1 ? Number.POSITIVE_INFINITY : (starts[closestIndex] + starts[closestIndex + 1]) / 2;
-  const availableHalfWindow = Math.min(offsetMs - previousBoundary, nextBoundary - offsetMs);
-  const effectiveGrace = Math.min(graceMs, Math.max(0, (nextBoundary - previousBoundary) / 4));
-  if (Number.isFinite(availableHalfWindow) && availableHalfWindow < effectiveGrace) return null;
-  return key.notes[closestIndex];
+  const previousBoundary = activeIndex === 0 ? Number.NEGATIVE_INFINITY : starts[activeIndex];
+  const nextBoundary = activeIndex === starts.length - 1 ? Number.POSITIVE_INFINITY : starts[activeIndex + 1];
+  const ownershipDuration = nextBoundary - previousBoundary;
+  const effectiveGrace = Math.min(graceMs, Number.isFinite(ownershipDuration) ? Math.max(0, ownershipDuration / 4) : graceMs);
+  const nearPreviousOnset = Number.isFinite(previousBoundary) && offsetMs - previousBoundary < effectiveGrace;
+  const nearNextOnset = Number.isFinite(nextBoundary) && nextBoundary - offsetMs < effectiveGrace;
+  if (nearPreviousOnset || nearNextOnset) return null;
+  return key.notes[activeIndex];
 }
 
 export function mergeVoicePitchAttempt(

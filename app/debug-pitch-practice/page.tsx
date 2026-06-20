@@ -64,11 +64,7 @@ function commonPitchNames(frames: PitchSnapshot[], acceptedOnly: boolean): strin
 }
 
 function nearestMidiNote(notes: WholeSongMidiAnswerKeyNote[], playbackMs: number): WholeSongMidiAnswerKeyNote | null {
-  if (notes.length === 0) return null;
-  const playbackSeconds = playbackMs / 1000;
-  return notes.reduce((closest, note) => (
-    Math.abs(note.tappedStartTimeSeconds - playbackSeconds) < Math.abs(closest.tappedStartTimeSeconds - playbackSeconds) ? note : closest
-  ), notes[0]);
+  return getWholeSongPitchTarget(notes, playbackMs)?.note ?? null;
 }
 
 export default function DebugPitchPracticePage() {
