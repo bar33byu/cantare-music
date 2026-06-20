@@ -106,6 +106,7 @@ export default function DebugPitchPracticePage() {
   const [copyStatus, setCopyStatus] = React.useState("");
 
   const streamRef = React.useRef<MediaStream | null>(null);
+  const songAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const contextRef = React.useRef<AudioContext | null>(null);
   const animationRef = React.useRef<number | null>(null);
   const stabilityRef = React.useRef<PitchStabilityState>({ frames: [] });
@@ -264,7 +265,8 @@ export default function DebugPitchPracticePage() {
         if (raw) {
           const midiPitch = frequencyToMidi(raw.frequencyHz);
           const accepted = raw.rms >= settings.minRms && raw.confidence >= settings.minConfidence;
-          const target = getWholeSongPitchTarget(wholeSongKeyRef.current?.notes ?? [], playbackMsRef.current);
+          const precisePlaybackMs = songAudioRef.current ? songAudioRef.current.currentTime * 1000 : playbackMsRef.current;
+          const target = getWholeSongPitchTarget(wholeSongKeyRef.current?.notes ?? [], precisePlaybackMs);
           if (target && detectorTargetIndexRef.current !== target.noteIndex) {
             stabilityRef.current = { frames: [] };
             detectorTargetIndexRef.current = target.noteIndex;
@@ -280,7 +282,7 @@ export default function DebugPitchPracticePage() {
             rms: raw.rms,
           } : null, { stabilityMs: requiredStabilityMs, maxSpreadCents: settings.maxSpreadCents });
           stabilityRef.current = stability.state;
-          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: playbackMsRef.current, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace, expectedMidiPitch: target?.note.midiPitch ?? null };
+          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: precisePlaybackMs, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace, expectedMidiPitch: target?.note.midiPitch ?? null };
           setSnapshot(nextSnapshot);
           setHistory((current) => [...current, nextSnapshot].slice(-300));
           if (captureActiveRef.current) {
@@ -449,6 +451,7 @@ export default function DebugPitchPracticePage() {
                 {song.alternateAudioUrl ? <div className="inline-flex rounded-full border border-indigo-200 p-0.5">{(["part", "blend"] as const).map((version) => <button key={version} type="button" onClick={() => setAudioVersion(version)} className={`rounded-full px-3 py-1 text-xs font-semibold ${audioVersion === version ? "bg-indigo-600 text-white" : "text-indigo-700"}`}>{version === "part" ? "Part" : "Blend"}</button>)}</div> : null}
               </div>
               <audio
+                ref={songAudioRef}
                 className="mt-3 w-full"
                 controls
                 src={audioVersion === "blend" && song.alternateAudioUrl ? song.alternateAudioUrl : song.audioUrl}

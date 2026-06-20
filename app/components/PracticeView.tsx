@@ -355,7 +355,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   } | null>(null);
   const onSegmentPlaybackCompleteRef = React.useRef(onSegmentPlaybackComplete);
   const playScopeRef = React.useRef(playScope);
-  const { isPlaying, isReady, currentMs, durationMs, endedCount = 0, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(directPlaybackAudioUrl, undefined, {
+  const { isPlaying, isReady, currentMs, getCurrentMs, durationMs, endedCount = 0, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(directPlaybackAudioUrl, undefined, {
     onRangeEnd: () => {
       if (playScopeRef.current === "segment") {
         onSegmentPlaybackCompleteRef.current?.();
@@ -470,6 +470,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     enabled: isSingPracticeMode,
     isPlaying,
     currentMs,
+    getCurrentMs,
     segmentStartMs: currentSegment?.startMs ?? 0,
     answerKey: currentMidiSegmentAnswerKey,
     resetToken: tapSessionResetToken,

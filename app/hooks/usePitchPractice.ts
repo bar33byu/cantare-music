@@ -29,6 +29,7 @@ export function usePitchPractice(input: {
   enabled: boolean;
   isPlaying: boolean;
   currentMs: number;
+  getCurrentMs?: () => number;
   segmentStartMs: number;
   answerKey: MidiSegmentAnswerKey | null;
   resetToken: number;
@@ -132,7 +133,8 @@ export function usePitchPractice(input: {
             rms: detection.rms,
           });
           stabilityRef.current = stability.state;
-          const note = findMidiNoteAtOffset(current.answerKey, current.currentMs - current.segmentStartMs);
+          const liveCurrentMs = current.getCurrentMs?.() ?? current.currentMs;
+          const note = findMidiNoteAtOffset(current.answerKey, liveCurrentMs - current.segmentStartMs);
           const centsError = note ? centsBetween(detectedMidiPitch, note.midiPitch) : undefined;
           setLive({
             detectedMidiPitch,

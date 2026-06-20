@@ -57,6 +57,13 @@ describe('useAudioPlayer', () => {
     expect(stub.currentTime).toBe(3);
   });
 
+  it('reads the live audio clock between timeupdate events', () => {
+    const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
+    stub.currentTime = 1.234;
+    expect(result.current.currentMs).toBe(0);
+    expect(result.current.getCurrentMs?.()).toBe(1234);
+  });
+
   it('becomes ready after canplay', () => {
     const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
     act(() => {
