@@ -32,6 +32,7 @@ interface PitchSnapshot {
   expectedMidiPitch: number | null;
   broadMidiPitch: number;
   guidedCandidateUsed: boolean;
+  expectedNoteIndex: number | null;
 }
 
 const inputClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900";
@@ -283,14 +284,14 @@ export default function DebugPitchPracticePage() {
           const requiredStabilityMs = adaptiveTimingEnabledRef.current && adaptiveTiming ? adaptiveTiming.stabilityMs : settings.stabilityMs;
           const transitionGraceMs = adaptiveTimingEnabledRef.current && adaptiveTiming ? adaptiveTiming.transitionGraceMs : 0;
           const inTransitionGrace = Boolean(adaptiveTimingEnabledRef.current && target?.inTransitionGrace);
-          const stability = updatePitchStability(stabilityRef.current, accepted && !inTransitionGrace ? {
+          const stability = accepted && !inTransitionGrace ? updatePitchStability(stabilityRef.current, {
             atMs: now,
             midiPitch,
             confidence: raw.confidence,
             rms: raw.rms,
-          } : null, { stabilityMs: requiredStabilityMs, maxSpreadCents: settings.maxSpreadCents });
+          }, { stabilityMs: requiredStabilityMs, maxSpreadCents: settings.maxSpreadCents, windowMs: target ? target.note.effectiveDurationSeconds * 1000 : requiredStabilityMs + 50 }) : { state: stabilityRef.current, stableMidiPitch: null };
           stabilityRef.current = stability.state;
-          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: precisePlaybackMs, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace, expectedMidiPitch: target?.note.midiPitch ?? null, broadMidiPitch: broad ? frequencyToMidi(broad.frequencyHz) : midiPitch, guidedCandidateUsed };
+          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: precisePlaybackMs, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace, expectedMidiPitch: target?.note.midiPitch ?? null, broadMidiPitch: broad ? frequencyToMidi(broad.frequencyHz) : midiPitch, guidedCandidateUsed, expectedNoteIndex: target?.note.index ?? null };
           setSnapshot(nextSnapshot);
           setHistory((current) => [...current, nextSnapshot].slice(-300));
           if (captureActiveRef.current) {
@@ -298,7 +299,6 @@ export default function DebugPitchPracticePage() {
             if (diagnosticFramesRef.current.length > 5000) diagnosticFramesRef.current.shift();
           }
         } else {
-          stabilityRef.current = { frames: [] };
           setSnapshot(null);
           if (captureActiveRef.current) noCandidateFramesRef.current += 1;
         }
@@ -378,6 +378,27 @@ export default function DebugPitchPracticePage() {
     const stableFrames = acceptedFrames.filter((frame) => frame.stableMidiPitch !== null);
     const comparableStableFrames = stableFrames.filter((frame) => frame.expectedMidiPitch !== null);
     const matchedFrames = comparableStableFrames.filter((frame) => Math.abs(centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch!)) <= 50);
+    const bestFrameByNote = new Map<number, PitchSnapshot>();
+    for (const frame of comparableStableFrames) {
+      if (frame.expectedNoteIndex === null) continue;
+      const existing = bestFrameByNote.get(frame.expectedNoteIndex);
+      const error = Math.abs(centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch!));
+      const existingError = existing ? Math.abs(centsBetween(existing.stableMidiPitch!, existing.expectedMidiPitch!)) : Number.POSITIVE_INFINITY;
+      if (error < existingError) bestFrameByNote.set(frame.expectedNoteIndex, frame);
+    }
+    const attemptedNoteFrames = [...bestFrameByNote.values()];
+    const matchedNoteFrames = attemptedNoteFrames.filter((frame) => Math.abs(centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch!)) <= 50);
+    const minPlaybackMs = frames.length > 0 ? Math.min(...frames.map((frame) => frame.songPlaybackMs)) : 0;
+    const maxPlaybackMs = frames.length > 0 ? Math.max(...frames.map((frame) => frame.songPlaybackMs)) : 0;
+    const encounteredNotes = (wholeSongKey?.notes ?? []).filter((note, index, notes) => {
+      const ownershipStartMs = note.tappedStartTimeSeconds * 1000;
+      const ownershipEndMs = (notes[index + 1]?.tappedStartTimeSeconds ?? Number.POSITIVE_INFINITY) * 1000;
+      return ownershipStartMs <= maxPlaybackMs && ownershipEndMs >= minPlaybackMs;
+    });
+    const noteScorePercent = attemptedNoteFrames.length > 0 ? Math.round(matchedNoteFrames.length / attemptedNoteFrames.length * 100) : 0;
+    const missedNoteSummaries = attemptedNoteFrames
+      .filter((frame) => Math.abs(centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch!)) > 50)
+      .map((frame) => `${midiToPitchName(frame.expectedMidiPitch!)}@${(frame.songPlaybackMs / 1000).toFixed(2)}s (${centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch!)} cents)`);
     const guidedFrames = frames.filter((frame) => frame.guidedCandidateUsed);
     const playbackMovedMs = frames.length > 1 ? Math.max(...frames.map((frame) => frame.songPlaybackMs)) - Math.min(...frames.map((frame) => frame.songPlaybackMs)) : 0;
     const mostlyQuiet = percentile(rmsValues, 0.9) < minRms;
@@ -398,6 +419,9 @@ export default function DebugPitchPracticePage() {
       `Accepted voiced frames: ${acceptedFrames.length}; stable frames: ${stableFrames.length}`,
       `Target-band overrides: ${guidedFrames.length}/${frames.length}`,
       `Stable MIDI matches (±50 cents): ${matchedFrames.length}/${comparableStableFrames.length}`,
+      `Production-style note score: ${noteScorePercent}% (${matchedNoteFrames.length}/${attemptedNoteFrames.length} attempted notes matched)`,
+      `MIDI note coverage: ${attemptedNoteFrames.length}/${encounteredNotes.length} encountered notes received an attempt`,
+      `Missed attempted notes: ${missedNoteSummaries.join(", ") || "none"}`,
       `Quiet-input assessment: ${mostlyQuiet ? "90% of RMS readings were below the voice gate" : "RMS exceeded the voice gate during at least 10% of capture"}`,
       "",
       `RMS min/p50/p90/max: ${(rmsValues.length ? Math.min(...rmsValues) : 0).toFixed(5)} / ${percentile(rmsValues, 0.5).toFixed(5)} / ${percentile(rmsValues, 0.9).toFixed(5)} / ${(rmsValues.length ? Math.max(...rmsValues) : 0).toFixed(5)} (gate ${minRms.toFixed(5)})`,
@@ -415,7 +439,7 @@ export default function DebugPitchPracticePage() {
       ...(recentStable.length > 0 ? recentStable : ["  none"]),
     ].join("\n");
     setDiagnosticReport(report);
-  }, [adaptiveTimingEnabled, audioInfo, autoGainControl, echoCancellation, fftSize, maxFrequencyHz, maxSpreadCents, minConfidence, minFrequencyHz, minRms, noiseSuppression, song, songIdInput, stabilityMs, yinThreshold]);
+  }, [adaptiveTimingEnabled, audioInfo, autoGainControl, echoCancellation, fftSize, maxFrequencyHz, maxSpreadCents, minConfidence, minFrequencyHz, minRms, noiseSuppression, song, songIdInput, stabilityMs, wholeSongKey, yinThreshold]);
 
   const copyDiagnosticReport = React.useCallback(async () => {
     if (!diagnosticReport) return;

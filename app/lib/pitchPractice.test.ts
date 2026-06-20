@@ -63,6 +63,14 @@ describe("pitch practice", () => {
     expect(result.stableMidiPitch).toBeCloseTo(60.1);
   });
 
+  it("accumulates accepted frames across brief gaps within a MIDI note", () => {
+    let state: PitchStabilityState = { frames: [] };
+    let result = updatePitchStability(state, { atMs: 0, midiPitch: 60, confidence: 0.9, rms: 0.1 }, { stabilityMs: 100, windowMs: 400 });
+    state = result.state;
+    result = updatePitchStability(state, { atMs: 200, midiPitch: 60.1, confidence: 0.9, rms: 0.1 }, { stabilityMs: 100, windowMs: 400 });
+    expect(result.stableMidiPitch).toBeCloseTo(60.1);
+  });
+
   it("keeps a later correct correction and scores attempted notes only", () => {
     const attempts = mergeVoicePitchAttempt(
       [{ sourceWholeSongNoteIndex: 1, detectedMidiPitch: 61, centsError: 100 }],

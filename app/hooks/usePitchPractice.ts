@@ -141,7 +141,6 @@ export function usePitchPractice(input: {
           }) : null;
           const detection = guidedDetection ?? broadDetection;
           if (!detection) {
-            stabilityRef.current = { frames: [] };
             if (now - quietSince > 1500) setStatus("quiet");
             animationRef.current = requestAnimationFrame(analyze);
             return;
@@ -149,12 +148,12 @@ export function usePitchPractice(input: {
           quietSince = now;
           setStatus("listening");
           const detectedMidiPitch = frequencyToMidi(detection.frequencyHz);
-          const stability = updatePitchStability(stabilityRef.current, scoringNote ? {
+          const stability = scoringNote ? updatePitchStability(stabilityRef.current, {
             atMs: now,
             midiPitch: detectedMidiPitch,
             confidence: detection.confidence,
             rms: detection.rms,
-          } : null, { stabilityMs: timing?.stabilityMs });
+          }, { stabilityMs: timing?.stabilityMs, windowMs: scoringNote.effectiveDurationSeconds * 1000 }) : { state: stabilityRef.current, stableMidiPitch: null };
           stabilityRef.current = stability.state;
           const centsError = targetNote ? centsBetween(detectedMidiPitch, targetNote.midiPitch) : undefined;
           setLive({

@@ -161,12 +161,13 @@ export function detectPitchYin(
 export function updatePitchStability(
   state: PitchStabilityState,
   frame: StablePitchFrame | null,
-  options: { stabilityMs?: number; maxSpreadCents?: number } = {}
+  options: { stabilityMs?: number; maxSpreadCents?: number; windowMs?: number } = {}
 ): { state: PitchStabilityState; stableMidiPitch: number | null } {
   if (!frame) return { state: { frames: [] }, stableMidiPitch: null };
   const stabilityMs = options.stabilityMs ?? PITCH_STABILITY_MS;
   const maxSpreadCents = options.maxSpreadCents ?? 35;
-  const frames = [...state.frames, frame].filter((item) => item.atMs >= frame.atMs - stabilityMs - 50);
+  const windowMs = Math.max(stabilityMs, options.windowMs ?? stabilityMs + 50);
+  const frames = [...state.frames, frame].filter((item) => item.atMs >= frame.atMs - windowMs);
   if (frames.length < 2 || frame.atMs - frames[0].atMs < stabilityMs) {
     return { state: { frames }, stableMidiPitch: null };
   }
