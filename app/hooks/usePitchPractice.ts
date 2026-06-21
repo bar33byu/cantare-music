@@ -4,6 +4,7 @@ import * as React from "react";
 import type { MidiSegmentAnswerKey } from "../lib/midiGuidedTapPractice";
 import {
   centsBetween,
+  createAdaptiveNoiseGateState,
   detectPitchYin,
   findMidiNoteAtOffset,
   frequencyToMidi,
@@ -12,7 +13,10 @@ import {
   midiToFrequency,
   midiToPitchName,
   scoreVoicePitchAttempts,
+  updateAdaptiveNoiseGate,
   updatePitchStability,
+  MIN_PITCH_CONFIDENCE,
+  type AdaptiveNoiseGateState,
   type PitchStabilityState,
   type VoicePitchAttempt,
 } from "../lib/pitchPractice";
@@ -40,11 +44,12 @@ export function usePitchPractice(input: {
   const [error, setError] = React.useState<string | null>(null);
   const [attempts, setAttempts] = React.useState<VoicePitchAttempt[]>([]);
   const [attemptSegmentId, setAttemptSegmentId] = React.useState<string | null>(input.answerKey?.segmentId ?? null);
-  const [live, setLive] = React.useState<{ detectedMidiPitch: number; detectedName: string; targetMidiPitch?: number; targetName?: string; centsError?: number; level: number } | null>(null);
+  const [live, setLive] = React.useState<{ detectedMidiPitch: number; detectedName: string; targetMidiPitch?: number; targetName?: string; centsError?: number; level: number; gateRms: number; noiseFloorRms: number } | null>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
   const contextRef = React.useRef<AudioContext | null>(null);
   const animationRef = React.useRef<number | null>(null);
   const stabilityRef = React.useRef<PitchStabilityState>({ frames: [] });
+  const noiseGateRef = React.useRef<AdaptiveNoiseGateState>(createAdaptiveNoiseGateState());
   const targetNoteIndexRef = React.useRef<number | null>(null);
   const inputRef = React.useRef(input);
   React.useEffect(() => {
@@ -59,6 +64,7 @@ export function usePitchPractice(input: {
     void contextRef.current?.close().catch(() => undefined);
     contextRef.current = null;
     stabilityRef.current = { frames: [] };
+    noiseGateRef.current = createAdaptiveNoiseGateState();
     setLive(null);
   }, []);
 
@@ -108,6 +114,7 @@ export function usePitchPractice(input: {
       const samples = new Float32Array(analyser.fftSize);
       let quietSince = performance.now();
       let lastAnalysisAt = 0;
+      const initialCalibrationEndsAt = performance.now() + 750;
 
       const analyze = () => {
         if (cancelled) return;
@@ -119,7 +126,13 @@ export function usePitchPractice(input: {
         lastAnalysisAt = now;
         analyser.getFloatTimeDomainData(samples);
         const current = inputRef.current;
+        const broadDetection = detectPitchYin(samples, context.sampleRate, { minRms: 0, minConfidence: 0 });
+        if (!broadDetection) {
+          animationRef.current = requestAnimationFrame(analyze);
+          return;
+        }
         if (!current.isPlaying || !current.answerKey) {
+          noiseGateRef.current = updateAdaptiveNoiseGate(noiseGateRef.current, broadDetection, { calibrating: true }).state;
           stabilityRef.current = { frames: [] };
           targetNoteIndexRef.current = null;
           setStatus("listening");
@@ -135,13 +148,16 @@ export function usePitchPractice(input: {
             stabilityRef.current = { frames: [] };
             targetNoteIndexRef.current = targetNote.sourceWholeSongNoteIndex;
           }
-          const broadDetection = detectPitchYin(samples, context.sampleRate);
           const guidedDetection = targetNote ? detectPitchYin(samples, context.sampleRate, {
             minFrequencyHz: midiToFrequency(targetNote.midiPitch - 2),
             maxFrequencyHz: midiToFrequency(targetNote.midiPitch + 2),
+            minRms: 0,
+            minConfidence: 0,
           }) : null;
-          const detection = guidedDetection ?? broadDetection;
-          if (!detection) {
+          const detection = guidedDetection && guidedDetection.confidence >= MIN_PITCH_CONFIDENCE ? guidedDetection : broadDetection;
+          const gate = updateAdaptiveNoiseGate(noiseGateRef.current, detection, { calibrating: now < initialCalibrationEndsAt });
+          noiseGateRef.current = gate.state;
+          if (!gate.accepted) {
             if (now - quietSince > 1500) setStatus("quiet");
             animationRef.current = requestAnimationFrame(analyze);
             return;
@@ -164,6 +180,8 @@ export function usePitchPractice(input: {
             targetName: targetNote?.pitchName,
             centsError,
             level: detection.rms,
+            gateRms: gate.gateRms,
+            noiseFloorRms: gate.noiseFloorRms,
           });
           if (scoringNote && stability.stableMidiPitch !== null) {
             const stableMidiPitch = stability.stableMidiPitch;

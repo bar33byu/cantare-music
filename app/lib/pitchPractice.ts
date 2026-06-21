@@ -6,6 +6,8 @@ export const PITCH_STABILITY_MS = 120;
 export const PITCH_TRANSITION_GRACE_MS = 100;
 export const MIN_PITCH_RMS = 0.012;
 export const MIN_PITCH_CONFIDENCE = 0.72;
+export const MIN_ADAPTIVE_PITCH_RMS = 0.003;
+export const MAX_ADAPTIVE_PITCH_RMS = 0.04;
 
 export interface PitchDetection {
   frequencyHz: number;
@@ -33,6 +35,55 @@ export interface PitchStabilityState {
 export interface AdaptivePitchTiming {
   stabilityMs: number;
   transitionGraceMs: number;
+}
+
+export interface AdaptiveNoiseGateState {
+  noiseSamples: number[];
+  open: boolean;
+}
+
+export interface AdaptiveNoiseGateResult {
+  state: AdaptiveNoiseGateState;
+  accepted: boolean;
+  noiseFloorRms: number;
+  gateRms: number;
+}
+
+export function createAdaptiveNoiseGateState(): AdaptiveNoiseGateState {
+  return { noiseSamples: [], open: false };
+}
+
+function percentile(values: number[], fraction: number): number {
+  if (values.length === 0) return 0.001;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))];
+}
+
+export function updateAdaptiveNoiseGate(
+  state: AdaptiveNoiseGateState,
+  frame: { rms: number; confidence: number },
+  options: { calibrating?: boolean; minConfidence?: number } = {}
+): AdaptiveNoiseGateResult {
+  const minConfidence = options.minConfidence ?? MIN_PITCH_CONFIDENCE;
+  const noiseFloorBeforeFrame = percentile(state.noiseSamples, 0.8);
+  const startGate = Math.max(MIN_ADAPTIVE_PITCH_RMS, Math.min(MAX_ADAPTIVE_PITCH_RMS, noiseFloorBeforeFrame * 3));
+  const continueGate = Math.max(MIN_ADAPTIVE_PITCH_RMS * 0.75, Math.min(MAX_ADAPTIVE_PITCH_RMS, noiseFloorBeforeFrame * 2));
+  const gateRms = state.open ? continueGate : startGate;
+  const accepted = !options.calibrating && frame.confidence >= minConfidence && frame.rms >= gateRms;
+  const shouldLearnNoise = Boolean(options.calibrating) || (
+    !state.open &&
+    frame.confidence < minConfidence &&
+    frame.rms <= startGate
+  );
+  const noiseSamples = shouldLearnNoise
+    ? [...state.noiseSamples, frame.rms].slice(-150)
+    : state.noiseSamples;
+  return {
+    state: { noiseSamples, open: accepted },
+    accepted,
+    noiseFloorRms: percentile(noiseSamples, 0.8),
+    gateRms,
+  };
 }
 
 export interface WholeSongPitchTarget {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centsBetween, detectPitchYin, findMidiNoteAtOffset, frequencyToMidi, getAdaptivePitchTiming, getWholeSongPitchTarget, mergeVoicePitchAttempt, scoreVoicePitchAttempts, updatePitchStability, type PitchStabilityState } from "./pitchPractice";
+import { centsBetween, createAdaptiveNoiseGateState, detectPitchYin, findMidiNoteAtOffset, frequencyToMidi, getAdaptivePitchTiming, getWholeSongPitchTarget, mergeVoicePitchAttempt, scoreVoicePitchAttempts, updateAdaptiveNoiseGate, updatePitchStability, type PitchStabilityState } from "./pitchPractice";
 import type { MidiSegmentAnswerKey } from "./midiGuidedTapPractice";
 
 const key: MidiSegmentAnswerKey = {
@@ -53,6 +53,30 @@ describe("pitch practice", () => {
     expect(detection).not.toBeNull();
     expect(detection?.rms).toBe(0);
     expect(detection?.confidence).toBe(0);
+  });
+
+  it("adapts its signal gate to quiet and noisy calibration samples", () => {
+    let quiet = createAdaptiveNoiseGateState();
+    let noisy = createAdaptiveNoiseGateState();
+    for (let index = 0; index < 20; index += 1) {
+      quiet = updateAdaptiveNoiseGate(quiet, { rms: 0.001, confidence: 0.1 }, { calibrating: true }).state;
+      noisy = updateAdaptiveNoiseGate(noisy, { rms: 0.01, confidence: 0.1 }, { calibrating: true }).state;
+    }
+    expect(updateAdaptiveNoiseGate(quiet, { rms: 0.005, confidence: 0.9 }).accepted).toBe(true);
+    expect(updateAdaptiveNoiseGate(noisy, { rms: 0.005, confidence: 0.9 }).accepted).toBe(false);
+    expect(updateAdaptiveNoiseGate(noisy, { rms: 0.035, confidence: 0.9 }).accepted).toBe(true);
+  });
+
+  it("uses hysteresis and does not learn a confident sung pitch as noise", () => {
+    let state = createAdaptiveNoiseGateState();
+    for (let index = 0; index < 20; index += 1) {
+      state = updateAdaptiveNoiseGate(state, { rms: 0.002, confidence: 0.1 }, { calibrating: true }).state;
+    }
+    const started = updateAdaptiveNoiseGate(state, { rms: 0.007, confidence: 0.95 });
+    const continued = updateAdaptiveNoiseGate(started.state, { rms: 0.0045, confidence: 0.95 });
+    expect(started.accepted).toBe(true);
+    expect(continued.accepted).toBe(true);
+    expect(continued.noiseFloorRms).toBeCloseTo(0.002);
   });
 
   it("requires a stable pitch window", () => {

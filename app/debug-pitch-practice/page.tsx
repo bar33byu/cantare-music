@@ -6,12 +6,15 @@ import type { Song } from "../types";
 import type { WholeSongMidiAnswerKey, WholeSongMidiAnswerKeyNote } from "../lib/midiGuidedTapPractice";
 import {
   centsBetween,
+  createAdaptiveNoiseGateState,
   detectPitchYin,
   frequencyToMidi,
   getWholeSongPitchTarget,
   midiToFrequency,
   midiToPitchName,
+  updateAdaptiveNoiseGate,
   updatePitchStability,
+  type AdaptiveNoiseGateState,
   type PitchStabilityState,
 } from "../lib/pitchPractice";
 
@@ -33,6 +36,8 @@ interface PitchSnapshot {
   broadMidiPitch: number;
   guidedCandidateUsed: boolean;
   expectedNoteIndex: number | null;
+  noiseFloorRms: number;
+  gateRms: number;
 }
 
 const inputClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900";
@@ -85,6 +90,7 @@ export default function DebugPitchPracticePage() {
   const [stabilityMs, setStabilityMs] = React.useState(120);
   const [maxSpreadCents, setMaxSpreadCents] = React.useState(35);
   const [adaptiveTimingEnabled, setAdaptiveTimingEnabled] = React.useState(true);
+  const [adaptiveNoiseGateEnabled, setAdaptiveNoiseGateEnabled] = React.useState(true);
   const [targetMidiPitch, setTargetMidiPitch] = React.useState(60);
   const [songIdInput, setSongIdInput] = React.useState(DEFAULT_DEBUG_SONG_ID);
   const [song, setSong] = React.useState<Song | null>(null);
@@ -110,10 +116,12 @@ export default function DebugPitchPracticePage() {
   const contextRef = React.useRef<AudioContext | null>(null);
   const animationRef = React.useRef<number | null>(null);
   const stabilityRef = React.useRef<PitchStabilityState>({ frames: [] });
+  const noiseGateRef = React.useRef<AdaptiveNoiseGateState>(createAdaptiveNoiseGateState());
   const settingsRef = React.useRef({ minFrequencyHz, maxFrequencyHz, yinThreshold, minRms, minConfidence, stabilityMs, maxSpreadCents });
   const playbackMsRef = React.useRef(playbackMs);
   const wholeSongKeyRef = React.useRef(wholeSongKey);
   const adaptiveTimingEnabledRef = React.useRef(adaptiveTimingEnabled);
+  const adaptiveNoiseGateEnabledRef = React.useRef(adaptiveNoiseGateEnabled);
   const detectorTargetIndexRef = React.useRef<number | null>(null);
   const captureActiveRef = React.useRef(false);
   const captureStartedAtRef = React.useRef<number | null>(null);
@@ -136,6 +144,11 @@ export default function DebugPitchPracticePage() {
     adaptiveTimingEnabledRef.current = adaptiveTimingEnabled;
     stabilityRef.current = { frames: [] };
   }, [adaptiveTimingEnabled]);
+
+  React.useEffect(() => {
+    adaptiveNoiseGateEnabledRef.current = adaptiveNoiseGateEnabled;
+    noiseGateRef.current = createAdaptiveNoiseGateState();
+  }, [adaptiveNoiseGateEnabled]);
 
   const refreshDevices = React.useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -189,6 +202,7 @@ export default function DebugPitchPracticePage() {
     void contextRef.current?.close().catch(() => undefined);
     contextRef.current = null;
     stabilityRef.current = { frames: [] };
+    noiseGateRef.current = createAdaptiveNoiseGateState();
     setStatus("idle");
     setAudioInfo(null);
   }, []);
@@ -269,13 +283,22 @@ export default function DebugPitchPracticePage() {
           minRms: 0,
           minConfidence: 0,
         }) : null;
-        const guidedCandidateUsed = Boolean(guided && guided.rms >= settings.minRms && guided.confidence >= settings.minConfidence);
+        const guidedCandidateUsed = Boolean(guided && guided.confidence >= settings.minConfidence);
         const raw = guidedCandidateUsed ? guided : broad;
         const sampledWaveform = Array.from({ length: 128 }, (_, index) => samples[Math.floor(index * samples.length / 128)] ?? 0);
         setWaveform(sampledWaveform);
         if (raw) {
           const midiPitch = frequencyToMidi(raw.frequencyHz);
-          const accepted = raw.rms >= settings.minRms && raw.confidence >= settings.minConfidence;
+          const calibratingNoise = songAudioRef.current?.paused ?? true;
+          const adaptiveGate = updateAdaptiveNoiseGate(noiseGateRef.current, raw, {
+            calibrating: calibratingNoise,
+            minConfidence: settings.minConfidence,
+          });
+          noiseGateRef.current = adaptiveGate.state;
+          const gateRms = adaptiveNoiseGateEnabledRef.current ? adaptiveGate.gateRms : settings.minRms;
+          const accepted = adaptiveNoiseGateEnabledRef.current
+            ? adaptiveGate.accepted
+            : raw.rms >= settings.minRms && raw.confidence >= settings.minConfidence;
           if (target && detectorTargetIndexRef.current !== target.noteIndex) {
             stabilityRef.current = { frames: [] };
             detectorTargetIndexRef.current = target.noteIndex;
@@ -291,7 +314,7 @@ export default function DebugPitchPracticePage() {
             rms: raw.rms,
           }, { stabilityMs: requiredStabilityMs, maxSpreadCents: settings.maxSpreadCents, windowMs: target ? target.note.effectiveDurationSeconds * 1000 : requiredStabilityMs + 50 }) : { state: stabilityRef.current, stableMidiPitch: null };
           stabilityRef.current = stability.state;
-          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: precisePlaybackMs, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace, expectedMidiPitch: target?.note.midiPitch ?? null, broadMidiPitch: broad ? frequencyToMidi(broad.frequencyHz) : midiPitch, guidedCandidateUsed, expectedNoteIndex: target?.note.index ?? null };
+          const nextSnapshot: PitchSnapshot = { atMs: now, songPlaybackMs: precisePlaybackMs, frequencyHz: raw.frequencyHz, midiPitch, confidence: raw.confidence, rms: raw.rms, stableMidiPitch: stability.stableMidiPitch, accepted, requiredStabilityMs, transitionGraceMs, inTransitionGrace, expectedMidiPitch: target?.note.midiPitch ?? null, broadMidiPitch: broad ? frequencyToMidi(broad.frequencyHz) : midiPitch, guidedCandidateUsed, expectedNoteIndex: target?.note.index ?? null, noiseFloorRms: adaptiveGate.noiseFloorRms, gateRms };
           setSnapshot(nextSnapshot);
           setHistory((current) => [...current, nextSnapshot].slice(-300));
           if (captureActiveRef.current) {
@@ -325,8 +348,8 @@ export default function DebugPitchPracticePage() {
     : null;
   const rejectionReason = !snapshot
     ? "No periodic pitch candidate"
-    : snapshot.rms < minRms
-      ? `Below RMS gate (${snapshot.rms.toFixed(4)} < ${minRms.toFixed(4)})`
+    : snapshot.rms < snapshot.gateRms
+      ? `Below ${adaptiveNoiseGateEnabled ? "adaptive " : ""}RMS gate (${snapshot.rms.toFixed(4)} < ${snapshot.gateRms.toFixed(4)})`
       : snapshot.confidence < minConfidence
         ? `Below confidence gate (${snapshot.confidence.toFixed(3)} < ${minConfidence.toFixed(3)})`
         : snapshot.inTransitionGrace
@@ -370,9 +393,11 @@ export default function DebugPitchPracticePage() {
     const noCandidateFrames = noCandidateFramesRef.current;
     const elapsedMs = Math.max(0, performance.now() - (captureStartedAtRef.current ?? performance.now()));
     const rmsValues = frames.map((frame) => frame.rms);
+    const gateValues = frames.map((frame) => frame.gateRms);
+    const noiseFloorValues = frames.map((frame) => frame.noiseFloorRms);
     const confidenceValues = frames.map((frame) => frame.confidence);
-    const belowRms = frames.filter((frame) => frame.rms < minRms).length;
-    const belowConfidence = frames.filter((frame) => frame.rms >= minRms && frame.confidence < minConfidence).length;
+    const belowRms = frames.filter((frame) => frame.rms < frame.gateRms).length;
+    const belowConfidence = frames.filter((frame) => frame.rms >= frame.gateRms && frame.confidence < minConfidence).length;
     const inGrace = frames.filter((frame) => frame.accepted && frame.inTransitionGrace).length;
     const acceptedFrames = frames.filter((frame) => frame.accepted && !frame.inTransitionGrace);
     const stableFrames = acceptedFrames.filter((frame) => frame.stableMidiPitch !== null);
@@ -401,7 +426,7 @@ export default function DebugPitchPracticePage() {
       .map((frame) => `${midiToPitchName(frame.expectedMidiPitch!)}@${(frame.songPlaybackMs / 1000).toFixed(2)}s (${centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch!)} cents)`);
     const guidedFrames = frames.filter((frame) => frame.guidedCandidateUsed);
     const playbackMovedMs = frames.length > 1 ? Math.max(...frames.map((frame) => frame.songPlaybackMs)) - Math.min(...frames.map((frame) => frame.songPlaybackMs)) : 0;
-    const mostlyQuiet = percentile(rmsValues, 0.9) < minRms;
+    const mostlyQuiet = frames.filter((frame) => frame.rms >= frame.gateRms).length < frames.length * 0.1;
     const recentStable = stableFrames.slice(-20).map((frame) => {
       const expected = frame.expectedMidiPitch === null ? "none" : `${midiToPitchName(frame.expectedMidiPitch)}(${frame.expectedMidiPitch})`;
       const cents = frame.expectedMidiPitch === null ? "n/a" : String(centsBetween(frame.stableMidiPitch!, frame.expectedMidiPitch));
@@ -424,7 +449,9 @@ export default function DebugPitchPracticePage() {
       `Missed attempted notes: ${missedNoteSummaries.join(", ") || "none"}`,
       `Quiet-input assessment: ${mostlyQuiet ? "90% of RMS readings were below the voice gate" : "RMS exceeded the voice gate during at least 10% of capture"}`,
       "",
-      `RMS min/p50/p90/max: ${(rmsValues.length ? Math.min(...rmsValues) : 0).toFixed(5)} / ${percentile(rmsValues, 0.5).toFixed(5)} / ${percentile(rmsValues, 0.9).toFixed(5)} / ${(rmsValues.length ? Math.max(...rmsValues) : 0).toFixed(5)} (gate ${minRms.toFixed(5)})`,
+      `RMS min/p50/p90/max: ${(rmsValues.length ? Math.min(...rmsValues) : 0).toFixed(5)} / ${percentile(rmsValues, 0.5).toFixed(5)} / ${percentile(rmsValues, 0.9).toFixed(5)} / ${(rmsValues.length ? Math.max(...rmsValues) : 0).toFixed(5)} (fixed fallback ${minRms.toFixed(5)})`,
+      `Adaptive noise floor p50/p90: ${percentile(noiseFloorValues, 0.5).toFixed(5)} / ${percentile(noiseFloorValues, 0.9).toFixed(5)}`,
+      `Effective RMS gate p50/p90: ${percentile(gateValues, 0.5).toFixed(5)} / ${percentile(gateValues, 0.9).toFixed(5)} (${adaptiveNoiseGateEnabled ? "adaptive" : "fixed"})`,
       `Confidence p50/p90: ${percentile(confidenceValues, 0.5).toFixed(3)} / ${percentile(confidenceValues, 0.9).toFixed(3)} (gate ${minConfidence.toFixed(3)})`,
       `Most common selected candidates: ${commonPitchNames(frames, false)}`,
       `Most common accepted selected candidates: ${commonPitchNames(frames, true)}`,
@@ -439,7 +466,7 @@ export default function DebugPitchPracticePage() {
       ...(recentStable.length > 0 ? recentStable : ["  none"]),
     ].join("\n");
     setDiagnosticReport(report);
-  }, [adaptiveTimingEnabled, audioInfo, autoGainControl, echoCancellation, fftSize, maxFrequencyHz, maxSpreadCents, minConfidence, minFrequencyHz, minRms, noiseSuppression, song, songIdInput, stabilityMs, wholeSongKey, yinThreshold]);
+  }, [adaptiveNoiseGateEnabled, adaptiveTimingEnabled, audioInfo, autoGainControl, echoCancellation, fftSize, maxFrequencyHz, maxSpreadCents, minConfidence, minFrequencyHz, minRms, noiseSuppression, song, songIdInput, stabilityMs, wholeSongKey, yinThreshold]);
 
   const copyDiagnosticReport = React.useCallback(async () => {
     if (!diagnosticReport) return;
@@ -520,7 +547,9 @@ export default function DebugPitchPracticePage() {
                 <Metric label="Broad YIN candidate" value={snapshot ? `${midiToPitchName(snapshot.broadMidiPitch)} (${snapshot.broadMidiPitch.toFixed(2)})` : "--"} />
                 <Metric label={snapshot?.guidedCandidateUsed ? "Target-band detected" : "Broad detected"} value={snapshot ? `${midiToPitchName(snapshot.midiPitch)} (${snapshot.midiPitch.toFixed(2)})` : "--"} />
                 <Metric label="Confidence" value={formatNumber(snapshot?.confidence, 3)} tone={snapshot && snapshot.confidence >= minConfidence ? "good" : "warn"} />
-                <Metric label="RMS level" value={formatNumber(snapshot?.rms, 4)} tone={snapshot && snapshot.rms >= minRms ? "good" : "warn"} />
+                <Metric label="RMS level" value={formatNumber(snapshot?.rms, 4)} tone={snapshot && snapshot.rms >= snapshot.gateRms ? "good" : "warn"} />
+                <Metric label="Noise floor" value={formatNumber(snapshot?.noiseFloorRms, 4)} />
+                <Metric label="Effective RMS gate" value={formatNumber(snapshot?.gateRms, 4)} />
                 <Metric label="Stable note" value={snapshot?.stableMidiPitch !== null && snapshot?.stableMidiPitch !== undefined ? `${midiToPitchName(snapshot.stableMidiPitch)} (${snapshot.stableMidiPitch.toFixed(2)})` : "--"} />
                 <Metric label="Target note" value={`${midiToPitchName(effectiveTargetMidiPitch)} (${effectiveTargetMidiPitch})`} />
                 <Metric label="Raw cents to target" value={detectedCents === null ? "--" : `${detectedCents > 0 ? "+" : ""}${detectedCents}`} tone={detectedCents !== null && Math.abs(detectedCents) <= 50 ? "good" : "warn"} />
@@ -569,13 +598,14 @@ export default function DebugPitchPracticePage() {
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="font-semibold">Detector settings</h2>
               <label className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900"><span>Adapt timing to active MIDI duration</span><input type="checkbox" checked={adaptiveTimingEnabled} onChange={(event) => setAdaptiveTimingEnabled(event.target.checked)} /></label>
+              <label className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900"><span>Adapt input gate to background noise</span><input type="checkbox" checked={adaptiveNoiseGateEnabled} onChange={(event) => setAdaptiveNoiseGateEnabled(event.target.checked)} /></label>
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <NumberSetting label="Manual target MIDI" value={targetMidiPitch} min={24} max={108} step={1} onChange={(value) => { setFollowPlayback(false); setTargetMidiPitch(value); }} />
                 <label><span className={labelClass}>FFT size</span><select className={inputClass} value={fftSize} onChange={(event) => setFftSize(Number(event.target.value))} disabled={status === "running"}>{[2048, 4096, 8192].map((size) => <option key={size}>{size}</option>)}</select></label>
                 <NumberSetting label="Min frequency" value={minFrequencyHz} min={30} max={500} step={1} onChange={setMinFrequencyHz} />
                 <NumberSetting label="Max frequency" value={maxFrequencyHz} min={200} max={2000} step={10} onChange={setMaxFrequencyHz} />
                 <NumberSetting label="YIN threshold" value={yinThreshold} min={0.05} max={0.5} step={0.01} onChange={setYinThreshold} />
-                <NumberSetting label="Minimum RMS" value={minRms} min={0} max={0.1} step={0.001} onChange={setMinRms} />
+                <NumberSetting label={adaptiveNoiseGateEnabled ? "Fixed RMS fallback" : "Minimum RMS"} value={minRms} min={0} max={0.1} step={0.001} onChange={setMinRms} />
                 <NumberSetting label="Min confidence" value={minConfidence} min={0} max={1} step={0.01} onChange={setMinConfidence} />
                 <NumberSetting label={adaptiveTimingEnabled ? "Fallback stability ms" : "Stability ms"} value={stabilityMs} min={40} max={500} step={10} onChange={setStabilityMs} />
                 <NumberSetting label="Max spread cents" value={maxSpreadCents} min={5} max={150} step={5} onChange={setMaxSpreadCents} />
