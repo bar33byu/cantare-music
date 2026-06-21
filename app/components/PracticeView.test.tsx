@@ -303,7 +303,10 @@ describe("PracticeView", () => {
     await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("practice-sing-mode-toggle"));
 
-    expect(screen.getByTestId("practice-sing-scoreboard")).toBeInTheDocument();
+    const scoreboard = screen.getByTestId("practice-sing-scoreboard");
+    expect(scoreboard).toBeInTheDocument();
+    expect(scoreboard).not.toHaveAttribute("open");
+    expect(scoreboard.previousElementSibling).toBe(screen.getByTestId("practice-focus"));
     expect(screen.getByTestId("practice-sing-cumulative-score")).toHaveTextContent("50%");
     expect(screen.getByTestId("practice-sing-segment-score-seg-0")).toHaveTextContent("1/2 matched; 2/2 attempted");
     expect(screen.getByTestId("practice-sing-segment-score-seg-1")).toHaveTextContent("--");
