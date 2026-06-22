@@ -17,6 +17,11 @@ export interface WarmupPitchTracePoint {
   midi: number;
 }
 
+export function getWarmupCaptureTailSeconds(latencyMs: number): number {
+  const safeLatencyMs = Number.isFinite(latencyMs) ? Math.max(0, latencyMs) : 0;
+  return (safeLatencyMs + 80) / 1000;
+}
+
 export function useWarmupPitchTrace(input: {
   isPlaying: boolean;
   playheadBeat: number;

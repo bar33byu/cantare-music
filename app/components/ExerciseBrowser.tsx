@@ -10,7 +10,7 @@ import {
   type VocalExercise,
   type VocalRange,
 } from "../lib/vocalExercise";
-import { useWarmupPitchTrace, type WarmupPitchTracePoint } from "../hooks/useWarmupPitchTrace";
+import { getWarmupCaptureTailSeconds, useWarmupPitchTrace, type WarmupPitchTracePoint } from "../hooks/useWarmupPitchTrace";
 
 const DEFAULT_RANGE: VocalRange = { low: 45, high: 64 };
 const NOTE_OPTIONS = Array.from({ length: 61 }, (_, index) => 24 + index);
@@ -220,13 +220,14 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
     master.connect(context.destination);
     const secondsPerBeat = 60 / exercise.tempoBpm / (tempoOverride / 100);
     const startAt = context.currentTime + 0.08;
+    const captureTailSeconds = getWarmupCaptureTailSeconds(inputLatencyMs);
     let cursorSeconds = -Math.max(0, startingBeat) * secondsPerBeat;
     const timeline: TimelineItem[] = [];
 
     path.slice(startingIndex).forEach((semitones, relativeIndex) => {
       const index = startingIndex + relativeIndex;
       const repetitionStart = cursorSeconds;
-      const repetitionEnd = repetitionStart + exercise.durationBeats * secondsPerBeat;
+      const repetitionEnd = repetitionStart + exercise.durationBeats * secondsPerBeat + captureTailSeconds;
       timeline.push({ index, offset: semitones, startSeconds: repetitionStart, endSeconds: repetitionEnd });
       const measureLength = exercise.timeSignature.numerator * (4 / exercise.timeSignature.denominator);
       for (const beat of contextMetronomeBeats) {
@@ -297,7 +298,7 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
       frameRef.current = requestAnimationFrame(update);
     };
     frameRef.current = requestAnimationFrame(update);
-  }, [contextMetronomeBeats, exercise, path, pitchTrace, stop, tempoPercent]);
+  }, [contextMetronomeBeats, exercise, inputLatencyMs, path, pitchTrace, stop, tempoPercent]);
 
   return (
     <section className="space-y-4" data-testid="exercise-player">
