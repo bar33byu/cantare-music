@@ -503,7 +503,7 @@ export function PlaylistPracticeView({
   }, [focusSortKey, livePlaylist.songs, ratingsBySongId]);
 
   const autoDrillQueue = useMemo<AutoDrillQueueItem[]>(() => {
-    return livePlaylist.songs.flatMap((song, songIndex) => {
+    return displayedSongs.flatMap((song, songIndex) => {
       if (!resolvePreferredAudioUrl(song, preferredAudioVersion)) {
         return [];
       }
@@ -525,7 +525,7 @@ export function PlaylistPracticeView({
           };
         });
     });
-  }, [livePlaylist.songs, preferredAudioVersion, ratingsBySongId]);
+  }, [displayedSongs, preferredAudioVersion, ratingsBySongId]);
 
   const currentAutoDrillItem = autoDrillQueue[autoDrillIndex];
 

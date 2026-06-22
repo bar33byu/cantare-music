@@ -21,6 +21,7 @@ Cantare lets you upload songs, divide them into labeled segments, add lyrics, an
 - **Visible MIDI sync status** - the setup panel reports whether the derived contour is ready and how many current sections contain MIDI notes, while temporary success notices clear automatically.
 - **Practice view** - practice one segment at a time with lyric visibility controls, segment navigation, ratings, knowledge tracking, and compact mobile-friendly controls.
 - **Tap practice** - tap along only when a MIDI contour is available, compare attempts against the MIDI-derived up/down/same key, and persist recent attempts.
+- **Pitch practice** - sing along through the microphone when aligned MIDI is available, receive exact-octave pitch feedback, and feed attempted-note results into the same contour history as Tap practice without recording audio.
 - **Contour heat map** - color the card contour from recent tap misses so trouble spots become visible immediately and improve as more attempts are saved.
 - **Playlist practice** - group songs into rehearsal playlists with aggregate stats, asset summaries, Focus, Auto Drill, Listen, and standard Songs modes.
 - **Auto Drill** - automatically loop segments based on ratings, allow forward/back navigation with the card arrows, and keep the auto-drill header compact.

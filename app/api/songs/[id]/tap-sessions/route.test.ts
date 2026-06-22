@@ -102,4 +102,20 @@ describe('POST /api/songs/[id]/tap-sessions', () => {
       segmentId: undefined,
     });
   });
+
+  it('creates a voice session for Sing mode', async () => {
+    vi.mocked(getSongById).mockResolvedValue({ id: 'song-1' } as Awaited<ReturnType<typeof getSongById>>);
+    vi.mocked(createTapPracticeSession).mockResolvedValue({ id: 'voice-1', songId: 'song-1', startedAt: new Date().toISOString(), tapCount: 0 } as Awaited<ReturnType<typeof createTapPracticeSession>>);
+    const request = new Request('http://localhost/api/songs/song-1/tap-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ segmentId: 'segment-1', inputMethod: 'voice' }),
+    });
+    const response = await POST(request as Parameters<typeof POST>[0], { params: Promise.resolve({ id: 'song-1' }) });
+    expect(response.status).toBe(201);
+    expect(createTapPracticeSession).toHaveBeenCalledWith('song-1', 'default', expect.any(Date), expect.objectContaining({
+      segmentId: 'segment-1',
+      inputMethod: 'voice',
+    }));
+  });
 });

@@ -4,6 +4,7 @@ export interface AudioPlayerControls {
   isPlaying: boolean;
   isReady: boolean;
   currentMs: number;
+  getCurrentMs?: () => number;
   durationMs: number;
   endedCount?: number;
   playbackRate?: number;
@@ -499,10 +500,16 @@ export function useAudioPlayer(
     }
   }, [updateDebugInfo]);
 
+  const getCurrentMs = useCallback(() => {
+    const audio = audioRef.current;
+    return audio ? audio.currentTime * 1000 : currentMs;
+  }, [currentMs]);
+
   return {
     isPlaying,
     isReady,
     currentMs,
+    getCurrentMs,
     durationMs,
     endedCount,
     playbackRate,

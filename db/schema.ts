@@ -265,6 +265,7 @@ export const tapPracticeSessions = pgTable(
     segmentId: text("segment_id").references(() => segments.id, { onDelete: "cascade" }),
     audioVersion: text("audio_version").notNull().default("straight"),
     mode: text("mode").notNull().default("practice"),
+    inputMethod: text("input_method").notNull().default("tap"),
     startedAt: timestamp("started_at").notNull().defaultNow(),
     completedAt: timestamp("completed_at"),
     finalizedAt: timestamp("finalized_at"),

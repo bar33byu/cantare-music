@@ -141,6 +141,41 @@
       "when": 1780272000000,
       "tag": "0020_promote_draft_recordings",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781308800000,
+      "tag": "0021_unassigned_draft_recordings",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781395200000,
+      "tag": "0022_playlist_share_audio_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781481600000,
+      "tag": "0023_public_playlist_share_audio_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781568000000,
+      "tag": "0024_user_account_deletion",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781910000000,
+      "tag": "0025_pitch_practice",
+      "breakpoints": true
     }
   ]
 }
