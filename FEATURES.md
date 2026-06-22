@@ -114,8 +114,8 @@ This was previously listed as Version 2.5, but it remains deferred while Version
 
 ## Future Version 3 Work
 
-- [ ] Shared practice sessions
-- [ ] User invitations
+- [ ] Change from two audio files to using a shared blend file and then as many part-specific files as wanted, up to 8 parts to song. Make a user preference about which part file to use. Move all the existing "part" files to the "B1" part as a ont-time migration. There should be S1, S2, A1, A2, T1, T2, B1, B2 parts available. Users's will set a general preference for the part they want. We need a plan for falling back to the other part if the sopranos aren't divided, for example. 
+- [ ] When a user is editing the lyric cards, they can "mute" a card because it represents words they don't sing. The card will display, but will not be rateable and will be slightly grayed out or marked as inactive during practice sessions. These segments would be skipped during hands free practice. 
 - [ ] Collaborative challenges and games
 - [ ] Expanded profiles and leaderboards
 - [ ] Better media lifecycle tooling for old draft and orphaned audio objects
