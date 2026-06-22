@@ -1,6 +1,6 @@
 {
   "name": "cantare-music",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,7 +11,9 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed:exercises": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/seed-vocal-exercises.ts",
+    "db:align:exercise-context": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/align-vocal-exercise-context.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1019.0",

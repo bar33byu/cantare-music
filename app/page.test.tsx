@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Home from './page';
 
@@ -536,6 +537,37 @@ describe('Home page', () => {
     await waitFor(() => {
       expect(screen.getByTestId('mock-select-song')).toBeInTheDocument();
     });
+  });
+
+  it('keeps the server render deterministic when signed-in settings are cached locally', () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      currentUserId: 'test-user',
+      users: [
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+      ],
+    }));
+
+    const html = renderToString(<Home />);
+    expect(html).toContain('Cantare Music (Guest)');
+    expect(html).not.toContain('>Cantare Music</h1>');
+  });
+
+  it('places Exercise after Shared and writes its hash route', async () => {
+    render(<Home />);
+
+    const tabs = screen.getByLabelText('Main sections').querySelectorAll('button');
+    expect(Array.from(tabs).map((tab) => tab.textContent?.trim())).toEqual([
+      'Playlists',
+      'Library',
+      'Shared',
+      'Exercise',
+    ]);
+
+    fireEvent.click(screen.getByTestId('exercise-tab'));
+    expect(await screen.findByTestId('exercise-browser')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.hash).toContain('view=exercise'));
   });
 
   it('refreshes playlist data when returning from song practice to playlist practice', async () => {

@@ -1,7 +1,7 @@
 import { eq, asc, desc, inArray, and, count, lte, sql, isNull, ne, or } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments, vocalExercises, vocalExerciseCollections, vocalExerciseCollectionItems, userVocalRanges } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow, VocalExerciseEventData, VocalExerciseRow } from "./schema";
 import { getPublicUrl } from "../lib/r2";
 import type { PracticeInputMethod, SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
 import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
@@ -155,6 +155,43 @@ export interface PersistedMidiSource {
   cleanedNoteCount: number;
   ignoredShortNoteCount: number;
   parseError?: string | null;
+}
+
+export interface PersistedVocalExercise {
+  id: string;
+  slug?: string;
+  title: string;
+  category?: string;
+  syllable?: string;
+  description?: string;
+  difficulty?: string;
+  pattern?: string;
+  coachingNotes?: string[];
+  collectionSlug?: string;
+  collectionTitle?: string;
+  routinePosition?: number;
+  sourceMidiFile: string;
+  exerciseStartBeat: number;
+  tempoBpm: number;
+  timeSignature: { numerator: number; denominator: number };
+  durationBeats: number;
+  events: VocalExerciseEventData[];
+  createdAt: string;
+}
+
+export interface PersistedVocalExerciseCollection {
+  slug: string;
+  title: string;
+  description?: string;
+  intendedSinger?: string;
+  primaryGoals: string[];
+  restBetweenIterationsMeasures: number;
+  transposeMode: string;
+}
+
+export interface PersistedVocalRange {
+  low: number;
+  high: number;
 }
 
 export interface PersistedDraftRecording {
@@ -5144,4 +5181,189 @@ export async function reorderPlaylistSongs(
         .where(and(eq(playlistSongs.playlistId, playlistId), eq(playlistSongs.songId, songId)))
     )
   );
+}
+
+function mapVocalExercise(
+  row: VocalExerciseRow,
+  collection?: { slug: string | null; title: string | null; position: number | null }
+): PersistedVocalExercise {
+  return {
+    id: row.id,
+    slug: row.slug ?? undefined,
+    title: row.title,
+    category: row.category ?? undefined,
+    syllable: row.syllable ?? undefined,
+    description: row.description ?? undefined,
+    difficulty: row.difficulty ?? undefined,
+    pattern: row.pattern ?? undefined,
+    coachingNotes: row.coachingNotes,
+    collectionSlug: collection?.slug ?? undefined,
+    collectionTitle: collection?.title ?? undefined,
+    routinePosition: collection?.position ?? undefined,
+    sourceMidiFile: row.sourceMidiFile,
+    exerciseStartBeat: row.exerciseStartBeatMilli / 1000,
+    tempoBpm: row.tempoBpmMilli / 1000,
+    timeSignature: {
+      numerator: row.timeSignatureNumerator,
+      denominator: row.timeSignatureDenominator,
+    },
+    durationBeats: row.durationBeatsMilli / 1000,
+    events: row.events,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function vocalExerciseValues(exercise: PersistedVocalExercise) {
+  return {
+    slug: exercise.slug ?? null,
+    title: exercise.title,
+    category: exercise.category ?? null,
+    syllable: exercise.syllable ?? null,
+    description: exercise.description ?? null,
+    difficulty: exercise.difficulty ?? null,
+    pattern: exercise.pattern ?? null,
+    coachingNotes: exercise.coachingNotes ?? [],
+    sourceMidiFile: exercise.sourceMidiFile,
+    exerciseStartBeatMilli: Math.round(exercise.exerciseStartBeat * 1000),
+    tempoBpmMilli: Math.round(exercise.tempoBpm * 1000),
+    timeSignatureNumerator: exercise.timeSignature.numerator,
+    timeSignatureDenominator: exercise.timeSignature.denominator,
+    durationBeatsMilli: Math.round(exercise.durationBeats * 1000),
+    events: exercise.events,
+  };
+}
+
+export async function getVocalExercises(): Promise<PersistedVocalExercise[]> {
+  const rows = await db()
+    .select({
+      exercise: vocalExercises,
+      collectionSlug: vocalExerciseCollectionItems.collectionSlug,
+      collectionTitle: vocalExerciseCollections.title,
+      routinePosition: vocalExerciseCollectionItems.position,
+    })
+    .from(vocalExercises)
+    .leftJoin(vocalExerciseCollectionItems, eq(vocalExerciseCollectionItems.exerciseId, vocalExercises.id))
+    .leftJoin(vocalExerciseCollections, eq(vocalExerciseCollections.slug, vocalExerciseCollectionItems.collectionSlug))
+    .orderBy(asc(vocalExerciseCollectionItems.collectionSlug), asc(vocalExerciseCollectionItems.position), asc(vocalExercises.title));
+  return rows.map((row) => mapVocalExercise(row.exercise, {
+    slug: row.collectionSlug,
+    title: row.collectionTitle,
+    position: row.routinePosition,
+  }));
+}
+
+export async function createVocalExercise(
+  exercise: PersistedVocalExercise,
+  createdByUserId: string
+): Promise<PersistedVocalExercise> {
+  const rows = await db()
+    .insert(vocalExercises)
+    .values({
+      id: exercise.id,
+      ...vocalExerciseValues(exercise),
+      createdByUserId,
+      createdAt: new Date(exercise.createdAt),
+      updatedAt: new Date(),
+    })
+    .returning();
+  return mapVocalExercise(rows[0]);
+}
+
+export async function upsertSeedVocalExercises(
+  exercises: PersistedVocalExercise[],
+  collection?: PersistedVocalExerciseCollection
+): Promise<PersistedVocalExercise[]> {
+  if (collection) {
+    await db()
+      .insert(vocalExerciseCollections)
+      .values({
+        slug: collection.slug,
+        title: collection.title,
+        description: collection.description ?? null,
+        intendedSinger: collection.intendedSinger ?? null,
+        primaryGoals: collection.primaryGoals,
+        restBetweenIterationsMeasures: collection.restBetweenIterationsMeasures,
+        transposeMode: collection.transposeMode,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: vocalExerciseCollections.slug,
+        set: {
+          title: collection.title,
+          description: collection.description ?? null,
+          intendedSinger: collection.intendedSinger ?? null,
+          primaryGoals: collection.primaryGoals,
+          restBetweenIterationsMeasures: collection.restBetweenIterationsMeasures,
+          transposeMode: collection.transposeMode,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  const saved = await Promise.all(exercises.map(async (exercise) => {
+    const values = vocalExerciseValues(exercise);
+    const rows = await db()
+      .insert(vocalExercises)
+      .values({
+        id: exercise.id,
+        ...values,
+        createdByUserId: null,
+        createdAt: new Date(exercise.createdAt),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: vocalExercises.id,
+        set: { ...values, updatedAt: new Date() },
+      })
+      .returning();
+    return mapVocalExercise(rows[0]);
+  }));
+
+  if (collection) {
+    await db().delete(vocalExerciseCollectionItems).where(eq(vocalExerciseCollectionItems.collectionSlug, collection.slug));
+    if (exercises.length > 0) {
+      await db().insert(vocalExerciseCollectionItems).values(exercises.map((exercise, index) => ({
+        collectionSlug: collection.slug,
+        exerciseId: exercise.id,
+        position: exercise.routinePosition ?? index,
+      })));
+    }
+  }
+
+  return saved;
+}
+
+export async function updateVocalExercise(exercise: PersistedVocalExercise): Promise<PersistedVocalExercise | null> {
+  const rows = await db()
+    .update(vocalExercises)
+    .set({ ...vocalExerciseValues(exercise), updatedAt: new Date() })
+    .where(eq(vocalExercises.id, exercise.id))
+    .returning();
+  return rows[0] ? mapVocalExercise(rows[0]) : null;
+}
+
+export async function deleteVocalExercise(id: string): Promise<boolean> {
+  const rows = await db().delete(vocalExercises).where(eq(vocalExercises.id, id)).returning({ id: vocalExercises.id });
+  return rows.length > 0;
+}
+
+export async function getUserVocalRange(userId: string): Promise<PersistedVocalRange | null> {
+  const rows = await db()
+    .select({ low: userVocalRanges.lowMidi, high: userVocalRanges.highMidi })
+    .from(userVocalRanges)
+    .where(eq(userVocalRanges.userId, userId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function saveUserVocalRange(userId: string, range: PersistedVocalRange): Promise<PersistedVocalRange> {
+  const rows = await db()
+    .insert(userVocalRanges)
+    .values({ userId, lowMidi: range.low, highMidi: range.high, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: userVocalRanges.userId,
+      set: { lowMidi: range.low, highMidi: range.high, updatedAt: new Date() },
+    })
+    .returning({ low: userVocalRanges.lowMidi, high: userVocalRanges.highMidi });
+  return rows[0];
 }
