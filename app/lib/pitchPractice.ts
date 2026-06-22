@@ -143,6 +143,13 @@ export function centsBetween(detectedMidiPitch: number, expectedMidiPitch: numbe
   return Math.round((detectedMidiPitch - expectedMidiPitch) * 100);
 }
 
+export function foldPitchToReferenceOctave(detectedMidiPitch: number, referenceMidiPitch: number): number {
+  if (!Number.isFinite(detectedMidiPitch) || !Number.isFinite(referenceMidiPitch)) return detectedMidiPitch;
+  const octaveShift = Math.round((referenceMidiPitch - detectedMidiPitch) / 12) * 12;
+  const folded = detectedMidiPitch + octaveShift;
+  return Math.abs(detectedMidiPitch - referenceMidiPitch) >= 10.5 ? folded : detectedMidiPitch;
+}
+
 export function detectPitchYin(
   samples: Float32Array,
   sampleRate: number,

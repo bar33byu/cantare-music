@@ -178,6 +178,10 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
   const firstExerciseNote = [...exercise.events]
     .filter((event) => event.region === "exercise")
     .sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi)[0];
+  const pitchTargets = useMemo(() => exercise.events
+    .filter((event) => event.region === "exercise")
+    .sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi)
+    .map((event) => ({ startBeat: event.startBeat, midi: event.midi + offset })), [exercise.events, offset]);
   const pitchTrace = useWarmupPitchTrace({
     isPlaying,
     playheadBeat,
@@ -187,6 +191,7 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
     tempoBpm: exercise.tempoBpm,
     tempoPercent,
     latencyMs: inputLatencyMs,
+    pitchTargets,
   });
 
   const stop = useCallback(() => {

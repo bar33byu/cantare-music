@@ -4,7 +4,10 @@ import * as React from "react";
 import {
   createAdaptiveNoiseGateState,
   detectPitchYin,
+  foldPitchToReferenceOctave,
   frequencyToMidi,
+  midiToFrequency,
+  MIN_PITCH_CONFIDENCE,
   updateAdaptiveNoiseGate,
   type AdaptiveNoiseGateState,
 } from "../lib/pitchPractice";
@@ -23,6 +26,7 @@ export function useWarmupPitchTrace(input: {
   tempoBpm: number;
   tempoPercent: number;
   latencyMs: number;
+  pitchTargets: Array<{ startBeat: number; midi: number }>;
 }) {
   const [isListening, setIsListening] = React.useState(false);
   const [status, setStatus] = React.useState("Microphone off");
@@ -89,14 +93,28 @@ export function useWarmupPitchTrace(input: {
           return;
         }
         lastAnalysisAt = now;
-        analyser.getFloatTimeDomainData(samples);
         const current = inputRef.current;
-        const detection = detectPitchYin(samples, context.sampleRate, { minRms: 0, minConfidence: 0 });
+        const secondsPerBeat = 60 / current.tempoBpm / (current.tempoPercent / 100);
+        const beat = current.playheadBeat - current.latencyMs / 1000 / secondsPerBeat;
+        const target = current.pitchTargets.reduce<{ startBeat: number; midi: number } | null>(
+          (active, candidate) => candidate.startBeat <= beat ? candidate : active,
+          null
+        );
+        analyser.getFloatTimeDomainData(samples);
+        const detection = target
+          ? detectPitchYin(samples, context.sampleRate, {
+              minFrequencyHz: midiToFrequency(target.midi - 5),
+              maxFrequencyHz: midiToFrequency(target.midi + 5),
+              minRms: 0,
+              minConfidence: MIN_PITCH_CONFIDENCE,
+            })
+          : detectPitchYin(samples, context.sampleRate, { minRms: 0, minConfidence: 0 });
         if (detection) {
           const gate = updateAdaptiveNoiseGate(gateRef.current, detection, { calibrating: !current.isPlaying });
           gateRef.current = gate.state;
           if (gate.accepted && current.isPlaying) {
-            const midi = frequencyToMidi(detection.frequencyHz);
+            const detectedMidi = frequencyToMidi(detection.frequencyHz);
+            const midi = target ? foldPitchToReferenceOctave(detectedMidi, target.midi) : detectedMidi;
             recentRef.current = [...recentRef.current, midi].slice(-3);
             const sorted = [...recentRef.current].sort((a, b) => a - b);
             const median = sorted[Math.floor(sorted.length / 2)];
@@ -106,8 +124,6 @@ export function useWarmupPitchTrace(input: {
               : previous + (median - previous) * 0.48;
             smoothedRef.current = smoothed;
             lastAcceptedAt = now;
-            const secondsPerBeat = 60 / current.tempoBpm / (current.tempoPercent / 100);
-            const beat = current.playheadBeat - current.latencyMs / 1000 / secondsPerBeat;
             if (beat >= current.exerciseStartBeat && beat <= current.exerciseEndBeat) {
               setPoints((existing) => [...existing, { beat, midi: smoothed }].slice(-500));
             }
