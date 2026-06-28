@@ -17,6 +17,16 @@ export interface WarmupPitchTracePoint {
   midi: number;
 }
 
+export const WARMUP_MIC_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+};
+
+const NEAR_TARGET_CONFIDENCE = 0.45;
+const NEAR_TARGET_MAX_SEMITONES = 0.85;
+const NEAR_TARGET_MIN_RMS = 0.0015;
+
 export function getWarmupCaptureTailSeconds(latencyMs: number): number {
   const safeLatencyMs = Number.isFinite(latencyMs) ? Math.max(0, latencyMs) : 0;
   return (safeLatencyMs + 80) / 1000;
@@ -42,6 +52,7 @@ export function useWarmupPitchTrace(input: {
   const gateRef = React.useRef<AdaptiveNoiseGateState>(createAdaptiveNoiseGateState());
   const recentRef = React.useRef<number[]>([]);
   const smoothedRef = React.useRef<number | null>(null);
+  const targetMidiRef = React.useRef<number | null>(null);
   const inputRef = React.useRef(input);
   React.useEffect(() => { inputRef.current = input; }, [input]);
 
@@ -55,6 +66,7 @@ export function useWarmupPitchTrace(input: {
     gateRef.current = createAdaptiveNoiseGateState();
     recentRef.current = [];
     smoothedRef.current = null;
+    targetMidiRef.current = null;
     setIsListening(false);
     setStatus("Microphone off");
   }, []);
@@ -72,7 +84,7 @@ export function useWarmupPitchTrace(input: {
     setStatus("Starting microphone...");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false },
+        audio: WARMUP_MIC_AUDIO_CONSTRAINTS,
       });
       const context = new AudioContextCtor();
       if (context.state === "suspended") await context.resume();
@@ -106,20 +118,34 @@ export function useWarmupPitchTrace(input: {
           null
         );
         analyser.getFloatTimeDomainData(samples);
-        const detection = target
+        const guidedDetection = target
           ? detectPitchYin(samples, context.sampleRate, {
               minFrequencyHz: midiToFrequency(target.midi - 5),
               maxFrequencyHz: midiToFrequency(target.midi + 5),
               minRms: 0,
-              minConfidence: MIN_PITCH_CONFIDENCE,
+              minConfidence: 0,
             })
-          : detectPitchYin(samples, context.sampleRate, { minRms: 0, minConfidence: 0 });
+          : null;
+        const broadDetection = detectPitchYin(samples, context.sampleRate, { minRms: 0, minConfidence: 0 });
+        const detection = target && guidedDetection ? guidedDetection : broadDetection;
         if (detection) {
-          const gate = updateAdaptiveNoiseGate(gateRef.current, detection, { calibrating: !current.isPlaying });
+          const detectedMidi = frequencyToMidi(detection.frequencyHz);
+          const midi = target ? foldPitchToReferenceOctave(detectedMidi, target.midi) : detectedMidi;
+          const nearTarget = Boolean(target)
+            && Math.abs(midi - target!.midi) <= NEAR_TARGET_MAX_SEMITONES
+            && detection.confidence >= NEAR_TARGET_CONFIDENCE
+            && detection.rms >= NEAR_TARGET_MIN_RMS;
+          const gate = updateAdaptiveNoiseGate(gateRef.current, detection, {
+            calibrating: !current.isPlaying,
+            minConfidence: target ? NEAR_TARGET_CONFIDENCE : MIN_PITCH_CONFIDENCE,
+          });
           gateRef.current = gate.state;
-          if (gate.accepted && current.isPlaying) {
-            const detectedMidi = frequencyToMidi(detection.frequencyHz);
-            const midi = target ? foldPitchToReferenceOctave(detectedMidi, target.midi) : detectedMidi;
+          if ((gate.accepted || nearTarget) && current.isPlaying) {
+            if (targetMidiRef.current !== (target?.midi ?? null)) {
+              recentRef.current = [];
+              smoothedRef.current = null;
+              targetMidiRef.current = target?.midi ?? null;
+            }
             recentRef.current = [...recentRef.current, midi].slice(-3);
             const sorted = [...recentRef.current].sort((a, b) => a - b);
             const median = sorted[Math.floor(sorted.length / 2)];
@@ -157,6 +183,7 @@ export function useWarmupPitchTrace(input: {
   React.useEffect(() => {
     recentRef.current = [];
     smoothedRef.current = null;
+    targetMidiRef.current = null;
     setPoints([]);
   }, [input.repetitionIndex]);
   React.useEffect(() => stop, [stop]);

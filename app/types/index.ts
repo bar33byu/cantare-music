@@ -91,6 +91,7 @@ export interface Playlist {
   id: string;
   name: string;
   eventDate?: string;
+  performanceStatus?: "Performed" | "Absent" | "Sick" | "Canceled" | null;
   isRetired: boolean;
   isPublic?: boolean;
   publishedAt?: string | null;
@@ -116,6 +117,7 @@ export interface SharedPlaylistListItem {
   id: string;
   name: string;
   eventDate?: string;
+  performanceStatus?: "Performed" | "Absent" | "Sick" | "Canceled" | null;
   isRetired: boolean;
   isPublic: boolean;
   publishedAt?: string | null;

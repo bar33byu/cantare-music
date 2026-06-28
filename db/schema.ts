@@ -199,6 +199,7 @@ export const playlists = pgTable(
     userId: text("user_id").notNull().default("default"),
     name: text("name").notNull(),
     eventDate: text("event_date"),
+    performanceStatus: text("performance_status"),
     isRetired: boolean("is_retired").notNull().default(false),
     isPublic: boolean("is_public").notNull().default(false),
     publishedAt: timestamp("published_at"),
@@ -310,6 +311,26 @@ export const tapPracticeTaps = pgTable(
   },
   (table) => ({
     sessionCreatedAtIdx: index("idx_tap_practice_taps_session_created_at").on(table.sessionId, table.createdAt),
+  })
+);
+
+export const songPracticeSessions = pgTable(
+  "song_practice_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().default("default"),
+    songId: text("song_id")
+      .notNull()
+      .references(() => songs.id, { onDelete: "cascade" }),
+    segmentId: text("segment_id").references(() => segments.id, { onDelete: "set null" }),
+    source: text("source").notNull().default("song"),
+    startedAt: timestamp("started_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+    durationSeconds: integer("duration_seconds").notNull().default(0),
+  },
+  (table) => ({
+    userStartedAtIdx: index("idx_song_practice_sessions_user_started_at").on(table.userId, table.startedAt),
+    userSongStartedAtIdx: index("idx_song_practice_sessions_user_song_started_at").on(table.userId, table.songId, table.startedAt),
   })
 );
 
@@ -427,6 +448,26 @@ export const vocalExerciseCollectionItems = pgTable(
   })
 );
 
+export const vocalExercisePracticeSessions = pgTable(
+  "vocal_exercise_practice_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().default("default"),
+    exerciseId: text("exercise_id")
+      .notNull()
+      .references(() => vocalExercises.id, { onDelete: "cascade" }),
+    startedAt: timestamp("started_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+    durationSeconds: integer("duration_seconds").notNull().default(0),
+    tempoPercent: integer("tempo_percent").notNull().default(100),
+    repetitionCount: integer("repetition_count").notNull().default(0),
+  },
+  (table) => ({
+    userStartedAtIdx: index("idx_vocal_exercise_practice_user_started_at").on(table.userId, table.startedAt),
+    userExerciseStartedAtIdx: index("idx_vocal_exercise_practice_user_exercise_started_at").on(table.userId, table.exerciseId, table.startedAt),
+  })
+);
+
 export const userVocalRanges = pgTable("user_vocal_ranges", {
   userId: text("user_id")
     .primaryKey()
@@ -455,8 +496,10 @@ export type OrphanedAudioKeyRow = InferSelectModel<typeof orphanedAudioKeys>;
 export type DraftRecordingRow = InferSelectModel<typeof draftRecordings>;
 export type TapPracticeSessionRow = InferSelectModel<typeof tapPracticeSessions>;
 export type TapPracticeTapRow = InferSelectModel<typeof tapPracticeTaps>;
+export type SongPracticeSessionRow = InferSelectModel<typeof songPracticeSessions>;
 export type MidiSourceRow = InferSelectModel<typeof midiSources>;
 export type MidiAlignmentRow = InferSelectModel<typeof midiAlignments>;
 export type VocalExerciseRow = InferSelectModel<typeof vocalExercises>;
 export type VocalExerciseCollectionRow = InferSelectModel<typeof vocalExerciseCollections>;
+export type VocalExercisePracticeSessionRow = InferSelectModel<typeof vocalExercisePracticeSessions>;
 export type UserVocalRangeRow = InferSelectModel<typeof userVocalRanges>;

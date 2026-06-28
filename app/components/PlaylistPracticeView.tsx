@@ -1655,6 +1655,8 @@ export function PlaylistPracticeView({
                     onNextSegment={handleNextFocusSegment}
                     canUsePrevSegment={currentFocusIndex > 0}
                     canUseNextSegment={currentFocusIndex < focusQueue.length - 1}
+                    practiceTimeTrackingEnabled={progressStorage !== 'none'}
+                    practiceTimeSource="playlist-focus"
                   />
                 </div>
               ) : null}
@@ -1787,6 +1789,8 @@ export function PlaylistPracticeView({
                     onNextSegment={handleNextAutoDrillSegment}
                     canUsePrevSegment={autoDrillIndex > 0}
                     canUseNextSegment={autoDrillIndex < autoDrillQueue.length - 1}
+                    practiceTimeTrackingEnabled={progressStorage !== 'none'}
+                    practiceTimeSource="playlist-auto"
                   />
                 </div>
               ) : null}

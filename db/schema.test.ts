@@ -13,6 +13,8 @@ import {
   draftRecordings,
   tapPracticeSessions,
   tapPracticeTaps,
+  songPracticeSessions,
+  vocalExercisePracticeSessions,
 } from "./schema";
 
 describe("schema tables", () => {
@@ -104,6 +106,7 @@ describe("schema tables", () => {
     expect(cols).toContain("userId");
     expect(cols).toContain("name");
     expect(cols).toContain("eventDate");
+    expect(cols).toContain("performanceStatus");
     expect(cols).toContain("isRetired");
     expect(cols).toContain("isPublic");
     expect(cols).toContain("publishedAt");
@@ -165,5 +168,29 @@ describe("schema tables", () => {
     expect(cols).toContain("durationMs");
     expect(cols).toContain("laneMilli");
     expect(cols).toContain("createdAt");
+  });
+
+  it("songPracticeSessions table has expected columns", () => {
+    const cols = Object.keys(songPracticeSessions);
+    expect(cols).toContain("id");
+    expect(cols).toContain("userId");
+    expect(cols).toContain("songId");
+    expect(cols).toContain("segmentId");
+    expect(cols).toContain("source");
+    expect(cols).toContain("startedAt");
+    expect(cols).toContain("completedAt");
+    expect(cols).toContain("durationSeconds");
+  });
+
+  it("vocalExercisePracticeSessions table has expected columns", () => {
+    const cols = Object.keys(vocalExercisePracticeSessions);
+    expect(cols).toContain("id");
+    expect(cols).toContain("userId");
+    expect(cols).toContain("exerciseId");
+    expect(cols).toContain("startedAt");
+    expect(cols).toContain("completedAt");
+    expect(cols).toContain("durationSeconds");
+    expect(cols).toContain("tempoPercent");
+    expect(cols).toContain("repetitionCount");
   });
 });

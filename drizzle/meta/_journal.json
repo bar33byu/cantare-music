@@ -197,6 +197,27 @@
       "when": 1782100800000,
       "tag": "0028_vocal_exercise_collections",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1782604800000,
+      "tag": "0029_vocal_exercise_practice_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1782691200000,
+      "tag": "0030_song_practice_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1782777600000,
+      "tag": "0031_playlist_performances",
+      "breakpoints": true
     }
   ]
 }

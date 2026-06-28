@@ -35,19 +35,21 @@ describe("ExerciseBrowser permissions", () => {
     render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
 
     expect(await screen.findByRole("button", { name: /Shared Triad/ })).toBeInTheDocument();
-    expect(screen.getByText(/Sign in to set and save/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sign in to set and save/)).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.queryByText("Add shared MIDI exercise")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Shared Triad/ }));
     expect(await screen.findByTestId("exercise-detail-page")).toBeInTheDocument();
-    expect(screen.getByLabelText(/Tempo:/)).not.toBeDisabled();
+    expect(screen.getByLabelText("Tempo")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Exercise begins at beat")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Exercises/ }));
     expect(await screen.findByTestId("exercise-browser")).toBeInTheDocument();
   });
 
-  it("loads and saves range controls for a signed-in user", async () => {
+  it("loads the saved range for a signed-in user's exercise playback", async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/exercises") return { ok: true, json: async () => ({ exercises: [exercise] }) };
@@ -60,13 +62,16 @@ describe("ExerciseBrowser permissions", () => {
 
     render(<ExerciseBrowser userId="user-1" isSignedIn isAdmin={false} />);
     expect(await screen.findByRole("button", { name: /Shared Triad/ })).toBeInTheDocument();
-    const selects = await screen.findAllByRole("combobox");
-    fireEvent.change(selects[0], { target: { value: "46" } });
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/users/me/vocal-range",
-      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ low: 46, high: 64 }) })
+      expect.objectContaining({ cache: "no-store" })
     ));
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/users/me/vocal-range",
+      expect.objectContaining({ method: "PATCH" })
+    );
     expect(screen.queryByText("Add shared MIDI exercise")).not.toBeInTheDocument();
   });
 
@@ -82,6 +87,18 @@ describe("ExerciseBrowser permissions", () => {
     fireEvent.click(screen.getByRole("button", { name: /Next exercise/ }));
     expect(screen.getByRole("heading", { name: "Five Note Scale" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Next exercise/ })).toBeDisabled();
+  });
+
+  it("opens coaching notes by default in the exercise player", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ exercises: [{ ...exercise, coachingNotes: ["Keep the onset easy."] }] }),
+    }));
+
+    render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Shared Triad/ }));
+    const notes = await screen.findByText("Coaching notes");
+    expect(notes.closest("details")).toHaveAttribute("open");
   });
 
   it("groups collection exercises under their collection title", async () => {

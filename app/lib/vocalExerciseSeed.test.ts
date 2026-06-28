@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { getExercisePitchRange } from "./vocalExercise";
 import { parseVocalExerciseSeed, parseVocalExerciseSeedBundle, scientificPitchToMidi } from "./vocalExerciseSeed";
+import baritoneWarmupsSeed from "../data/baritone-passaggio-warmups.seed.json";
+import legacyExercisesSeed from "../data/legacy-vocal-exercises.seed.json";
+
+const ALLOWED_SING_DURATIONS = new Set([1 / 3, 0.5, 1, 2, 4]);
+
+function isAllowedDivision(value: number): boolean {
+  return Math.abs(value * 2 - Math.round(value * 2)) < 1e-9
+    || Math.abs(value * 3 - Math.round(value * 3)) < 1e-9;
+}
 
 describe("vocal exercise seed mapping", () => {
   it("uses scientific pitch notation with C4 at MIDI 60", () => {
@@ -82,5 +91,32 @@ describe("vocal exercise seed mapping", () => {
       coachingNotes: ["Stay light."],
     });
     expect(bundle.exercises[1].tempoBpm).toBe(84);
+  });
+
+  it("keeps the baritone warmup singing entrances one beat after context", () => {
+    const { exercises } = parseVocalExerciseSeedBundle(baritoneWarmupsSeed, "2026-06-21T00:00:00.000Z");
+    for (const exercise of exercises) {
+      const contextEnd = Math.max(...exercise.events
+        .filter((event) => event.region === "context")
+        .map((event) => event.startBeat + event.durationBeats));
+      const exerciseStart = Math.min(...exercise.events
+        .filter((event) => event.region === "exercise")
+        .map((event) => event.startBeat));
+      expect(exerciseStart - contextEnd, exercise.slug).toBeCloseTo(1);
+    }
+  });
+
+  it("uses conventional note divisions for seeded singing patterns", () => {
+    const bundles = [baritoneWarmupsSeed, legacyExercisesSeed];
+    const exercises = bundles.flatMap((seed) => parseVocalExerciseSeedBundle(seed, "2026-06-21T00:00:00.000Z").exercises);
+    for (const exercise of exercises) {
+      for (const event of exercise.events.filter((candidate) => candidate.region === "exercise")) {
+        expect(isAllowedDivision(event.startBeat), `${exercise.slug} start ${event.startBeat}`).toBe(true);
+        expect(
+          [...ALLOWED_SING_DURATIONS].some((duration) => Math.abs(event.durationBeats - duration) < 1e-9),
+          `${exercise.slug} duration ${event.durationBeats}`
+        ).toBe(true);
+      }
+    }
   });
 });

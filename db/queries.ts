@@ -1,7 +1,7 @@
 import { eq, asc, desc, inArray, and, count, lte, sql, isNull, ne, or } from "drizzle-orm";
 import { db } from "./index";
-import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, midiSources, midiAlignments, vocalExercises, vocalExerciseCollections, vocalExerciseCollectionItems, userVocalRanges } from "./schema";
-import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow, VocalExerciseEventData, VocalExerciseRow } from "./schema";
+import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, songPracticeSessions, midiSources, midiAlignments, vocalExercises, vocalExerciseCollections, vocalExerciseCollectionItems, vocalExercisePracticeSessions, userVocalRanges } from "./schema";
+import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, SongPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow, VocalExerciseEventData, VocalExerciseRow, VocalExercisePracticeSessionRow } from "./schema";
 import { getPublicUrl } from "../lib/r2";
 import type { PracticeInputMethod, SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
 import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
@@ -48,6 +48,89 @@ function getNextImportedCopyName(baseName: string, existingNames: string[]): str
 
 export function getImportedPlaylistName(sourceName: string, existingNames: string[]): string {
   return getNextImportedCopyName(sourceName, existingNames);
+}
+
+export const PLAYLIST_PERFORMANCE_STATUSES = ["Performed", "Absent", "Sick", "Canceled"] as const;
+export type PlaylistPerformanceStatus = typeof PLAYLIST_PERFORMANCE_STATUSES[number];
+
+function normalizePlaylistPerformanceStatus(value: unknown): PlaylistPerformanceStatus | null {
+  return PLAYLIST_PERFORMANCE_STATUSES.find((status) => status === value) ?? null;
+}
+
+function getNextDuplicatedPlaylistName(baseName: string, existingNames: string[]): string {
+  const fallbackBaseName = baseName.trim() || "Playlist";
+  const existingNameKeys = new Set(existingNames.map(normalizeImportedNameKey));
+  let copyNumber = 2;
+  let candidate = `${fallbackBaseName} (copy)`;
+  while (existingNameKeys.has(normalizeImportedNameKey(candidate))) {
+    candidate = `${fallbackBaseName} (copy ${copyNumber})`;
+    copyNumber += 1;
+  }
+  return candidate;
+}
+
+const MONTH_NAME_TO_NUMBER: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+};
+
+function toValidDateKey(year: number, month: number, day: number): string | null {
+  if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+  const value = new Date(Date.UTC(year, month - 1, day));
+  if (value.getUTCFullYear() !== year || value.getUTCMonth() !== month - 1 || value.getUTCDate() !== day) {
+    return null;
+  }
+  return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+}
+
+export function extractPlaylistEventDateFromName(name: string): string | null {
+  const trimmed = name.trim();
+  const isoMatch = trimmed.match(/\b(20\d{2}|19\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if (isoMatch) {
+    return toValidDateKey(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]));
+  }
+
+  const usNumericMatch = trimmed.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2}|19\d{2})\b/);
+  if (usNumericMatch) {
+    return toValidDateKey(Number(usNumericMatch[3]), Number(usNumericMatch[1]), Number(usNumericMatch[2]));
+  }
+
+  const monthNamePattern = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+  const monthFirstMatch = trimmed.match(new RegExp(`\\b${monthNamePattern}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?[,]?\\s+(20\\d{2}|19\\d{2})\\b`, "i"));
+  if (monthFirstMatch) {
+    return toValidDateKey(Number(monthFirstMatch[3]), MONTH_NAME_TO_NUMBER[monthFirstMatch[1].toLowerCase()], Number(monthFirstMatch[2]));
+  }
+
+  const dayFirstMatch = trimmed.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+${monthNamePattern}\\.?[,]?\\s+(20\\d{2}|19\\d{2})\\b`, "i"));
+  if (dayFirstMatch) {
+    return toValidDateKey(Number(dayFirstMatch[3]), MONTH_NAME_TO_NUMBER[dayFirstMatch[2].toLowerCase()], Number(dayFirstMatch[1]));
+  }
+
+  return null;
 }
 
 export function getImportedSongTitle(sourceTitle: string, playlistName: string, existingTitles: string[]): string {
@@ -194,6 +277,87 @@ export interface PersistedVocalRange {
   high: number;
 }
 
+export interface PersistedVocalExercisePracticeSession {
+  id: string;
+  userId: string;
+  exerciseId: string;
+  exerciseTitle?: string;
+  startedAt: string;
+  completedAt?: string | null;
+  durationSeconds: number;
+  tempoPercent: number;
+  repetitionCount: number;
+}
+
+export interface PersistedSongPracticeSession {
+  id: string;
+  userId: string;
+  songId: string;
+  songTitle?: string;
+  segmentId?: string | null;
+  source: string;
+  startedAt: string;
+  completedAt?: string | null;
+  durationSeconds: number;
+}
+
+export interface StatsBucket {
+  label: string;
+  seconds: number;
+  sessionCount: number;
+}
+
+export interface PracticeStatsSummary {
+  userId: string;
+  generatedAt: string;
+  songs: {
+    total: number;
+    masteredAbove80: number;
+    practicedRecently: number;
+    untouchedOverSixMonths: number;
+    neverPracticed: number;
+    averageMasteryPercent: number;
+    untouchedSongs: Array<{ id: string; title: string; artist?: string | null; lastPracticedAt: string | null; masteryPercent: number }>;
+    strongestSong?: { id: string; title: string; masteryPercent: number };
+    stalestSong?: { id: string; title: string; lastPracticedAt: string | null; masteryPercent: number };
+  };
+  songPractice: {
+    totalSessions: number;
+    totalSeconds: number;
+    practicedDays: number;
+    averageSecondsPerPracticedDay: number;
+    averageSecondsPerSession: number;
+    daily: StatsBucket[];
+    weekly: StatsBucket[];
+    monthly: StatsBucket[];
+    weekday: StatsBucket[];
+    recentSessions: PersistedSongPracticeSession[];
+  };
+  exercises: {
+    totalSessions: number;
+    totalSeconds: number;
+    practicedDays: number;
+    averageSecondsPerPracticedDay: number;
+    averageSecondsPerSession: number;
+    daily: StatsBucket[];
+    weekly: StatsBucket[];
+    monthly: StatsBucket[];
+    weekday: StatsBucket[];
+    recentSessions: PersistedVocalExercisePracticeSession[];
+  };
+  playlists: {
+    totalPlaylists: number;
+    performedPlaylists: number;
+    songsInAnyPlaylist: number;
+    songsNotInAnyPlaylist: number;
+    totalSongPlacements: number;
+    averagePlacementsPerSong: number;
+    averagePlacementsPerPlaylist: number;
+    mostIncludedSongs: Array<{ id: string; title: string; playlistCount: number; playlistNames: string[] }>;
+    mostPerformedSongs: Array<{ id: string; title: string; performanceCount: number; performanceDates: string[] }>;
+  };
+}
+
 export interface PersistedDraftRecording {
   id: string;
   songId: string | null;
@@ -233,6 +397,7 @@ export interface PlaylistDetail {
   id: string;
   name: string;
   eventDate?: string;
+  performanceStatus?: PlaylistPerformanceStatus | null;
   isRetired: boolean;
   isPublic?: boolean;
   publishedAt?: string | null;
@@ -252,6 +417,7 @@ export interface PlaylistSummary {
   id: string;
   name: string;
   eventDate?: string;
+  performanceStatus?: PlaylistPerformanceStatus | null;
   isRetired: boolean;
   isPublic?: boolean;
   publishedAt?: string | null;
@@ -509,7 +675,7 @@ function isMissingPlaylistSharingColumnError(error: unknown): boolean {
     return false;
   }
 
-  const columns = ["share_token", "shared_at", "share_audio_mode", "public_share_audio_mode", "source_playlist_id", "source_owner_id", "source_share_token", "imported_at", "is_public", "published_at"];
+  const columns = ["share_token", "shared_at", "share_audio_mode", "public_share_audio_mode", "source_playlist_id", "source_owner_id", "source_share_token", "imported_at", "is_public", "published_at", "performance_status"];
   const message = error.message.toLowerCase();
   if (columns.some((column) => message.includes(column)) && message.includes("does not exist")) {
     return true;
@@ -588,6 +754,58 @@ function isMissingTapPracticeTableError(error: unknown): boolean {
     }
 
     if (causeMentionsTapTables && causeMessage.includes("does not exist")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isMissingVocalExercisePracticeSessionTableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("vocal_exercise_practice_sessions") && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (causeCode === "42P01" && causeMessage.includes("vocal_exercise_practice_sessions")) {
+      return true;
+    }
+    if (causeMessage.includes("vocal_exercise_practice_sessions") && causeMessage.includes("does not exist")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isMissingSongPracticeSessionTableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("song_practice_sessions") && message.includes("does not exist")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
+    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
+    if (causeCode === "42P01" && causeMessage.includes("song_practice_sessions")) {
+      return true;
+    }
+    if (causeMessage.includes("song_practice_sessions") && causeMessage.includes("does not exist")) {
       return true;
     }
   }
@@ -2368,7 +2586,7 @@ export async function getRatingsForSong(
       .where(and(eq(practiceRatings.userId, userId), inArray(practiceRatings.segmentId, segmentGroups.allScoreSegmentIds)))
       .orderBy(desc(practiceRatings.ratedAt));
   } catch (error) {
-    if (!isMissingUserIdColumnError(error)) {
+    if (!isMissingUserIdColumnError(error) && !isMissingPlaylistSharingColumnError(error)) {
       throw error;
     }
 
@@ -3819,6 +4037,7 @@ function mapPlaylistSummary(row: PlaylistRow, songCount: number = 0): PlaylistSu
     id: row.id,
     name: row.name,
     eventDate: row.eventDate ?? undefined,
+    performanceStatus: normalizePlaylistPerformanceStatus(row.performanceStatus),
     isRetired: row.isRetired,
     isPublic: Boolean(row.isPublic),
     publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
@@ -3912,7 +4131,7 @@ export async function getAllPlaylists(
           ? await legacyBaseQuery.where(eq(playlists.userId, userId))
           : await legacyBaseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
 
-      rows = legacyRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
+      rows = legacyRows.map((row) => ({ ...row, performanceStatus: null, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
     } catch (legacyError) {
       if (!isMissingUserIdColumnError(legacyError)) {
         throw legacyError;
@@ -3933,7 +4152,7 @@ export async function getAllPlaylists(
         ? await userlessBaseQuery
         : await userlessBaseQuery.where(eq(playlists.isRetired, false));
 
-      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
+      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, performanceStatus: null, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
     }
   }
 
@@ -4065,7 +4284,7 @@ export async function getPlaylistById(
         .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
         .limit(1);
 
-      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
+      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, performanceStatus: null, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
     } catch (legacyError) {
       if (!isMissingUserIdColumnError(legacyError)) {
         throw legacyError;
@@ -4083,7 +4302,7 @@ export async function getPlaylistById(
         .where(eq(playlists.id, id))
         .limit(1);
 
-      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
+      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, performanceStatus: null, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
     }
   }
 
@@ -5037,7 +5256,10 @@ export async function createPlaylist(data: {
   userId: string;
   name: string;
   eventDate?: string;
+  performanceStatus?: PlaylistPerformanceStatus | null;
 }): Promise<PlaylistSummary> {
+  const eventDate = data.eventDate ?? extractPlaylistEventDateFromName(data.name);
+  const performanceStatus = normalizePlaylistPerformanceStatus(data.performanceStatus);
   try {
     const rows = await db()
       .insert(playlists)
@@ -5045,7 +5267,8 @@ export async function createPlaylist(data: {
         id: crypto.randomUUID(),
         userId: data.userId,
         name: data.name,
-        eventDate: data.eventDate ?? null,
+        eventDate,
+        performanceStatus,
       })
       .returning();
 
@@ -5060,7 +5283,7 @@ export async function createPlaylist(data: {
       .values({
         id: crypto.randomUUID(),
         name: data.name,
-        eventDate: data.eventDate ?? null,
+        eventDate,
       })
       .returning();
 
@@ -5070,19 +5293,25 @@ export async function createPlaylist(data: {
 
 export async function updatePlaylist(
   id: string,
-  data: { name?: string; eventDate?: string; isRetired?: boolean },
+  data: { name?: string; eventDate?: string | null; isRetired?: boolean; performanceStatus?: PlaylistPerformanceStatus | null },
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
-  const updates: Partial<Pick<PlaylistRow, "name" | "eventDate" | "isRetired" | "isPublic" | "publishedAt" | "shareToken" | "sharedAt">> = {};
+  const updates: Partial<Pick<PlaylistRow, "name" | "eventDate" | "performanceStatus" | "isRetired" | "isPublic" | "publishedAt" | "shareToken" | "sharedAt">> = {};
   if (data.name !== undefined) updates.name = data.name;
   if (data.eventDate !== undefined) updates.eventDate = data.eventDate;
+  if (data.performanceStatus !== undefined) updates.performanceStatus = normalizePlaylistPerformanceStatus(data.performanceStatus);
   if (data.isRetired !== undefined) {
     updates.isRetired = data.isRetired;
     if (data.isRetired) {
+      if (data.performanceStatus === undefined) {
+        updates.performanceStatus = "Performed";
+      }
       updates.isPublic = false;
       updates.publishedAt = null;
       updates.shareToken = null;
       updates.sharedAt = null;
+    } else if (data.performanceStatus === undefined) {
+      updates.performanceStatus = null;
     }
   }
 
@@ -5094,6 +5323,74 @@ export async function updatePlaylist(
     .update(playlists)
     .set(updates)
     .where(and(eq(playlists.id, id), eq(playlists.userId, userId)));
+}
+
+export async function duplicatePlaylist(
+  id: string,
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<PlaylistSummary | null> {
+  const playlistRows = await db()
+    .select()
+    .from(playlists)
+    .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
+    .limit(1);
+  const source = playlistRows[0];
+  if (!source) {
+    return null;
+  }
+
+  const existingNameRows = await db()
+    .select({ name: playlists.name })
+    .from(playlists)
+    .where(eq(playlists.userId, userId));
+  const duplicatedPlaylistId = crypto.randomUUID();
+  const duplicatedName = getNextDuplicatedPlaylistName(
+    source.name,
+    existingNameRows.map((row) => row.name)
+  );
+  const createdRows = await db()
+    .insert(playlists)
+    .values({
+      id: duplicatedPlaylistId,
+      userId,
+      name: duplicatedName,
+      eventDate: source.eventDate,
+      performanceStatus: null,
+      isRetired: false,
+      isPublic: false,
+      publishedAt: null,
+      shareToken: null,
+      sharedAt: null,
+      shareAudioMode: source.shareAudioMode,
+      publicShareAudioMode: source.publicShareAudioMode,
+      sourcePlaylistId: source.sourcePlaylistId,
+      sourceOwnerId: source.sourceOwnerId,
+      sourceShareToken: source.sourceShareToken,
+      importedAt: source.importedAt,
+    })
+    .returning();
+
+  const sourceSongs = await db()
+    .select({
+      songId: playlistSongs.songId,
+      position: playlistSongs.position,
+    })
+    .from(playlistSongs)
+    .innerJoin(songs, and(eq(songs.id, playlistSongs.songId), eq(songs.userId, userId)))
+    .where(eq(playlistSongs.playlistId, id))
+    .orderBy(asc(playlistSongs.position));
+
+  if (sourceSongs.length > 0) {
+    await db().insert(playlistSongs).values(
+      sourceSongs.map((song) => ({
+        playlistId: duplicatedPlaylistId,
+        songId: song.songId,
+        position: song.position,
+      }))
+    );
+  }
+
+  return mapPlaylistSummary(createdRows[0], sourceSongs.length);
 }
 
 export async function deletePlaylist(id: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<void> {
@@ -5345,6 +5642,415 @@ export async function updateVocalExercise(exercise: PersistedVocalExercise): Pro
 export async function deleteVocalExercise(id: string): Promise<boolean> {
   const rows = await db().delete(vocalExercises).where(eq(vocalExercises.id, id)).returning({ id: vocalExercises.id });
   return rows.length > 0;
+}
+
+function mapSongPracticeSession(row: SongPracticeSessionRow, title?: string | null): PersistedSongPracticeSession {
+  return {
+    id: row.id,
+    userId: row.userId,
+    songId: row.songId,
+    songTitle: title ?? undefined,
+    segmentId: row.segmentId,
+    source: row.source,
+    startedAt: row.startedAt.toISOString(),
+    completedAt: row.completedAt ? row.completedAt.toISOString() : null,
+    durationSeconds: Math.max(0, row.durationSeconds ?? 0),
+  };
+}
+
+export async function createSongPracticeSession(data: {
+  id?: string;
+  userId: string;
+  songId: string;
+  segmentId?: string | null;
+  source?: string;
+  startedAt?: Date;
+}): Promise<PersistedSongPracticeSession | null> {
+  try {
+    const rows = await db()
+      .insert(songPracticeSessions)
+      .values({
+        id: data.id ?? crypto.randomUUID(),
+        userId: data.userId,
+        songId: data.songId,
+        segmentId: data.segmentId ?? null,
+        source: data.source ?? "song",
+        startedAt: data.startedAt ?? new Date(),
+      })
+      .returning();
+    return mapSongPracticeSession(rows[0]);
+  } catch (error) {
+    if (isMissingSongPracticeSessionTableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function finishSongPracticeSession(data: {
+  id: string;
+  userId: string;
+  completedAt?: Date;
+  durationSeconds: number;
+}): Promise<PersistedSongPracticeSession | null> {
+  try {
+    const rows = await db()
+      .update(songPracticeSessions)
+      .set({
+        completedAt: data.completedAt ?? new Date(),
+        durationSeconds: Math.max(0, Math.round(data.durationSeconds)),
+      })
+      .where(and(eq(songPracticeSessions.id, data.id), eq(songPracticeSessions.userId, data.userId)))
+      .returning();
+    return rows[0] ? mapSongPracticeSession(rows[0]) : null;
+  } catch (error) {
+    if (isMissingSongPracticeSessionTableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function mapVocalExercisePracticeSession(row: VocalExercisePracticeSessionRow, title?: string | null): PersistedVocalExercisePracticeSession {
+  return {
+    id: row.id,
+    userId: row.userId,
+    exerciseId: row.exerciseId,
+    exerciseTitle: title ?? undefined,
+    startedAt: row.startedAt.toISOString(),
+    completedAt: row.completedAt ? row.completedAt.toISOString() : null,
+    durationSeconds: Math.max(0, row.durationSeconds ?? 0),
+    tempoPercent: row.tempoPercent,
+    repetitionCount: row.repetitionCount,
+  };
+}
+
+export async function createVocalExercisePracticeSession(data: {
+  id?: string;
+  userId: string;
+  exerciseId: string;
+  startedAt?: Date;
+  tempoPercent?: number;
+  repetitionCount?: number;
+}): Promise<PersistedVocalExercisePracticeSession | null> {
+  try {
+    const rows = await db()
+      .insert(vocalExercisePracticeSessions)
+      .values({
+        id: data.id ?? crypto.randomUUID(),
+        userId: data.userId,
+        exerciseId: data.exerciseId,
+        startedAt: data.startedAt ?? new Date(),
+        tempoPercent: Math.max(40, Math.min(150, Math.round(data.tempoPercent ?? 100))),
+        repetitionCount: Math.max(0, Math.round(data.repetitionCount ?? 0)),
+      })
+      .returning();
+    return mapVocalExercisePracticeSession(rows[0]);
+  } catch (error) {
+    if (isMissingVocalExercisePracticeSessionTableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function finishVocalExercisePracticeSession(data: {
+  id: string;
+  userId: string;
+  completedAt?: Date;
+  durationSeconds: number;
+}): Promise<PersistedVocalExercisePracticeSession | null> {
+  try {
+    const rows = await db()
+      .update(vocalExercisePracticeSessions)
+      .set({
+        completedAt: data.completedAt ?? new Date(),
+        durationSeconds: Math.max(0, Math.round(data.durationSeconds)),
+      })
+      .where(and(eq(vocalExercisePracticeSessions.id, data.id), eq(vocalExercisePracticeSessions.userId, data.userId)))
+      .returning();
+    return rows[0] ? mapVocalExercisePracticeSession(rows[0]) : null;
+  } catch (error) {
+    if (isMissingVocalExercisePracticeSessionTableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function dateKey(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function monthKey(value: Date): string {
+  return value.toISOString().slice(0, 7);
+}
+
+function weekKey(value: Date): string {
+  const start = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  const day = start.getUTCDay() || 7;
+  start.setUTCDate(start.getUTCDate() - day + 1);
+  return dateKey(start);
+}
+
+function emptyBuckets(labels: string[]): Map<string, StatsBucket> {
+  return new Map(labels.map((label) => [label, { label, seconds: 0, sessionCount: 0 }]));
+}
+
+function recentDayLabels(days: number, now: Date): string[] {
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    date.setUTCDate(date.getUTCDate() - (days - index - 1));
+    return dateKey(date);
+  });
+}
+
+function recentWeekLabels(weeks: number, now: Date): string[] {
+  const currentWeekStart = new Date(`${weekKey(now)}T00:00:00.000Z`);
+  return Array.from({ length: weeks }, (_, index) => {
+    const date = new Date(currentWeekStart);
+    date.setUTCDate(date.getUTCDate() - (weeks - index - 1) * 7);
+    return weekKey(date);
+  });
+}
+
+function recentMonthLabels(months: number, now: Date): string[] {
+  return Array.from({ length: months }, (_, index) => {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - index - 1), 1));
+    return monthKey(date);
+  });
+}
+
+function buildPracticeTimeSummary<T extends { startedAt: string; durationSeconds: number }>(sessions: T[], now: Date) {
+  const daily = emptyBuckets(recentDayLabels(14, now));
+  const weekly = emptyBuckets(recentWeekLabels(8, now));
+  const monthly = emptyBuckets(recentMonthLabels(6, now));
+  const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekdays = emptyBuckets(weekdayLabels);
+  const practicedDayKeys = new Set<string>();
+
+  for (const session of sessions) {
+    const started = new Date(session.startedAt);
+    if (Number.isNaN(started.getTime())) {
+      continue;
+    }
+    const seconds = Math.max(0, session.durationSeconds);
+    practicedDayKeys.add(dateKey(started));
+    for (const bucket of [
+      daily.get(dateKey(started)),
+      weekly.get(weekKey(started)),
+      monthly.get(monthKey(started)),
+      weekdays.get(weekdayLabels[started.getUTCDay()]),
+    ]) {
+      if (!bucket) {
+        continue;
+      }
+      bucket.seconds += seconds;
+      bucket.sessionCount += 1;
+    }
+  }
+
+  const totalSeconds = sessions.reduce((sum, session) => sum + Math.max(0, session.durationSeconds), 0);
+  const practicedDays = practicedDayKeys.size;
+  return {
+    totalSessions: sessions.length,
+    totalSeconds,
+    practicedDays,
+    averageSecondsPerPracticedDay: practicedDays > 0 ? Math.round(totalSeconds / practicedDays) : 0,
+    averageSecondsPerSession: sessions.length > 0 ? Math.round(totalSeconds / sessions.length) : 0,
+    daily: Array.from(daily.values()),
+    weekly: Array.from(weekly.values()),
+    monthly: Array.from(monthly.values()),
+    weekday: Array.from(weekdays.values()),
+  };
+}
+
+export async function getPracticeStatsSummary(userId: string = DEFAULT_QUERY_USER_ID, now: Date = new Date()): Promise<PracticeStatsSummary> {
+  const sixMonthsAgo = new Date(now);
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const thirtyDaysAgo = new Date(now);
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const allSongs = await getAllSongs(userId);
+  const songIds = allSongs.map((song) => song.id);
+  const [ratingFallbackBySongId, knowledgeBySongId] = await Promise.all([
+    getLatestRatingTimeBySongIds(songIds, userId),
+    getSongKnowledgeBySongIds(songIds, userId),
+  ]);
+
+  const songStats = allSongs.map((song) => {
+    const lastPracticedAt = song.lastPracticedAt ?? ratingFallbackBySongId[song.id] ?? null;
+    return {
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      masteryPercent: knowledgeBySongId[song.id] ?? 0,
+      lastPracticedAt,
+    };
+  });
+  const masteredAbove80 = songStats.filter((song) => song.masteryPercent >= 80).length;
+  const practicedRecently = songStats.filter((song) => song.lastPracticedAt && song.lastPracticedAt >= thirtyDaysAgo).length;
+  const neverPracticed = songStats.filter((song) => !song.lastPracticedAt).length;
+  const untouchedSongStats = songStats
+    .filter((song) => !song.lastPracticedAt || song.lastPracticedAt < sixMonthsAgo)
+    .sort((a, b) => {
+      const aTime = a.lastPracticedAt?.getTime() ?? 0;
+      const bTime = b.lastPracticedAt?.getTime() ?? 0;
+      return aTime - bTime || a.title.localeCompare(b.title);
+    });
+  const untouchedOverSixMonths = untouchedSongStats.length;
+  const averageMasteryPercent = songStats.length > 0
+    ? Math.round(songStats.reduce((sum, song) => sum + song.masteryPercent, 0) / songStats.length)
+    : 0;
+  const strongestSong = [...songStats].sort((a, b) => b.masteryPercent - a.masteryPercent || a.title.localeCompare(b.title))[0];
+  const stalestSong = [...songStats]
+    .sort((a, b) => {
+      const aTime = a.lastPracticedAt?.getTime() ?? 0;
+      const bTime = b.lastPracticedAt?.getTime() ?? 0;
+      return aTime - bTime || a.title.localeCompare(b.title);
+    })[0];
+
+  let songSessions: PersistedSongPracticeSession[] = [];
+  try {
+    const rows = await db()
+      .select({
+        session: songPracticeSessions,
+        title: songs.title,
+      })
+      .from(songPracticeSessions)
+      .leftJoin(songs, eq(songs.id, songPracticeSessions.songId))
+      .where(eq(songPracticeSessions.userId, userId))
+      .orderBy(desc(songPracticeSessions.startedAt));
+    songSessions = rows.map((row) => mapSongPracticeSession(row.session, row.title));
+  } catch (error) {
+    if (!isMissingSongPracticeSessionTableError(error)) {
+      throw error;
+    }
+  }
+
+  let exerciseSessions: PersistedVocalExercisePracticeSession[] = [];
+  try {
+    const rows = await db()
+      .select({
+        session: vocalExercisePracticeSessions,
+        title: vocalExercises.title,
+      })
+      .from(vocalExercisePracticeSessions)
+      .leftJoin(vocalExercises, eq(vocalExercises.id, vocalExercisePracticeSessions.exerciseId))
+      .where(eq(vocalExercisePracticeSessions.userId, userId))
+      .orderBy(desc(vocalExercisePracticeSessions.startedAt));
+    exerciseSessions = rows.map((row) => mapVocalExercisePracticeSession(row.session, row.title));
+  } catch (error) {
+    if (!isMissingVocalExercisePracticeSessionTableError(error)) {
+      throw error;
+    }
+  }
+
+  const songPracticeSummary = buildPracticeTimeSummary(songSessions, now);
+  const exercisePracticeSummary = buildPracticeTimeSummary(exerciseSessions, now);
+
+  const playlistRows = await db()
+    .select({
+      songId: songs.id,
+      songTitle: songs.title,
+      playlistId: playlists.id,
+      playlistName: playlists.name,
+      playlistEventDate: playlists.eventDate,
+      playlistPerformanceStatus: playlists.performanceStatus,
+      playlistIsRetired: playlists.isRetired,
+    })
+    .from(playlistSongs)
+    .innerJoin(songs, eq(songs.id, playlistSongs.songId))
+    .innerJoin(playlists, eq(playlists.id, playlistSongs.playlistId))
+    .where(and(eq(songs.userId, userId), eq(playlists.userId, userId)));
+  const playlistCountRows = await db()
+    .select({ count: count(playlists.id) })
+    .from(playlists)
+    .where(eq(playlists.userId, userId));
+  const totalPlaylists = playlistCountRows[0]?.count ?? 0;
+  const playlistNamesBySong = new Map<string, { title: string; names: Set<string> }>();
+  const performancesBySong = new Map<string, { title: string; dates: Set<string> }>();
+  const performedPlaylistIds = new Set<string>();
+  for (const row of playlistRows) {
+    const entry = playlistNamesBySong.get(row.songId) ?? { title: row.songTitle, names: new Set<string>() };
+    entry.names.add(row.playlistName);
+    playlistNamesBySong.set(row.songId, entry);
+    if (row.playlistIsRetired && row.playlistPerformanceStatus === "Performed") {
+      performedPlaylistIds.add(row.playlistId);
+      const performance = performancesBySong.get(row.songId) ?? { title: row.songTitle, dates: new Set<string>() };
+      performance.dates.add(row.playlistEventDate ?? "undated");
+      performancesBySong.set(row.songId, performance);
+    }
+  }
+  const mostIncludedSongs = Array.from(playlistNamesBySong.entries())
+    .map(([id, entry]) => ({
+      id,
+      title: entry.title,
+      playlistCount: entry.names.size,
+      playlistNames: Array.from(entry.names).sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => b.playlistCount - a.playlistCount || a.title.localeCompare(b.title))
+    .slice(0, 8);
+  const songsInAnyPlaylist = playlistNamesBySong.size;
+  const mostPerformedSongs = Array.from(performancesBySong.entries())
+    .map(([id, entry]) => ({
+      id,
+      title: entry.title,
+      performanceCount: entry.dates.size,
+      performanceDates: Array.from(entry.dates).sort((a, b) => b.localeCompare(a)),
+    }))
+    .sort((a, b) => b.performanceCount - a.performanceCount || a.title.localeCompare(b.title))
+    .slice(0, 8);
+
+  return {
+    userId,
+    generatedAt: now.toISOString(),
+    songs: {
+      total: songStats.length,
+      masteredAbove80,
+      practicedRecently,
+      untouchedOverSixMonths,
+      neverPracticed,
+      averageMasteryPercent,
+      untouchedSongs: untouchedSongStats.map((song) => ({
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        lastPracticedAt: song.lastPracticedAt ? song.lastPracticedAt.toISOString() : null,
+        masteryPercent: song.masteryPercent,
+      })),
+      strongestSong: strongestSong ? {
+        id: strongestSong.id,
+        title: strongestSong.title,
+        masteryPercent: strongestSong.masteryPercent,
+      } : undefined,
+      stalestSong: stalestSong ? {
+        id: stalestSong.id,
+        title: stalestSong.title,
+        lastPracticedAt: stalestSong.lastPracticedAt ? stalestSong.lastPracticedAt.toISOString() : null,
+        masteryPercent: stalestSong.masteryPercent,
+      } : undefined,
+    },
+    songPractice: {
+      ...songPracticeSummary,
+      recentSessions: songSessions.slice(0, 8),
+    },
+    exercises: {
+      ...exercisePracticeSummary,
+      recentSessions: exerciseSessions.slice(0, 8),
+    },
+    playlists: {
+      totalPlaylists,
+      performedPlaylists: performedPlaylistIds.size,
+      songsInAnyPlaylist,
+      songsNotInAnyPlaylist: Math.max(0, songStats.length - songsInAnyPlaylist),
+      totalSongPlacements: playlistRows.length,
+      averagePlacementsPerSong: songStats.length > 0 ? Math.round((playlistRows.length / songStats.length) * 10) / 10 : 0,
+      averagePlacementsPerPlaylist: totalPlaylists > 0 ? Math.round((playlistRows.length / totalPlaylists) * 10) / 10 : 0,
+      mostIncludedSongs,
+      mostPerformedSongs,
+    },
+  };
 }
 
 export async function getUserVocalRange(userId: string): Promise<PersistedVocalRange | null> {

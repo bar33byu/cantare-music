@@ -33,6 +33,9 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const [playlistNameDraft, setPlaylistNameDraft] = useState('');
   const [playlistNameSaving, setPlaylistNameSaving] = useState(false);
   const [playlistNameError, setPlaylistNameError] = useState<string | null>(null);
+  const [playlistEventDateDraft, setPlaylistEventDateDraft] = useState('');
+  const [playlistEventDateSaving, setPlaylistEventDateSaving] = useState(false);
+  const [playlistEventDateError, setPlaylistEventDateError] = useState<string | null>(null);
   const [addingSongIds, setAddingSongIds] = useState<Set<string>>(new Set());
   const [refreshPreview, setRefreshPreview] = useState<PlaylistRefreshPreview | null>(null);
   const [refreshLoading, setRefreshLoading] = useState(false);
@@ -60,6 +63,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     const data = (await response.json()) as Playlist;
     setPlaylist(data);
     setPlaylistNameDraft(data.name);
+    setPlaylistEventDateDraft(data.eventDate ?? '');
     setShareAudioMode(data.shareAudioMode ?? 'both');
     setPublicShareAudioMode(data.publicShareAudioMode ?? 'both');
     setRefreshPreview(null);
@@ -203,6 +207,32 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
       setPlaylistNameError(error instanceof Error ? error.message : 'Unable to rename playlist right now.');
     } finally {
       setPlaylistNameSaving(false);
+    }
+  };
+
+  const handleSavePlaylistEventDate = async () => {
+    if (!playlist || playlistEventDateDraft === (playlist.eventDate ?? '')) {
+      return;
+    }
+
+    setPlaylistEventDateSaving(true);
+    setPlaylistEventDateError(null);
+    try {
+      const response = await request(`/api/playlists/${playlistId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventDate: playlistEventDateDraft || null }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Unable to update performance date right now.');
+      }
+
+      setPlaylist((current) => current ? { ...current, eventDate: playlistEventDateDraft || undefined } : current);
+    } catch (error) {
+      setPlaylistEventDateError(error instanceof Error ? error.message : 'Unable to update performance date right now.');
+    } finally {
+      setPlaylistEventDateSaving(false);
     }
   };
 
@@ -478,7 +508,30 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
           </div>
           <h2 data-testid="playlist-detail-name" className="sr-only">{playlist.name}</h2>
           {playlistNameError ? <p data-testid="playlist-detail-name-error" className="mt-1 text-sm text-red-600">{playlistNameError}</p> : null}
-          {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label htmlFor="playlist-event-date-input" className="text-sm font-medium text-gray-700">Performance date</label>
+            <input
+              id="playlist-event-date-input"
+              data-testid="playlist-detail-event-date-input"
+              type="date"
+              value={playlistEventDateDraft}
+              onChange={(event) => {
+                setPlaylistEventDateDraft(event.target.value);
+                setPlaylistEventDateError(null);
+              }}
+              className="rounded border border-gray-300 px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              data-testid="playlist-detail-event-date-save"
+              className="rounded border border-indigo-300 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+              disabled={playlistEventDateSaving || playlistEventDateDraft === (playlist.eventDate ?? '')}
+              onClick={() => void handleSavePlaylistEventDate()}
+            >
+              {playlistEventDateSaving ? 'Saving...' : 'Save date'}
+            </button>
+          </div>
+          {playlistEventDateError ? <p data-testid="playlist-detail-event-date-error" className="mt-1 text-sm text-red-600">{playlistEventDateError}</p> : null}
         </div>
         <div className="flex gap-2">
           <button data-testid="playlist-detail-back" className="rounded border border-gray-300 px-3 py-2" onClick={onBack}>← Back</button>

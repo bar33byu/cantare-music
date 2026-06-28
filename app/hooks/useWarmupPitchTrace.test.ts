@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getWarmupCaptureTailSeconds } from "./useWarmupPitchTrace";
+import { getWarmupCaptureTailSeconds, WARMUP_MIC_AUDIO_CONSTRAINTS } from "./useWarmupPitchTrace";
 
 describe("warmup pitch trace timing", () => {
   it("keeps the repetition open for device latency and one detector frame", () => {
@@ -11,5 +11,13 @@ describe("warmup pitch trace timing", () => {
   it("guards invalid latency values", () => {
     expect(getWarmupCaptureTailSeconds(-100)).toBeCloseTo(0.08);
     expect(getWarmupCaptureTailSeconds(Number.NaN)).toBeCloseTo(0.08);
+  });
+
+  it("does not request browser audio processing that can cancel matched guide pitches", () => {
+    expect(WARMUP_MIC_AUDIO_CONSTRAINTS).toMatchObject({
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    });
   });
 });

@@ -6,35 +6,20 @@ import {
   getContextMetronomeBeats,
   getExercisePitchRange,
   midiNoteName,
-  setExerciseStartBeat,
   type VocalExercise,
   type VocalRange,
 } from "../lib/vocalExercise";
 import { getWarmupCaptureTailSeconds, useWarmupPitchTrace, type WarmupPitchTracePoint } from "../hooks/useWarmupPitchTrace";
+import { withUserIdHeader } from "../lib/userContext";
 
 const DEFAULT_RANGE: VocalRange = { low: 45, high: 64 };
-const NOTE_OPTIONS = Array.from({ length: 61 }, (_, index) => 24 + index);
+const MAX_PRACTICE_REPETITIONS = 15;
 
 interface TimelineItem {
   index: number;
   offset: number;
   startSeconds: number;
   endSeconds: number;
-}
-
-function NoteSelect({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
-  return (
-    <label className="grid gap-1 text-sm font-medium text-slate-700">
-      {label}
-      <select
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-      >
-        {NOTE_OPTIONS.map((midi) => <option key={midi} value={midi}>{midiNoteName(midi)}</option>)}
-      </select>
-    </label>
-  );
 }
 
 function PianoRoll({ exercise, range, offset, playheadBeat, pitchTrace }: {
@@ -125,6 +110,39 @@ function PianoRoll({ exercise, range, offset, playheadBeat, pitchTrace }: {
   );
 }
 
+function condenseTranspositionPath(path: number[], maxRepetitions = MAX_PRACTICE_REPETITIONS): number[] {
+  if (path.length <= maxRepetitions) return path;
+  const important = new Set([0, path.length - 1]);
+  let minIndex = 0;
+  let maxIndex = 0;
+  path.forEach((offset, index) => {
+    if (offset < path[minIndex]) minIndex = index;
+    if (offset > path[maxIndex]) maxIndex = index;
+  });
+  important.add(minIndex);
+  important.add(maxIndex);
+
+  const targetCount = Math.max(important.size, maxRepetitions);
+  for (let slot = 1; important.size < targetCount && slot < targetCount - 1; slot += 1) {
+    important.add(Math.round((slot / (targetCount - 1)) * (path.length - 1)));
+  }
+
+  return Array.from(important)
+    .sort((a, b) => a - b)
+    .map((index) => path[index]);
+}
+
+function formatDuration(seconds: number): string {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function volumeToGain(volumePercent: number): number {
+  return Math.max(0, Math.min(1.5, volumePercent / 100));
+}
+
 function RangeKeyboard({ range, current, startingPitch }: { range: VocalRange; current: VocalRange | null; startingPitch: number | null }) {
   const notes = Array.from({ length: range.high - range.low + 1 }, (_, index) => range.low + index);
   return (
@@ -154,11 +172,11 @@ function RangeKeyboard({ range, current, startingPitch }: { range: VocalRange; c
   );
 }
 
-function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
+function ExercisePlayer({ exercise, range, userId, isAdmin, onDelete }: {
   exercise: VocalExercise;
   range: VocalRange;
+  userId: string;
   isAdmin: boolean;
-  onUpdate: (exercise: VocalExercise) => void;
   onDelete: () => void;
 }) {
   const [tempoPercent, setTempoPercent] = useState(100);
@@ -166,12 +184,20 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playheadBeat, setPlayheadBeat] = useState(0);
   const [inputLatencyMs, setInputLatencyMs] = useState(0);
+  const [contextVolume, setContextVolume] = useState(75);
+  const [singVolume, setSingVolume] = useState(100);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourcesRef = useRef<OscillatorNode[]>([]);
   const frameRef = useRef<number | null>(null);
   const playbackStartRef = useRef(0);
   const timelineRef = useRef<TimelineItem[]>([]);
-  const path = useMemo(() => generateTranspositionPath(exercise, range), [exercise, range]);
+  const activeSessionRef = useRef<{ id: string; startedAtMs: number } | null>(null);
+  const fullPath = useMemo(() => generateTranspositionPath(exercise, range), [exercise, range]);
+  const path = useMemo(() => condenseTranspositionPath(fullPath), [fullPath]);
+  const secondsPerBeatAtTempo = 60 / exercise.tempoBpm / (tempoPercent / 100);
+  const secondsPerRepetition = exercise.durationBeats * secondsPerBeatAtTempo + getWarmupCaptureTailSeconds(inputLatencyMs);
+  const practiceDuration = path.length * secondsPerRepetition;
+  const fullDuration = fullPath.length * secondsPerRepetition;
   const contextMetronomeBeats = useMemo(() => getContextMetronomeBeats(exercise), [exercise]);
   const offset = path[currentIndex] ?? path[0] ?? 0;
   const currentRange = getExercisePitchRange(exercise, offset);
@@ -193,8 +219,27 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
     latencyMs: inputLatencyMs,
     pitchTargets,
   });
+  const startPitchTrace = pitchTrace.start;
 
-  const stop = useCallback(() => {
+  useEffect(() => {
+    void startPitchTrace();
+  }, [startPitchTrace]);
+
+  const stop = useCallback((resetPlayback = true) => {
+    const activeSession = activeSessionRef.current;
+    if (activeSession) {
+      activeSessionRef.current = null;
+      const completedAt = new Date();
+      const durationSeconds = Math.max(0, (completedAt.getTime() - activeSession.startedAtMs) / 1000);
+      void fetch(`/api/exercise-practice-sessions/${activeSession.id}`, withUserIdHeader({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          completedAt: completedAt.toISOString(),
+          durationSeconds,
+        }),
+      }, userId)).catch(() => undefined);
+    }
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     frameRef.current = null;
     for (const source of sourcesRef.current) {
@@ -204,19 +249,22 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
     void audioContextRef.current?.close().catch(() => undefined);
     audioContextRef.current = null;
     setIsPlaying(false);
-    setPlayheadBeat(0);
-  }, []);
+    if (resetPlayback) {
+      setCurrentIndex(0);
+      setPlayheadBeat(0);
+    }
+  }, [userId]);
 
-  useEffect(() => stop, [stop]);
+  useEffect(() => () => stop(), [stop]);
 
   const start = useCallback((tempoOverride = tempoPercent, startingIndex = 0, startingBeat = 0) => {
-    stop();
+    stop(false);
     if (path.length === 0) return;
     const AudioContextCtor = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextCtor) return;
     const context = new AudioContextCtor();
     const master = context.createGain();
-    master.gain.value = 0.28;
+    master.gain.value = 0.62;
     master.connect(context.destination);
     const secondsPerBeat = 60 / exercise.tempoBpm / (tempoOverride / 100);
     const startAt = context.currentTime + 0.08;
@@ -252,24 +300,45 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
         const noteStartOffset = repetitionStart + note.startBeat * secondsPerBeat;
         const noteEndOffset = noteStartOffset + Math.max(0.03, note.durationBeats * secondsPerBeat);
         if (noteEndOffset <= 0) continue;
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
         const noteStart = startAt + Math.max(0, noteStartOffset);
         const noteEnd = startAt + noteEndOffset;
         if (noteEnd - noteStart < 0.01) continue;
-        const attackEnd = noteStart + Math.min(0.012, (noteEnd - noteStart) * 0.35);
-        const sustainEnd = Math.max(attackEnd, noteEnd - 0.025);
-        oscillator.type = "triangle";
-        oscillator.frequency.value = 440 * 2 ** ((note.midi + semitones - 69) / 12);
-        gain.gain.setValueAtTime(0.0001, noteStart);
-        gain.gain.exponentialRampToValueAtTime(Math.max(0.015, (note.velocity / 127) * 0.18), attackEnd);
-        gain.gain.setValueAtTime(Math.max(0.015, (note.velocity / 127) * 0.18), sustainEnd);
-        gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
-        oscillator.connect(gain);
-        gain.connect(master);
-        oscillator.start(noteStart);
-        oscillator.stop(noteEnd + 0.01);
-        sourcesRef.current.push(oscillator);
+        const noteGain = context.createGain();
+        const filter = context.createBiquadFilter();
+        const baseFrequency = 440 * 2 ** ((note.midi + semitones - 69) / 12);
+        const regionVolume = note.region === "context" ? contextVolume : singVolume;
+        const peakGain = Math.max(0.005, (note.velocity / 127) * 0.42 * volumeToGain(regionVolume));
+        const attackEnd = noteStart + Math.min(0.018, (noteEnd - noteStart) * 0.18);
+        const decayEnd = Math.min(noteEnd - 0.05, attackEnd + 0.18);
+        const releaseStart = Math.max(decayEnd, noteEnd - 0.09);
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(4600, noteStart);
+        filter.frequency.exponentialRampToValueAtTime(1700, Math.max(noteStart + 0.04, decayEnd));
+        noteGain.gain.setValueAtTime(0.0001, noteStart);
+        noteGain.gain.exponentialRampToValueAtTime(peakGain, attackEnd);
+        noteGain.gain.exponentialRampToValueAtTime(Math.max(0.004, peakGain * 0.38), Math.max(attackEnd + 0.01, decayEnd));
+        noteGain.gain.setValueAtTime(Math.max(0.004, peakGain * 0.32), releaseStart);
+        noteGain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+
+        const partials = [
+          { type: "triangle" as OscillatorType, ratio: 1, gain: 1 },
+          { type: "sine" as OscillatorType, ratio: 2, gain: 0.34 },
+          { type: "sine" as OscillatorType, ratio: 3.01, gain: 0.16 },
+        ];
+        for (const partial of partials) {
+          const oscillator = context.createOscillator();
+          const partialGain = context.createGain();
+          oscillator.type = partial.type;
+          oscillator.frequency.setValueAtTime(baseFrequency * partial.ratio, noteStart);
+          partialGain.gain.value = partial.gain;
+          oscillator.connect(partialGain);
+          partialGain.connect(filter);
+          oscillator.start(noteStart);
+          oscillator.stop(noteEnd + 0.02);
+          sourcesRef.current.push(oscillator);
+        }
+        filter.connect(noteGain);
+        noteGain.connect(master);
       }
       cursorSeconds = repetitionEnd;
     });
@@ -277,6 +346,20 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
     audioContextRef.current = context;
     playbackStartRef.current = startAt;
     timelineRef.current = timeline;
+    const sessionId = crypto.randomUUID();
+    const startedAt = new Date();
+    activeSessionRef.current = { id: sessionId, startedAtMs: startedAt.getTime() };
+    void fetch("/api/exercise-practice-sessions", withUserIdHeader({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: sessionId,
+        exerciseId: exercise.id,
+        startedAt: startedAt.toISOString(),
+        tempoPercent: tempoOverride,
+        repetitionCount: path.length,
+      }),
+    }, userId)).catch(() => undefined);
     setCurrentIndex(startingIndex);
     setPlayheadBeat(Math.max(0, startingBeat));
     setIsPlaying(true);
@@ -298,7 +381,7 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
       frameRef.current = requestAnimationFrame(update);
     };
     frameRef.current = requestAnimationFrame(update);
-  }, [contextMetronomeBeats, exercise, inputLatencyMs, path, pitchTrace, stop, tempoPercent]);
+  }, [contextMetronomeBeats, contextVolume, exercise, inputLatencyMs, path, pitchTrace, singVolume, stop, tempoPercent, userId]);
 
   return (
     <section className="space-y-4" data-testid="exercise-player">
@@ -318,7 +401,7 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
             </p>
           ) : null}
           {(exercise.coachingNotes?.length ?? 0) > 0 ? (
-            <details className="mt-3 max-w-2xl rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-sm text-slate-700">
+            <details open className="mt-3 max-w-2xl rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-sm text-slate-700">
               <summary className="cursor-pointer font-semibold text-indigo-800">Coaching notes</summary>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 {exercise.coachingNotes?.map((note) => <li key={note}>{note}</li>)}
@@ -329,62 +412,119 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
         {isAdmin ? <button type="button" onClick={onDelete} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">Delete</button> : null}
       </div>
 
-      <div className={`grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm ${isAdmin ? "md:grid-cols-[1fr_1fr_auto]" : "md:grid-cols-[1fr_auto]"} md:items-end`}>
-        {isAdmin ? (
-          <label className="grid gap-1 text-sm font-medium text-slate-700">
-            Exercise begins at beat
-            <input
-              type="number"
-              min="0"
-              max={exercise.durationBeats}
-              step="0.25"
-              value={exercise.exerciseStartBeat}
-              onChange={(event) => onUpdate(setExerciseStartBeat(exercise, Number(event.target.value)))}
-              className="rounded-lg border border-slate-300 px-3 py-2"
-            />
-          </label>
-        ) : null}
-        <label className="grid gap-1 text-sm font-medium text-slate-700">
-          Tempo: {tempoPercent}%
-          <input
-            type="range"
-            min="40"
-            max="150"
-            step="5"
-            value={tempoPercent}
-            onChange={(event) => {
-              const nextTempo = Number(event.target.value);
-              setTempoPercent(nextTempo);
-              if (isPlaying) start(nextTempo, currentIndex, playheadBeat);
-            }}
-          />
-        </label>
-        <div className="flex gap-2">
-          <button type="button" onClick={isPlaying ? stop : () => start()} disabled={path.length === 0} className="rounded-lg bg-indigo-600 px-5 py-2 font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">
-            {isPlaying ? "Stop" : "Start"}
-          </button>
-          <button type="button" onClick={() => start()} disabled={!isPlaying} className="rounded-lg border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:opacity-40">Restart</button>
-        </div>
-      </div>
+      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="grid gap-3 xl:grid-cols-[auto_minmax(12rem,0.85fr)_minmax(18rem,1.1fr)_minmax(16rem,1fr)] xl:items-center">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label={isPlaying ? "Pause" : "Play"}
+              title={isPlaying ? "Pause" : "Play"}
+              onClick={isPlaying ? () => stop(false) : () => start(tempoPercent, currentIndex, playheadBeat)}
+              disabled={path.length === 0}
+              className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-2xl font-bold leading-none text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {isPlaying ? "\u23f8" : "\u25b6"}
+            </button>
+            <button
+              type="button"
+              aria-label="Restart"
+              title="Restart"
+              onClick={() => start()}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 bg-white text-xl font-semibold leading-none text-slate-700 hover:border-indigo-300 hover:text-indigo-700"
+            >
+              {"\u21ba"}
+            </button>
+          </div>
 
-      <div className="grid gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 md:grid-cols-[auto_1fr] md:items-end">
-        <button type="button" onClick={pitchTrace.isListening ? pitchTrace.stop : () => void pitchTrace.start()} className="rounded-lg bg-emerald-700 px-5 py-2 font-semibold text-white hover:bg-emerald-800">
-          {pitchTrace.isListening ? "Stop listening" : "Use microphone"}
-        </button>
-        <label className="grid gap-1 text-sm font-medium text-slate-700">
-          Microphone delay: {inputLatencyMs} ms
-          <span className="flex items-center gap-3">
-            <input aria-label="Microphone delay" type="range" min="0" max="400" step="10" value={inputLatencyMs} onChange={(event) => setInputLatencyMs(Number(event.target.value))} className="min-w-0 flex-1" />
-            <button type="button" onClick={() => setInputLatencyMs(0)} className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold">Wired</button>
-            <button type="button" onClick={() => setInputLatencyMs(180)} className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold">Bluetooth</button>
-          </span>
-        </label>
-        <p className="text-xs text-emerald-900 md:col-span-2" role="status">
-          {pitchTrace.status}. Green is within 50 cents, amber within 100, and rose is farther away.
-          {pitchTrace.status.includes("embedded browser") ? (
-            <> <button type="button" onClick={() => window.open(window.location.href, "_blank", "noopener,noreferrer")} className="font-semibold underline">Open this page in a full browser</button>.</>
-          ) : null}
-        </p>
+          <label className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-3 text-sm font-medium text-slate-700">
+            <span>Tempo</span>
+            <input
+              aria-label="Tempo"
+              type="range"
+              min="40"
+              max="150"
+              step="5"
+              value={tempoPercent}
+              onChange={(event) => {
+                const nextTempo = Number(event.target.value);
+                setTempoPercent(nextTempo);
+                if (isPlaying) start(nextTempo, currentIndex, playheadBeat);
+              }}
+              className="min-w-0"
+            />
+            <span className="w-11 text-right tabular-nums">{tempoPercent}%</span>
+          </label>
+
+          <div className="grid min-w-0 gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2">
+            <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3">
+              <button
+                type="button"
+                aria-label={pitchTrace.isListening ? "Stop listening" : "Use microphone"}
+                title={pitchTrace.isListening ? "Stop listening" : "Use microphone"}
+                onClick={pitchTrace.isListening ? pitchTrace.stop : () => void pitchTrace.start()}
+                className={`inline-flex h-8 min-w-20 items-center justify-center rounded-md px-3 text-xs font-semibold ${
+                  pitchTrace.isListening
+                    ? "border border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
+                    : "border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-50"
+                }`}
+              >
+                {pitchTrace.isListening ? "Mic on" : "Mic off"}
+              </button>
+              <label className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-sm font-medium text-slate-700">
+                <span>Delay</span>
+                <input aria-label="Microphone delay" type="range" min="0" max="400" step="10" value={inputLatencyMs} onChange={(event) => setInputLatencyMs(Number(event.target.value))} className="min-w-0" />
+                <span className="w-12 text-right tabular-nums">{inputLatencyMs} ms</span>
+              </label>
+              <button type="button" onClick={() => setInputLatencyMs(0)} className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold">Wired</button>
+              <button type="button" onClick={() => setInputLatencyMs(180)} className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold">Bluetooth</button>
+            </div>
+            <p className="truncate text-xs text-emerald-900" role="status" title={`${pitchTrace.status}. Green is within 50 cents, amber within 100, and rose is farther away.`}>
+              {pitchTrace.status}. Green within 50 cents, amber within 100, rose farther.
+              {pitchTrace.status.includes("embedded browser") ? (
+                <> <button type="button" onClick={() => window.open(window.location.href, "_blank", "noopener,noreferrer")} className="font-semibold underline">Open in browser</button>.</>
+              ) : null}
+            </p>
+          </div>
+
+          <div className="grid min-w-0 gap-2 rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2">
+            <label className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-sm font-medium text-slate-700">
+              <span>Context</span>
+              <input
+                aria-label="Context volume"
+                type="range"
+                min="0"
+                max="150"
+                step="5"
+                value={contextVolume}
+                onChange={(event) => {
+                  const nextVolume = Number(event.target.value);
+                  setContextVolume(nextVolume);
+                  if (isPlaying) start(tempoPercent, currentIndex, playheadBeat);
+                }}
+                className="min-w-0"
+              />
+              <span className="w-12 text-right tabular-nums">{contextVolume}%</span>
+            </label>
+            <label className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-sm font-medium text-slate-700">
+              <span>Sing</span>
+              <input
+                aria-label="Sing volume"
+                type="range"
+                min="0"
+                max="150"
+                step="5"
+                value={singVolume}
+                onChange={(event) => {
+                  const nextVolume = Number(event.target.value);
+                  setSingVolume(nextVolume);
+                  if (isPlaying) start(tempoPercent, currentIndex, playheadBeat);
+                }}
+                className="min-w-0"
+              />
+              <span className="w-12 text-right tabular-nums">{singVolume}%</span>
+            </label>
+          </div>
+        </div>
       </div>
 
       {path.length === 0 ? (
@@ -395,7 +535,11 @@ function ExercisePlayer({ exercise, range, isAdmin, onUpdate, onDelete }: {
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-indigo-950 px-4 py-3 text-white">
           <span className="font-semibold">Repetition {currentIndex + 1} of {path.length}</span>
           <span>Sing from {midiNoteName((firstExerciseNote?.midi ?? 60) + offset)}</span>
-          <span className="text-sm text-indigo-200">Transpose {offset >= 0 ? "+" : ""}{offset}</span>
+          <span className="text-sm text-indigo-200">
+            {formatDuration(practiceDuration)}
+            {fullPath.length > path.length ? ` / full walk ${formatDuration(fullDuration)}` : ""}
+            {" / "}Transpose {offset >= 0 ? "+" : ""}{offset}
+          </span>
         </div>
       )}
 
@@ -482,24 +626,6 @@ function ExerciseWorkspace({ userId, isSignedIn, isAdmin }: { userId: string; is
     return Array.from(groups.values());
   }, [exercises]);
 
-  const saveRange = async (nextRange: VocalRange) => {
-    setRange(nextRange);
-    setRangeMessage("Saving...");
-    try {
-      const response = await fetch("/api/users/me/vocal-range", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextRange),
-      });
-      if (!response.ok) throw new Error("Unable to save your vocal range");
-      const payload = await response.json() as { range: VocalRange };
-      setRange(payload.range);
-      setRangeMessage("Range saved");
-    } catch (error) {
-      setRangeMessage(error instanceof Error ? error.message : "Unable to save your vocal range");
-    }
-  };
-
   const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -527,19 +653,6 @@ function ExerciseWorkspace({ userId, isSignedIn, isAdmin }: { userId: string; is
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Unable to read this MIDI file.");
     }
-  };
-
-  const updateSelectedExercise = (updated: VocalExercise) => {
-    setExercises((previous) => previous.map((exercise) => exercise.id === updated.id ? updated : exercise));
-    void fetch(`/api/exercises/${updated.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ exerciseStartBeat: updated.exerciseStartBeat }),
-    }).then(async (response) => {
-      if (!response.ok) throw new Error("Unable to save exercise setup");
-      const payload = await response.json() as { exercise: VocalExercise };
-      setExercises((previous) => previous.map((exercise) => exercise.id === payload.exercise.id ? payload.exercise : exercise));
-    }).catch((error) => setImportError(error instanceof Error ? error.message : "Unable to save exercise setup"));
   };
 
   const deleteSelectedExercise = () => {
@@ -577,8 +690,8 @@ function ExerciseWorkspace({ userId, isSignedIn, isAdmin }: { userId: string; is
             key={selected.id}
             exercise={selected}
             range={range}
+            userId={userId}
             isAdmin={isAdmin}
-            onUpdate={updateSelectedExercise}
             onDelete={deleteSelectedExercise}
           />
         </div>
@@ -601,21 +714,7 @@ function ExerciseWorkspace({ userId, isSignedIn, isAdmin }: { userId: string; is
         ) : null}
       </div>
 
-      <section className="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
-        {isSignedIn ? (
-          <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
-            <NoteSelect label="Lowest comfortable note" value={range.low} onChange={(low) => void saveRange({ low, high: Math.max(low, range.high) })} />
-            <NoteSelect label="Highest comfortable note" value={range.high} onChange={(high) => void saveRange({ low: Math.min(range.low, high), high })} />
-            <div className="rounded-lg bg-white px-4 py-2 text-center text-sm font-semibold text-indigo-800 shadow-sm">{range.high - range.low + 1} semitones</div>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-indigo-950">
-            <span>Guest range: {midiNoteName(range.low)} to {midiNoteName(range.high)}</span>
-            <span className="font-semibold">Sign in to set and save your vocal range.</span>
-          </div>
-        )}
-        {rangeMessage ? <p className="mt-2 text-xs font-medium text-indigo-800" role="status">{rangeMessage}</p> : null}
-      </section>
+      {rangeMessage ? <p className="text-xs font-medium text-indigo-800" role="status">{rangeMessage}</p> : null}
 
       {isAdmin && showAddForm ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">

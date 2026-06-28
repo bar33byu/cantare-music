@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createPlaylist, getAllPlaylists } from '../../../db/queries';
+import { createPlaylist, getAllPlaylists, PLAYLIST_PERFORMANCE_STATUSES } from '../../../db/queries';
 import { resolveEffectiveRequestUserId } from '../_user';
 
 const userScopedHeaders = {
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   try {
     const userId = await resolveEffectiveRequestUserId(request);
     const body = await request.json();
-    const { name, eventDate } = body;
+    const { name, eventDate, performanceStatus } = body;
 
     if (!name || typeof name !== 'string') {
       return NextResponse.json({ error: 'name is required and must be a string' }, { status: 400 });
@@ -44,7 +44,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'eventDate must be a string' }, { status: 400 });
     }
 
-    const playlist = await createPlaylist({ userId, name: name.trim(), eventDate });
+    if (
+      performanceStatus !== undefined &&
+      performanceStatus !== null &&
+      !PLAYLIST_PERFORMANCE_STATUSES.includes(performanceStatus)
+    ) {
+      return NextResponse.json({ error: 'performanceStatus must be Performed, Absent, Sick, or Canceled' }, { status: 400 });
+    }
+
+    const playlist = await createPlaylist({ userId, name: name.trim(), eventDate, performanceStatus });
     return NextResponse.json(playlist, { status: 201 });
   } catch (error) {
     console.error('Error creating playlist:', error);

@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import PracticeView from "./components/PracticeView";
 import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
@@ -8,6 +9,7 @@ import { PlaylistPracticeView } from "./components/PlaylistPracticeView";
 import { GuestWelcomePanel } from "./components/GuestWelcomePanel";
 import { SharedBrowser } from "./components/SharedBrowser";
 import { ExerciseBrowser } from "./components/ExerciseBrowser";
+import { VocalRangeEditor } from "./components/VocalRangeEditor";
 import { SongForm } from "./components/SongForm";
 import { SongBrowser } from "./components/SongBrowser";
 import { SegmentEditor } from "./components/SegmentEditor";
@@ -1834,6 +1836,8 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             onOpenContourReferenceClick={() => {
               setActiveView("song_contour_reference");
             }}
+            practiceTimeTrackingEnabled={!playlistPracticeReadOnly}
+            practiceTimeSource="song"
           />
         </div>
       </div>
@@ -2057,6 +2061,18 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               </div>
 
               <div data-testid="settings-scroll-body" className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-2 pr-1">
+                <SettingsSection title="Stats" tone="muted" testId="settings-section-stats">
+                  <Link
+                    href="/stats"
+                    className="inline-flex w-full items-center justify-center rounded-lg border border-indigo-200 bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+                    onClick={() => setSettingsOpen(false)}
+                  >
+                    Open stats dashboard
+                  </Link>
+                  <p className="mt-2 text-xs text-gray-600">
+                    Song mastery, stale repertoire, and exercise practice-time trends.
+                  </p>
+                </SettingsSection>
                 <SettingsSection title="Playback" tone="muted" testId="settings-section-playback">
                   <div>
                     <p className="text-sm text-gray-700">Default audio</p>
@@ -2165,6 +2181,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                           Save profile
                         </button>
                       </form>
+                      <VocalRangeEditor userId={currentUser.id} />
                       <button
                         type="button"
                         onClick={() => {

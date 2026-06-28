@@ -733,6 +733,18 @@ describe('Home page', () => {
           }),
         } as Response;
       }
+      if (String(input) === '/api/users/me/vocal-range' && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ range: JSON.parse(String(init.body)) }),
+        } as Response;
+      }
+      if (String(input) === '/api/users/me/vocal-range') {
+        return {
+          ok: true,
+          json: async () => ({ range: { low: 45, high: 64 } }),
+        } as Response;
+      }
       return {
         ok: true,
         json: async () => ({}),
@@ -754,6 +766,7 @@ describe('Home page', () => {
     expect(screen.getByTestId('settings-current-username')).toHaveTextContent('@test-user');
     expect(screen.getByTestId('profile-display-name')).toHaveValue('Test User');
     expect(screen.getByTestId('profile-username')).toHaveValue('test-user');
+    expect(screen.getByTestId('profile-vocal-range-editor')).toHaveTextContent('A2 to E4');
 
     fireEvent.change(screen.getByTestId('profile-username'), { target: { value: 'New Singer!' } });
     fireEvent.click(screen.getByText('Save profile'));
@@ -762,6 +775,14 @@ describe('Home page', () => {
       expect(global.fetch).toHaveBeenCalledWith('/api/users/me', expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ displayName: 'Test User', username: 'new-singer' }),
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'High' }));
+    fireEvent.click(screen.getByRole('button', { name: 'C5 highest range note' }));
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/users/me/vocal-range', expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ low: 45, high: 72 }),
       }));
     });
     expect(screen.queryByText('Add')).not.toBeInTheDocument();

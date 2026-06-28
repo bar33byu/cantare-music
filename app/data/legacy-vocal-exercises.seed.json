@@ -1,0 +1,130 @@
+{
+  "format": "cantare_exercise_seed_v2",
+  "defaults": {
+    "timeSignature": { "numerator": 4, "denominator": 4 },
+    "baseTempoBpm": 88,
+    "exerciseStartBeat": 4,
+    "transposeMode": "semitone_all_notes",
+    "restBetweenIterations": { "measures": 1 }
+  },
+  "recommendedRoutineOrder": [
+    "agility-thirds-lee",
+    "arpeggio-vowel-mah",
+    "fifth-octave-placement-noo",
+    "five-note-scale-mee",
+    "major-triad-mum",
+    "neighbor-tones-nee"
+  ],
+  "exercises": [
+    {
+      "slug": "agility-thirds-lee",
+      "title": "Agility Thirds Lee",
+      "category": "Agility",
+      "syllable": "lee",
+      "description": "One-measure C-major context chord, then a rising thirds agility pattern.",
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 0.5, "notes": ["C3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 4.5, "durationBeats": 0.5, "notes": ["E3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 0.5, "notes": ["D3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 5.5, "durationBeats": 0.5, "notes": ["F3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 0.5, "notes": ["E3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 6.5, "durationBeats": 0.5, "notes": ["G3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 0.5, "notes": ["F3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 7.5, "durationBeats": 0.5, "notes": ["A3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 0.5, "notes": ["G3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 8.5, "durationBeats": 0.5, "notes": ["E3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 9, "durationBeats": 0.5, "notes": ["D3"], "lyric": "lee" },
+        { "region": "exercise", "startBeat": 9.5, "durationBeats": 1, "notes": ["C3"], "lyric": "lee" }
+      ]
+    },
+    {
+      "slug": "arpeggio-vowel-mah",
+      "title": "Arpeggio Vowel Mah",
+      "category": "Tone",
+      "syllable": "mah",
+      "description": "One-measure arpeggiated C-major context, then 1-3-5-3-1.",
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 1, "notes": ["C3"], "role": "context_arpeggio" },
+        { "region": "context", "startBeat": 1, "durationBeats": 1, "notes": ["E3"], "role": "context_arpeggio" },
+        { "region": "context", "startBeat": 2, "durationBeats": 1, "notes": ["G3"], "role": "context_arpeggio" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 1, "notes": ["C3"], "lyric": "mah" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 1, "notes": ["E3"], "lyric": "mah" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 1, "notes": ["G3"], "lyric": "mah" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 1, "notes": ["E3"], "lyric": "mah" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 2, "notes": ["C3"], "lyric": "mah" }
+      ]
+    },
+    {
+      "slug": "fifth-octave-placement-noo",
+      "title": "Fifth Octave Placement Noo",
+      "category": "Placement",
+      "syllable": "noo",
+      "description": "One-measure C-major context chord, then 1-5-8-5-1.",
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 1, "notes": ["C3"], "lyric": "noo" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 1, "notes": ["G3"], "lyric": "noo" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 2, "notes": ["C4"], "lyric": "noo" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 1, "notes": ["G3"], "lyric": "noo" },
+        { "region": "exercise", "startBeat": 9, "durationBeats": 2, "notes": ["C3"], "lyric": "noo" }
+      ]
+    },
+    {
+      "slug": "five-note-scale-mee",
+      "title": "Five Note Scale Mee",
+      "category": "Scale",
+      "syllable": "mee",
+      "description": "One-measure C-major context chord, then 1-2-3-4-5-4-3-2-1.",
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 0.5, "notes": ["C3"], "lyric": "mee" },
+        { "region": "exercise", "startBeat": 4.5, "durationBeats": 0.5, "notes": ["D3"], "lyric": "mee" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 0.5, "notes": ["E3"], "lyric": "mee" },
+        { "region": "exercise", "startBeat": 5.5, "durationBeats": 0.5, "notes": ["F3"], "lyric": "mee" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 1, "notes": ["G3"], "lyric": "mee" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 0.5, "notes": ["F3"], "lyric": "mee" },
+        { "region": "exercise", "startBeat": 7.5, "durationBeats": 0.5, "notes": ["E3"], "lyric": "mee" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 0.5, "notes": ["D3"], "lyric": "mee" },
+        { "region": "exercise", "startBeat": 8.5, "durationBeats": 1, "notes": ["C3"], "lyric": "mee" }
+      ]
+    },
+    {
+      "slug": "major-triad-mum",
+      "title": "Major Triad Mum",
+      "category": "Tone",
+      "syllable": "mum",
+      "description": "One-measure C-major context chord, then 1-3-5-8-5-3-1.",
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 1, "notes": ["C3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 1, "notes": ["E3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 1, "notes": ["G3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 1, "notes": ["C4"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 1, "notes": ["G3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 9, "durationBeats": 1, "notes": ["E3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 10, "durationBeats": 2, "notes": ["C3"], "lyric": "mum" }
+      ]
+    },
+    {
+      "slug": "neighbor-tones-nee",
+      "title": "Neighbor Tones Nee",
+      "category": "Resonance",
+      "syllable": "nee",
+      "description": "One-measure C-major context chord, then a neighbor-tone resonance pattern.",
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 0.5, "notes": ["E3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 4.5, "durationBeats": 0.5, "notes": ["F3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 0.5, "notes": ["E3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 5.5, "durationBeats": 0.5, "notes": ["D3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 1, "notes": ["E3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 0.5, "notes": ["F3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 7.5, "durationBeats": 0.5, "notes": ["G3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 0.5, "notes": ["F3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 8.5, "durationBeats": 0.5, "notes": ["E3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 9, "durationBeats": 1, "notes": ["C3"], "lyric": "nee" }
+      ]
+    }
+  ]
+}

@@ -4,14 +4,21 @@ import { upsertSeedVocalExercises } from "../db/queries";
 import { parseVocalExerciseSeedBundle } from "../app/lib/vocalExerciseSeed";
 import { alignContextToMetronome } from "../app/lib/vocalExercise";
 
+const DEFAULT_SEED_PATHS = [
+  "app/data/baritone-passaggio-warmups.seed.json",
+  "app/data/legacy-vocal-exercises.seed.json",
+];
+
 async function main() {
-  const sourcePath = process.argv[2];
-  if (!sourcePath) throw new Error("Usage: seed-vocal-exercises <path-to-seed.json>");
-  const absolutePath = resolve(sourcePath);
-  const source = JSON.parse(await readFile(absolutePath, "utf8")) as unknown;
-  const { exercises, collection } = parseVocalExerciseSeedBundle(source);
-  const saved = await upsertSeedVocalExercises(exercises.map(alignContextToMetronome), collection);
-  process.stdout.write(`Seeded ${saved.length} vocal exercises: ${saved.map((exercise) => exercise.slug).join(", ")}\n`);
+  const sourcePaths = process.argv.slice(2);
+  const paths = sourcePaths.length > 0 ? sourcePaths : DEFAULT_SEED_PATHS;
+  for (const sourcePath of paths) {
+    const absolutePath = resolve(sourcePath);
+    const source = JSON.parse(await readFile(absolutePath, "utf8")) as unknown;
+    const { exercises, collection } = parseVocalExerciseSeedBundle(source);
+    const saved = await upsertSeedVocalExercises(exercises.map(alignContextToMetronome), collection);
+    process.stdout.write(`Seeded ${saved.length} vocal exercises from ${sourcePath}: ${saved.map((exercise) => exercise.slug).join(", ")}\n`);
+  }
 }
 
 void main().catch((error) => {
