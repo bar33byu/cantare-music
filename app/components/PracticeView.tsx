@@ -79,6 +79,8 @@ interface PracticeViewProps {
   onNextSegment?: (options?: { wasPlaying: boolean }) => void;
   canUsePrevSegment?: boolean;
   canUseNextSegment?: boolean;
+  practiceTimeTrackingEnabled?: boolean;
+  practiceTimeSource?: string;
 }
 
 type LyricVisibilityMode = "full" | "hint" | "hidden";
@@ -271,6 +273,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   onNextSegment,
   canUsePrevSegment: canUsePrevSegmentOverride,
   canUseNextSegment: canUseNextSegmentOverride,
+  practiceTimeTrackingEnabled = false,
+  practiceTimeSource = "song",
 }) => {
   const withUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
     return withUserIdHeader(init, userId);
@@ -391,6 +395,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     Boolean(song.hasMidiContour)
   );
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
+  const activePracticeSessionRef = React.useRef<{ id: string; startedAtMs: number } | null>(null);
   const tapBarRef = React.useRef<HTMLDivElement | null>(null);
   const activeTapCaptureRef = React.useRef<ActiveTapCapture | null>(null);
   const toastTimerRef = React.useRef<number | null>(null);
@@ -426,6 +431,45 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     viewportSize.height <= 520 &&
     viewportSize.width <= 1100
   );
+  React.useEffect(() => {
+    if (!practiceTimeTrackingEnabled || !isPlaying) {
+      return;
+    }
+
+    const sessionId = crypto.randomUUID();
+    const startedAt = new Date();
+    activePracticeSessionRef.current = { id: sessionId, startedAtMs: startedAt.getTime() };
+    void request("/api/song-practice-sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: sessionId,
+        songId: song.id,
+        segmentId: currentSegment?.id ?? null,
+        source: practiceTimeSource,
+        startedAt: startedAt.toISOString(),
+      }),
+    }).catch(() => undefined);
+
+    return () => {
+      const activeSession = activePracticeSessionRef.current;
+      if (!activeSession) {
+        return;
+      }
+      activePracticeSessionRef.current = null;
+      const completedAt = new Date();
+      const durationSeconds = Math.max(0, (completedAt.getTime() - activeSession.startedAtMs) / 1000);
+      void request(`/api/song-practice-sessions/${activeSession.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          completedAt: completedAt.toISOString(),
+          durationSeconds,
+        }),
+      }).catch(() => undefined);
+    };
+  }, [currentSegment?.id, isPlaying, practiceTimeSource, practiceTimeTrackingEnabled, request, song.id]);
+
   React.useEffect(() => {
     onSegmentPlaybackCompleteRef.current = onSegmentPlaybackComplete;
   }, [onSegmentPlaybackComplete]);

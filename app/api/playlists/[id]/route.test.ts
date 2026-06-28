@@ -4,6 +4,7 @@ vi.mock('../../../../db/queries', () => ({
   getPlaylistById: vi.fn(),
   updatePlaylist: vi.fn(),
   deletePlaylist: vi.fn(),
+  PLAYLIST_PERFORMANCE_STATUSES: ['Performed', 'Absent', 'Sick', 'Canceled'],
 }));
 
 import { DELETE, GET, PATCH } from './route';
@@ -42,7 +43,7 @@ describe('PATCH /api/playlists/[id]', () => {
 
     const response = await PATCH(request as any, { params: Promise.resolve({ id: 'pl-1' }) });
     expect(response.status).toBe(204);
-    expect(updatePlaylist).toHaveBeenCalledWith('pl-1', { name: undefined, eventDate: undefined, isRetired: true }, 'default');
+    expect(updatePlaylist).toHaveBeenCalledWith('pl-1', { name: undefined, eventDate: undefined, isRetired: true, performanceStatus: undefined }, 'default');
   });
 
   it('returns 404 when missing', async () => {

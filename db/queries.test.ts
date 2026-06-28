@@ -370,6 +370,16 @@ describe("shared playlist import title helpers", () => {
       ["MSW 31 May 2026 Baritone", "MSW 31 May 2026 Baritone (import 2)"]
     )).toBe("MSW 31 May 2026 Baritone (import 3)");
   });
+
+  it("extracts playlist event dates from common title formats", async () => {
+    const { extractPlaylistEventDateFromName } = await getQueries();
+
+    expect(extractPlaylistEventDateFromName("MSW 31 May 2026 Baritone")).toBe("2026-05-31");
+    expect(extractPlaylistEventDateFromName("Concert Apr 4, 2026")).toBe("2026-04-04");
+    expect(extractPlaylistEventDateFromName("Set 2026-04-04")).toBe("2026-04-04");
+    expect(extractPlaylistEventDateFromName("Set 4/4/2026")).toBe("2026-04-04");
+    expect(extractPlaylistEventDateFromName("No date here")).toBeNull();
+  });
 });
 
 describe("getAllSongs", () => {

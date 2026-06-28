@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Home from './page';
 
@@ -538,6 +539,37 @@ describe('Home page', () => {
     });
   });
 
+  it('keeps the server render deterministic when signed-in settings are cached locally', () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      currentUserId: 'test-user',
+      users: [
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+      ],
+    }));
+
+    const html = renderToString(<Home />);
+    expect(html).toContain('Cantare Music (Guest)');
+    expect(html).not.toContain('>Cantare Music</h1>');
+  });
+
+  it('places Exercise after Shared and writes its hash route', async () => {
+    render(<Home />);
+
+    const tabs = screen.getByLabelText('Main sections').querySelectorAll('button');
+    expect(Array.from(tabs).map((tab) => tab.textContent?.trim())).toEqual([
+      'Playlists',
+      'Library',
+      'Shared',
+      'Exercise',
+    ]);
+
+    fireEvent.click(screen.getByTestId('exercise-tab'));
+    expect(await screen.findByTestId('exercise-browser')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.hash).toContain('view=exercise'));
+  });
+
   it('refreshes playlist data when returning from song practice to playlist practice', async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -701,6 +733,18 @@ describe('Home page', () => {
           }),
         } as Response;
       }
+      if (String(input) === '/api/users/me/vocal-range' && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ range: JSON.parse(String(init.body)) }),
+        } as Response;
+      }
+      if (String(input) === '/api/users/me/vocal-range') {
+        return {
+          ok: true,
+          json: async () => ({ range: { low: 45, high: 64 } }),
+        } as Response;
+      }
       return {
         ok: true,
         json: async () => ({}),
@@ -722,6 +766,7 @@ describe('Home page', () => {
     expect(screen.getByTestId('settings-current-username')).toHaveTextContent('@test-user');
     expect(screen.getByTestId('profile-display-name')).toHaveValue('Test User');
     expect(screen.getByTestId('profile-username')).toHaveValue('test-user');
+    expect(screen.getByTestId('profile-vocal-range-editor')).toHaveTextContent('A2 to E4');
 
     fireEvent.change(screen.getByTestId('profile-username'), { target: { value: 'New Singer!' } });
     fireEvent.click(screen.getByText('Save profile'));
@@ -730,6 +775,14 @@ describe('Home page', () => {
       expect(global.fetch).toHaveBeenCalledWith('/api/users/me', expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ displayName: 'Test User', username: 'new-singer' }),
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'High' }));
+    fireEvent.click(screen.getByRole('button', { name: 'C5 highest range note' }));
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/users/me/vocal-range', expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ low: 45, high: 72 }),
       }));
     });
     expect(screen.queryByText('Add')).not.toBeInTheDocument();

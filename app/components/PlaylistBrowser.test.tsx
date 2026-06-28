@@ -141,6 +141,45 @@ describe('PlaylistBrowser', () => {
     });
   });
 
+  it('updates performance status for retired playlists', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ playlists: [{ ...basePlaylist, isRetired: true, performanceStatus: 'Performed' }] }),
+    });
+
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+    await waitFor(() => expect(screen.getByTestId('playlist-performance-status-pl-1')).toBeInTheDocument());
+
+    mockFetch.mockResolvedValueOnce({ ok: true });
+    fireEvent.change(screen.getByTestId('playlist-performance-status-pl-1'), { target: { value: 'Sick' } });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1', expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ performanceStatus: 'Sick' }),
+      }));
+    });
+  });
+
+  it('duplicates a playlist from the actions menu', async () => {
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+    await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('playlist-actions-pl-1'));
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ...basePlaylist, id: 'pl-copy', name: 'April Set (copy)', songCount: 3 }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ playlists: [basePlaylist] }) });
+    fireEvent.click(screen.getByTestId('playlist-duplicate-pl-1'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1/duplicate', expect.objectContaining({ method: 'POST' }));
+      expect(onManagePlaylist).toHaveBeenCalledWith(expect.objectContaining({ id: 'pl-copy', songs: [] }));
+    });
+  });
+
   it('delete confirm flow works', async () => {
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
     await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());

@@ -1,12 +1,15 @@
 "use client";
 
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import PracticeView from "./components/PracticeView";
 import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
 import { PlaylistPracticeView } from "./components/PlaylistPracticeView";
 import { GuestWelcomePanel } from "./components/GuestWelcomePanel";
 import { SharedBrowser } from "./components/SharedBrowser";
+import { ExerciseBrowser } from "./components/ExerciseBrowser";
+import { VocalRangeEditor } from "./components/VocalRangeEditor";
 import { SongForm } from "./components/SongForm";
 import { SongBrowser } from "./components/SongBrowser";
 import { SegmentEditor } from "./components/SegmentEditor";
@@ -53,6 +56,7 @@ type AppView =
   | "song_add"
   | "playlists"
   | "shared"
+  | "exercise"
   | "playlist_detail"
   | "playlist_practice";
 
@@ -259,6 +263,7 @@ function parseHashRoute(hash: string): HashRouteState {
     view === "song_add" ||
     view === "playlists" ||
     view === "shared" ||
+    view === "exercise" ||
     view === "playlist_detail" ||
     view === "playlist_practice"
       ? view
@@ -826,14 +831,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [playlistPracticeReadOnly, setPlaylistPracticeReadOnly] = useState(false);
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [userSettings, setUserSettings] = useState<UserSettings>(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_USER_SETTINGS;
-    }
-
-    const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-    return getLocallyTrustedUserSettings(storedSettings, window.localStorage);
-  });
+  const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [authEmail, setAuthEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -1502,6 +1500,13 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         return;
       }
 
+      if (route.view === "shared" || route.view === "exercise") {
+        setSelectedSong(null);
+        setSelectedPlaylist(null);
+        setActiveView(route.view);
+        return;
+      }
+
       if (route.view === "song_add") {
         setSelectedSong(null);
         setActiveView("song_add");
@@ -1831,6 +1836,8 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             onOpenContourReferenceClick={() => {
               setActiveView("song_contour_reference");
             }}
+            practiceTimeTrackingEnabled={!playlistPracticeReadOnly}
+            practiceTimeSource="song"
           />
         </div>
       </div>
@@ -2054,6 +2061,18 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               </div>
 
               <div data-testid="settings-scroll-body" className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-2 pr-1">
+                <SettingsSection title="Stats" tone="muted" testId="settings-section-stats">
+                  <Link
+                    href="/stats"
+                    className="inline-flex w-full items-center justify-center rounded-lg border border-indigo-200 bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+                    onClick={() => setSettingsOpen(false)}
+                  >
+                    Open stats dashboard
+                  </Link>
+                  <p className="mt-2 text-xs text-gray-600">
+                    Song mastery, stale repertoire, and exercise practice-time trends.
+                  </p>
+                </SettingsSection>
                 <SettingsSection title="Playback" tone="muted" testId="settings-section-playback">
                   <div>
                     <p className="text-sm text-gray-700">Default audio</p>
@@ -2162,6 +2181,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                           Save profile
                         </button>
                       </form>
+                      <VocalRangeEditor userId={currentUser.id} />
                       <button
                         type="button"
                         onClick={() => {
@@ -2332,14 +2352,14 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         ) : null}
 
         {/* Tab navigation */}
-        <div className="flex gap-0 mb-6 border-b border-gray-300">
+        <div className="mb-6 flex gap-0 overflow-x-auto border-b border-gray-300" aria-label="Main sections">
           <button
             data-testid="playlists-tab"
             onClick={() => {
               setSelectedSong(null);
               setActiveView("playlists");
             }}
-            className={`px-4 py-3 font-medium transition-colors ${
+            className={`shrink-0 px-4 py-3 font-medium transition-colors ${
               activeView === "playlists"
                 ? "border-b-2 border-indigo-600 text-indigo-600"
                 : "text-gray-600 hover:text-gray-900"
@@ -2353,7 +2373,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               setSelectedPlaylist(null);
               setActiveView("library");
             }}
-            className={`px-4 py-3 font-medium transition-colors ${
+            className={`shrink-0 px-4 py-3 font-medium transition-colors ${
               activeView === "library"
                 ? "border-b-2 border-blue-600 text-blue-600"
                 : "text-gray-600 hover:text-gray-900"
@@ -2368,13 +2388,28 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               setSelectedPlaylist(null);
               setActiveView("shared");
             }}
-            className={`px-4 py-3 font-medium transition-colors ${
+            className={`shrink-0 px-4 py-3 font-medium transition-colors ${
               activeView === "shared"
                 ? "border-b-2 border-emerald-600 text-emerald-700"
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
             Shared
+          </button>
+          <button
+            data-testid="exercise-tab"
+            onClick={() => {
+              setSelectedSong(null);
+              setSelectedPlaylist(null);
+              setActiveView("exercise");
+            }}
+            className={`shrink-0 px-4 py-3 font-medium transition-colors ${
+              activeView === "exercise"
+                ? "border-b-2 border-violet-600 text-violet-700"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+          >
+            Exercise
           </button>
         </div>
 
@@ -2467,6 +2502,14 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               footer="Public shared playlists are available to signed-in users. Direct playlist share links still work without signing in."
             />
           )
+        ) : null}
+
+        {activeView === "exercise" ? (
+          <ExerciseBrowser
+            userId={activeUserId}
+            isSignedIn={isSignedIn}
+            isAdmin={Boolean(adminActor?.isAdmin)}
+          />
         ) : null}
       </div>
     </div>

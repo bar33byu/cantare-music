@@ -1,0 +1,231 @@
+{
+  "format": "cantare_exercise_seed_v2",
+  "collection": {
+    "slug": "baritone-passaggio-warmups",
+    "title": "Baritone Passaggio Warmups",
+    "description": "Warmups for gentle onset, airflow, registration, and passaggio coordination.",
+    "intendedSinger": "baritone",
+    "primaryGoals": ["Smooth passaggio", "Release throat grip", "Coordinate breath and registration"]
+  },
+  "defaults": {
+    "timeSignature": { "numerator": 4, "denominator": 4 },
+    "baseTempoBpm": 84,
+    "exerciseStartBeat": 4,
+    "transposeMode": "semitone_all_notes",
+    "restBetweenIterations": { "measures": 1 }
+  },
+  "recommendedRoutineOrder": [
+    "gentle-hum-sustain",
+    "lip-trill-five-note",
+    "ng-bridge-stepwise",
+    "mum-triad-passaggio",
+    "gee-descending-five-note",
+    "nee-hover-passaggio",
+    "vowel-ladder-triad",
+    "light-octave-noo"
+  ],
+  "exercises": [
+    {
+      "slug": "gentle-hum-sustain",
+      "title": "Gentle Hum Sustain",
+      "category": "Onset",
+      "syllable": "hum / vvv",
+      "description": "Easy sustained tone to reduce throat grabbing and establish gentle onset before range work.",
+      "difficulty": "easy",
+      "tempoBpm": 72,
+      "pattern": "1 sustained",
+      "coachingNotes": [
+        "Use an easy onset with no punch or breath blast.",
+        "Keep the tone medium-soft.",
+        "This should feel like a comfortable speech-level hum or gentle vvv."
+      ],
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 4, "notes": ["C3"], "lyric": "hum" }
+      ]
+    },
+    {
+      "slug": "lip-trill-five-note",
+      "title": "Lip Trill Five-Note",
+      "category": "Semi-occluded",
+      "syllable": "lip trill / tongue trill / vv",
+      "description": "Five-note scale for airflow, easy closure, and registration smoothing.",
+      "difficulty": "easy",
+      "tempoBpm": 84,
+      "pattern": "1-2-3-4-5-4-3-2-1",
+      "coachingNotes": [
+        "Use a lip trill, tongue trill, or gentle vv if trills are unavailable.",
+        "Do not push for volume.",
+        "Let the upper notes feel lighter rather than louder."
+      ],
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 0.5, "notes": ["C3"], "lyric": "trill" },
+        { "region": "exercise", "startBeat": 4.5, "durationBeats": 0.5, "notes": ["D3"], "lyric": "trill" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 0.5, "notes": ["E3"], "lyric": "trill" },
+        { "region": "exercise", "startBeat": 5.5, "durationBeats": 0.5, "notes": ["F3"], "lyric": "trill" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 1, "notes": ["G3"], "lyric": "trill" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 0.5, "notes": ["F3"], "lyric": "trill" },
+        { "region": "exercise", "startBeat": 7.5, "durationBeats": 0.5, "notes": ["E3"], "lyric": "trill" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 0.5, "notes": ["D3"], "lyric": "trill" },
+        { "region": "exercise", "startBeat": 8.5, "durationBeats": 1, "notes": ["C3"], "lyric": "trill" }
+      ]
+    },
+    {
+      "slug": "ng-bridge-stepwise",
+      "title": "NG Bridge Stepwise",
+      "category": "Registration",
+      "syllable": "ng",
+      "description": "Discrete-note substitute for an NG siren to smooth the bridge without vowel weight.",
+      "difficulty": "medium",
+      "tempoBpm": 76,
+      "pattern": "1-2-3-4-5-6-7-8-7-6-5-4-3-2-1",
+      "coachingNotes": [
+        "Sing on NG as in the end of 'sing'.",
+        "Keep it buzzy and narrow.",
+        "Let the registration shift happen without opening the vowel."
+      ],
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 1, "notes": ["C3"], "role": "context_arpeggio" },
+        { "region": "context", "startBeat": 1, "durationBeats": 1, "notes": ["E3"], "role": "context_arpeggio" },
+        { "region": "context", "startBeat": 2, "durationBeats": 1, "notes": ["G3"], "role": "context_arpeggio" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 0.5, "notes": ["C3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 4.5, "durationBeats": 0.5, "notes": ["D3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 0.5, "notes": ["E3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 5.5, "durationBeats": 0.5, "notes": ["F3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 0.5, "notes": ["G3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 6.5, "durationBeats": 0.5, "notes": ["A3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 0.5, "notes": ["B3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 7.5, "durationBeats": 0.5, "notes": ["C4"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 0.5, "notes": ["B3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 8.5, "durationBeats": 0.5, "notes": ["A3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 9, "durationBeats": 0.5, "notes": ["G3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 9.5, "durationBeats": 0.5, "notes": ["F3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 10, "durationBeats": 0.5, "notes": ["E3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 10.5, "durationBeats": 0.5, "notes": ["D3"], "lyric": "ng" },
+        { "region": "exercise", "startBeat": 11, "durationBeats": 1, "notes": ["C3"], "lyric": "ng" }
+      ]
+    },
+    {
+      "slug": "mum-triad-passaggio",
+      "title": "Mum Triad Passaggio",
+      "category": "Passaggio",
+      "syllable": "mum",
+      "description": "Covered triad pattern for connecting chest and head without splatting the vowel.",
+      "difficulty": "medium",
+      "tempoBpm": 80,
+      "pattern": "1-3-5-8-5-3-1",
+      "coachingNotes": [
+        "Keep the sound speech-like and slightly covered.",
+        "Do not make the top note louder.",
+        "The top note should feel like release, not push."
+      ],
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 1, "notes": ["C3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 1, "notes": ["E3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 1, "notes": ["G3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 1, "notes": ["C4"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 1, "notes": ["G3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 9, "durationBeats": 1, "notes": ["E3"], "lyric": "mum" },
+        { "region": "exercise", "startBeat": 10, "durationBeats": 2, "notes": ["C3"], "lyric": "mum" }
+      ]
+    },
+    {
+      "slug": "gee-descending-five-note",
+      "title": "Gee Descending Five-Note",
+      "category": "Registration",
+      "syllable": "gee / gug / goo",
+      "description": "Descending pattern that lets the singer find the lighter upper coordination first and bring it downward.",
+      "difficulty": "easy-medium",
+      "tempoBpm": 84,
+      "pattern": "5-4-3-2-1",
+      "coachingNotes": [
+        "Start light on the top note.",
+        "Avoid barking the G consonant.",
+        "Let the sound descend without grabbing."
+      ],
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 1, "notes": ["G3"], "lyric": "gee" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 1, "notes": ["F3"], "lyric": "gee" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 1, "notes": ["E3"], "lyric": "gee" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 1, "notes": ["D3"], "lyric": "gee" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 2, "notes": ["C3"], "lyric": "gee" }
+      ]
+    },
+    {
+      "slug": "nee-hover-passaggio",
+      "title": "Nee Hover Passaggio",
+      "category": "Passaggio",
+      "syllable": "nee / noo",
+      "description": "Hover pattern for stabilizing notes near the passaggio without blasting through them.",
+      "difficulty": "medium",
+      "tempoBpm": 76,
+      "pattern": "3-4-5-4-3-2-1",
+      "coachingNotes": [
+        "Use medium-soft volume.",
+        "Keep the vowel narrow.",
+        "This is meant to work the unstable notes directly without force."
+      ],
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 1, "notes": ["E3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 1, "notes": ["F3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 1, "notes": ["G3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 1, "notes": ["F3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 1, "notes": ["E3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 9, "durationBeats": 1, "notes": ["D3"], "lyric": "nee" },
+        { "region": "exercise", "startBeat": 10, "durationBeats": 2, "notes": ["C3"], "lyric": "nee" }
+      ]
+    },
+    {
+      "slug": "vowel-ladder-triad",
+      "title": "Vowel Ladder Triad",
+      "category": "Vowel modification",
+      "syllable": "mee-mih-meh-muh",
+      "description": "Triad pattern with changing vowels to encourage narrowing/modification as the exercise rises.",
+      "difficulty": "medium",
+      "tempoBpm": 76,
+      "pattern": "1-3-5-8-5-3-1",
+      "coachingNotes": [
+        "Do not carry a wide open vowel too high.",
+        "Let the vowel narrow as pitch rises.",
+        "Use this to notice which vowel shapes trigger cracking."
+      ],
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 1, "notes": ["C3"], "lyric": "mee" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 1, "notes": ["E3"], "lyric": "mih" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 1, "notes": ["G3"], "lyric": "meh" },
+        { "region": "exercise", "startBeat": 7, "durationBeats": 1, "notes": ["C4"], "lyric": "muh" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 1, "notes": ["G3"], "lyric": "meh" },
+        { "region": "exercise", "startBeat": 9, "durationBeats": 1, "notes": ["E3"], "lyric": "mih" },
+        { "region": "exercise", "startBeat": 10, "durationBeats": 2, "notes": ["C3"], "lyric": "mee" }
+      ]
+    },
+    {
+      "slug": "light-octave-noo",
+      "title": "Light Octave Noo",
+      "category": "Upper connection",
+      "syllable": "noo / woo",
+      "description": "Light octave placement exercise for upper connection after the voice is warm.",
+      "difficulty": "medium-hard",
+      "tempoBpm": 72,
+      "pattern": "1-5-8-5-1",
+      "coachingNotes": [
+        "Use after easier warmups, not first.",
+        "The top note should be lighter, not louder.",
+        "Stop before strain."
+      ],
+      "events": [
+        { "region": "context", "startBeat": 0, "durationBeats": 3, "notes": ["C3", "E3", "G3"], "role": "context_chord" },
+        { "region": "exercise", "startBeat": 4, "durationBeats": 1, "notes": ["C3"], "lyric": "noo" },
+        { "region": "exercise", "startBeat": 5, "durationBeats": 1, "notes": ["G3"], "lyric": "noo" },
+        { "region": "exercise", "startBeat": 6, "durationBeats": 2, "notes": ["C4"], "lyric": "noo" },
+        { "region": "exercise", "startBeat": 8, "durationBeats": 1, "notes": ["G3"], "lyric": "noo" },
+        { "region": "exercise", "startBeat": 9, "durationBeats": 2, "notes": ["C3"], "lyric": "noo" }
+      ]
+    }
+  ]
+}

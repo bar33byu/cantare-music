@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../db/queries', () => ({
   getAllPlaylists: vi.fn(),
   createPlaylist: vi.fn(),
+  PLAYLIST_PERFORMANCE_STATUSES: ['Performed', 'Absent', 'Sick', 'Canceled'],
   getUserById: vi.fn(),
   getUserForSessionTokenHash: vi.fn(),
   logAuditEvent: vi.fn(),
@@ -77,7 +78,7 @@ describe('POST /api/playlists', () => {
 
     const response = await POST(request as any);
     expect(response.status).toBe(201);
-    expect(createPlaylist).toHaveBeenCalledWith({ userId: 'default', name: 'Set', eventDate: '2026-04-04' });
+    expect(createPlaylist).toHaveBeenCalledWith({ userId: 'default', name: 'Set', eventDate: '2026-04-04', performanceStatus: undefined });
   });
 
   it('returns 400 when name is missing', async () => {

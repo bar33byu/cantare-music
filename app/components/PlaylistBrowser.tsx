@@ -9,6 +9,7 @@ type PlaylistListItem = {
   id: string;
   name: string;
   eventDate?: string;
+  performanceStatus?: PlaylistPerformanceStatus | null;
   isRetired: boolean;
   isPublic?: boolean;
   publishedAt?: string | null;
@@ -20,6 +21,28 @@ type PlaylistListItem = {
   healthStats?: PlaylistHealthStats;
   songs?: Playlist['songs'];
 };
+
+type PlaylistPerformanceStatus = 'Performed' | 'Absent' | 'Sick' | 'Canceled';
+
+const PLAYLIST_PERFORMANCE_STATUSES: PlaylistPerformanceStatus[] = ['Performed', 'Absent', 'Sick', 'Canceled'];
+
+function sortPlaylists(list: PlaylistListItem[], includeRetired: boolean) {
+  if (!includeRetired) {
+    return list;
+  }
+
+  return [...list].sort((a, b) => {
+    if (a.isRetired !== b.isRetired) {
+      return a.isRetired ? -1 : 1;
+    }
+    const aDate = a.eventDate ?? '';
+    const bDate = b.eventDate ?? '';
+    if (aDate || bDate) {
+      return bDate.localeCompare(aDate);
+    }
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+}
 
 type PlaylistHealthStats = {
   songsWithPartAudio: number;
@@ -95,6 +118,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
   const [showArchived, setShowArchived] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
+  const [createEventDate, setCreateEventDate] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
@@ -144,7 +168,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
       if (latestFetchIdRef.current !== fetchId) {
         return;
       }
-      setPlaylists(list);
+      setPlaylists(sortPlaylists(list, includeRetired));
       const knowledge = Object.fromEntries(list.map((playlist) => [playlist.id, Math.min(Math.round(playlist.knowledgePercent ?? 0), 100)]));
       const stats = Object.fromEntries(list.map((playlist) => [playlist.id, playlist.healthStats ?? EMPTY_PLAYLIST_STATS]));
       setKnowledgeByPlaylist(knowledge);
@@ -201,6 +225,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: createName.trim(),
+        eventDate: createEventDate || undefined,
       }),
     });
 
@@ -212,15 +237,16 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
     const createdPlaylist = (await response.json()) as PlaylistListItem;
 
     setCreateName('');
+    setCreateEventDate('');
     setShowCreate(false);
     onManagePlaylist({ ...createdPlaylist, songs: [] } as Playlist);
   };
 
-  const handleRetireToggle = async (playlist: PlaylistListItem, isRetired: boolean) => {
+  const handleRetireToggle = async (playlist: PlaylistListItem, isRetired: boolean, performanceStatus?: PlaylistPerformanceStatus) => {
     const response = await request(`/api/playlists/${playlist.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isRetired }),
+      body: JSON.stringify({ isRetired, performanceStatus }),
     });
 
     if (!response.ok) {
@@ -229,6 +255,39 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
     }
 
     await fetchPlaylists(showArchived);
+  };
+
+  const handlePerformanceStatusChange = async (playlist: PlaylistListItem, performanceStatus: PlaylistPerformanceStatus) => {
+    const response = await request(`/api/playlists/${playlist.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ performanceStatus }),
+    });
+
+    if (!response.ok) {
+      setError('Unable to update playlist status right now.');
+      return;
+    }
+
+    setPlaylists((current) => sortPlaylists(
+      current.map((item) => item.id === playlist.id ? { ...item, performanceStatus } : item),
+      showArchived
+    ));
+  };
+
+  const handleDuplicate = async (playlist: PlaylistListItem) => {
+    const response = await request(`/api/playlists/${playlist.id}/duplicate`, {
+      method: 'POST',
+    });
+
+    if (!response.ok) {
+      setError('Unable to duplicate playlist right now.');
+      return;
+    }
+
+    const duplicatedPlaylist = (await response.json()) as PlaylistListItem;
+    await fetchPlaylists(showArchived);
+    onManagePlaylist({ ...duplicatedPlaylist, songs: [] } as Playlist);
   };
 
   const handleDelete = async (playlistId: string) => {
@@ -273,6 +332,13 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
               onChange={(event) => setCreateName(event.target.value)}
               placeholder="Playlist name"
               className="rounded border border-gray-300 px-3 py-2"
+            />
+            <input
+              data-testid="new-playlist-event-date"
+              type="date"
+              value={createEventDate}
+              onChange={(event) => setCreateEventDate(event.target.value)}
+              className="ml-2 rounded border border-gray-300 px-3 py-2"
             />
           </div>
           <div className="mt-3 flex gap-2">
@@ -353,6 +419,9 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                       ) : null}
                     </div>
                     {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
+                    {playlist.isRetired && playlist.performanceStatus ? (
+                      <p className="text-sm font-medium text-gray-600">{playlist.performanceStatus}</p>
+                    ) : null}
                     <p className="text-xs text-gray-500">Songs: {totalSongs}</p>
                     <p className="text-sm font-semibold text-indigo-800" data-testid={`playlist-knowledge-${playlist.id}`}>
                       Knowledge: {knowledgePercent}%
@@ -406,11 +475,21 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                           Edit Playlist
                         </button>
                         <button
+                          data-testid={`playlist-duplicate-${playlist.id}`}
+                          className="block w-full rounded px-3 py-2 text-left text-sm text-indigo-700 hover:bg-indigo-50"
+                          onClick={() => {
+                            setOpenActionsId(null);
+                            void handleDuplicate(playlist);
+                          }}
+                        >
+                          Duplicate
+                        </button>
+                        <button
                           data-testid={`playlist-retire-${playlist.id}`}
                           className="block w-full rounded px-3 py-2 text-left text-sm text-amber-700 hover:bg-amber-50"
                           onClick={() => {
                             setOpenActionsId(null);
-                            void handleRetireToggle(playlist, !playlist.isRetired);
+                            void handleRetireToggle(playlist, !playlist.isRetired, !playlist.isRetired ? 'Performed' : undefined);
                           }}
                         >
                           {playlist.isRetired ? 'Un-retire' : 'Retire'}
@@ -437,6 +516,24 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                       <button data-testid={`playlist-delete-confirm-yes-${playlist.id}`} className="rounded bg-red-600 px-3 py-1 text-white" onClick={() => void handleDelete(playlist.id)}>Confirm</button>
                       <button data-testid={`playlist-delete-confirm-no-${playlist.id}`} className="rounded border border-gray-300 px-3 py-1" onClick={() => setDeleteConfirmId(null)}>Cancel</button>
                     </div>
+                  </div>
+                ) : null}
+                {playlist.isRetired ? (
+                  <div className="mt-3 border-t border-gray-100 pt-3">
+                    <label className="flex w-fit items-center gap-2 text-sm text-gray-700">
+                      <span className="font-medium">Status</span>
+                      <select
+                        data-testid={`playlist-performance-status-${playlist.id}`}
+                        value={playlist.performanceStatus ?? ''}
+                        onChange={(event) => void handlePerformanceStatusChange(playlist, event.target.value as PlaylistPerformanceStatus)}
+                        className="rounded border border-gray-300 bg-white px-2 py-1"
+                      >
+                        <option value="" disabled>Choose status</option>
+                        {PLAYLIST_PERFORMANCE_STATUSES.map((status) => (
+                          <option key={status} value={status}>{status}</option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 ) : null}
               </article>

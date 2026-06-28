@@ -176,6 +176,48 @@
       "when": 1781910000000,
       "tag": "0025_pitch_practice",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1782097200000,
+      "tag": "0026_vocal_exercises",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1782099000000,
+      "tag": "0027_vocal_exercise_seed_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1782100800000,
+      "tag": "0028_vocal_exercise_collections",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1782604800000,
+      "tag": "0029_vocal_exercise_practice_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1782691200000,
+      "tag": "0030_song_practice_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1782777600000,
+      "tag": "0031_playlist_performances",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deletePlaylist, getPlaylistById, updatePlaylist } from '../../../../db/queries';
+import { deletePlaylist, getPlaylistById, updatePlaylist, PLAYLIST_PERFORMANCE_STATUSES } from '../../../../db/queries';
 import { resolveEffectiveRequestUserId } from '../../_user';
 
 const userScopedHeaders = {
@@ -51,19 +51,26 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { name, eventDate, isRetired } = body;
+    const { name, eventDate, isRetired, performanceStatus } = body;
 
     if (name !== undefined && typeof name !== 'string') {
       return NextResponse.json({ error: 'name must be a string' }, { status: 400 });
     }
-    if (eventDate !== undefined && typeof eventDate !== 'string') {
+    if (eventDate !== undefined && eventDate !== null && typeof eventDate !== 'string') {
       return NextResponse.json({ error: 'eventDate must be a string' }, { status: 400 });
     }
     if (isRetired !== undefined && typeof isRetired !== 'boolean') {
       return NextResponse.json({ error: 'isRetired must be a boolean' }, { status: 400 });
     }
+    if (
+      performanceStatus !== undefined &&
+      performanceStatus !== null &&
+      !PLAYLIST_PERFORMANCE_STATUSES.includes(performanceStatus)
+    ) {
+      return NextResponse.json({ error: 'performanceStatus must be Performed, Absent, Sick, or Canceled' }, { status: 400 });
+    }
 
-    await updatePlaylist(id, { name, eventDate, isRetired }, userId);
+    await updatePlaylist(id, { name, eventDate, isRetired, performanceStatus }, userId);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error updating playlist:', error);

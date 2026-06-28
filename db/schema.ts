@@ -54,6 +54,17 @@ export interface MidiCleanupSettingsData {
   simultaneousThresholdMs: number;
 }
 
+export interface VocalExerciseEventData {
+  id: string;
+  startBeat: number;
+  durationBeats: number;
+  midi: number;
+  velocity: number;
+  region: "context" | "exercise";
+  lyric?: string;
+  role?: string;
+}
+
 export const users = pgTable(
   "users",
   {
@@ -188,6 +199,7 @@ export const playlists = pgTable(
     userId: text("user_id").notNull().default("default"),
     name: text("name").notNull(),
     eventDate: text("event_date"),
+    performanceStatus: text("performance_status"),
     isRetired: boolean("is_retired").notNull().default(false),
     isPublic: boolean("is_public").notNull().default(false),
     publishedAt: timestamp("published_at"),
@@ -302,6 +314,26 @@ export const tapPracticeTaps = pgTable(
   })
 );
 
+export const songPracticeSessions = pgTable(
+  "song_practice_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().default("default"),
+    songId: text("song_id")
+      .notNull()
+      .references(() => songs.id, { onDelete: "cascade" }),
+    segmentId: text("segment_id").references(() => segments.id, { onDelete: "set null" }),
+    source: text("source").notNull().default("song"),
+    startedAt: timestamp("started_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+    durationSeconds: integer("duration_seconds").notNull().default(0),
+  },
+  (table) => ({
+    userStartedAtIdx: index("idx_song_practice_sessions_user_started_at").on(table.userId, table.startedAt),
+    userSongStartedAtIdx: index("idx_song_practice_sessions_user_song_started_at").on(table.userId, table.songId, table.startedAt),
+  })
+);
+
 export const midiSources = pgTable(
   "midi_sources",
   {
@@ -358,6 +390,93 @@ export const midiAlignments = pgTable(
   })
 );
 
+export const vocalExercises = pgTable(
+  "vocal_exercises",
+  {
+    id: text("id").primaryKey(),
+    slug: text("slug"),
+    title: text("title").notNull(),
+    category: text("category"),
+    syllable: text("syllable"),
+    description: text("description"),
+    difficulty: text("difficulty"),
+    pattern: text("pattern"),
+    coachingNotes: jsonb("coaching_notes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    sourceMidiFile: text("source_midi_file").notNull(),
+    exerciseStartBeatMilli: integer("exercise_start_beat_milli").notNull().default(0),
+    tempoBpmMilli: integer("tempo_bpm_milli").notNull().default(120000),
+    timeSignatureNumerator: integer("time_signature_numerator").notNull().default(4),
+    timeSignatureDenominator: integer("time_signature_denominator").notNull().default(4),
+    durationBeatsMilli: integer("duration_beats_milli").notNull(),
+    events: jsonb("events").$type<VocalExerciseEventData[]>().notNull().default(sql`'[]'::jsonb`),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    titleIdx: index("idx_vocal_exercises_title").on(table.title),
+    slugUniqueIdx: uniqueIndex("vocal_exercises_slug_unique").on(table.slug).where(sql`${table.slug} IS NOT NULL`),
+  })
+);
+
+export const vocalExerciseCollections = pgTable("vocal_exercise_collections", {
+  slug: text("slug").primaryKey(),
+  title: text("title").notNull(),
+  description: text("description"),
+  intendedSinger: text("intended_singer"),
+  primaryGoals: jsonb("primary_goals").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  restBetweenIterationsMeasures: integer("rest_between_iterations_measures").notNull().default(0),
+  transposeMode: text("transpose_mode").notNull().default("semitone_all_notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const vocalExerciseCollectionItems = pgTable(
+  "vocal_exercise_collection_items",
+  {
+    collectionSlug: text("collection_slug")
+      .notNull()
+      .references(() => vocalExerciseCollections.slug, { onDelete: "cascade" }),
+    exerciseId: text("exercise_id")
+      .notNull()
+      .references(() => vocalExercises.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.collectionSlug, table.exerciseId] }),
+    positionIdx: index("idx_vocal_exercise_collection_position").on(table.collectionSlug, table.position),
+  })
+);
+
+export const vocalExercisePracticeSessions = pgTable(
+  "vocal_exercise_practice_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().default("default"),
+    exerciseId: text("exercise_id")
+      .notNull()
+      .references(() => vocalExercises.id, { onDelete: "cascade" }),
+    startedAt: timestamp("started_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+    durationSeconds: integer("duration_seconds").notNull().default(0),
+    tempoPercent: integer("tempo_percent").notNull().default(100),
+    repetitionCount: integer("repetition_count").notNull().default(0),
+  },
+  (table) => ({
+    userStartedAtIdx: index("idx_vocal_exercise_practice_user_started_at").on(table.userId, table.startedAt),
+    userExerciseStartedAtIdx: index("idx_vocal_exercise_practice_user_exercise_started_at").on(table.userId, table.exerciseId, table.startedAt),
+  })
+);
+
+export const userVocalRanges = pgTable("user_vocal_ranges", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  lowMidi: integer("low_midi").notNull(),
+  highMidi: integer("high_midi").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export type UserRow = InferSelectModel<typeof users>;
 export type MagicLinkTokenRow = InferSelectModel<typeof magicLinkTokens>;
 export type UserSessionRow = InferSelectModel<typeof userSessions>;
@@ -377,5 +496,10 @@ export type OrphanedAudioKeyRow = InferSelectModel<typeof orphanedAudioKeys>;
 export type DraftRecordingRow = InferSelectModel<typeof draftRecordings>;
 export type TapPracticeSessionRow = InferSelectModel<typeof tapPracticeSessions>;
 export type TapPracticeTapRow = InferSelectModel<typeof tapPracticeTaps>;
+export type SongPracticeSessionRow = InferSelectModel<typeof songPracticeSessions>;
 export type MidiSourceRow = InferSelectModel<typeof midiSources>;
 export type MidiAlignmentRow = InferSelectModel<typeof midiAlignments>;
+export type VocalExerciseRow = InferSelectModel<typeof vocalExercises>;
+export type VocalExerciseCollectionRow = InferSelectModel<typeof vocalExerciseCollections>;
+export type VocalExercisePracticeSessionRow = InferSelectModel<typeof vocalExercisePracticeSessions>;
+export type UserVocalRangeRow = InferSelectModel<typeof userVocalRanges>;

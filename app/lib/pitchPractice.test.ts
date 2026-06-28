@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centsBetween, createAdaptiveNoiseGateState, detectPitchYin, findMidiNoteAtOffset, frequencyToMidi, getAdaptivePitchTiming, getWholeSongPitchTarget, mergeVoicePitchAttempt, scoreVoicePitchAttempts, updateAdaptiveNoiseGate, updatePitchStability, type PitchStabilityState } from "./pitchPractice";
+import { centsBetween, createAdaptiveNoiseGateState, detectPitchYin, findMidiNoteAtOffset, foldPitchToReferenceOctave, frequencyToMidi, getAdaptivePitchTiming, getWholeSongPitchTarget, mergeVoicePitchAttempt, scoreVoicePitchAttempts, updateAdaptiveNoiseGate, updatePitchStability, type PitchStabilityState } from "./pitchPractice";
 import type { MidiSegmentAnswerKey } from "./midiGuidedTapPractice";
 
 const key: MidiSegmentAnswerKey = {
@@ -20,6 +20,13 @@ describe("pitch practice", () => {
   it("converts concert A and cents to MIDI", () => {
     expect(frequencyToMidi(440)).toBeCloseTo(69, 6);
     expect(centsBetween(69.49, 69)).toBe(49);
+  });
+
+  it("folds clear harmonic octave errors without flattening ordinary pitch differences", () => {
+    expect(foldPitchToReferenceOctave(84.1, 60)).toBeCloseTo(60.1);
+    expect(foldPitchToReferenceOctave(71.9, 60)).toBeCloseTo(59.9);
+    expect(foldPitchToReferenceOctave(67, 60)).toBe(67);
+    expect(foldPitchToReferenceOctave(60, 72)).toBe(72);
   });
 
   it("detects a generated sine wave", () => {
