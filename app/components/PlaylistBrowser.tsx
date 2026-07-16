@@ -22,25 +22,23 @@ type PlaylistListItem = {
   songs?: Playlist['songs'];
 };
 
-type PlaylistPerformanceStatus = 'Performed' | 'Absent' | 'Sick' | 'Canceled';
+type PlaylistPerformanceStatus = 'Performed' | 'Recorded' | 'Absent' | 'Sick' | 'Canceled';
+type PlaylistSortMode = 'performanceDate' | 'name';
 
-const PLAYLIST_PERFORMANCE_STATUSES: PlaylistPerformanceStatus[] = ['Performed', 'Absent', 'Sick', 'Canceled'];
+const PLAYLIST_PERFORMANCE_STATUSES: PlaylistPerformanceStatus[] = ['Performed', 'Recorded', 'Absent', 'Sick', 'Canceled'];
 
-function sortPlaylists(list: PlaylistListItem[], includeRetired: boolean) {
-  if (!includeRetired) {
-    return list;
-  }
-
+function sortPlaylists(list: PlaylistListItem[], sortMode: PlaylistSortMode) {
   return [...list].sort((a, b) => {
-    if (a.isRetired !== b.isRetired) {
-      return a.isRetired ? -1 : 1;
+    if (sortMode === 'name') {
+      return a.name.localeCompare(b.name) || (b.eventDate ?? '').localeCompare(a.eventDate ?? '') || b.createdAt.localeCompare(a.createdAt);
     }
+
     const aDate = a.eventDate ?? '';
     const bDate = b.eventDate ?? '';
     if (aDate || bDate) {
-      return bDate.localeCompare(aDate);
+      return (bDate ? 1 : 0) - (aDate ? 1 : 0) || bDate.localeCompare(aDate) || a.name.localeCompare(b.name);
     }
-    return b.createdAt.localeCompare(a.createdAt);
+    return b.createdAt.localeCompare(a.createdAt) || a.name.localeCompare(b.name);
   });
 }
 
@@ -116,6 +114,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [sortMode, setSortMode] = useState<PlaylistSortMode>('performanceDate');
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createEventDate, setCreateEventDate] = useState('');
@@ -148,7 +147,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
     const cached = readCachedJson<CachedPlaylistListPayload>(cacheKey);
     const hasCachedPlaylists = cached !== null && Array.isArray(cached.value.playlists);
     if (cached && hasCachedPlaylists) {
-      setPlaylists(cached.value.playlists);
+      setPlaylists(sortPlaylists(cached.value.playlists, sortMode));
       setKnowledgeByPlaylist(cached.value.knowledgeByPlaylist ?? {});
       setStatsByPlaylist(cached.value.statsByPlaylist ?? {});
       setLoading(false);
@@ -168,7 +167,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
       if (latestFetchIdRef.current !== fetchId) {
         return;
       }
-      setPlaylists(sortPlaylists(list, includeRetired));
+      setPlaylists(sortPlaylists(list, sortMode));
       const knowledge = Object.fromEntries(list.map((playlist) => [playlist.id, Math.min(Math.round(playlist.knowledgePercent ?? 0), 100)]));
       const stats = Object.fromEntries(list.map((playlist) => [playlist.id, playlist.healthStats ?? EMPTY_PLAYLIST_STATS]));
       setKnowledgeByPlaylist(knowledge);
@@ -192,7 +191,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
         setLoading(false);
       }
     }
-  }, [request, userId]);
+  }, [request, sortMode, userId]);
 
   useEffect(() => {
     void fetchPlaylists(showArchived);
@@ -271,7 +270,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
 
     setPlaylists((current) => sortPlaylists(
       current.map((item) => item.id === playlist.id ? { ...item, performanceStatus } : item),
-      showArchived
+      sortMode
     ));
   };
 
@@ -321,6 +320,18 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
         >
           {showArchived ? 'Hide Archived' : 'Show Archived'}
         </button>
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <span className="font-medium">Sort</span>
+          <select
+            data-testid="playlist-sort-mode"
+            value={sortMode}
+            onChange={(event) => setSortMode(event.target.value as PlaylistSortMode)}
+            className="rounded border border-gray-300 bg-white px-3 py-2"
+          >
+            <option value="performanceDate">Performance date</option>
+            <option value="name">Name</option>
+          </select>
+        </label>
       </div>
 
       {showCreate ? (

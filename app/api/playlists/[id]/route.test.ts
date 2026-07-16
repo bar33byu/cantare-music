@@ -4,7 +4,7 @@ vi.mock('../../../../db/queries', () => ({
   getPlaylistById: vi.fn(),
   updatePlaylist: vi.fn(),
   deletePlaylist: vi.fn(),
-  PLAYLIST_PERFORMANCE_STATUSES: ['Performed', 'Absent', 'Sick', 'Canceled'],
+  PLAYLIST_PERFORMANCE_STATUSES: ['Performed', 'Recorded', 'Absent', 'Sick', 'Canceled'],
 }));
 
 import { DELETE, GET, PATCH } from './route';

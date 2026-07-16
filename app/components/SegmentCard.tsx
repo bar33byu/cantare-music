@@ -344,6 +344,14 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
                 : undefined
             }
           />
+          {Object.values(contourHeatMap ?? {}).some((stat) => stat.sessionCount > 0) ? (
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-medium text-slate-500" aria-label="Tap transition color legend">
+              <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-indigo-600" />Under 3 tries</span>
+              <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500" />Reliable</span>
+              <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-500" />Mixed</span>
+              <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-red-500" />Frequent miss</span>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

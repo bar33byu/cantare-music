@@ -1352,6 +1352,45 @@ describe("PracticeView", () => {
     });
   });
 
+  it("treats adjacent keyboard keys as different notes and only repeats as same", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+    mockPracticeFetchWithMidiAnswerKey();
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    await waitFor(() => expectTapSessionStarted(song.id));
+
+    fireEvent.keyDown(window, { key: "z" });
+    fireEvent.keyDown(window, { key: "x" });
+    fireEvent.keyDown(window, { key: "x" });
+    fireEvent.keyDown(window, { key: "z" });
+
+    await waitFor(() => {
+      const tapPersistCalls = mockFetch.mock.calls.filter(([calledUrl, calledInit]) => (
+        String(calledUrl).includes("/tap-sessions/tap-session-1") && calledInit?.method === "POST"
+      ));
+      expect(tapPersistCalls).toHaveLength(4);
+      expect(tapPersistCalls.map(([, init]) => JSON.parse(String(init?.body)).direction)).toEqual([
+        "same",
+        "up",
+        "same",
+        "down",
+      ]);
+    });
+  });
+
   it("persists captured taps to the active tap session", async () => {
     mockPracticeFetchWithMidiAnswerKey();
 
@@ -1409,7 +1448,7 @@ describe("PracticeView", () => {
     });
   });
 
-  it("refreshes the card contour heat map after saving tap practice attempts", async () => {
+  it("refreshes scored tap-session summaries after saving without a duplicate heat-map request", async () => {
     mockPracticeFetchWithMidiAnswerKey();
 
     mockUseAudioPlayer.mockReturnValue({
@@ -1430,12 +1469,10 @@ describe("PracticeView", () => {
     const song = makeSong(1);
     await renderAndWaitForRatings(song);
 
-    await waitFor(() => {
-      const heatMapCalls = mockFetch.mock.calls.filter(
-        ([url, init]) => url === `/api/songs/${song.id}/tap-heatmap` && init?.cache === "no-store"
-      );
-      expect(heatMapCalls).toHaveLength(1);
-    });
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith(
+      `/api/songs/${song.id}/tap-sessions`,
+      expect.objectContaining({ cache: "no-store" })
+    ));
 
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
 
@@ -1467,11 +1504,12 @@ describe("PracticeView", () => {
     });
 
     await waitFor(() => {
-      const heatMapCalls = mockFetch.mock.calls.filter(
-        ([url, init]) => url === `/api/songs/${song.id}/tap-heatmap` && init?.cache === "no-store"
+      const sessionSummaryCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions` && init?.cache === "no-store"
       );
-      expect(heatMapCalls.length).toBeGreaterThanOrEqual(2);
+      expect(sessionSummaryCalls.length).toBeGreaterThanOrEqual(2);
     });
+    expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith("/tap-heatmap"))).toBe(false);
   });
 
   it("persists integer millisecond tap timings when playback time is fractional", async () => {

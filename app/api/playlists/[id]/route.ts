@@ -67,7 +67,7 @@ export async function PATCH(
       performanceStatus !== null &&
       !PLAYLIST_PERFORMANCE_STATUSES.includes(performanceStatus)
     ) {
-      return NextResponse.json({ error: 'performanceStatus must be Performed, Absent, Sick, or Canceled' }, { status: 400 });
+      return NextResponse.json({ error: 'performanceStatus must be Performed, Recorded, Absent, Sick, or Canceled' }, { status: 400 });
     }
 
     await updatePlaylist(id, { name, eventDate, isRetired, performanceStatus }, userId);

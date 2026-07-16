@@ -50,7 +50,7 @@ export function getImportedPlaylistName(sourceName: string, existingNames: strin
   return getNextImportedCopyName(sourceName, existingNames);
 }
 
-export const PLAYLIST_PERFORMANCE_STATUSES = ["Performed", "Absent", "Sick", "Canceled"] as const;
+export const PLAYLIST_PERFORMANCE_STATUSES = ["Performed", "Recorded", "Absent", "Sick", "Canceled"] as const;
 export type PlaylistPerformanceStatus = typeof PLAYLIST_PERFORMANCE_STATUSES[number];
 
 function normalizePlaylistPerformanceStatus(value: unknown): PlaylistPerformanceStatus | null {
@@ -3239,6 +3239,7 @@ async function pruneTapPracticeSessionsForSegment(
   songId: string,
   segmentId: string,
   currentSessionId: string,
+  inputMethod: PracticeInputMethod,
   userId: string = DEFAULT_QUERY_USER_ID,
   keepLimit: number = TAP_PRACTICE_SESSION_KEEP_LIMIT
 ): Promise<void> {
@@ -3255,6 +3256,7 @@ async function pruneTapPracticeSessionsForSegment(
         eq(tapPracticeSessions.songId, songId),
         eq(tapPracticeSessions.segmentId, segmentId),
         eq(tapPracticeSessions.mode, "practice"),
+        eq(tapPracticeSessions.inputMethod, inputMethod),
         eq(songs.userId, userId)
       ))
       .orderBy(desc(tapPracticeSessions.startedAt));
@@ -3272,6 +3274,7 @@ async function pruneTapPracticeSessionsForSegment(
           eq(tapPracticeSessions.songId, songId),
           eq(tapPracticeSessions.segmentId, segmentId),
           eq(tapPracticeSessions.mode, "practice"),
+          eq(tapPracticeSessions.inputMethod, inputMethod),
           eq(songs.userId, userId)
         ))
         .orderBy(desc(tapPracticeSessions.startedAt));
@@ -3487,7 +3490,7 @@ export async function updateTapPracticeSessionProgress(
   }
 
   if (existing.segmentId && existing.mode === "practice") {
-    await pruneTapPracticeSessionsForSegment(existing.songId, existing.segmentId, sessionId, userId);
+    await pruneTapPracticeSessionsForSegment(existing.songId, existing.segmentId, sessionId, existing.inputMethod ?? "tap", userId);
   }
 
   return getTapPracticeSessionDetail(sessionId, userId);
@@ -3767,7 +3770,7 @@ export async function finalizeTapPracticeSession(
   }
 
   if (existing.segmentId && existing.mode === "practice") {
-    await pruneTapPracticeSessionsForSegment(existing.songId, existing.segmentId, sessionId, userId);
+    await pruneTapPracticeSessionsForSegment(existing.songId, existing.segmentId, sessionId, existing.inputMethod ?? "tap", userId);
   }
 
   return getTapPracticeSessionDetail(sessionId, userId);

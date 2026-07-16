@@ -41,6 +41,52 @@ describe('PlaylistBrowser', () => {
     });
   });
 
+  it('sorts playlists by performance date by default', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        playlists: [
+          { ...basePlaylist, id: 'pl-apr', name: 'April Set', eventDate: '2026-04-04' },
+          { ...basePlaylist, id: 'pl-may', name: 'May Set', eventDate: '2026-05-01' },
+          { ...basePlaylist, id: 'pl-undated', name: 'Undated Set', eventDate: undefined },
+        ],
+      }),
+    });
+
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+    await waitFor(() => expect(screen.getByTestId('playlist-row-pl-may')).toBeInTheDocument());
+
+    const mayRow = screen.getByTestId('playlist-row-pl-may');
+    const aprilRow = screen.getByTestId('playlist-row-pl-apr');
+    const undatedRow = screen.getByTestId('playlist-row-pl-undated');
+    expect(mayRow.compareDocumentPosition(aprilRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(aprilRow.compareDocumentPosition(undatedRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('playlist-sort-mode')).toHaveValue('performanceDate');
+  });
+
+  it('sorts playlists by name when selected', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        playlists: [
+          { ...basePlaylist, id: 'pl-zed', name: 'Zed Set', eventDate: '2026-06-01' },
+          { ...basePlaylist, id: 'pl-alpha', name: 'Alpha Set', eventDate: '2026-01-01' },
+        ],
+      }),
+    });
+
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+    await waitFor(() => expect(screen.getByTestId('playlist-row-pl-zed')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId('playlist-sort-mode'), { target: { value: 'name' } });
+
+    await waitFor(() => {
+      const alphaRow = screen.getByTestId('playlist-row-pl-alpha');
+      const zedRow = screen.getByTestId('playlist-row-pl-zed');
+      expect(alphaRow.compareDocumentPosition(zedRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
   it('shows separate indicators for public Shared publishing and URL sharing', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
@@ -151,12 +197,12 @@ describe('PlaylistBrowser', () => {
     await waitFor(() => expect(screen.getByTestId('playlist-performance-status-pl-1')).toBeInTheDocument());
 
     mockFetch.mockResolvedValueOnce({ ok: true });
-    fireEvent.change(screen.getByTestId('playlist-performance-status-pl-1'), { target: { value: 'Sick' } });
+    fireEvent.change(screen.getByTestId('playlist-performance-status-pl-1'), { target: { value: 'Recorded' } });
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith('/api/playlists/pl-1', expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ performanceStatus: 'Sick' }),
+        body: JSON.stringify({ performanceStatus: 'Recorded' }),
       }));
     });
   });

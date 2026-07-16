@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../db/queries', () => ({
   getAllPlaylists: vi.fn(),
   createPlaylist: vi.fn(),
-  PLAYLIST_PERFORMANCE_STATUSES: ['Performed', 'Absent', 'Sick', 'Canceled'],
+  PLAYLIST_PERFORMANCE_STATUSES: ['Performed', 'Recorded', 'Absent', 'Sick', 'Canceled'],
   getUserById: vi.fn(),
   getUserForSessionTokenHash: vi.fn(),
   logAuditEvent: vi.fn(),

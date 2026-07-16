@@ -47,7 +47,7 @@ describe('PitchContourThumbnail', () => {
     expect(notes[1]).toHaveAttribute('fill', 'rgb(244 137 24)');
   });
 
-  it('keeps notes neutral until they have at least two attempts of history', () => {
+  it('keeps notes neutral until they have at least three attempts of history', () => {
     render(
       <PitchContourThumbnail
         segmentDurationMs={10000}
@@ -55,12 +55,14 @@ describe('PitchContourThumbnail', () => {
           { id: 'n-1', timeOffsetMs: 1000, durationMs: 800, lane: 0.2 },
         ]}
         noteHeatMap={{
-          'n-1': { sessionCount: 1, missCount: 1, missRate: 1 },
+          'n-1': { sessionCount: 2, missCount: 2, missRate: 1 },
         }}
       />
     );
 
-    expect(screen.getByTestId('pitch-contour-thumbnail-note')).toHaveAttribute('fill', 'rgb(79 70 229)');
+    const note = screen.getByTestId('pitch-contour-thumbnail-note');
+    expect(note).toHaveAttribute('fill', 'rgb(79 70 229)');
+    expect(note.querySelector('title')).toHaveTextContent('2 graded attempts; 3 needed for a trouble color');
   });
 
   it('uses warmer colors for higher miss rates', () => {

@@ -8,7 +8,7 @@ interface PitchContourThumbnailProps {
   activeTimeMs?: number;
 }
 
-const MIN_HEATMAP_SESSION_COUNT = 2;
+const MIN_HEATMAP_SESSION_COUNT = 3;
 
 function blendChannel(start: number, end: number, amount: number): number {
   return Math.round(start + (end - start) * amount);
@@ -99,7 +99,15 @@ export function PitchContourThumbnail({ notes = [], segmentDurationMs, className
                 opacity={isActive ? 1 : getContourHeatOpacity(stat)}
                 stroke={isActive ? "rgb(255 255 255)" : undefined}
                 strokeWidth={isActive ? 0.8 : undefined}
-              />
+              >
+                {stat ? (
+                  <title>{
+                    stat.sessionCount < MIN_HEATMAP_SESSION_COUNT
+                      ? `${stat.sessionCount} graded ${stat.sessionCount === 1 ? 'attempt' : 'attempts'}; 3 needed for a trouble color`
+                      : `${stat.missCount} ${stat.missCount === 1 ? 'miss' : 'misses'} in ${stat.sessionCount} graded attempts`
+                  }</title>
+                ) : null}
+              </rect>
             </g>
           );
         })}

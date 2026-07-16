@@ -524,37 +524,113 @@ export function scoreTapAttemptAgainstMidiKey(
   void timeToleranceMs;
   const totalTaps = segmentKey.taps.length;
   const details: TapScoreResult["details"] = [];
-  const assignments = new Map<number, { tap: DirectionTap; attemptIndex: number; distanceMs: number }>();
+  const assignments = new Map<number, { tap: DirectionTap; attemptIndex: number }>();
   const assignedAttemptIndexes = new Set<number>();
   let matchedTaps = 0;
 
   const sortedAttemptTaps = [...attemptTaps].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-  for (let attemptIndex = 0; attemptIndex < sortedAttemptTaps.length; attemptIndex += 1) {
-    const actual = sortedAttemptTaps[attemptIndex];
-    let closestExpectedIndex = -1;
-    let closestDistanceMs = Number.POSITIVE_INFINITY;
+  type AlignmentOperation = "match" | "skip-expected" | "skip-actual";
+  interface AlignmentCell {
+    matchedPairs: number;
+    timingDistanceMs: number;
+    previousExpectedIndex: number;
+    previousAttemptIndex: number;
+    operation: AlignmentOperation | null;
+  }
 
-    for (let expectedIndex = 0; expectedIndex < totalTaps; expectedIndex += 1) {
-      const expected = segmentKey.taps[expectedIndex];
-      const distanceMs = Math.abs(actual.timeOffsetMs - expected.timeOffsetMs);
-      if (distanceMs < closestDistanceMs) {
-        closestExpectedIndex = expectedIndex;
-        closestDistanceMs = distanceMs;
+  const alignment: Array<Array<AlignmentCell | null>> = Array.from(
+    { length: totalTaps + 1 },
+    () => Array.from({ length: sortedAttemptTaps.length + 1 }, () => null)
+  );
+  alignment[0][0] = {
+    matchedPairs: 0,
+    timingDistanceMs: 0,
+    previousExpectedIndex: -1,
+    previousAttemptIndex: -1,
+    operation: null,
+  };
+
+  const operationPriority: Record<AlignmentOperation, number> = {
+    match: 0,
+    "skip-actual": 1,
+    "skip-expected": 2,
+  };
+  const updateCell = (
+    expectedIndex: number,
+    attemptIndex: number,
+    candidate: AlignmentCell
+  ) => {
+    const existing = alignment[expectedIndex][attemptIndex];
+    const candidatePriority = candidate.operation ? operationPriority[candidate.operation] : 3;
+    const existingPriority = existing?.operation ? operationPriority[existing.operation] : 3;
+    if (
+      !existing ||
+      candidate.matchedPairs > existing.matchedPairs ||
+      (
+        candidate.matchedPairs === existing.matchedPairs &&
+        (
+          candidate.timingDistanceMs < existing.timingDistanceMs ||
+          (
+            candidate.timingDistanceMs === existing.timingDistanceMs &&
+            candidatePriority < existingPriority
+          )
+        )
+      )
+    ) {
+      alignment[expectedIndex][attemptIndex] = candidate;
+    }
+  };
+
+  for (let expectedIndex = 0; expectedIndex <= totalTaps; expectedIndex += 1) {
+    for (let attemptIndex = 0; attemptIndex <= sortedAttemptTaps.length; attemptIndex += 1) {
+      const cell = alignment[expectedIndex][attemptIndex];
+      if (!cell) continue;
+
+      if (expectedIndex < totalTaps) {
+        updateCell(expectedIndex + 1, attemptIndex, {
+          matchedPairs: cell.matchedPairs,
+          timingDistanceMs: cell.timingDistanceMs,
+          previousExpectedIndex: expectedIndex,
+          previousAttemptIndex: attemptIndex,
+          operation: "skip-expected",
+        });
+      }
+      if (attemptIndex < sortedAttemptTaps.length) {
+        updateCell(expectedIndex, attemptIndex + 1, {
+          matchedPairs: cell.matchedPairs,
+          timingDistanceMs: cell.timingDistanceMs,
+          previousExpectedIndex: expectedIndex,
+          previousAttemptIndex: attemptIndex,
+          operation: "skip-actual",
+        });
+      }
+      if (expectedIndex < totalTaps && attemptIndex < sortedAttemptTaps.length) {
+        updateCell(expectedIndex + 1, attemptIndex + 1, {
+          matchedPairs: cell.matchedPairs + 1,
+          timingDistanceMs: cell.timingDistanceMs + Math.abs(
+            segmentKey.taps[expectedIndex].timeOffsetMs - sortedAttemptTaps[attemptIndex].timeOffsetMs
+          ),
+          previousExpectedIndex: expectedIndex,
+          previousAttemptIndex: attemptIndex,
+          operation: "match",
+        });
       }
     }
+  }
 
-    if (closestExpectedIndex === -1) {
-      continue;
-    }
-
-    const existing = assignments.get(closestExpectedIndex);
-    if (!existing || closestDistanceMs < existing.distanceMs) {
-      if (existing) {
-        assignedAttemptIndexes.delete(existing.attemptIndex);
-      }
-      assignments.set(closestExpectedIndex, { tap: actual, attemptIndex, distanceMs: closestDistanceMs });
+  let expectedCursor = totalTaps;
+  let attemptCursor = sortedAttemptTaps.length;
+  while (expectedCursor > 0 || attemptCursor > 0) {
+    const cell = alignment[expectedCursor][attemptCursor];
+    if (!cell || !cell.operation) break;
+    if (cell.operation === "match") {
+      const expectedIndex = expectedCursor - 1;
+      const attemptIndex = attemptCursor - 1;
+      assignments.set(expectedIndex, { tap: sortedAttemptTaps[attemptIndex], attemptIndex });
       assignedAttemptIndexes.add(attemptIndex);
     }
+    expectedCursor = cell.previousExpectedIndex;
+    attemptCursor = cell.previousAttemptIndex;
   }
 
   for (let index = 0; index < totalTaps; index += 1) {
@@ -582,13 +658,50 @@ export function scoreTapAttemptAgainstMidiKey(
     }
   }
 
-  const attemptedExpectedTaps = details.filter((detail) => detail.expected && detail.actual).length;
+  const extraTaps = Math.max(0, sortedAttemptTaps.length - assignedAttemptIndexes.size);
+  const scoredEventCount = totalTaps + extraTaps;
   return {
     matchedTaps,
     totalTaps,
-    extraTaps: Math.max(0, sortedAttemptTaps.length - assignedAttemptIndexes.size),
-    scorePercent: totalTaps === 0 ? 100 : attemptedExpectedTaps === 0 ? 0 : Math.max(0, Math.min(100, Math.round((matchedTaps / attemptedExpectedTaps) * 100))),
+    extraTaps,
+    scorePercent: scoredEventCount === 0
+      ? 100
+      : Math.max(0, Math.min(100, Math.round((matchedTaps / scoredEventCount) * 100))),
     details,
+  };
+}
+
+export function scoreTapAttemptProgressAgainstMidiKey(
+  segmentKey: MidiSegmentAnswerKey,
+  attemptTaps: DirectionTap[],
+  timeToleranceMs: number
+): TapScoreResult {
+  if (attemptTaps.length >= segmentKey.taps.length) {
+    return scoreTapAttemptAgainstMidiKey(segmentKey, attemptTaps, timeToleranceMs);
+  }
+
+  const attemptedPrefixLength = attemptTaps.length;
+  const prefixScore = scoreTapAttemptAgainstMidiKey({
+    ...segmentKey,
+    taps: segmentKey.taps.slice(0, attemptedPrefixLength),
+    notes: segmentKey.notes.slice(0, attemptedPrefixLength),
+  }, attemptTaps, timeToleranceMs);
+  const missingDetails: TapScoreResult["details"] = segmentKey.taps
+    .slice(attemptedPrefixLength)
+    .map((expected, offset) => ({
+      index: attemptedPrefixLength + offset,
+      expected,
+      status: "missing",
+    }));
+
+  return {
+    matchedTaps: prefixScore.matchedTaps,
+    totalTaps: segmentKey.taps.length,
+    extraTaps: 0,
+    scorePercent: segmentKey.taps.length === 0
+      ? 100
+      : Math.round((prefixScore.matchedTaps / segmentKey.taps.length) * 100),
+    details: [...prefixScore.details, ...missingDetails],
   };
 }
 
@@ -640,15 +753,25 @@ export function buildMidiContourTapHeatMap(
   const recentAttempts = scoredAttempts.slice(0, Math.max(1, attemptLimit));
   return Object.fromEntries(
     segmentKey.notes.map((note, index) => {
+      if (index === 0) {
+        return [
+          `midi-contour-${segmentKey.segmentId}-${note.sourceWholeSongNoteIndex}`,
+          { sessionCount: 0, missCount: 0, missRate: 0 },
+        ];
+      }
+      let sessionCount = 0;
       let missCount = 0;
       for (const attempt of recentAttempts) {
         const detail = attempt.details.find((item) => item.index === index);
-        if (detail && detail.status !== "matched" && detail.status !== "extra" && detail.status !== "missing") {
+        if (!detail?.expected || !detail.actual || detail.status === "extra" || detail.status === "missing") {
+          continue;
+        }
+        sessionCount += 1;
+        if (detail.status !== "matched") {
           missCount += 1;
         }
       }
 
-      const sessionCount = recentAttempts.length;
       const missRate = sessionCount === 0 ? 0 : missCount / sessionCount;
       return [
         `midi-contour-${segmentKey.segmentId}-${note.sourceWholeSongNoteIndex}`,

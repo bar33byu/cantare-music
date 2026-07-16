@@ -218,6 +218,13 @@
       "when": 1782777600000,
       "tag": "0031_playlist_performances",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1782864000000,
+      "tag": "0032_recorded_playlist_status",
+      "breakpoints": true
     }
   ]
 }
