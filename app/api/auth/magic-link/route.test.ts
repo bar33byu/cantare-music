@@ -5,9 +5,9 @@ vi.mock("../../../../db/queries", () => ({
 }));
 
 vi.mock("../../../lib/authTokens", () => ({
-  createOpaqueToken: vi.fn(() => "magic-token"),
+  createSixDigitCode: vi.fn(() => "042137"),
   getAppBaseUrl: vi.fn(() => "http://localhost"),
-  hashAuthToken: vi.fn((token: string) => `hashed:${token}`),
+  hashMagicLinkCode: vi.fn((email: string, code: string) => `hashed:${email}:${code}`),
   MAGIC_LINK_TTL_MS: 15 * 60 * 1000,
 }));
 
@@ -38,11 +38,12 @@ describe("POST /api/auth/magic-link", () => {
     expect(response.status).toBe(200);
     expect(createMagicLinkToken).toHaveBeenCalledWith(expect.objectContaining({
       email: "singer@example.com",
-      tokenHash: "hashed:magic-token",
+      tokenHash: "hashed:singer@example.com:042137",
     }));
     expect(sendMagicLinkEmail).toHaveBeenCalledWith({
       to: "singer@example.com",
-      loginUrl: "http://localhost/auth/verify?token=magic-token&returnTo=%2Fshare%2Fplaylists%2Fshare-token",
+      code: "042137",
+      loginUrl: "http://localhost/auth/verify?token=042137&email=singer%40example.com&returnTo=%2Fshare%2Fplaylists%2Fshare-token",
     });
   });
 
@@ -59,7 +60,8 @@ describe("POST /api/auth/magic-link", () => {
 
     expect(sendMagicLinkEmail).toHaveBeenCalledWith({
       to: "singer@example.com",
-      loginUrl: "http://localhost/auth/verify?token=magic-token",
+      code: "042137",
+      loginUrl: "http://localhost/auth/verify?token=042137&email=singer%40example.com",
     });
   });
 });

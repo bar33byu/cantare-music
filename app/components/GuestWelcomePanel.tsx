@@ -26,8 +26,8 @@ export function GuestWelcomePanel({
           uploaded, but they are only shared with others at your direction.
         </p>
         <p>
-          Provide an email in the sign-in process and a magic link will be mailed to you. This app doesn&apos;t use
-          passwords.
+          Provide an email in the sign-in process and a six-digit code plus a one-click login link will be mailed to
+          you. This app doesn&apos;t use passwords.
         </p>
       </div>
       {action ? <div className="mt-5">{action}</div> : null}

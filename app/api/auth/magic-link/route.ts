@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createMagicLinkToken } from "../../../../db/queries";
-import { createOpaqueToken, getAppBaseUrl, hashAuthToken, MAGIC_LINK_TTL_MS } from "../../../lib/authTokens";
+import { createSixDigitCode, getAppBaseUrl, hashMagicLinkCode, MAGIC_LINK_TTL_MS } from "../../../lib/authTokens";
 import { getSafeAuthReturnPath } from "../../../lib/authRedirects";
 import { sendMagicLinkEmail } from "../../../lib/resend";
 
 const NEUTRAL_RESPONSE = {
-  message: "If that email can sign in to Cantare, a login link is on the way.",
+  message: "If that email can sign in to Cantare, a six-digit code and login link are on the way.",
 };
 
 function normalizeEmail(value: unknown): string {
@@ -24,20 +24,21 @@ export async function POST(request: NextRequest) {
     const returnTo = getSafeAuthReturnPath(body?.returnTo, appBaseUrl);
 
     if (isLikelyEmail(email)) {
-      const token = createOpaqueToken();
+      const code = createSixDigitCode();
       const expiresAt = new Date(Date.now() + MAGIC_LINK_TTL_MS);
       await createMagicLinkToken({
         email,
-        tokenHash: hashAuthToken(token),
+        tokenHash: hashMagicLinkCode(email, code),
         expiresAt,
       });
 
       const loginUrl = new URL("/auth/verify", appBaseUrl);
-      loginUrl.searchParams.set("token", token);
+      loginUrl.searchParams.set("token", code);
+      loginUrl.searchParams.set("email", email);
       if (returnTo !== "/") {
         loginUrl.searchParams.set("returnTo", returnTo);
       }
-      await sendMagicLinkEmail({ to: email, loginUrl: loginUrl.toString() });
+      await sendMagicLinkEmail({ to: email, code, loginUrl: loginUrl.toString() });
     }
   } catch (error) {
     console.error("Error requesting magic link:", error);

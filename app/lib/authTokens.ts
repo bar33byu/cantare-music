@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "crypto";
+import { createHmac, randomBytes, randomInt, timingSafeEqual } from "crypto";
 
 export const AUTH_SESSION_COOKIE_NAME = "cantare-session";
 export const MAGIC_LINK_TTL_MS = 15 * 60 * 1000;
@@ -21,6 +21,10 @@ export function createOpaqueToken(): string {
   return randomBytes(32).toString("base64url");
 }
 
+export function createSixDigitCode(): string {
+  return randomInt(0, 1_000_000).toString().padStart(6, "0");
+}
+
 export function getAuthSecret(): string {
   const secret = process.env.CANTARE_AUTH_SECRET;
   if (!secret) {
@@ -31,6 +35,10 @@ export function getAuthSecret(): string {
 
 export function hashAuthToken(token: string, secret = getAuthSecret()): string {
   return createHmac("sha256", secret).update(token).digest("hex");
+}
+
+export function hashMagicLinkCode(email: string, code: string, secret = getAuthSecret()): string {
+  return hashAuthToken(`${email.trim().toLowerCase()}\n${code}`, secret);
 }
 
 export function constantTimeEquals(a: string, b: string): boolean {

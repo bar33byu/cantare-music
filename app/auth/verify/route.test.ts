@@ -13,6 +13,7 @@ vi.mock("../../lib/authTokens", () => ({
   createOpaqueToken: vi.fn(() => "session-token"),
   getAppBaseUrl: vi.fn(() => "http://localhost"),
   hashAuthToken: vi.fn((token: string) => `hashed:${token}`),
+  hashMagicLinkCode: vi.fn((email: string, code: string) => `hashed:${email}:${code}`),
   SESSION_TTL_MS: 60 * 60 * 1000,
 }));
 
@@ -61,5 +62,40 @@ describe("GET /auth/verify", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("http://localhost/?auth=signed-in&setup=username");
+  });
+
+  it("uses an email-bound hash for a six-digit login link", async () => {
+    vi.mocked(consumeMagicLinkToken).mockResolvedValue({
+      id: "token-2",
+      email: "singer@example.com",
+      tokenHash: "hashed:singer@example.com:042137",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+      consumedAt: new Date(),
+    });
+    vi.mocked(getOrCreateUserForEmailWithStatus).mockResolvedValue({
+      created: false,
+      user: {
+        id: "user-1",
+        username: "singer",
+        name: "Singer",
+        email: "singer@example.com",
+        avatarUrl: null,
+        profileVisibility: "private",
+      },
+    });
+    vi.mocked(createUserSession).mockResolvedValue({
+      id: "session-2",
+      userId: "user-1",
+      tokenHash: "hashed:session-token",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+      revokedAt: null,
+    });
+
+    const response = await GET(new NextRequest("http://localhost/auth/verify?token=042137&email=SINGER%40example.com"));
+
+    expect(consumeMagicLinkToken).toHaveBeenCalledWith("hashed:singer@example.com:042137");
+    expect(response.headers.get("location")).toBe("http://localhost/?auth=signed-in");
   });
 });

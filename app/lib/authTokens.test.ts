@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getAppBaseUrl } from "./authTokens";
+import { createSixDigitCode, getAppBaseUrl, hashMagicLinkCode } from "./authTokens";
 
 const originalEnv = {
   CANTARE_APP_URL: process.env.CANTARE_APP_URL,
@@ -55,5 +55,20 @@ describe("getAppBaseUrl", () => {
     process.env.CANTARE_APP_URL = "https://cantare.lavalane.org";
 
     expect(getAppBaseUrl()).toBe("https://cantare.lavalane.org");
+  });
+});
+
+describe("six-digit login codes", () => {
+  it("creates exactly six numeric digits, including possible leading zeroes", () => {
+    for (let index = 0; index < 100; index += 1) {
+      expect(createSixDigitCode()).toMatch(/^\d{6}$/);
+    }
+  });
+
+  it("binds code hashes to a normalized email address", () => {
+    expect(hashMagicLinkCode(" Singer@Example.com ", "042137", "test-secret"))
+      .toBe(hashMagicLinkCode("singer@example.com", "042137", "test-secret"));
+    expect(hashMagicLinkCode("other@example.com", "042137", "test-secret"))
+      .not.toBe(hashMagicLinkCode("singer@example.com", "042137", "test-secret"));
   });
 });
