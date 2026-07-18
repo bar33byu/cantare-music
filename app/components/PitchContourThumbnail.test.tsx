@@ -81,6 +81,25 @@ describe('PitchContourThumbnail', () => {
     expect(screen.getByTestId('pitch-contour-thumbnail-note')).toHaveAttribute('fill', 'rgb(239 68 68)');
   });
 
+  it('uses definitive green and red colors for a single recent attempt', () => {
+    render(
+      <PitchContourThumbnail
+        segmentDurationMs={10000}
+        notes={[
+          { id: 'n-1', timeOffsetMs: 1000, durationMs: 800, lane: 0.2 },
+          { id: 'n-2', timeOffsetMs: 5000, durationMs: 500, lane: 0.8 },
+        ]}
+        noteResults={{ 'n-1': 'matched', 'n-2': 'missed' }}
+      />
+    );
+
+    const notes = screen.getAllByTestId('pitch-contour-thumbnail-note');
+    expect(notes[0]).toHaveAttribute('data-note-result', 'matched');
+    expect(notes[0]).toHaveAttribute('fill', 'rgb(22 163 74)');
+    expect(notes[1]).toHaveAttribute('data-note-result', 'missed');
+    expect(notes[1]).toHaveAttribute('fill', 'rgb(220 38 38)');
+  });
+
   it('lights the note that contains the active playback time without replacing its heat color', () => {
     render(
       <PitchContourThumbnail

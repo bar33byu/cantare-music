@@ -5,7 +5,7 @@ import { flushSync } from "react-dom";
 import { Song, MemoryRating, PitchContourNote, ContourNoteHeatStat } from "../types/index";
 import { sessionReducer, SessionState } from "../lib/sessionReducer";
 import { computeKnowledgeScore } from "../lib/knowledgeUtils";
-import SegmentCard from "./SegmentCard";
+import SegmentCard, { type RecentTapAttemptDisplay } from "./SegmentCard";
 import KnowledgeBar from "./KnowledgeBar";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
@@ -157,6 +157,8 @@ const ROLL_WINDOW_MS = 6000;
 const TAP_PERSISTENCE_WARNING_MS = 3500;
 const TAP_PRACTICE_COUNT_IN_MS = 2000;
 const TAP_CONTOUR_HEAT_MAP_ATTEMPT_LIMIT = 5;
+const RECENT_TAP_ATTEMPT_LIFETIME_MS = 60 * 60 * 1000;
+const RECENT_TAP_ATTEMPT_STORAGE_KEY_PREFIX = "cantare:recent-tap-attempt:";
 const TAP_MATCH_OPTIONS = {
   timeToleranceMs: DEFAULT_TAP_TIMING_TOLERANCE_MS,
   sameDeadZone: DEFAULT_CONTOUR_SAME_DEAD_ZONE,
@@ -181,6 +183,11 @@ interface LocalScoredTapAttempt {
   sessionId: string;
   completedAt: string;
   score: TapScoreResult;
+}
+
+interface StoredRecentTapAttempt extends RecentTapAttemptDisplay {
+  songId: string;
+  expiresAt: number;
 }
 
 interface PersistedTapPayload {
@@ -219,6 +226,48 @@ function getNextLyricMode(mode: LyricVisibilityMode): LyricVisibilityMode {
 
 function buildOfflineRatingsQueueKey(songId: string): string {
   return `${OFFLINE_RATING_QUEUE_PREFIX}${songId}`;
+}
+
+function buildRecentTapAttemptStorageKey(songId: string): string {
+  return `${RECENT_TAP_ATTEMPT_STORAGE_KEY_PREFIX}${songId}`;
+}
+
+function buildMidiPitchContourNotes(segmentKey: MidiSegmentAnswerKey | null): PitchContourNote[] {
+  if (!segmentKey || segmentKey.notes.length === 0) {
+    return [];
+  }
+
+  const pitches = segmentKey.notes.map((note) => note.midiPitch);
+  const minPitch = Math.min(...pitches);
+  const maxPitch = Math.max(...pitches);
+  const pitchRange = Math.max(1, maxPitch - minPitch);
+
+  return segmentKey.notes.map((note) => ({
+    id: `midi-contour-${segmentKey.segmentId}-${note.sourceWholeSongNoteIndex}`,
+    timeOffsetMs: Math.max(0, Math.round(note.segmentLocalStartTimeSeconds * 1000)),
+    durationMs: Math.max(MIN_TAP_DURATION_MS, Math.round(note.effectiveDurationSeconds * 1000)),
+    lane: Math.min(1, Math.max(0, (note.midiPitch - minPitch) / pitchRange)),
+  }));
+}
+
+function isStoredRecentTapAttempt(value: unknown, songId: string): value is StoredRecentTapAttempt {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<StoredRecentTapAttempt>;
+  return candidate.songId === songId
+    && typeof candidate.segmentId === "string"
+    && typeof candidate.segmentLabel === "string"
+    && typeof candidate.segmentDurationMs === "number"
+    && typeof candidate.completedAt === "string"
+    && typeof candidate.scorePercent === "number"
+    && typeof candidate.matchedTaps === "number"
+    && typeof candidate.totalEvents === "number"
+    && typeof candidate.missedTaps === "number"
+    && typeof candidate.extraTaps === "number"
+    && Array.isArray(candidate.notes)
+    && Boolean(candidate.noteResults && typeof candidate.noteResults === "object")
+    && typeof candidate.expiresAt === "number";
 }
 
 function toDirectionTaps(notes: TapAttemptNote[]): DirectionTap[] {
@@ -363,6 +412,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [localMidiScoreAttemptsBySegment, setLocalMidiScoreAttemptsBySegment] = React.useState<Record<string, LocalScoredTapAttempt[]>>({});
   const [voiceRunScoresBySegment, setVoiceRunScoresBySegment] = React.useState<Record<string, TapScoreResult>>({});
   const [tapAttemptsBySegment, setTapAttemptsBySegment] = React.useState<Record<string, TapAttemptNote[]>>({});
+  const [recentTapAttempt, setRecentTapAttempt] = React.useState<StoredRecentTapAttempt | null>(null);
   const [tapHeatMapRefreshToken, setTapHeatMapRefreshToken] = React.useState(0);
   const [tapSessionResetToken, setTapSessionResetToken] = React.useState(0);
   const [tapPracticeCountIn, setTapPracticeCountIn] = React.useState<number | null>(null);
@@ -449,12 +499,69 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const lastHandledEndedCountRef = React.useRef(endedCount);
   const tapAttemptsRef = React.useRef<Record<string, TapAttemptNote[]>>({});
   const previousTapPracticeSegmentIdRef = React.useRef<string | null>(null);
+  const previousTapPracticeModeRef = React.useRef(false);
   const [tapSessionId, setTapSessionId] = React.useState<string | null>(null);
   const tapSessionIdRef = React.useRef<string | null>(null);
   const tapSessionInputMethodRef = React.useRef<"tap" | "voice">("tap");
   const tapSessionGenerationRef = React.useRef(0);
   const pendingPersistedTapsRef = React.useRef<PersistedTapPayload[]>([]);
   const persistTapChainRef = React.useRef<Promise<void>>(Promise.resolve());
+  React.useEffect(() => {
+    const storageKey = buildRecentTapAttemptStorageKey(song.id);
+    setRecentTapAttempt(null);
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (!stored) {
+        return;
+      }
+      const parsed: unknown = JSON.parse(stored);
+      if (!isStoredRecentTapAttempt(parsed, song.id) || parsed.expiresAt <= Date.now()) {
+        window.localStorage.removeItem(storageKey);
+        return;
+      }
+      setRecentTapAttempt(parsed);
+    } catch {
+      try {
+        window.localStorage.removeItem(storageKey);
+      } catch {
+        // Browser storage is unavailable; leave the in-memory state empty.
+      }
+    }
+  }, [song.id]);
+
+  React.useEffect(() => {
+    if (!recentTapAttempt || recentTapAttempt.songId !== song.id) {
+      return;
+    }
+    const remainingMs = recentTapAttempt.expiresAt - Date.now();
+    if (remainingMs <= 0) {
+      setRecentTapAttempt(null);
+      try {
+        window.localStorage.removeItem(buildRecentTapAttemptStorageKey(song.id));
+      } catch {
+        // The expired in-memory snapshot is already cleared.
+      }
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setRecentTapAttempt(null);
+      try {
+        window.localStorage.removeItem(buildRecentTapAttemptStorageKey(song.id));
+      } catch {
+        // The expired in-memory snapshot is already cleared.
+      }
+    }, remainingMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [recentTapAttempt, song.id]);
+
+  const dismissRecentTapAttempt = React.useCallback(() => {
+    setRecentTapAttempt(null);
+    try {
+      window.localStorage.removeItem(buildRecentTapAttemptStorageKey(song.id));
+    } catch {
+      // The in-memory dismissal still succeeds when storage is unavailable.
+    }
+  }, [song.id]);
   const isLast = !hasSegments || session.currentSegmentIndex === song.segments.length - 1;
   const isFirst = !hasSegments || session.currentSegmentIndex === 0;
   const canRestartCurrentSegment = currentSegment
@@ -591,23 +698,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       percent: attempted > 0 ? Math.round(matched / attempted * 100) : 0,
     };
   }, [displayedVoiceRunScores, midiSegmentAnswerKeys, song.segments]);
-  const currentMidiPitchContourNotes = useMemo<PitchContourNote[]>(() => {
-    if (!currentMidiSegmentAnswerKey || currentMidiSegmentAnswerKey.notes.length === 0) {
-      return [];
-    }
-
-    const pitches = currentMidiSegmentAnswerKey.notes.map((note) => note.midiPitch);
-    const minPitch = Math.min(...pitches);
-    const maxPitch = Math.max(...pitches);
-    const pitchRange = Math.max(1, maxPitch - minPitch);
-
-    return currentMidiSegmentAnswerKey.notes.map((note) => ({
-      id: `midi-contour-${currentMidiSegmentAnswerKey.segmentId}-${note.sourceWholeSongNoteIndex}`,
-      timeOffsetMs: Math.max(0, Math.round(note.segmentLocalStartTimeSeconds * 1000)),
-      durationMs: Math.max(MIN_TAP_DURATION_MS, Math.round(note.effectiveDurationSeconds * 1000)),
-      lane: Math.min(1, Math.max(0, (note.midiPitch - minPitch) / pitchRange)),
-    }));
-  }, [currentMidiSegmentAnswerKey]);
+  const currentMidiPitchContourNotes = useMemo<PitchContourNote[]>(
+    () => buildMidiPitchContourNotes(currentMidiSegmentAnswerKey),
+    [currentMidiSegmentAnswerKey]
+  );
   const currentCardContourNotes = currentMidiPitchContourNotes;
   const hasCardContourData = currentCardContourNotes.length > 0;
   const currentDerivedAnswerKey = useMemo(
@@ -1583,16 +1677,60 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     finalizeTapCapture(lane);
   }, [currentMs, currentSegment, finalizeTapCapture]);
 
+  const captureRecentTapAttempt = React.useCallback((segmentId: string) => {
+    const segmentKey = midiSegmentAnswerKeys[segmentId];
+    const segment = song.segments.find((candidate) => candidate.id === segmentId);
+    const attemptNotes = tapAttemptsRef.current[segmentId] ?? [];
+    if (!segmentKey || !segment || segmentKey.taps.length === 0 || attemptNotes.length === 0) {
+      return null;
+    }
+
+    const score = scoreTapAttemptAgainstMidiKey(
+      segmentKey,
+      toDirectionTaps(attemptNotes),
+      TAP_MATCH_OPTIONS.timeToleranceMs
+    );
+    const notes = buildMidiPitchContourNotes(segmentKey);
+    const noteResults = Object.fromEntries(notes.map((note, index) => {
+      const detail = score.details.find((candidate) => candidate.index === index && candidate.expected);
+      return [note.id, detail?.status === "matched" ? "matched" : "missed"];
+    })) as Record<string, "matched" | "missed">;
+    const now = Date.now();
+    const snapshot: StoredRecentTapAttempt = {
+      songId: song.id,
+      segmentId,
+      segmentLabel: segment.label || `Segment ${segment.order + 1}`,
+      segmentDurationMs: Math.max(1, segment.endMs - segment.startMs),
+      completedAt: new Date(now).toISOString(),
+      expiresAt: now + RECENT_TAP_ATTEMPT_LIFETIME_MS,
+      scorePercent: score.scorePercent,
+      matchedTaps: score.matchedTaps,
+      totalEvents: score.totalTaps + score.extraTaps,
+      missedTaps: score.details.filter((detail) => detail.expected && detail.status !== "matched").length,
+      extraTaps: score.extraTaps,
+      notes,
+      noteResults,
+    };
+    setRecentTapAttempt(snapshot);
+    try {
+      window.localStorage.setItem(buildRecentTapAttemptStorageKey(song.id), JSON.stringify(snapshot));
+    } catch {
+      // Keep the snapshot in memory if browser storage is unavailable.
+    }
+    return score;
+  }, [midiSegmentAnswerKeys, song.id, song.segments]);
+
   const recordCurrentMidiContourAttempt = React.useCallback(() => {
     if (!currentSegment || !currentMidiSegmentAnswerKey || currentMidiSegmentAnswerKey.taps.length === 0) {
       return;
     }
 
     const attemptNotes = tapAttemptsRef.current[currentSegment.id] ?? [];
+    const recentScore = captureRecentTapAttempt(currentSegment.id);
     if (attemptNotes.length < currentMidiSegmentAnswerKey.taps.length) {
       return;
     }
-    const score = scoreTapAttemptAgainstMidiKey(
+    const score = recentScore ?? scoreTapAttemptAgainstMidiKey(
       currentMidiSegmentAnswerKey,
       toDirectionTaps(attemptNotes),
       TAP_MATCH_OPTIONS.timeToleranceMs
@@ -1612,7 +1750,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         ].slice(0, TAP_CONTOUR_HEAT_MAP_ATTEMPT_LIMIT);
       })(),
     }));
-  }, [currentMidiSegmentAnswerKey, currentSegment]);
+  }, [captureRecentTapAttempt, currentMidiSegmentAnswerKey, currentSegment]);
 
   const clearTapPracticeAttempts = React.useCallback((segmentId?: string) => {
     activeTapCaptureRef.current = null;
@@ -2245,8 +2383,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       return;
     }
 
+    captureRecentTapAttempt(previousSegmentId);
     clearTapPracticeAttempts(segmentId);
-  }, [clearTapPracticeAttempts, currentSegment?.id, isTapPracticeMode]);
+  }, [captureRecentTapAttempt, clearTapPracticeAttempts, currentSegment?.id, isTapPracticeMode]);
+
+  useEffect(() => {
+    const wasTapPracticeMode = previousTapPracticeModeRef.current;
+    previousTapPracticeModeRef.current = isTapPracticeMode;
+    if (wasTapPracticeMode && !isTapPracticeMode && currentSegment) {
+      captureRecentTapAttempt(currentSegment.id);
+    }
+  }, [captureRecentTapAttempt, currentSegment, isTapPracticeMode]);
 
   useEffect(() => {
     if (isGuidedPracticeMode) {
@@ -2778,6 +2925,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
                     showContourMap={showCardContourMap && hasCardContourData}
                     contourHeatMap={currentMidiContourHeatMap}
+                    recentTapAttempt={recentTapAttempt?.songId === song.id ? recentTapAttempt : null}
+                    onDismissRecentTapAttempt={dismissRecentTapAttempt}
                   />
                 </div>
                 {isGuidedPracticeMode && hasSegments && currentSegment ? (
