@@ -5,10 +5,11 @@ interface PitchContourThumbnailProps {
   segmentDurationMs: number;
   className?: string;
   noteHeatMap?: Record<string, ContourNoteHeatStat>;
+  noteResults?: Record<string, 'matched' | 'missed'>;
   activeTimeMs?: number;
 }
 
-const MIN_HEATMAP_SESSION_COUNT = 2;
+const MIN_HEATMAP_SESSION_COUNT = 3;
 
 function blendChannel(start: number, end: number, amount: number): number {
   return Math.round(start + (end - start) * amount);
@@ -42,7 +43,7 @@ function getContourHeatOpacity(stat?: ContourNoteHeatStat): number {
   return Math.min(0.98, 0.62 + Math.min(stat.sessionCount, 10) * 0.03);
 }
 
-export function PitchContourThumbnail({ notes = [], segmentDurationMs, className, noteHeatMap, activeTimeMs }: PitchContourThumbnailProps) {
+export function PitchContourThumbnail({ notes = [], segmentDurationMs, className, noteHeatMap, noteResults, activeTimeMs }: PitchContourThumbnailProps) {
   const safeDurationMs = Math.max(1, segmentDurationMs);
 
   return (
@@ -65,6 +66,7 @@ export function PitchContourThumbnail({ notes = [], segmentDurationMs, className
           const width = Math.max(1, Math.min(100 - x, (note.durationMs / safeDurationMs) * 100));
           const y = (1 - note.lane) * 20;
           const stat = noteHeatMap?.[note.id];
+          const result = noteResults?.[note.id];
           const isActive = activeTimeMs !== undefined
             && activeTimeMs >= note.timeOffsetMs
             && activeTimeMs < note.timeOffsetMs + note.durationMs;
@@ -89,17 +91,28 @@ export function PitchContourThumbnail({ notes = [], segmentDurationMs, className
                 data-testid="pitch-contour-thumbnail-note"
                 data-note-heat-rate={stat ? stat.missRate.toFixed(3) : undefined}
                 data-note-heat-sessions={stat ? String(stat.sessionCount) : undefined}
+                data-note-result={result}
                 data-active={isActive ? "true" : undefined}
                 x={x}
                 y={Math.max(0, Math.min(20, y))}
                 width={width}
                 height={4}
                 rx={1}
-                fill={getContourHeatColor(stat)}
-                opacity={isActive ? 1 : getContourHeatOpacity(stat)}
+                fill={result === 'matched' ? 'rgb(22 163 74)' : result === 'missed' ? 'rgb(220 38 38)' : getContourHeatColor(stat)}
+                opacity={result ? 0.95 : isActive ? 1 : getContourHeatOpacity(stat)}
                 stroke={isActive ? "rgb(255 255 255)" : undefined}
                 strokeWidth={isActive ? 0.8 : undefined}
-              />
+              >
+                {result ? (
+                  <title>{result === 'matched' ? 'Correct in the most recent Tap attempt' : 'Missed in the most recent Tap attempt'}</title>
+                ) : stat ? (
+                  <title>{
+                    stat.sessionCount < MIN_HEATMAP_SESSION_COUNT
+                      ? `${stat.sessionCount} graded ${stat.sessionCount === 1 ? 'attempt' : 'attempts'}; 3 needed for a trouble color`
+                      : `${stat.missCount} ${stat.missCount === 1 ? 'miss' : 'misses'} in ${stat.sessionCount} graded attempts`
+                  }</title>
+                ) : null}
+              </rect>
             </g>
           );
         })}

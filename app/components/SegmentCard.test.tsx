@@ -232,4 +232,37 @@ describe("SegmentCard", () => {
 
     expect(screen.getByTestId("pitch-contour-thumbnail-active-halo")).toHaveAttribute("data-active-note-id", "n-1");
   });
+
+  it("shows the recent Tap attempt above the long-term contour", () => {
+    render(
+      <SegmentCard
+        {...defaultProps}
+        showContourMap
+        segment={{
+          ...mockSegment,
+          pitchContourNotes: [{ id: "average-1", timeOffsetMs: 0, durationMs: 1000, lane: 0.5 }],
+        }}
+        recentTapAttempt={{
+          segmentId: "seg-previous",
+          segmentLabel: "Previous section",
+          segmentDurationMs: 32000,
+          completedAt: new Date().toISOString(),
+          scorePercent: 50,
+          matchedTaps: 1,
+          totalEvents: 2,
+          missedTaps: 1,
+          extraTaps: 0,
+          notes: [
+            { id: "recent-1", timeOffsetMs: 0, durationMs: 1000, lane: 0.25 },
+            { id: "recent-2", timeOffsetMs: 1000, durationMs: 1000, lane: 0.75 },
+          ],
+          noteResults: { "recent-1": "matched", "recent-2": "missed" },
+        }}
+      />
+    );
+
+    expect(screen.getByTestId("segment-card-recent-tap-attempt")).toHaveTextContent("Previous section");
+    expect(screen.getByTestId("segment-card-recent-tap-attempt")).toHaveTextContent("50%");
+    expect(screen.getAllByTestId("pitch-contour-thumbnail")).toHaveLength(2);
+  });
 });

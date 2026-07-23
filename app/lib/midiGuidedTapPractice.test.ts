@@ -11,6 +11,7 @@ import {
   deriveWholeSongAnswerKey,
   resumeAlignmentFromNote,
   scoreTapAttemptAgainstMidiKey,
+  scoreTapAttemptProgressAgainstMidiKey,
   undoLastAlignmentTap,
   type CleanedMidiNote,
   type RawMidiNote,
@@ -205,7 +206,7 @@ describe("midiGuidedTapPractice", () => {
     expect(score.details.map((detail) => detail.status)).toEqual(["matched", "matched"]);
   });
 
-  it("ignores extra taps and recovers on later closest MIDI notes", () => {
+  it("penalizes extra taps and recovers on later closest MIDI notes", () => {
     const notes: CleanedMidiNote[] = cleanMidiNotes([
       raw(0, 60, 0, 1),
       raw(1, 62, 1, 1),
@@ -220,18 +221,18 @@ describe("midiGuidedTapPractice", () => {
       { timeOffsetMs: 2000, direction: "down" },
     ], 0);
 
-    expect(score.scorePercent).toBe(100);
+    expect(score.scorePercent).toBe(75);
     expect(score.extraTaps).toBe(1);
     expect(score.details.map((detail) => detail.status)).toEqual(["matched", "matched", "matched", "extra"]);
   });
 
-  it("does not penalize skipped MIDI notes in the contour score", () => {
+  it("penalizes skipped MIDI notes in the contour score", () => {
     const notes: CleanedMidiNote[] = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
     const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
     const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
     const score = scoreTapAttemptAgainstMidiKey(segmentKey, [{ timeOffsetMs: 0, direction: "same" }], 400);
 
-    expect(score.scorePercent).toBe(100);
+    expect(score.scorePercent).toBe(50);
     expect(score.details.map((detail) => detail.status)).toEqual(["matched", "missing"]);
   });
 
@@ -272,5 +273,58 @@ describe("midiGuidedTapPractice", () => {
       missCount: 1,
       missRate: 0.5,
     });
+  });
+
+  it("uses timing only to choose ordered assignments, not to decide correctness", () => {
+    const notes = cleanMidiNotes([
+      raw(0, 60, 0, 1),
+      raw(1, 62, 1, 1),
+      raw(2, 60, 2, 1),
+    ], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(3, [5, 6, 7]));
+    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 8000 });
+    const score = scoreTapAttemptAgainstMidiKey(segmentKey, [
+      { timeOffsetMs: 900, direction: "same" },
+      { timeOffsetMs: 1900, direction: "up" },
+      { timeOffsetMs: 2900, direction: "down" },
+    ], 0);
+
+    expect(score.scorePercent).toBe(100);
+    expect(score.details.map((detail) => detail.status)).toEqual(["matched", "matched", "matched"]);
+    expect(score.details.map((detail) => detail.timingDeltaMs)).toEqual([900, 900, 900]);
+  });
+
+  it("keeps live partial scoring on the answer-key prefix despite a large timing shift", () => {
+    const notes = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
+    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
+    const score = scoreTapAttemptProgressAgainstMidiKey(segmentKey, [
+      { id: "late-first-tap", timeOffsetMs: 900, direction: "same" },
+    ], 0);
+
+    expect(score.scorePercent).toBe(50);
+    expect(score.details).toEqual([
+      expect.objectContaining({ index: 0, status: "matched", actual: expect.objectContaining({ id: "late-first-tap" }) }),
+      expect.objectContaining({ index: 1, status: "missing" }),
+    ]);
+  });
+
+  it("does not treat an unassigned answer note as correct heat-map evidence", () => {
+    const notes = cleanMidiNotes([
+      raw(0, 60, 0, 1),
+      raw(1, 62, 1, 1),
+      raw(2, 64, 2, 1),
+    ], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(3, [5, 6, 7]));
+    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 8000 });
+    const incomplete = scoreTapAttemptAgainstMidiKey(segmentKey, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 1000, direction: "up" },
+    ], 0);
+    const heatMap = buildMidiContourTapHeatMap(segmentKey, [incomplete], 5);
+
+    expect(heatMap["midi-contour-seg-1-0"].sessionCount).toBe(0);
+    expect(heatMap["midi-contour-seg-1-1"].sessionCount).toBe(1);
+    expect(heatMap["midi-contour-seg-1-2"]).toEqual({ sessionCount: 0, missCount: 0, missRate: 0 });
   });
 });

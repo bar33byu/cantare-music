@@ -28,7 +28,7 @@ Cantare lets you upload songs, divide them into labeled segments, add lyrics, an
 - **Listen mode** - play playlist songs sequentially without the practice-card workflow, including smooth Part/Blend switching during playback.
 - **Playlist sharing** - publish playlists to the Shared tab or create direct share links, with independent Part, Blend, or Part and Blend audio settings for each sharing mechanism.
 - **Playlist imports** - copy shared playlists into a singer's own library while preserving source lineage and applying the selected shared audio scope.
-- **Passwordless accounts and impersonation support** - sign in with magic links, isolate user libraries, and allow admins to troubleshoot as another user.
+- **Passwordless accounts and impersonation support** - sign in with a six-digit email code or one-click link, isolate user libraries, and allow admins to troubleshoot as another user.
 - **Offline-tolerant ratings and tap persistence** - buffer early taps and queue rating updates where possible so practice interactions are not easily lost.
 
 ## Tech Stack
@@ -39,7 +39,7 @@ Cantare lets you upload songs, divide them into labeled segments, add lyrics, an
 | Styling | Tailwind CSS 4 |
 | Database | PostgreSQL via Neon serverless + Drizzle ORM |
 | Audio storage | S3-compatible object storage (presigned upload/download URLs) |
-| Auth | Passwordless magic links with hashed session tokens |
+| Auth | Passwordless six-digit email codes and one-click links with hashed tokens |
 | Testing | Vitest + Testing Library |
 
 ## Getting Started
@@ -78,7 +78,7 @@ Notes:
 - If `R2_ENDPOINT` is blank and `R2_ACCOUNT_ID` is set, the app derives the standard Cloudflare R2 endpoint automatically.
 - Part and Blend audio versions are both stored as R2 objects and exposed to the browser as direct public R2 URLs.
 - Draft recordings are stored as audio objects and remain editable through metadata until promoted.
-- Magic-link login links expire after 15 minutes and can be consumed once. Sessions persist for 90 days or until sign-out.
+- Email login codes and one-click links expire after 15 minutes and share the same one-time credential. Codes are bound to the recipient email, and repeated incorrect attempts are temporarily throttled. Sessions persist for 90 days or until sign-out.
 - Scheduled account deletions are marked immediately, remain cancelable for 30 days, and can be purged by calling `POST /api/admin/account-deletions/purge` with an admin session or `Authorization: Bearer $CANTARE_ACCOUNT_DELETION_CRON_SECRET`.
 
 Run database migrations before first use:

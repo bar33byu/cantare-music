@@ -7,6 +7,7 @@ import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
 import { PlaylistPracticeView } from "./components/PlaylistPracticeView";
 import { GuestWelcomePanel } from "./components/GuestWelcomePanel";
+import { MagicCodeSignInForm } from "./components/MagicCodeSignInForm";
 import { SharedBrowser } from "./components/SharedBrowser";
 import { ExerciseBrowser } from "./components/ExerciseBrowser";
 import { VocalRangeEditor } from "./components/VocalRangeEditor";
@@ -832,9 +833,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
-  const [authEmail, setAuthEmail] = useState("");
-  const [authMessage, setAuthMessage] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
+  const [signOutLoading, setSignOutLoading] = useState(false);
   const [profileDisplayName, setProfileDisplayName] = useState("");
   const [profileUsername, setProfileUsername] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
@@ -1139,61 +1138,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     };
   }, [adminActor?.isAdmin, currentUser.id, settingsOpen]);
 
-  const handleMagicLinkRequest = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!authEmail.trim()) {
-      return;
-    }
-
-    setAuthLoading(true);
-    setAuthMessage("");
-    try {
-      const response = await fetch("/api/auth/magic-link", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: authEmail.trim() }),
-      });
-      const payload = await response.json().catch(() => ({})) as { message?: string };
-      setAuthMessage(payload.message ?? "If that email can sign in to Cantare, a login link is on the way.");
-    } catch {
-      setAuthMessage("If that email can sign in to Cantare, a login link is on the way.");
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-  const guestSignInForm = (
-    <>
-      <form className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={handleMagicLinkRequest}>
-        <label htmlFor="guest-sign-in-email" className="text-sm font-medium text-gray-700">
-          Email for magic link
-        </label>
-        <input
-          id="guest-sign-in-email"
-          type="email"
-          value={authEmail}
-          onChange={(event) => setAuthEmail(event.target.value)}
-          placeholder="Email address"
-          className="min-w-0 rounded border border-gray-300 px-3 py-2 text-sm text-gray-800 sm:col-start-1 sm:row-start-2"
-        />
-        <button
-          type="submit"
-          disabled={authLoading || !authEmail.trim()}
-          className="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 sm:col-start-2 sm:row-start-2"
-        >
-          Email magic link
-        </button>
-      </form>
-      {authMessage ? (
-        <p className="mt-2 text-xs text-gray-600" role="status">
-          {authMessage}
-        </p>
-      ) : (
-        <p className="mt-2 text-xs text-gray-600">
-          Enter your email and Cantare will mail you a secure sign-in link. No password required.
-        </p>
-      )}
-    </>
-  );
+  const guestSignInForm = <MagicCodeSignInForm idPrefix="guest-sign-in" />;
 
   const handleProfileSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1303,7 +1248,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   };
 
   const handleSignOut = async () => {
-    setAuthLoading(true);
+    setSignOutLoading(true);
     try {
       await fetch("/api/auth/sign-out", { method: "POST" });
     } catch {
@@ -1323,8 +1268,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       setSelectedPlaylist(null);
       setRefreshTrigger((previous) => previous + 1);
       setActiveView("playlists");
-      setAuthMessage("Signed out.");
-      setAuthLoading(false);
+      setSignOutLoading(false);
     }
   };
 
@@ -2187,7 +2131,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                         onClick={() => {
                           void handleSignOut();
                         }}
-                        disabled={authLoading}
+                        disabled={signOutLoading}
                         className="mt-3 rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Sign out
@@ -2231,36 +2175,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                       </div>
                     </>
                   ) : (
-                    <>
-                      <p className="mt-3 text-sm text-gray-600">
-                        Enter your email and Cantare will mail you a secure sign-in link. No password required.
-                      </p>
-                      <form className="mt-3 grid gap-2" onSubmit={handleMagicLinkRequest}>
-                        <label htmlFor="settings-sign-in-email" className="text-sm font-medium text-gray-700">
-                          Email for magic link
-                        </label>
-                        <input
-                          id="settings-sign-in-email"
-                          type="email"
-                          value={authEmail}
-                          onChange={(event) => setAuthEmail(event.target.value)}
-                          placeholder="Email address"
-                          className="min-w-0 rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
-                        />
-                        <button
-                          type="submit"
-                          disabled={authLoading || !authEmail.trim()}
-                          className="rounded border border-indigo-300 px-3 py-1 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Email magic link
-                        </button>
-                      </form>
-                      {authMessage ? (
-                        <p className="mt-2 text-xs text-gray-600" role="status">
-                          {authMessage}
-                        </p>
-                      ) : null}
-                    </>
+                    <MagicCodeSignInForm idPrefix="settings-sign-in" className="mt-3" />
                   )}
                   {isSignedIn && profileMessage ? (
                     <p className="mt-2 text-xs text-gray-600" role="status">

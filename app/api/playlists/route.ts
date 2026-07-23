@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       performanceStatus !== null &&
       !PLAYLIST_PERFORMANCE_STATUSES.includes(performanceStatus)
     ) {
-      return NextResponse.json({ error: 'performanceStatus must be Performed, Absent, Sick, or Canceled' }, { status: 400 });
+      return NextResponse.json({ error: 'performanceStatus must be Performed, Recorded, Absent, Sick, or Canceled' }, { status: 400 });
     }
 
     const playlist = await createPlaylist({ userId, name: name.trim(), eventDate, performanceStatus });

@@ -58,7 +58,12 @@ export async function GET(
 
     const sessions = await listTapPracticeSessionsForSong(id, userId, TAP_HEAT_MAP_SESSION_LIMIT);
     const scoredAttemptsBySegment = sessions
-      .filter((session) => session.mode === 'practice' && session.segmentId && hasCompletedScoreSummary(session))
+      .filter((session) => (
+        session.mode === 'practice' &&
+        session.inputMethod !== 'voice' &&
+        session.segmentId &&
+        hasCompletedScoreSummary(session)
+      ))
       .reduce<Record<string, TapScoreResult[]>>((accumulator, session) => {
         if (!session.segmentId || !isTapScoreResult(session.scoreDetails)) {
           return accumulator;

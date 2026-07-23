@@ -1,24 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { consumeMagicLinkToken, createUserSession, getOrCreateUserForEmailWithStatus, logAuditEvent } from "../../../db/queries";
-import { AUTH_SESSION_COOKIE_NAME, createOpaqueToken, getAppBaseUrl, hashAuthToken, SESSION_TTL_MS } from "../../lib/authTokens";
+import { getAppBaseUrl, hashAuthToken, hashMagicLinkCode } from "../../lib/authTokens";
 import { getSafeAuthReturnPath } from "../../lib/authRedirects";
-import { USER_COOKIE_NAME } from "../../lib/userContext";
-import { isEmailAdmin } from "../../api/_user";
-
-function cookieOptions(maxAgeSeconds: number, httpOnly: boolean) {
-  return {
-    httpOnly,
-    sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: maxAgeSeconds,
-  };
-}
+import { completeMagicLinkLogin, setLoginCookies } from "../../lib/magicLinkLogin";
+import {
+  clearLoginCodeFailures,
+  getLoginCodeRateLimitKey,
+  isLoginCodeRateLimited,
+  recordLoginCodeFailure,
+} from "../../lib/loginCodeRateLimit";
 
 export async function GET(request: NextRequest) {
   const appBaseUrl = getAppBaseUrl(request);
   const redirectUrl = new URL(getSafeAuthReturnPath(request.nextUrl.searchParams.get("returnTo"), appBaseUrl), appBaseUrl);
   const rawToken = request.nextUrl.searchParams.get("token") ?? "";
+  const email = request.nextUrl.searchParams.get("email")?.trim().toLowerCase() ?? "";
 
   try {
     if (!rawToken) {
@@ -26,41 +21,35 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(redirectUrl);
     }
 
-    // Magic links are one-time use and expire after MAGIC_LINK_TTL_MS.
-    const consumedToken = await consumeMagicLinkToken(hashAuthToken(rawToken));
-    if (!consumedToken) {
+    // New links carry an email-bound six-digit code. The fallback keeps links
+    // issued by the previous opaque-token implementation valid during rollout.
+    const isSixDigitCode = /^\d{6}$/.test(rawToken);
+    const rateLimitKey = isSixDigitCode && email ? getLoginCodeRateLimitKey(request, email) : null;
+    if (rateLimitKey && isLoginCodeRateLimited(rateLimitKey)) {
       redirectUrl.searchParams.set("auth", "invalid");
       return NextResponse.redirect(redirectUrl);
     }
-
-    const { user, created } = await getOrCreateUserForEmailWithStatus(consumedToken.email);
-    const sessionToken = createOpaqueToken();
-    const maxAgeSeconds = Math.floor(SESSION_TTL_MS / 1000);
-    await createUserSession({
-      userId: user.id,
-      tokenHash: hashAuthToken(sessionToken),
-      expiresAt: new Date(Date.now() + SESSION_TTL_MS),
-    });
-    await logAuditEvent({
-      eventType: "auth.admin_status_resolved",
-      actorUserId: user.id,
-      effectiveUserId: user.id,
-      resourceType: "user",
-      resourceId: user.id,
-      metadata: {
-        email: user.email,
-        isAdmin: isEmailAdmin(user.email),
-        source: "magic_link_login",
-      },
-    });
+    const tokenHash = isSixDigitCode && email
+      ? hashMagicLinkCode(email, rawToken)
+      : hashAuthToken(rawToken);
+    const login = await completeMagicLinkLogin(tokenHash, "magic_link_login");
+    if (!login) {
+      if (rateLimitKey) {
+        recordLoginCodeFailure(rateLimitKey);
+      }
+      redirectUrl.searchParams.set("auth", "invalid");
+      return NextResponse.redirect(redirectUrl);
+    }
+    if (rateLimitKey) {
+      clearLoginCodeFailures(rateLimitKey);
+    }
 
     redirectUrl.searchParams.set("auth", "signed-in");
-    if (created) {
+    if (login.created) {
       redirectUrl.searchParams.set("setup", "username");
     }
     const response = NextResponse.redirect(redirectUrl);
-    response.cookies.set(AUTH_SESSION_COOKIE_NAME, sessionToken, cookieOptions(maxAgeSeconds, true));
-    response.cookies.set(USER_COOKIE_NAME, user.id, cookieOptions(maxAgeSeconds, false));
+    setLoginCookies(response, login);
     return response;
   } catch (error) {
     console.error("Error consuming magic link:", error);

@@ -72,7 +72,7 @@ The near-term priority is stabilization: keep the current workflows reliable on 
 ## Version 3.0: Accounts, Sharing, and Rehearsal Capture
 
 - [x] Multi-user account model and profile management
-- [x] Passwordless magic-link sign-in
+- [x] Passwordless sign-in by six-digit email code or one-click link
 - [x] Admin impersonation for support and troubleshooting
 - [x] User-scoped songs, playlists, ratings, tap attempts, drafts, and settings
 - [x] Playlist direct URL sharing

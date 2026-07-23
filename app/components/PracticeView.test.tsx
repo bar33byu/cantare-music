@@ -53,6 +53,7 @@ vi.mock("./SegmentCard", () => ({
     lyricSize,
     showContourMap,
     contourHeatMap,
+    recentTapAttempt,
   }: {
     segment: { id: string; label: string };
     onRate: (r: MemoryRating) => void;
@@ -61,6 +62,16 @@ vi.mock("./SegmentCard", () => ({
     lyricSize?: "default" | "large";
     showContourMap?: boolean;
     contourHeatMap?: Record<string, unknown>;
+    recentTapAttempt?: {
+      segmentId: string;
+      segmentLabel: string;
+      segmentDurationMs: number;
+      scorePercent: number;
+      matchedTaps: number;
+      totalEvents: number;
+      missedTaps: number;
+      extraTaps: number;
+    } | null;
   }) => (
     <div
       data-testid="mock-segment-card"
@@ -69,6 +80,12 @@ vi.mock("./SegmentCard", () => ({
       data-lyric-size={lyricSize}
       data-show-contour-map={showContourMap ? "true" : "false"}
       data-contour-heat-count={Object.keys(contourHeatMap ?? {}).length}
+      data-recent-tap-segment={recentTapAttempt?.segmentId}
+      data-recent-tap-score={recentTapAttempt?.scorePercent}
+      data-recent-tap-matched={recentTapAttempt?.matchedTaps}
+      data-recent-tap-total={recentTapAttempt?.totalEvents}
+      data-recent-tap-missed={recentTapAttempt?.missedTaps}
+      data-recent-tap-extra={recentTapAttempt?.extraTaps}
       data-contour-heat-miss-total={Object.values(contourHeatMap ?? {}).reduce<number>((total, value) => {
         const missCount = typeof value === "object" && value && "missCount" in value
           ? Number((value as { missCount?: number }).missCount ?? 0)
@@ -1352,6 +1369,45 @@ describe("PracticeView", () => {
     });
   });
 
+  it("treats adjacent keyboard keys as different notes and only repeats as same", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: true,
+      isReady: true,
+      currentMs: 100,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+    mockPracticeFetchWithMidiAnswerKey();
+
+    const song = makeSong(1);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    await waitFor(() => expectTapSessionStarted(song.id));
+
+    fireEvent.keyDown(window, { key: "z" });
+    fireEvent.keyDown(window, { key: "x" });
+    fireEvent.keyDown(window, { key: "x" });
+    fireEvent.keyDown(window, { key: "z" });
+
+    await waitFor(() => {
+      const tapPersistCalls = mockFetch.mock.calls.filter(([calledUrl, calledInit]) => (
+        String(calledUrl).includes("/tap-sessions/tap-session-1") && calledInit?.method === "POST"
+      ));
+      expect(tapPersistCalls).toHaveLength(4);
+      expect(tapPersistCalls.map(([, init]) => JSON.parse(String(init?.body)).direction)).toEqual([
+        "same",
+        "up",
+        "same",
+        "down",
+      ]);
+    });
+  });
+
   it("persists captured taps to the active tap session", async () => {
     mockPracticeFetchWithMidiAnswerKey();
 
@@ -1409,7 +1465,7 @@ describe("PracticeView", () => {
     });
   });
 
-  it("refreshes the card contour heat map after saving tap practice attempts", async () => {
+  it("refreshes scored tap-session summaries after saving without a duplicate heat-map request", async () => {
     mockPracticeFetchWithMidiAnswerKey();
 
     mockUseAudioPlayer.mockReturnValue({
@@ -1430,12 +1486,10 @@ describe("PracticeView", () => {
     const song = makeSong(1);
     await renderAndWaitForRatings(song);
 
-    await waitFor(() => {
-      const heatMapCalls = mockFetch.mock.calls.filter(
-        ([url, init]) => url === `/api/songs/${song.id}/tap-heatmap` && init?.cache === "no-store"
-      );
-      expect(heatMapCalls).toHaveLength(1);
-    });
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith(
+      `/api/songs/${song.id}/tap-sessions`,
+      expect.objectContaining({ cache: "no-store" })
+    ));
 
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
 
@@ -1467,11 +1521,12 @@ describe("PracticeView", () => {
     });
 
     await waitFor(() => {
-      const heatMapCalls = mockFetch.mock.calls.filter(
-        ([url, init]) => url === `/api/songs/${song.id}/tap-heatmap` && init?.cache === "no-store"
+      const sessionSummaryCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => url === `/api/songs/${song.id}/tap-sessions` && init?.cache === "no-store"
       );
-      expect(heatMapCalls.length).toBeGreaterThanOrEqual(2);
+      expect(sessionSummaryCalls.length).toBeGreaterThanOrEqual(2);
     });
+    expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith("/tap-heatmap"))).toBe(false);
   });
 
   it("persists integer millisecond tap timings when playback time is fractional", async () => {
@@ -1850,7 +1905,7 @@ describe("PracticeView", () => {
     });
   });
 
-  it("clears previous attempts when tap playback reaches a new segment start", async () => {
+  it("keeps a scored snapshot when tap playback reaches a new segment start", async () => {
     const playbackState = {
       isPlaying: true,
       isReady: true,
@@ -1905,6 +1960,71 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-segment-id", "seg-1");
       expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
+      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-recent-tap-segment", "seg-0");
+      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-recent-tap-score", "0");
+      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-recent-tap-matched", "0");
+      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-recent-tap-missed", "2");
+    });
+
+    const stored = JSON.parse(String(window.localStorage.getItem(`cantare:recent-tap-attempt:${song.id}`)));
+    expect(stored).toEqual(expect.objectContaining({
+      songId: song.id,
+      segmentId: "seg-0",
+      scorePercent: 0,
+    }));
+    expect(stored.expiresAt - Date.parse(stored.completedAt)).toBe(60 * 60 * 1000);
+  });
+
+  it("restores a recent Tap attempt saved less than an hour ago", async () => {
+    const song = makeSong(1);
+    const completedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    window.localStorage.setItem(`cantare:recent-tap-attempt:${song.id}`, JSON.stringify({
+      songId: song.id,
+      segmentId: "seg-0",
+      segmentLabel: "Verse 1",
+      segmentDurationMs: 4000,
+      completedAt,
+      expiresAt: Date.parse(completedAt) + 60 * 60 * 1000,
+      scorePercent: 50,
+      matchedTaps: 1,
+      totalEvents: 2,
+      missedTaps: 1,
+      extraTaps: 0,
+      notes: [{ id: "midi-contour-seg-0-1", timeOffsetMs: 0, durationMs: 100, lane: 0 }],
+      noteResults: { "midi-contour-seg-0-1": "matched" },
+    }));
+
+    await renderAndWaitForRatings(song);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-recent-tap-segment", "seg-0");
+      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-recent-tap-score", "50");
+    });
+  });
+
+  it("removes a recent Tap attempt after its one-hour lifetime", async () => {
+    const song = makeSong(1);
+    window.localStorage.setItem(`cantare:recent-tap-attempt:${song.id}`, JSON.stringify({
+      songId: song.id,
+      segmentId: "seg-0",
+      segmentLabel: "Verse 1",
+      segmentDurationMs: 4000,
+      completedAt: new Date(Date.now() - 60 * 60 * 1000 - 1).toISOString(),
+      expiresAt: Date.now() - 1,
+      scorePercent: 50,
+      matchedTaps: 1,
+      totalEvents: 2,
+      missedTaps: 1,
+      extraTaps: 0,
+      notes: [{ id: "midi-contour-seg-0-1", timeOffsetMs: 0, durationMs: 100, lane: 0 }],
+      noteResults: { "midi-contour-seg-0-1": "matched" },
+    }));
+
+    await renderAndWaitForRatings(song);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-segment-card")).not.toHaveAttribute("data-recent-tap-segment");
+      expect(window.localStorage.getItem(`cantare:recent-tap-attempt:${song.id}`)).toBeNull();
     });
   });
 
