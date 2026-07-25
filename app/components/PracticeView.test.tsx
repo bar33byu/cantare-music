@@ -304,6 +304,55 @@ describe("PracticeView", () => {
     });
   });
 
+  it("keeps one song practice session across segment changes and pauses", async () => {
+    const playbackState = {
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1000,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+    mockUseAudioPlayer.mockImplementation(() => playbackState);
+    const song = makeSong(2);
+    const view = render(
+      <PracticeView
+        song={song}
+        initialSession={makeSession(song)}
+        practiceTimeTrackingEnabled
+        practiceTimeSource="playlist-auto"
+      />
+    );
+
+    await waitFor(() => {
+      const starts = mockFetch.mock.calls.filter(([url, init]) => url === "/api/song-practice-sessions" && init?.method === "POST");
+      expect(starts).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.some(([url, init]) => String(url).startsWith("/api/song-practice-sessions/") && init?.method === "PATCH")).toBe(true);
+    });
+
+    playbackState.isPlaying = false;
+    view.rerender(
+      <PracticeView song={song} initialSession={makeSession(song)} practiceTimeTrackingEnabled practiceTimeSource="playlist-auto" />
+    );
+    playbackState.isPlaying = true;
+    view.rerender(
+      <PracticeView song={song} initialSession={makeSession(song)} practiceTimeTrackingEnabled practiceTimeSource="playlist-auto" />
+    );
+
+    await waitFor(() => {
+      const starts = mockFetch.mock.calls.filter(([url, init]) => url === "/api/song-practice-sessions" && init?.method === "POST");
+      expect(starts).toHaveLength(1);
+    });
+  });
+
   it("shows cumulative and per-segment scores during a Sing run", async () => {
     mockPracticeFetchWithMidiAnswerKey();
     mockUsePitchPractice.mockReturnValue({

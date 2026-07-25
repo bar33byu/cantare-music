@@ -47,6 +47,52 @@ beforeEach(() => {
   executeSpy.mockReset();
 });
 
+describe("practice stats helpers", () => {
+  it("excludes zero-percent songs from average mastery", async () => {
+    const { averageNonZeroMastery } = await getQueries();
+
+    expect(averageNonZeroMastery([0, 0, 25, 75, 100])).toBe(67);
+    expect(averageNonZeroMastery([0, 0])).toBe(0);
+  });
+
+  it("groups adjacent timers for the same song into one session", async () => {
+    const { groupSongPracticeSessions } = await getQueries();
+    const base = {
+      userId: "user-1",
+      songTitle: "Song One",
+      source: "playlist-auto",
+    };
+
+    const grouped = groupSongPracticeSessions([
+      { ...base, id: "timer-2", songId: "song-1", segmentId: "segment-2", startedAt: "2026-07-25T12:00:12.000Z", completedAt: "2026-07-25T12:00:20.000Z", durationSeconds: 8 },
+      { ...base, id: "timer-1", songId: "song-1", segmentId: "segment-1", startedAt: "2026-07-25T12:00:00.000Z", completedAt: "2026-07-25T12:00:10.000Z", durationSeconds: 10 },
+      { ...base, id: "other-song", songId: "song-2", segmentId: null, startedAt: "2026-07-25T12:00:21.000Z", completedAt: "2026-07-25T12:00:30.000Z", durationSeconds: 9 },
+    ]);
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped[1]).toEqual(expect.objectContaining({
+      id: "timer-1",
+      songId: "song-1",
+      segmentId: null,
+      durationSeconds: 18,
+      completedAt: "2026-07-25T12:00:20.000Z",
+    }));
+  });
+
+  it("filters activity to the selected dashboard range", async () => {
+    const { filterPracticeSessionsByRange } = await getQueries();
+    const sessions = [
+      { startedAt: "2026-07-20T12:00:00.000Z" },
+      { startedAt: "2026-05-01T12:00:00.000Z" },
+    ];
+    const now = new Date("2026-07-25T12:00:00.000Z");
+
+    expect(filterPracticeSessionsByRange(sessions, 30, now)).toHaveLength(1);
+    expect(filterPracticeSessionsByRange(sessions, 90, now)).toHaveLength(2);
+    expect(filterPracticeSessionsByRange(sessions, "all", now)).toHaveLength(2);
+  });
+});
+
 // Lazily import queries AFTER mock is set up
 async function getQueries() {
   return import("./queries");

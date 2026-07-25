@@ -9,8 +9,6 @@ interface PitchContourThumbnailProps {
   activeTimeMs?: number;
 }
 
-const MIN_HEATMAP_SESSION_COUNT = 3;
-
 function blendChannel(start: number, end: number, amount: number): number {
   return Math.round(start + (end - start) * amount);
 }
@@ -24,7 +22,7 @@ function blendRgb(
 }
 
 function getContourHeatColor(stat?: ContourNoteHeatStat): string {
-  if (!stat || stat.sessionCount < MIN_HEATMAP_SESSION_COUNT) {
+  if (!stat || stat.sessionCount === 0) {
     return 'rgb(79 70 229)';
   }
 
@@ -36,7 +34,7 @@ function getContourHeatColor(stat?: ContourNoteHeatStat): string {
 }
 
 function getContourHeatOpacity(stat?: ContourNoteHeatStat): number {
-  if (!stat || stat.sessionCount < MIN_HEATMAP_SESSION_COUNT) {
+  if (!stat || stat.sessionCount === 0) {
     return 0.85;
   }
 
@@ -106,11 +104,7 @@ export function PitchContourThumbnail({ notes = [], segmentDurationMs, className
                 {result ? (
                   <title>{result === 'matched' ? 'Correct in the most recent Tap attempt' : 'Missed in the most recent Tap attempt'}</title>
                 ) : stat ? (
-                  <title>{
-                    stat.sessionCount < MIN_HEATMAP_SESSION_COUNT
-                      ? `${stat.sessionCount} graded ${stat.sessionCount === 1 ? 'attempt' : 'attempts'}; 3 needed for a trouble color`
-                      : `${stat.missCount} ${stat.missCount === 1 ? 'miss' : 'misses'} in ${stat.sessionCount} graded attempts`
-                  }</title>
+                  <title>{`${stat.missCount} ${stat.missCount === 1 ? 'miss' : 'misses'} in ${stat.sessionCount} graded ${stat.sessionCount === 1 ? 'attempt' : 'attempts'}`}</title>
                 ) : null}
               </rect>
             </g>
