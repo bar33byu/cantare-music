@@ -4,6 +4,7 @@ import path from "node:path";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { upsertSeedVocalExercises, type PersistedVocalExercise } from "../db/queries";
 import { BUCKET, r2Client } from "../lib/r2";
+import { removeLegacyVocalExercises } from "../db/vocalExerciseMaintenance";
 
 const DEFAULT_SOURCE_DIRECTORY = "C:\\Users\\bar33\\Music\\Unknown artist\\Unknown album (7-27-2026 6-48-48 PM)";
 const COLLECTION_SLUG = "recorded-warmups-2026";
@@ -74,7 +75,8 @@ async function main() {
     transposeMode: "recorded_audio",
   });
 
-  console.log("Recorded warmups are ready. Legacy MIDI records were retained for practice-history integrity and are hidden by the recorded warmup player.");
+  const removed = await removeLegacyVocalExercises();
+  console.log(`Recorded warmups are ready. Removed ${removed.exercises.length} legacy MIDI exercise(s) and ${removed.practiceSessionCount} associated practice session(s).`);
 }
 
 main().catch((error) => {
