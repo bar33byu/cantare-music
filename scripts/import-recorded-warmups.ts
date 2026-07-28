@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { upsertSeedVocalExercises, type PersistedVocalExercise } from "../db/queries";
+import { getVocalExercises, upsertSeedVocalExercises, type PersistedVocalExercise } from "../db/queries";
 import { BUCKET, r2Client } from "../lib/r2";
 import { removeLegacyVocalExercises } from "../db/vocalExerciseMaintenance";
 
@@ -22,35 +22,57 @@ async function main() {
     .filter((filename) => filename.toLowerCase().endsWith(".mp3"))
     .sort((left, right) => trackNumber(left) - trackNumber(right) || left.localeCompare(right));
 
-  if (files.length === 0) throw new Error(`No MP3 files found in ${sourceDirectory}`);
-  console.log(`Importing ${files.length} recorded warmups from ${sourceDirectory}`);
+  if (files.length === 0 || files.length % 2 !== 0) throw new Error(`Expected an even number of MP3 files in ${sourceDirectory}`);
+  const pairs = Array.from({ length: files.length / 2 }, (_, index) => {
+    const part = files[index * 2];
+    const blend = files[index * 2 + 1];
+    const partTrack = trackNumber(part);
+    const blendTrack = trackNumber(blend);
+    if (partTrack % 2 !== 1 || blendTrack !== partTrack + 1) throw new Error(`Expected odd/even Part and Blend pair, received ${part} and ${blend}`);
+    return { part, blend };
+  });
+  console.log(`Importing ${pairs.length} Part/Blend warmup pairs from ${sourceDirectory}`);
+
+  const existingById = uploadOnly
+    ? new Map<string, PersistedVocalExercise>()
+    : new Map((await getVocalExercises()).map((exercise) => [exercise.id, exercise]));
 
   const exercises: PersistedVocalExercise[] = [];
-  for (const [index, filename] of files.entries()) {
-    const bytes = await readFile(path.join(sourceDirectory, filename));
-    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 12);
-    const audioKey = `audio/warmups/recorded-2026/${String(index + 1).padStart(2, "0")}-${hash}.mp3`;
-    await r2Client.send(new PutObjectCommand({
-      Bucket: BUCKET,
-      Key: audioKey,
-      Body: bytes,
-      ContentType: "audio/mpeg",
-      CacheControl: "public, max-age=31536000, immutable",
-      Metadata: { originalFilename: encodeURIComponent(filename) },
-    }));
-    console.log(`Uploaded ${filename} -> ${audioKey}`);
+  for (const [index, pair] of pairs.entries()) {
+    const upload = async (filename: string, version: "part" | "blend") => {
+      const bytes = await readFile(path.join(sourceDirectory, filename));
+      const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 12);
+      const prefix = String(index + 1).padStart(2, "0");
+      const audioKey = version === "part"
+        ? `audio/warmups/recorded-2026/${prefix}-part-${hash}.mp3`
+        : `audio/warmups/recorded-2026/${prefix}-${hash}.mp3`;
+      await r2Client.send(new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: audioKey,
+        Body: bytes,
+        ContentType: "audio/mpeg",
+        CacheControl: "public, max-age=31536000, immutable",
+        Metadata: { originalFilename: encodeURIComponent(filename), version },
+      }));
+      console.log(`Uploaded ${version} ${filename} -> ${audioKey}`);
+      return audioKey;
+    };
+    const [audioKey, alternateAudioKey] = await Promise.all([upload(pair.part, "part"), upload(pair.blend, "blend")]);
+    const id = `recorded-warmup-${String(index + 1).padStart(2, "0")}`;
+    const existing = existingById.get(id);
     exercises.push({
-      id: `recorded-warmup-${String(index + 1).padStart(2, "0")}`,
+      id,
       slug: `recorded-warmup-${String(index + 1).padStart(2, "0")}`,
-      title: `Warmup ${index + 1}`,
+      title: existing?.title ?? `Warmup ${index + 1}`,
       category: "Recorded",
-      description: `Imported from ${filename}`,
-      lyricHint: "",
+      description: `Part: ${pair.part}; Blend: ${pair.blend}`,
+      lyricHint: existing?.lyricHint ?? "",
       collectionSlug: COLLECTION_SLUG,
       collectionTitle: "Recorded Warmups",
       routinePosition: index,
       audioKey,
-      sourceMidiFile: filename,
+      alternateAudioKey,
+      sourceMidiFile: `${pair.part} / ${pair.blend}`,
       exerciseStartBeat: 0,
       tempoBpm: 120,
       timeSignature: { numerator: 4, denominator: 4 },

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ExerciseBrowser } from "./ExerciseBrowser";
 
@@ -9,6 +9,8 @@ const exercises = [
     lyricHint: "Mah, may, me, moh, moo",
     audioKey: "audio/warmups/01.mp3",
     audioUrl: "https://audio.example.com/audio/warmups/01.mp3",
+    alternateAudioKey: "audio/warmups/01-blend.mp3",
+    alternateAudioUrl: "https://audio.example.com/audio/warmups/01-blend.mp3",
     sourceMidiFile: "02 Track 2.mp3",
     exerciseStartBeat: 0,
     tempoBpm: 120,
@@ -24,6 +26,8 @@ const exercises = [
     lyricHint: "",
     audioKey: "audio/warmups/02.mp3",
     audioUrl: "https://audio.example.com/audio/warmups/02.mp3",
+    alternateAudioKey: "audio/warmups/02-blend.mp3",
+    alternateAudioUrl: "https://audio.example.com/audio/warmups/02-blend.mp3",
     sourceMidiFile: "04 Track 4.mp3",
     exerciseStartBeat: 0,
     tempoBpm: 120,
@@ -108,7 +112,7 @@ describe("recorded warmup browser", () => {
     render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
     fireEvent.click(await screen.findByRole("button", { name: "Play set (2)" }));
     expect(await screen.findByText("Now playing")).toBeInTheDocument();
-    expect(screen.getByText("Set 1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Exercise 1 of 2")).toBeInTheDocument();
     await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
   });
 
@@ -139,5 +143,38 @@ describe("recorded warmup browser", () => {
     await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2));
+  });
+
+  it("switches between Blend and Part while preserving the playback position", async () => {
+    mockExerciseList();
+    const { container } = render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Play set (2)" }));
+    const audio = container.querySelector("audio")!;
+    await waitFor(() => expect(audio.getAttribute("src")).toBe(exercises[0].alternateAudioUrl));
+    expect(screen.getByRole("button", { name: "Blend" })).toHaveAttribute("aria-pressed", "true");
+    audio.currentTime = 12;
+    Object.defineProperty(audio, "paused", { configurable: true, get: () => false });
+
+    fireEvent.click(screen.getByRole("button", { name: "Part" }));
+
+    await waitFor(() => expect(audio.getAttribute("src")).toBe(exercises[0].audioUrl));
+    expect(screen.getByRole("button", { name: "Part" })).toHaveAttribute("aria-pressed", "true");
+    expect(audio.currentTime).toBe(12);
+    await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps lyric hints visible and skips forward and backward through the set", async () => {
+    mockExerciseList();
+    render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Play set (2)" }));
+    const player = screen.getByLabelText("Warmup player");
+    expect(within(player).getByText("Mah, may, me, moh, moo")).toBeInTheDocument();
+
+    fireEvent.click(within(player).getByRole("button", { name: /Next/ }));
+    await waitFor(() => expect(within(player).getByText("Warmup 2")).toBeInTheDocument());
+    expect(within(player).getByText("No lyric hints yet.")).toBeInTheDocument();
+
+    fireEvent.click(within(player).getByRole("button", { name: /Previous/ }));
+    await waitFor(() => expect(within(player).getByText("Warmup 1")).toBeInTheDocument());
   });
 });

@@ -23,6 +23,8 @@ export interface VocalExercise {
   coachingNotes?: string[];
   audioKey?: string;
   audioUrl?: string;
+  alternateAudioKey?: string;
+  alternateAudioUrl?: string;
   lyricHint?: string;
   collectionSlug?: string;
   collectionTitle?: string;

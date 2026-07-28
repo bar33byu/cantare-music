@@ -252,6 +252,8 @@ export interface PersistedVocalExercise {
   coachingNotes?: string[];
   audioKey?: string;
   audioUrl?: string;
+  alternateAudioKey?: string;
+  alternateAudioUrl?: string;
   lyricHint?: string;
   collectionSlug?: string;
   collectionTitle?: string;
@@ -5503,6 +5505,8 @@ function mapVocalExercise(
     coachingNotes: row.coachingNotes,
     audioKey: row.audioKey ?? undefined,
     audioUrl: row.audioKey ? getPublicUrl(row.audioKey) : undefined,
+    alternateAudioKey: row.alternateAudioKey ?? undefined,
+    alternateAudioUrl: row.alternateAudioKey ? getPublicUrl(row.alternateAudioKey) : undefined,
     lyricHint: row.lyricHint,
     collectionSlug: collection?.slug ?? undefined,
     collectionTitle: collection?.title ?? undefined,
@@ -5531,6 +5535,7 @@ function vocalExerciseValues(exercise: PersistedVocalExercise) {
     pattern: exercise.pattern ?? null,
     coachingNotes: exercise.coachingNotes ?? [],
     audioKey: exercise.audioKey ?? null,
+    alternateAudioKey: exercise.alternateAudioKey ?? null,
     lyricHint: exercise.lyricHint ?? "",
     sourceMidiFile: exercise.sourceMidiFile,
     exerciseStartBeatMilli: Math.round(exercise.exerciseStartBeat * 1000),

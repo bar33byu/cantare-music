@@ -404,6 +404,7 @@ export const vocalExercises = pgTable(
     coachingNotes: jsonb("coaching_notes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     sourceMidiFile: text("source_midi_file").notNull(),
     audioKey: text("audio_key"),
+    alternateAudioKey: text("alternate_audio_key"),
     lyricHint: text("lyric_hint").notNull().default(""),
     exerciseStartBeatMilli: integer("exercise_start_beat_milli").notNull().default(0),
     tempoBpmMilli: integer("tempo_bpm_milli").notNull().default(120000),

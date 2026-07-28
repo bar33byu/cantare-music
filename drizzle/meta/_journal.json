@@ -232,6 +232,13 @@
       "when": 1785211200000,
       "tag": "0033_recorded_warmups",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785301200000,
+      "tag": "0034_vocal_exercise_alternate_audio",
+      "breakpoints": true
     }
   ]
 }

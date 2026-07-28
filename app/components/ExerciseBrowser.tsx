@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VocalExercise } from "../lib/vocalExercise";
 import { withUserIdHeader } from "../lib/userContext";
 
+type WarmupAudioVersion = "part" | "blend";
+
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "--:--";
   const rounded = Math.round(seconds);
@@ -21,6 +23,25 @@ function createPracticeSessionId(): string {
 
 function selectionStorageKey(userId: string): string {
   return `cantare:warmup-set:v1:${userId || "guest"}`;
+}
+
+function audioVersionStorageKey(userId: string): string {
+  return `cantare:warmup-audio-version:v1:${userId || "guest"}`;
+}
+
+function readSavedAudioVersion(userId: string): WarmupAudioVersion {
+  try {
+    return window.localStorage.getItem(audioVersionStorageKey(userId)) === "part" ? "part" : "blend";
+  } catch {
+    return "blend";
+  }
+}
+
+function resolveWarmupAudioUrl(exercise: VocalExercise | null, version: WarmupAudioVersion): string {
+  if (!exercise) return "";
+  return version === "blend"
+    ? exercise.alternateAudioUrl ?? exercise.audioUrl ?? ""
+    : exercise.audioUrl ?? exercise.alternateAudioUrl ?? "";
 }
 
 function readSavedSelection(userId: string): string[] | null {
@@ -103,7 +124,7 @@ function WarmupCard({ exercise, index, enabled, active, isAdmin, duration, onTog
 
       {error ? <p role="alert" className="mt-3 text-sm font-medium text-rose-700">{error}</p> : null}
       <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" onClick={onPlay} disabled={!exercise.audioUrl} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+        <button type="button" onClick={onPlay} disabled={!exercise.audioUrl && !exercise.alternateAudioUrl} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">
           {active ? "Restart" : "Play"}
         </button>
         {isAdmin && !editing ? <button type="button" onClick={() => setEditing(true)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:border-indigo-300 hover:text-indigo-700">Edit title & hints</button> : null}
@@ -123,12 +144,14 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
   const [enabledIds, setEnabledIds] = useState<Set<string> | null>(null);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [playRequestId, setPlayRequestId] = useState(0);
+  const [audioVersion, setAudioVersion] = useState<WarmupAudioVersion>("blend");
   const [isRoutine, setIsRoutine] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [durations, setDurations] = useState<Record<string, number>>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pendingPlaybackRef = useRef<{ currentTime: number; shouldPlay: boolean } | null>(null);
   const activeSessionRef = useRef<{ id: string; startedAt: number } | null>(null);
 
   useEffect(() => {
@@ -139,10 +162,11 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
         if (!response.ok) throw new Error("Could not load warmups");
         const payload = await response.json() as { exercises?: VocalExercise[] };
         const recorded = (payload.exercises ?? [])
-          .filter((exercise) => Boolean(exercise.audioUrl))
+          .filter((exercise) => Boolean(exercise.audioUrl || exercise.alternateAudioUrl))
           .sort((left, right) => (left.routinePosition ?? Number.MAX_SAFE_INTEGER) - (right.routinePosition ?? Number.MAX_SAFE_INTEGER) || left.title.localeCompare(right.title));
         if (cancelled) return;
         setExercises(recorded);
+        setAudioVersion(readSavedAudioVersion(userId));
         const saved = readSavedSelection(userId);
         const validIds = new Set(recorded.map((exercise) => exercise.id));
         setEnabledIds(new Set(saved === null ? validIds : saved.filter((id) => validIds.has(id))));
@@ -157,6 +181,8 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
 
   const enabledExercises = useMemo(() => exercises.filter((exercise) => enabledIds?.has(exercise.id)), [enabledIds, exercises]);
   const currentExercise = exercises.find((exercise) => exercise.id === currentId) ?? null;
+  const currentAudioUrl = resolveWarmupAudioUrl(currentExercise, audioVersion);
+  const currentSetIndex = currentExercise ? enabledExercises.findIndex((exercise) => exercise.id === currentExercise.id) : -1;
 
   const finishSession = useCallback(() => {
     const active = activeSessionRef.current;
@@ -177,6 +203,7 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
     setPlaybackError(null);
     setIsRoutine(routine);
     setCurrentId(exercise.id);
+    pendingPlaybackRef.current = { currentTime: 0, shouldPlay: true };
     setPlayRequestId((previous) => previous + 1);
     const sessionId = createPracticeSessionId();
     const startedAt = new Date();
@@ -189,21 +216,25 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
   }, [finishSession, userId]);
 
   useEffect(() => {
-    if (!currentExercise || !audioRef.current) return;
+    if (!currentExercise || !currentAudioUrl || !audioRef.current) return;
     const audio = audioRef.current;
+    const pending = pendingPlaybackRef.current ?? { currentTime: 0, shouldPlay: true };
+    pendingPlaybackRef.current = null;
     let cancelled = false;
     const resetWhenReady = () => {
       if (cancelled) return;
-      try { audio.currentTime = 0; } catch { /* The new source will begin at zero naturally. */ }
+      try { audio.currentTime = Math.min(pending.currentTime, Number.isFinite(audio.duration) ? audio.duration : pending.currentTime); } catch { /* Keep the browser's natural position. */ }
     };
 
     try {
-      audio.currentTime = 0;
+      audio.currentTime = pending.currentTime;
+      if (audio.readyState < 1) audio.addEventListener("loadedmetadata", resetWhenReady, { once: true });
     } catch {
       audio.addEventListener("loadedmetadata", resetWhenReady, { once: true });
     }
 
     try {
+      if (!pending.shouldPlay) return () => audio.removeEventListener("loadedmetadata", resetWhenReady);
       const result = audio.play();
       void result?.catch((error: unknown) => {
         if (cancelled) return;
@@ -219,7 +250,19 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
       cancelled = true;
       audio.removeEventListener("loadedmetadata", resetWhenReady);
     };
-  }, [currentExercise, playRequestId]);
+  }, [currentAudioUrl, currentExercise, playRequestId]);
+
+  const switchAudioVersion = (nextVersion: WarmupAudioVersion) => {
+    if (nextVersion === audioVersion) return;
+    const audio = audioRef.current;
+    pendingPlaybackRef.current = {
+      currentTime: audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+      shouldPlay: Boolean(audio && !audio.paused),
+    };
+    setAudioVersion(nextVersion);
+    setPlayRequestId((previous) => previous + 1);
+    try { window.localStorage.setItem(audioVersionStorageKey(userId), nextVersion); } catch { /* Storage may be unavailable. */ }
+  };
 
   const handleEnded = () => {
     finishSession();
@@ -234,6 +277,12 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
       setCurrentId(null);
       setIsRoutine(false);
     }
+  };
+
+  const skipExercise = (direction: -1 | 1) => {
+    if (currentSetIndex < 0) return;
+    const target = enabledExercises[currentSetIndex + direction];
+    if (target) play(target, isRoutine);
   };
 
   const persistSelection = (next: Set<string>) => {
@@ -277,11 +326,25 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
           <>
             <div className="mb-2 flex items-center justify-between gap-3">
               <div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600">Now playing</p><p className="truncate font-bold text-slate-950">{currentExercise.title}</p></div>
-              {isRoutine ? <span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Set {enabledExercises.findIndex((item) => item.id === currentExercise.id) + 1} of {enabledExercises.length}</span> : null}
+              <span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{currentSetIndex >= 0 ? `Exercise ${currentSetIndex + 1} of ${enabledExercises.length}` : "Not in current set"}</span>
             </div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="inline-flex rounded-lg border border-slate-300 bg-slate-50 p-1" aria-label="Warmup audio version">
+                <button type="button" aria-pressed={audioVersion === "part"} disabled={!currentExercise.audioUrl} onClick={() => switchAudioVersion("part")} className={`rounded-md px-4 py-2 text-sm font-semibold ${audioVersion === "part" ? "bg-indigo-600 text-white shadow-sm" : "text-slate-700 hover:bg-white"} disabled:cursor-not-allowed disabled:opacity-40`}>Part</button>
+                <button type="button" aria-pressed={audioVersion === "blend"} disabled={!currentExercise.alternateAudioUrl} onClick={() => switchAudioVersion("blend")} className={`rounded-md px-4 py-2 text-sm font-semibold ${audioVersion === "blend" ? "bg-indigo-600 text-white shadow-sm" : "text-slate-700 hover:bg-white"} disabled:cursor-not-allowed disabled:opacity-40`}>Blend</button>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => skipExercise(-1)} disabled={currentSetIndex <= 0} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-40">&larr; Previous</button>
+                <button type="button" onClick={() => skipExercise(1)} disabled={currentSetIndex < 0 || currentSetIndex >= enabledExercises.length - 1} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-40">Next &rarr;</button>
+              </div>
+            </div>
+            <section className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3" aria-label="Current lyric hints">
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-amber-800">Lyric hints</p>
+              <p className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${currentExercise.lyricHint ? "text-slate-800" : "italic text-slate-500"}`}>{currentExercise.lyricHint || "No lyric hints yet."}</p>
+            </section>
           </>
         ) : null}
-        <audio ref={audioRef} src={currentExercise?.audioUrl} controls preload="metadata" className="w-full" onEnded={handleEnded} onLoadedMetadata={(event) => {
+        <audio ref={audioRef} src={currentAudioUrl || undefined} controls preload="metadata" className="w-full" onEnded={handleEnded} onLoadedMetadata={(event) => {
           if (currentExercise) setDurations((previous) => ({ ...previous, [currentExercise.id]: event.currentTarget.duration }));
         }} onError={() => setPlaybackError("This warmup audio could not be loaded.")} />
       </section>
