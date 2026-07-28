@@ -5,6 +5,15 @@ import type { VocalExercise } from "../lib/vocalExercise";
 import { withUserIdHeader } from "../lib/userContext";
 
 type WarmupAudioVersion = "part" | "blend";
+type WarmupCompletionStatus = "completed" | "skipped" | "stopped" | "restarted";
+
+interface ActiveWarmupSession {
+  id: string;
+  created: Promise<boolean>;
+  playedMilliseconds: number;
+  playingSince: number | null;
+  versionsUsed: Set<WarmupAudioVersion>;
+}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "--:--";
@@ -149,7 +158,8 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
   const playingVersionRef = useRef<WarmupAudioVersion | null>(null);
   const isAudioPlayingRef = useRef(false);
   const playbackPositionRef = useRef(0);
-  const activeSessionRef = useRef<{ id: string; startedAt: number } | null>(null);
+  const activeSessionRef = useRef<ActiveWarmupSession | null>(null);
+  const routineIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,22 +192,62 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
   const currentExercise = exercises.find((exercise) => exercise.id === currentId) ?? null;
   const currentSetIndex = currentExercise ? enabledExercises.findIndex((exercise) => exercise.id === currentExercise.id) : -1;
 
-  const finishSession = useCallback(() => {
+  const markPlaybackStarted = useCallback((version: WarmupAudioVersion) => {
     const active = activeSessionRef.current;
     if (!active) return;
+    active.versionsUsed.add(version);
+    if (active.playingSince === null) active.playingSince = performance.now();
+  }, []);
+
+  const markPlaybackPaused = useCallback(() => {
+    const active = activeSessionRef.current;
+    if (!active || active.playingSince === null) return;
+    active.playedMilliseconds += Math.max(0, performance.now() - active.playingSince);
+    active.playingSince = null;
+  }, []);
+
+  const finishSession = useCallback((
+    completionStatus: WarmupCompletionStatus,
+    routineCompleted = false,
+  ) => {
+    const active = activeSessionRef.current;
+    if (!active) return;
+    if (active.playingSince !== null) {
+      active.playedMilliseconds += Math.max(0, performance.now() - active.playingSince);
+      active.playingSince = null;
+    }
     activeSessionRef.current = null;
+    isAudioPlayingRef.current = false;
     const completedAt = new Date();
-    void fetch(`/api/exercise-practice-sessions/${active.id}`, withUserIdHeader({
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ completedAt: completedAt.toISOString(), durationSeconds: Math.max(0, (Date.now() - active.startedAt) / 1000) }),
-    }, userId)).catch(() => undefined);
+    const audioVersion = active.versionsUsed.size > 1
+      ? "mixed"
+      : active.versionsUsed.values().next().value ?? audioVersionRef.current;
+    void active.created.then((created) => {
+      if (!created) return;
+      return fetch(`/api/exercise-practice-sessions/${active.id}`, withUserIdHeader({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          completedAt: completedAt.toISOString(),
+          durationSeconds: Math.max(0, active.playedMilliseconds / 1000),
+          audioVersion,
+          completionStatus,
+          routineCompleted,
+        }),
+        keepalive: true,
+      }, userId));
+    }).catch(() => undefined);
   }, [userId]);
 
-  useEffect(() => () => finishSession(), [finishSession]);
+  useEffect(() => () => finishSession("stopped"), [finishSession]);
 
-  const play = useCallback((exercise: VocalExercise, routine: boolean) => {
-    finishSession();
+  const play = useCallback((exercise: VocalExercise, routine: boolean, startNewRoutine = false) => {
+    finishSession("restarted");
+    if (!routine) {
+      routineIdRef.current = null;
+    } else if (startNewRoutine || !routineIdRef.current) {
+      routineIdRef.current = createPracticeSessionId();
+    }
     setPlaybackError(null);
     setIsRoutine(routine);
     setCurrentId(exercise.id);
@@ -205,12 +255,26 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
     setPlayRequestId((previous) => previous + 1);
     const sessionId = createPracticeSessionId();
     const startedAt = new Date();
-    activeSessionRef.current = { id: sessionId, startedAt: startedAt.getTime() };
-    void fetch("/api/exercise-practice-sessions", withUserIdHeader({
+    const startingVersion = audioVersionRef.current;
+    const created = fetch("/api/exercise-practice-sessions", withUserIdHeader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: sessionId, exerciseId: exercise.id, startedAt: startedAt.toISOString(), tempoPercent: 100, repetitionCount: 1 }),
-    }, userId)).catch(() => undefined);
+      body: JSON.stringify({
+        id: sessionId,
+        exerciseId: exercise.id,
+        startedAt: startedAt.toISOString(),
+        audioVersion: startingVersion,
+        practiceMode: routine ? "set" : "single",
+        routineId: routine ? routineIdRef.current : null,
+      }),
+    }, userId)).then((response) => response.ok).catch(() => false);
+    activeSessionRef.current = {
+      id: sessionId,
+      created,
+      playedMilliseconds: 0,
+      playingSince: null,
+      versionsUsed: new Set([startingVersion]),
+    };
   }, [finishSession, userId]);
 
   useEffect(() => {
@@ -289,15 +353,20 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
   };
 
   const handleEnded = () => {
-    finishSession();
     if (!isRoutine || !currentExercise) {
+      finishSession("completed");
       setCurrentId(null);
       return;
     }
     const currentIndex = enabledExercises.findIndex((exercise) => exercise.id === currentExercise.id);
     const next = enabledExercises[currentIndex + 1];
-    if (next) play(next, true);
+    if (next) {
+      finishSession("completed");
+      play(next, true);
+    }
     else {
+      finishSession("completed", true);
+      routineIdRef.current = null;
       setCurrentId(null);
       setIsRoutine(false);
     }
@@ -306,7 +375,10 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
   const skipExercise = (direction: -1 | 1) => {
     if (currentSetIndex < 0) return;
     const target = enabledExercises[currentSetIndex + direction];
-    if (target) play(target, isRoutine);
+    if (target) {
+      finishSession("skipped");
+      play(target, isRoutine);
+    }
   };
 
   const persistSelection = (next: Set<string>) => {
@@ -334,7 +406,7 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
         <h1 className="mt-2 text-3xl font-bold">Warmups</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-indigo-100">Choose the exercises you want, then play the set straight through and sing along. Your choices are saved on this device.</p>
         <div className="mt-5 flex flex-wrap gap-2">
-          <button type="button" onClick={() => enabledExercises[0] && play(enabledExercises[0], true)} disabled={enabledExercises.length === 0} className="rounded-lg bg-white px-5 py-2.5 font-bold text-indigo-900 shadow-sm hover:bg-indigo-50 disabled:cursor-not-allowed disabled:bg-indigo-300">
+          <button type="button" onClick={() => enabledExercises[0] && play(enabledExercises[0], true, true)} disabled={enabledExercises.length === 0} className="rounded-lg bg-white px-5 py-2.5 font-bold text-indigo-900 shadow-sm hover:bg-indigo-50 disabled:cursor-not-allowed disabled:bg-indigo-300">
             Play set ({enabledExercises.length})
           </button>
           <button type="button" onClick={() => persistSelection(new Set(exercises.map((exercise) => exercise.id)))} className="rounded-lg border border-indigo-300 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Select all</button>
@@ -374,8 +446,8 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
           controls
           preload="metadata"
           className={audioVersion === "part" ? "w-full" : "hidden"}
-          onPlay={() => { playingVersionRef.current = "part"; isAudioPlayingRef.current = true; }}
-          onPause={() => { if (playingVersionRef.current === "part") isAudioPlayingRef.current = false; }}
+          onPlay={() => { playingVersionRef.current = "part"; isAudioPlayingRef.current = true; markPlaybackStarted("part"); }}
+          onPause={() => { if (playingVersionRef.current === "part") { isAudioPlayingRef.current = false; markPlaybackPaused(); } }}
           onTimeUpdate={(event) => { if (playingVersionRef.current === "part") playbackPositionRef.current = event.currentTarget.currentTime; }}
           onEnded={handleEnded}
           onLoadedMetadata={(event) => {
@@ -393,8 +465,8 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
           controls
           preload="metadata"
           className={audioVersion === "blend" ? "w-full" : "hidden"}
-          onPlay={() => { playingVersionRef.current = "blend"; isAudioPlayingRef.current = true; }}
-          onPause={() => { if (playingVersionRef.current === "blend") isAudioPlayingRef.current = false; }}
+          onPlay={() => { playingVersionRef.current = "blend"; isAudioPlayingRef.current = true; markPlaybackStarted("blend"); }}
+          onPause={() => { if (playingVersionRef.current === "blend") { isAudioPlayingRef.current = false; markPlaybackPaused(); } }}
           onTimeUpdate={(event) => { if (playingVersionRef.current === "blend") playbackPositionRef.current = event.currentTarget.currentTime; }}
           onEnded={handleEnded}
           onLoadedMetadata={(event) => {

@@ -91,6 +91,69 @@ describe("practice stats helpers", () => {
     expect(filterPracticeSessionsByRange(sessions, 90, now)).toHaveLength(2);
     expect(filterPracticeSessionsByRange(sessions, "all", now)).toHaveLength(2);
   });
+
+  it("summarizes recorded warmup playback by completion, mode, set, and exercise", async () => {
+    const { buildWarmupPracticeSummary } = await getQueries();
+    const base = {
+      userId: "user-1",
+      completedAt: "2026-07-25T12:01:00.000Z",
+      tempoPercent: 100,
+      repetitionCount: 1,
+      practiceMode: "set" as const,
+    };
+    const summary = buildWarmupPracticeSummary([
+      {
+        ...base,
+        id: "session-1",
+        exerciseId: "warmup-1",
+        exerciseTitle: "1 - Legato",
+        startedAt: "2026-07-25T12:00:00.000Z",
+        durationSeconds: 58,
+        audioVersion: "blend",
+        routineId: "set-1",
+        completionStatus: "completed",
+        routineCompleted: false,
+      },
+      {
+        ...base,
+        id: "session-2",
+        exerciseId: "warmup-2",
+        exerciseTitle: "2 - Line",
+        startedAt: "2026-07-25T12:01:00.000Z",
+        durationSeconds: 24,
+        audioVersion: "mixed",
+        routineId: "set-1",
+        completionStatus: "skipped",
+        routineCompleted: true,
+      },
+      {
+        ...base,
+        id: "zero-second-start",
+        exerciseId: "warmup-3",
+        exerciseTitle: "3 - Range",
+        startedAt: "2026-07-25T12:02:00.000Z",
+        durationSeconds: 0,
+        audioVersion: "part",
+        routineId: null,
+        completionStatus: "stopped",
+        routineCompleted: false,
+      },
+    ], [
+      { id: "warmup-2", title: "2 - Line" },
+      { id: "warmup-1", title: "1 - Legato" },
+      { id: "warmup-3", title: "3 - Range" },
+    ]);
+
+    expect(summary.practicedSessions).toHaveLength(2);
+    expect(summary.uniqueExercisesPracticed).toBe(2);
+    expect(summary.completedSessions).toBe(1);
+    expect(summary.partialSessions).toBe(1);
+    expect(summary.completedSets).toBe(1);
+    expect(summary.versions.blend).toEqual({ sessionCount: 1, seconds: 58 });
+    expect(summary.versions.mixed).toEqual({ sessionCount: 1, seconds: 24 });
+    expect(summary.exerciseBreakdown.map((exercise) => exercise.exerciseId)).toEqual(["warmup-1", "warmup-2", "warmup-3"]);
+    expect(summary.exerciseBreakdown[2]).toEqual(expect.objectContaining({ sessionCount: 0, totalSeconds: 0 }));
+  });
 });
 
 // Lazily import queries AFTER mock is set up

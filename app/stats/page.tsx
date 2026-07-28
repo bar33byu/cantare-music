@@ -8,7 +8,11 @@ function formatWholeNumber(value: number): string {
 }
 
 function formatDuration(seconds: number): string {
-  const totalMinutes = Math.round(Math.max(0, seconds) / 60);
+  const totalSeconds = Math.round(Math.max(0, seconds));
+  if (totalSeconds > 0 && totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const totalMinutes = Math.round(totalSeconds / 60);
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes - days * 60 * 24) / 60);
   const minutes = totalMinutes % 60;
@@ -19,6 +23,19 @@ function formatDuration(seconds: number): string {
     return `${hours}h ${minutes}m`;
   }
   return `${minutes}m`;
+}
+
+function formatWarmupMode(audioVersion: string, practiceMode: string): string {
+  const version = audioVersion === "part" ? "Part" : audioVersion === "blend" ? "Blend" : audioVersion === "mixed" ? "Mixed" : "Earlier data";
+  return practiceMode === "set" ? `${version} · Set` : version;
+}
+
+function formatWarmupResult(status: string): string {
+  if (status === "completed") return "Completed";
+  if (status === "skipped") return "Skipped";
+  if (status === "stopped") return "Stopped";
+  if (status === "restarted") return "Restarted";
+  return "Earlier data";
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -133,8 +150,8 @@ export default async function StatsPage({
         <section className="mt-6 grid gap-3 lg:grid-cols-4">
           <Metric label={`Song practice time · ${rangeLabel}`} value={formatDuration(stats.songPractice.totalSeconds)} accent="text-sky-700" />
           <Metric label={`Song practice days · ${rangeLabel}`} value={formatWholeNumber(stats.songPractice.practicedDays)} />
-          <Metric label={`Exercise practice time · ${rangeLabel}`} value={formatDuration(stats.exercises.totalSeconds)} accent="text-indigo-700" />
-          <Metric label={`Exercise practice days · ${rangeLabel}`} value={formatWholeNumber(stats.exercises.practicedDays)} />
+          <Metric label={`Warmup singing time · ${rangeLabel}`} value={formatDuration(stats.exercises.totalSeconds)} accent="text-indigo-700" />
+          <Metric label={`Warmup practice days · ${rangeLabel}`} value={formatWholeNumber(stats.exercises.practicedDays)} />
         </section>
 
         <section className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
@@ -158,11 +175,27 @@ export default async function StatsPage({
           </div>
 
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-950">Exercise Rhythm · {rangeLabel}</h2>
-            <dl className="mt-4 grid gap-3 text-sm">
+            <h2 className="text-lg font-bold text-slate-950">Warmup Progress · {rangeLabel}</h2>
+            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
               <div className="flex items-center justify-between gap-3">
-                <dt className="font-semibold text-slate-500">Exercise sessions logged</dt>
+                <dt className="font-semibold text-slate-500">Warmups practiced</dt>
+                <dd className="font-bold tabular-nums text-slate-950">{stats.exercises.uniqueExercisesPracticed} / {stats.exercises.availableExercises}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="font-semibold text-slate-500">Tracked plays</dt>
                 <dd className="font-bold tabular-nums text-slate-950">{stats.exercises.totalSessions}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="font-semibold text-slate-500">Completed plays</dt>
+                <dd className="font-bold tabular-nums text-emerald-700">{stats.exercises.completedSessions}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="font-semibold text-slate-500">Completed sets</dt>
+                <dd className="font-bold tabular-nums text-indigo-700">{stats.exercises.completedSets}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="font-semibold text-slate-500">Partial plays</dt>
+                <dd className="font-bold tabular-nums text-slate-950">{stats.exercises.partialSessions}</dd>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <dt className="font-semibold text-slate-500">Average per practiced day</dt>
@@ -171,6 +204,18 @@ export default async function StatsPage({
               <div className="flex items-center justify-between gap-3">
                 <dt className="font-semibold text-slate-500">Best weekday</dt>
                 <dd className="font-bold tabular-nums text-slate-950">{topWeekday?.seconds ? `${topWeekday.label} (${formatDuration(topWeekday.seconds)})` : "Not enough data"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="font-semibold text-slate-500">Part time</dt>
+                <dd className="font-bold tabular-nums text-slate-950">{formatDuration(stats.exercises.versions.part.seconds)}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="font-semibold text-slate-500">Blend time</dt>
+                <dd className="font-bold tabular-nums text-slate-950">{formatDuration(stats.exercises.versions.blend.seconds)}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="font-semibold text-slate-500">Mixed Part / Blend time</dt>
+                <dd className="font-bold tabular-nums text-slate-950">{formatDuration(stats.exercises.versions.mixed.seconds)}</dd>
               </div>
             </dl>
           </div>
@@ -227,13 +272,13 @@ export default async function StatsPage({
             buckets={range === 30 ? stats.songPractice.daily : range === 90 ? stats.songPractice.weekly : stats.songPractice.monthly}
           />
           <BucketChart
-            title={`Exercise Activity by ${range === 30 ? "Day" : range === 90 ? "Week" : "Month"}`}
+            title={`Warmup Activity by ${range === 30 ? "Day" : range === 90 ? "Week" : "Month"}`}
             buckets={range === 30 ? stats.exercises.daily : range === 90 ? stats.exercises.weekly : stats.exercises.monthly}
           />
         </section>
 
         <section className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          <BucketChart title={`Exercise Practice by Weekday · ${rangeLabel}`} buckets={stats.exercises.weekday} />
+          <BucketChart title={`Warmup Practice by Weekday · ${rangeLabel}`} buckets={stats.exercises.weekday} />
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-lg font-bold text-slate-950">Song Sessions · {rangeLabel}</h2>
             <div className="mt-4 overflow-x-auto">
@@ -333,28 +378,59 @@ export default async function StatsPage({
         </section>
 
         <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-bold text-slate-950">Exercise Sessions · {rangeLabel}</h2>
+          <h2 className="text-lg font-bold text-slate-950">Warmup Coverage · {rangeLabel}</h2>
+          <p className="mt-1 text-sm text-slate-600">Playback time counts only while audio is actually playing. Pauses are excluded.</p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[40rem] text-left text-sm">
+              <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
+                <tr>
+                  <th className="border-b border-slate-200 py-2 pr-3">Warmup</th>
+                  <th className="border-b border-slate-200 py-2 pr-3 text-right">Plays</th>
+                  <th className="border-b border-slate-200 py-2 pr-3 text-right">Completed</th>
+                  <th className="border-b border-slate-200 py-2 pr-3 text-right">Singing time</th>
+                  <th className="border-b border-slate-200 py-2 text-right">Last practiced</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.exercises.exerciseBreakdown.map((exercise) => (
+                  <tr key={exercise.exerciseId}>
+                    <td className="border-b border-slate-100 py-2 pr-3 font-medium text-slate-900">{exercise.exerciseTitle}</td>
+                    <td className="border-b border-slate-100 py-2 pr-3 text-right font-semibold tabular-nums">{exercise.sessionCount}</td>
+                    <td className="border-b border-slate-100 py-2 pr-3 text-right font-semibold tabular-nums text-emerald-700">{exercise.completedCount}</td>
+                    <td className="border-b border-slate-100 py-2 pr-3 text-right font-semibold tabular-nums">{formatDuration(exercise.totalSeconds)}</td>
+                    <td className="border-b border-slate-100 py-2 text-right text-slate-600">{formatDate(exercise.lastPracticedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h2 className="text-lg font-bold text-slate-950">Recent Warmup Plays · {rangeLabel}</h2>
             <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[32rem] text-left text-sm">
+              <table className="w-full min-w-[42rem] text-left text-sm">
                 <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
                   <tr>
-                    <th className="border-b border-slate-200 py-2 pr-3">Exercise</th>
+                    <th className="border-b border-slate-200 py-2 pr-3">Warmup</th>
                     <th className="border-b border-slate-200 py-2 pr-3">Date</th>
                     <th className="border-b border-slate-200 py-2 pr-3 text-right">Time</th>
-                    <th className="border-b border-slate-200 py-2 text-right">Tempo</th>
+                    <th className="border-b border-slate-200 py-2 pr-3 text-right">Mode</th>
+                    <th className="border-b border-slate-200 py-2 text-right">Result</th>
                   </tr>
                 </thead>
                 <tbody>
                   {stats.exercises.recentSessions.length > 0 ? stats.exercises.recentSessions.map((session) => (
                     <tr key={session.id}>
-                      <td className="border-b border-slate-100 py-2 pr-3 font-medium text-slate-900">{session.exerciseTitle ?? "Exercise"}</td>
+                      <td className="border-b border-slate-100 py-2 pr-3 font-medium text-slate-900">{session.exerciseTitle ?? "Warmup"}</td>
                       <td className="border-b border-slate-100 py-2 pr-3 text-slate-600">{formatDate(session.startedAt)}</td>
                       <td className="border-b border-slate-100 py-2 pr-3 text-right font-semibold tabular-nums">{formatDuration(session.durationSeconds)}</td>
-                      <td className="border-b border-slate-100 py-2 text-right tabular-nums text-slate-600">{session.tempoPercent}%</td>
+                      <td className="border-b border-slate-100 py-2 pr-3 text-right text-slate-600">{formatWarmupMode(session.audioVersion, session.practiceMode)}</td>
+                      <td className="border-b border-slate-100 py-2 text-right text-slate-600">{formatWarmupResult(session.completionStatus)}</td>
                     </tr>
                   )) : (
                     <tr>
-                      <td className="py-5 text-slate-600" colSpan={4}>Exercise playback time will appear here after you practice.</td>
+                      <td className="py-5 text-slate-600" colSpan={5}>Warmup playback time will appear here after you practice.</td>
                     </tr>
                   )}
                 </tbody>

@@ -464,6 +464,11 @@ export const vocalExercisePracticeSessions = pgTable(
     durationSeconds: integer("duration_seconds").notNull().default(0),
     tempoPercent: integer("tempo_percent").notNull().default(100),
     repetitionCount: integer("repetition_count").notNull().default(0),
+    audioVersion: text("audio_version").notNull().default("unknown"),
+    practiceMode: text("practice_mode").notNull().default("unknown"),
+    routineId: text("routine_id"),
+    completionStatus: text("completion_status").notNull().default("legacy"),
+    routineCompleted: boolean("routine_completed").notNull().default(false),
   },
   (table) => ({
     userStartedAtIdx: index("idx_vocal_exercise_practice_user_started_at").on(table.userId, table.startedAt),
