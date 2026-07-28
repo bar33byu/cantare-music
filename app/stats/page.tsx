@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { getPracticeStatsSummary, type StatsBucket } from "../../db/queries";
+import { getPracticeStatsSummary, type PracticeStatsRange, type StatsBucket } from "../../db/queries";
 import { resolveEffectiveRequestUserId } from "../api/_user";
 
 function formatWholeNumber(value: number): string {
@@ -75,10 +75,23 @@ function BucketChart({ title, buckets }: { title: string; buckets: StatsBucket[]
   );
 }
 
-export default async function StatsPage() {
+const RANGE_OPTIONS: Array<{ value: PracticeStatsRange; label: string }> = [
+  { value: 30, label: "30 days" },
+  { value: 90, label: "90 days" },
+  { value: "all", label: "All time" },
+];
+
+export default async function StatsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string | string[] }>;
+}) {
+  const requestedRange = (await searchParams).range;
+  const range: PracticeStatsRange = requestedRange === "90" ? 90 : requestedRange === "all" ? "all" : 30;
+  const rangeLabel = RANGE_OPTIONS.find((option) => option.value === range)?.label ?? "30 days";
   const requestHeaders = await headers();
   const userId = await resolveEffectiveRequestUserId(new Request("http://cantare.local/stats", { headers: requestHeaders }));
-  const stats = await getPracticeStatsSummary(userId);
+  const stats = await getPracticeStatsSummary(userId, new Date(), range);
   const topWeekday = [...stats.exercises.weekday].sort((a, b) => b.seconds - a.seconds || b.sessionCount - a.sessionCount)[0];
 
   return (
@@ -94,18 +107,34 @@ export default async function StatsPage() {
           </Link>
         </div>
 
+        <nav aria-label="Dashboard time frame" className="mb-6 flex w-fit gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+          {RANGE_OPTIONS.map((option) => {
+            const isSelected = option.value === range;
+            return (
+              <Link
+                key={option.value}
+                href={`/stats?range=${option.value}`}
+                aria-current={isSelected ? "page" : undefined}
+                className={`rounded-md px-4 py-2 text-sm font-semibold transition-colors ${isSelected ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"}`}
+              >
+                {option.label}
+              </Link>
+            );
+          })}
+        </nav>
+
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Metric label="Songs stored" value={formatWholeNumber(stats.songs.total)} />
           <Metric label="Mastered 80%+" value={formatWholeNumber(stats.songs.masteredAbove80)} accent="text-emerald-700" />
-          <Metric label="Practiced in 30 days" value={formatWholeNumber(stats.songs.practicedRecently)} accent="text-indigo-700" />
+          <Metric label={`Songs practiced · ${rangeLabel}`} value={formatWholeNumber(stats.songs.practicedInRange)} accent="text-indigo-700" />
           <Metric label="Untouched 6+ months" value={formatWholeNumber(stats.songs.untouchedOverSixMonths)} accent="text-rose-700" href="#untouched-songs" />
         </section>
 
         <section className="mt-6 grid gap-3 lg:grid-cols-4">
-          <Metric label="Song practice time" value={formatDuration(stats.songPractice.totalSeconds)} accent="text-sky-700" />
-          <Metric label="Song practice days" value={formatWholeNumber(stats.songPractice.practicedDays)} />
-          <Metric label="Exercise practice time" value={formatDuration(stats.exercises.totalSeconds)} accent="text-indigo-700" />
-          <Metric label="Exercise practice days" value={formatWholeNumber(stats.exercises.practicedDays)} />
+          <Metric label={`Song practice time · ${rangeLabel}`} value={formatDuration(stats.songPractice.totalSeconds)} accent="text-sky-700" />
+          <Metric label={`Song practice days · ${rangeLabel}`} value={formatWholeNumber(stats.songPractice.practicedDays)} />
+          <Metric label={`Exercise practice time · ${rangeLabel}`} value={formatDuration(stats.exercises.totalSeconds)} accent="text-indigo-700" />
+          <Metric label={`Exercise practice days · ${rangeLabel}`} value={formatWholeNumber(stats.exercises.practicedDays)} />
         </section>
 
         <section className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
@@ -113,17 +142,12 @@ export default async function StatsPage() {
             <h2 className="text-lg font-bold text-slate-950">Song Pulse</h2>
             <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
               <div>
-                <dt className="font-semibold text-slate-500">Average mastery</dt>
+                <dt className="font-semibold text-slate-500">Average mastery of started songs</dt>
                 <dd className="mt-1 text-2xl font-bold tabular-nums text-slate-950">{stats.songs.averageMasteryPercent}%</dd>
               </div>
               <div>
                 <dt className="font-semibold text-slate-500">Never practiced</dt>
                 <dd className="mt-1 text-2xl font-bold tabular-nums text-slate-950">{stats.songs.neverPracticed}</dd>
-              </div>
-              <div>
-                <dt className="font-semibold text-slate-500">Strongest song</dt>
-                <dd className="mt-1 font-bold text-slate-950">{stats.songs.strongestSong?.title ?? "No songs yet"}</dd>
-                <dd className="text-slate-600">{stats.songs.strongestSong ? `${stats.songs.strongestSong.masteryPercent}% mastered` : ""}</dd>
               </div>
               <div>
                 <dt className="font-semibold text-slate-500">Stalest song</dt>
@@ -134,7 +158,7 @@ export default async function StatsPage() {
           </div>
 
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-950">Exercise Rhythm</h2>
+            <h2 className="text-lg font-bold text-slate-950">Exercise Rhythm · {rangeLabel}</h2>
             <dl className="mt-4 grid gap-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <dt className="font-semibold text-slate-500">Exercise sessions logged</dt>
@@ -154,7 +178,7 @@ export default async function StatsPage() {
 
         <section className="mt-6 grid gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-950">Song Practice Time</h2>
+            <h2 className="text-lg font-bold text-slate-950">Song Practice Time · {rangeLabel}</h2>
             <dl className="mt-4 grid gap-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <dt className="font-semibold text-slate-500">Sessions logged</dt>
@@ -197,17 +221,21 @@ export default async function StatsPage() {
           </div>
         </section>
 
-        <section className="mt-6 grid gap-4 xl:grid-cols-3">
-          <BucketChart title="Daily Song Time" buckets={stats.songPractice.daily} />
-          <BucketChart title="Daily Exercise Time" buckets={stats.exercises.daily} />
-          <BucketChart title="Weekly Exercise Time" buckets={stats.exercises.weekly} />
-          <BucketChart title="Monthly Exercise Time" buckets={stats.exercises.monthly} />
+        <section className="mt-6 grid gap-4 xl:grid-cols-2">
+          <BucketChart
+            title={`Song Activity by ${range === 30 ? "Day" : range === 90 ? "Week" : "Month"}`}
+            buckets={range === 30 ? stats.songPractice.daily : range === 90 ? stats.songPractice.weekly : stats.songPractice.monthly}
+          />
+          <BucketChart
+            title={`Exercise Activity by ${range === 30 ? "Day" : range === 90 ? "Week" : "Month"}`}
+            buckets={range === 30 ? stats.exercises.daily : range === 90 ? stats.exercises.weekly : stats.exercises.monthly}
+          />
         </section>
 
         <section className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          <BucketChart title="Practice by Weekday" buckets={stats.exercises.weekday} />
+          <BucketChart title={`Exercise Practice by Weekday · ${rangeLabel}`} buckets={stats.exercises.weekday} />
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-950">Recent Song Sessions</h2>
+            <h2 className="text-lg font-bold text-slate-950">Song Sessions · {rangeLabel}</h2>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[32rem] text-left text-sm">
                 <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
@@ -305,7 +333,7 @@ export default async function StatsPage() {
         </section>
 
         <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-bold text-slate-950">Recent Exercise Sessions</h2>
+          <h2 className="text-lg font-bold text-slate-950">Exercise Sessions · {rangeLabel}</h2>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[32rem] text-left text-sm">
                 <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">

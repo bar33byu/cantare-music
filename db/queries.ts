@@ -250,6 +250,11 @@ export interface PersistedVocalExercise {
   difficulty?: string;
   pattern?: string;
   coachingNotes?: string[];
+  audioKey?: string;
+  audioUrl?: string;
+  alternateAudioKey?: string;
+  alternateAudioUrl?: string;
+  lyricHint?: string;
   collectionSlug?: string;
   collectionTitle?: string;
   routinePosition?: number;
@@ -313,12 +318,11 @@ export interface PracticeStatsSummary {
   songs: {
     total: number;
     masteredAbove80: number;
-    practicedRecently: number;
+    practicedInRange: number;
     untouchedOverSixMonths: number;
     neverPracticed: number;
     averageMasteryPercent: number;
     untouchedSongs: Array<{ id: string; title: string; artist?: string | null; lastPracticedAt: string | null; masteryPercent: number }>;
-    strongestSong?: { id: string; title: string; masteryPercent: number };
     stalestSong?: { id: string; title: string; lastPracticedAt: string | null; masteryPercent: number };
   };
   songPractice: {
@@ -357,6 +361,8 @@ export interface PracticeStatsSummary {
     mostPerformedSongs: Array<{ id: string; title: string; performanceCount: number; performanceDates: string[] }>;
   };
 }
+
+export type PracticeStatsRange = 30 | 90 | "all";
 
 export interface PersistedDraftRecording {
   id: string;
@@ -5497,6 +5503,11 @@ function mapVocalExercise(
     difficulty: row.difficulty ?? undefined,
     pattern: row.pattern ?? undefined,
     coachingNotes: row.coachingNotes,
+    audioKey: row.audioKey ?? undefined,
+    audioUrl: row.audioKey ? getPublicUrl(row.audioKey) : undefined,
+    alternateAudioKey: row.alternateAudioKey ?? undefined,
+    alternateAudioUrl: row.alternateAudioKey ? getPublicUrl(row.alternateAudioKey) : undefined,
+    lyricHint: row.lyricHint,
     collectionSlug: collection?.slug ?? undefined,
     collectionTitle: collection?.title ?? undefined,
     routinePosition: collection?.position ?? undefined,
@@ -5523,6 +5534,9 @@ function vocalExerciseValues(exercise: PersistedVocalExercise) {
     difficulty: exercise.difficulty ?? null,
     pattern: exercise.pattern ?? null,
     coachingNotes: exercise.coachingNotes ?? [],
+    audioKey: exercise.audioKey ?? null,
+    alternateAudioKey: exercise.alternateAudioKey ?? null,
+    lyricHint: exercise.lyricHint ?? "",
     sourceMidiFile: exercise.sourceMidiFile,
     exerciseStartBeatMilli: Math.round(exercise.exerciseStartBeat * 1000),
     tempoBpmMilli: Math.round(exercise.tempoBpm * 1000),
@@ -5824,10 +5838,89 @@ function recentMonthLabels(months: number, now: Date): string[] {
   });
 }
 
-function buildPracticeTimeSummary<T extends { startedAt: string; durationSeconds: number }>(sessions: T[], now: Date) {
-  const daily = emptyBuckets(recentDayLabels(14, now));
-  const weekly = emptyBuckets(recentWeekLabels(8, now));
-  const monthly = emptyBuckets(recentMonthLabels(6, now));
+function allTimeMonthLabels<T extends { startedAt: string }>(sessions: T[], now: Date): string[] {
+  const validDates = sessions
+    .map((session) => new Date(session.startedAt))
+    .filter((date) => !Number.isNaN(date.getTime()) && date <= now)
+    .sort((a, b) => a.getTime() - b.getTime());
+  if (validDates.length === 0) {
+    return recentMonthLabels(6, now);
+  }
+  const first = validDates[0];
+  const monthCount = (
+    (now.getUTCFullYear() - first.getUTCFullYear()) * 12
+    + now.getUTCMonth() - first.getUTCMonth()
+    + 1
+  );
+  return recentMonthLabels(Math.max(1, monthCount), now);
+}
+
+export function filterPracticeSessionsByRange<T extends { startedAt: string }>(
+  sessions: T[],
+  range: PracticeStatsRange,
+  now: Date,
+): T[] {
+  if (range === "all") {
+    return sessions;
+  }
+  const cutoff = new Date(now);
+  cutoff.setUTCDate(cutoff.getUTCDate() - range);
+  return sessions.filter((session) => {
+    const startedAt = new Date(session.startedAt);
+    return !Number.isNaN(startedAt.getTime()) && startedAt >= cutoff && startedAt <= now;
+  });
+}
+
+export function averageNonZeroMastery(values: number[]): number {
+  const practicedValues = values.filter((value) => value > 0);
+  return practicedValues.length > 0
+    ? Math.round(practicedValues.reduce((sum, value) => sum + value, 0) / practicedValues.length)
+    : 0;
+}
+
+export function groupSongPracticeSessions(
+  sessions: PersistedSongPracticeSession[],
+  maxGapMs = 15 * 60 * 1000,
+): PersistedSongPracticeSession[] {
+  const sorted = [...sessions].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+  const grouped: PersistedSongPracticeSession[] = [];
+
+  for (const session of sorted) {
+    const previous = grouped[grouped.length - 1];
+    const startedAtMs = Date.parse(session.startedAt);
+    const previousEndMs = previous
+      ? Date.parse(previous.completedAt ?? previous.startedAt)
+      : Number.NaN;
+    const shouldMerge = Boolean(
+      previous
+      && previous.songId === session.songId
+      && Number.isFinite(startedAtMs)
+      && Number.isFinite(previousEndMs)
+      && startedAtMs <= previousEndMs + maxGapMs
+    );
+
+    if (!shouldMerge || !previous) {
+      grouped.push({ ...session });
+      continue;
+    }
+
+    previous.durationSeconds += Math.max(0, session.durationSeconds);
+    previous.completedAt = session.completedAt ?? session.startedAt;
+    previous.segmentId = previous.segmentId === session.segmentId ? previous.segmentId : null;
+    previous.source = previous.source === session.source ? previous.source : "song";
+  }
+
+  return grouped.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+}
+
+function buildPracticeTimeSummary<T extends { startedAt: string; durationSeconds: number }>(
+  sessions: T[],
+  now: Date,
+  range: PracticeStatsRange,
+) {
+  const daily = emptyBuckets(recentDayLabels(range === 30 ? 30 : 14, now));
+  const weekly = emptyBuckets(recentWeekLabels(range === 90 ? 14 : 8, now));
+  const monthly = emptyBuckets(range === "all" ? allTimeMonthLabels(sessions, now) : recentMonthLabels(6, now));
   const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const weekdays = emptyBuckets(weekdayLabels);
   const practicedDayKeys = new Set<string>();
@@ -5868,12 +5961,13 @@ function buildPracticeTimeSummary<T extends { startedAt: string; durationSeconds
   };
 }
 
-export async function getPracticeStatsSummary(userId: string = DEFAULT_QUERY_USER_ID, now: Date = new Date()): Promise<PracticeStatsSummary> {
+export async function getPracticeStatsSummary(
+  userId: string = DEFAULT_QUERY_USER_ID,
+  now: Date = new Date(),
+  range: PracticeStatsRange = 30,
+): Promise<PracticeStatsSummary> {
   const sixMonthsAgo = new Date(now);
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-  const thirtyDaysAgo = new Date(now);
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
   const allSongs = await getAllSongs(userId);
   const songIds = allSongs.map((song) => song.id);
   const [ratingFallbackBySongId, knowledgeBySongId] = await Promise.all([
@@ -5892,7 +5986,12 @@ export async function getPracticeStatsSummary(userId: string = DEFAULT_QUERY_USE
     };
   });
   const masteredAbove80 = songStats.filter((song) => song.masteryPercent >= 80).length;
-  const practicedRecently = songStats.filter((song) => song.lastPracticedAt && song.lastPracticedAt >= thirtyDaysAgo).length;
+  const rangeCutoff = range === "all" ? null : new Date(now.getTime() - range * 24 * 60 * 60 * 1000);
+  const practicedInRange = songStats.filter((song) => (
+    song.lastPracticedAt
+    && song.lastPracticedAt <= now
+    && (!rangeCutoff || song.lastPracticedAt >= rangeCutoff)
+  )).length;
   const neverPracticed = songStats.filter((song) => !song.lastPracticedAt).length;
   const untouchedSongStats = songStats
     .filter((song) => !song.lastPracticedAt || song.lastPracticedAt < sixMonthsAgo)
@@ -5902,10 +6001,7 @@ export async function getPracticeStatsSummary(userId: string = DEFAULT_QUERY_USE
       return aTime - bTime || a.title.localeCompare(b.title);
     });
   const untouchedOverSixMonths = untouchedSongStats.length;
-  const averageMasteryPercent = songStats.length > 0
-    ? Math.round(songStats.reduce((sum, song) => sum + song.masteryPercent, 0) / songStats.length)
-    : 0;
-  const strongestSong = [...songStats].sort((a, b) => b.masteryPercent - a.masteryPercent || a.title.localeCompare(b.title))[0];
+  const averageMasteryPercent = averageNonZeroMastery(songStats.map((song) => song.masteryPercent));
   const stalestSong = [...songStats]
     .sort((a, b) => {
       const aTime = a.lastPracticedAt?.getTime() ?? 0;
@@ -5949,8 +6045,11 @@ export async function getPracticeStatsSummary(userId: string = DEFAULT_QUERY_USE
     }
   }
 
-  const songPracticeSummary = buildPracticeTimeSummary(songSessions, now);
-  const exercisePracticeSummary = buildPracticeTimeSummary(exerciseSessions, now);
+  const groupedSongSessions = groupSongPracticeSessions(songSessions);
+  const rangedSongSessions = filterPracticeSessionsByRange(groupedSongSessions, range, now);
+  const rangedExerciseSessions = filterPracticeSessionsByRange(exerciseSessions, range, now);
+  const songPracticeSummary = buildPracticeTimeSummary(rangedSongSessions, now, range);
+  const exercisePracticeSummary = buildPracticeTimeSummary(rangedExerciseSessions, now, range);
 
   const playlistRows = await db()
     .select({
@@ -6011,7 +6110,7 @@ export async function getPracticeStatsSummary(userId: string = DEFAULT_QUERY_USE
     songs: {
       total: songStats.length,
       masteredAbove80,
-      practicedRecently,
+      practicedInRange,
       untouchedOverSixMonths,
       neverPracticed,
       averageMasteryPercent,
@@ -6022,11 +6121,6 @@ export async function getPracticeStatsSummary(userId: string = DEFAULT_QUERY_USE
         lastPracticedAt: song.lastPracticedAt ? song.lastPracticedAt.toISOString() : null,
         masteryPercent: song.masteryPercent,
       })),
-      strongestSong: strongestSong ? {
-        id: strongestSong.id,
-        title: strongestSong.title,
-        masteryPercent: strongestSong.masteryPercent,
-      } : undefined,
       stalestSong: stalestSong ? {
         id: stalestSong.id,
         title: stalestSong.title,
@@ -6036,11 +6130,11 @@ export async function getPracticeStatsSummary(userId: string = DEFAULT_QUERY_USE
     },
     songPractice: {
       ...songPracticeSummary,
-      recentSessions: songSessions.slice(0, 8),
+      recentSessions: rangedSongSessions.slice(0, 8),
     },
     exercises: {
       ...exercisePracticeSummary,
-      recentSessions: exerciseSessions.slice(0, 8),
+      recentSessions: rangedExerciseSessions.slice(0, 8),
     },
     playlists: {
       totalPlaylists,

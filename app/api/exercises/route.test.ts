@@ -6,8 +6,7 @@ vi.mock("../../../db/queries", () => ({
 }));
 
 vi.mock("../_user", () => ({
-  getRequestCookie: vi.fn(),
-  resolveRequestContext: vi.fn(),
+  resolveAuthenticatedRequestContext: vi.fn(),
 }));
 
 vi.mock("../../lib/vocalExercise", () => ({
@@ -15,7 +14,7 @@ vi.mock("../../lib/vocalExercise", () => ({
 }));
 
 import { createVocalExercise, getVocalExercises } from "../../../db/queries";
-import { getRequestCookie, resolveRequestContext } from "../_user";
+import { resolveAuthenticatedRequestContext } from "../_user";
 import { parseVocalExerciseMidi } from "../../lib/vocalExercise";
 import { GET, POST } from "./route";
 
@@ -34,23 +33,34 @@ const exercise = {
 describe("exercise catalog route", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns the shared catalog without authentication", async () => {
+  it("rejects catalog access without an authenticated session", async () => {
+    vi.mocked(resolveAuthenticatedRequestContext).mockResolvedValue(null);
+    const response = await GET(new Request("http://localhost/api/exercises") as never);
+    expect(response.status).toBe(401);
+    expect(getVocalExercises).not.toHaveBeenCalled();
+  });
+
+  it("returns the catalog to an authenticated user", async () => {
+    vi.mocked(resolveAuthenticatedRequestContext).mockResolvedValue({
+      actor: { id: "user-1", email: "user@example.com", isAdmin: false },
+      effectiveUser: { id: "user-1", email: "user@example.com", isAdmin: false },
+      isImpersonating: false,
+    } as never);
     vi.mocked(getVocalExercises).mockResolvedValue([exercise]);
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/exercises") as never);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ exercises: [exercise] });
   });
 
   it("rejects exercise uploads without an admin session", async () => {
-    vi.mocked(getRequestCookie).mockReturnValue(undefined);
+    vi.mocked(resolveAuthenticatedRequestContext).mockResolvedValue(null);
     const response = await POST(new Request("http://localhost/api/exercises", { method: "POST" }) as never);
     expect(response.status).toBe(403);
     expect(createVocalExercise).not.toHaveBeenCalled();
   });
 
   it("stores parsed MIDI for an authenticated admin", async () => {
-    vi.mocked(getRequestCookie).mockReturnValue("session-token");
-    vi.mocked(resolveRequestContext).mockResolvedValue({
+    vi.mocked(resolveAuthenticatedRequestContext).mockResolvedValue({
       actor: { id: "admin-1", isAdmin: true },
       effectiveUser: { id: "admin-1", isAdmin: true },
       isImpersonating: false,

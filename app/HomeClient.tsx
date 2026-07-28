@@ -855,6 +855,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const settingsLoadedRef = useRef(false);
   const usersHydratedFromDbRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
+  const initialHashRouteAppliedRef = useRef(false);
   const activeUserId = userSettings.currentUserId;
   const currentUser = useMemo(
     () => userSettings.users.find((user) => user.id === userSettings.currentUserId) ?? DEFAULT_USER_SETTINGS.users[0],
@@ -1515,9 +1516,12 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     window.addEventListener("popstate", onPopState);
     const currentHash = window.location.hash;
     if (currentHash) {
-      void applyHashRoute(currentHash);
+      void applyHashRoute(currentHash).finally(() => {
+        initialHashRouteAppliedRef.current = true;
+      });
     } else {
       window.history.replaceState(null, "", buildHashRoute({ view: "playlists" }));
+      initialHashRouteAppliedRef.current = true;
     }
 
     return () => {
@@ -1560,7 +1564,11 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   }, [activeView, selectedPlaylist, selectedSong, songEditorReturnView]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || isApplyingHashRouteRef.current) {
+    if (
+      typeof window === "undefined"
+      || !initialHashRouteAppliedRef.current
+      || isApplyingHashRouteRef.current
+    ) {
       return;
     }
     if (window.location.hash === currentHash) {
@@ -2311,21 +2319,23 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           >
             Shared
           </button>
-          <button
-            data-testid="exercise-tab"
-            onClick={() => {
-              setSelectedSong(null);
-              setSelectedPlaylist(null);
-              setActiveView("exercise");
-            }}
-            className={`shrink-0 px-4 py-3 font-medium transition-colors ${
-              activeView === "exercise"
-                ? "border-b-2 border-violet-600 text-violet-700"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            Exercise
-          </button>
+          {isSignedIn ? (
+            <button
+              data-testid="exercise-tab"
+              onClick={() => {
+                setSelectedSong(null);
+                setSelectedPlaylist(null);
+                setActiveView("exercise");
+              }}
+              className={`shrink-0 px-4 py-3 font-medium transition-colors ${
+                activeView === "exercise"
+                  ? "border-b-2 border-violet-600 text-violet-700"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              Exercise
+            </button>
+          ) : null}
         </div>
 
         {activeView === "library" ? (
@@ -2420,11 +2430,19 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         ) : null}
 
         {activeView === "exercise" ? (
-          <ExerciseBrowser
-            userId={activeUserId}
-            isSignedIn={isSignedIn}
-            isAdmin={Boolean(adminActor?.isAdmin)}
-          />
+          isSignedIn ? (
+            <ExerciseBrowser
+              userId={activeUserId}
+              isSignedIn
+              isAdmin={Boolean(adminActor?.isAdmin)}
+            />
+          ) : (
+            <GuestWelcomePanel
+              title="Sign in to use warmups"
+              action={guestSignInForm}
+              footer="Recorded warmups and warmup practice are available to signed-in users."
+            />
+          )
         ) : null}
       </div>
     </div>

@@ -19,17 +19,6 @@ describe("ReplaceAudioForm", () => {
     global.fetch = vi.fn();
   });
 
-  it("shows validation error when submit is clicked with no file", async () => {
-    render(<ReplaceAudioForm songId="song-1" />);
-
-    fireEvent.click(screen.getByTestId("replace-audio-submit-prominent"));
-
-    expect(await screen.findByTestId("replace-audio-error-prominent")).toHaveTextContent(
-      "Select an MP3 file for Prominent first."
-    );
-    expect(uploadMock).not.toHaveBeenCalled();
-  });
-
   it("shows populated and missing status for each audio version", () => {
     render(<ReplaceAudioForm songId="song-1" audioUrl="https://cdn.example.com/prominent.mp3" />);
 
@@ -37,8 +26,9 @@ describe("ReplaceAudioForm", () => {
     expect(screen.getByText("Upload or replace files")).toBeInTheDocument();
     expect(screen.getByTestId("replace-audio-status-prominent")).toHaveTextContent("Uploaded");
     expect(screen.getByTestId("replace-audio-status-blend")).toHaveTextContent("Missing");
-    expect(screen.getByTestId("replace-audio-submit-prominent")).toHaveTextContent("Replace Prominent");
-    expect(screen.getByTestId("replace-audio-submit-blend")).toHaveTextContent("Upload Blend");
+    expect(screen.getByText(/Select a file to upload it immediately/)).toBeInTheDocument();
+    expect(screen.queryByTestId("replace-audio-submit-prominent")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("replace-audio-submit-blend")).not.toBeInTheDocument();
   });
 
   it("uploads file and patches song audio key", async () => {
@@ -51,8 +41,6 @@ describe("ReplaceAudioForm", () => {
     const file = new File(["x"], "new.mp3", { type: "audio/mpeg" });
     const input = screen.getByTestId("replace-audio-input-prominent") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
-
-    fireEvent.click(screen.getByTestId("replace-audio-submit-prominent"));
 
     await waitFor(() => {
       expect(uploadMock).toHaveBeenCalledWith("song-1", file, "prominent");
@@ -78,8 +66,6 @@ describe("ReplaceAudioForm", () => {
 
     const file = new File(["x"], "blend.mp3", { type: "audio/mpeg" });
     fireEvent.change(screen.getByTestId("replace-audio-input-blend"), { target: { files: [file] } });
-    fireEvent.click(screen.getByTestId("replace-audio-submit-blend"));
-
     await waitFor(() => {
       expect(uploadMock).toHaveBeenCalledWith("song-1", file, "blend");
     });
@@ -99,8 +85,6 @@ describe("ReplaceAudioForm", () => {
 
     const file = new File(["x"], "new.mp3", { type: "audio/mpeg" });
     fireEvent.change(screen.getByTestId("replace-audio-input-prominent"), { target: { files: [file] } });
-    fireEvent.click(screen.getByTestId("replace-audio-submit-prominent"));
-
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith("/api/songs/song-1", {
         method: "PATCH",
@@ -121,8 +105,6 @@ describe("ReplaceAudioForm", () => {
 
     const file = new File(["x"], "new.mp3", { type: "audio/mpeg" });
     fireEvent.change(screen.getByTestId("replace-audio-input-prominent"), { target: { files: [file] } });
-    fireEvent.click(screen.getByTestId("replace-audio-submit-prominent"));
-
     expect(await screen.findByTestId("replace-audio-error-prominent")).toHaveTextContent("Update failed");
   });
 });

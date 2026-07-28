@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createVocalExercise, getVocalExercises } from "../../../db/queries";
-import { AUTH_SESSION_COOKIE_NAME } from "../../lib/authTokens";
 import { parseVocalExerciseMidi } from "../../lib/vocalExercise";
-import { getRequestCookie, resolveRequestContext } from "../_user";
+import { resolveAuthenticatedRequestContext } from "../_user";
 
 const MAX_MIDI_FILE_SIZE = 2_000_000;
 
@@ -15,14 +14,23 @@ function errorResponse(error: unknown) {
 }
 
 async function requireAdmin(request: NextRequest) {
-  if (!getRequestCookie(request, AUTH_SESSION_COOKIE_NAME)) return null;
-  const context = await resolveRequestContext(request);
-  return context.actor?.isAdmin ? context.actor : null;
+  const context = await resolveAuthenticatedRequestContext(request);
+  return context?.actor?.isAdmin ? context.actor : null;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    return NextResponse.json({ exercises: await getVocalExercises() });
+    const context = await resolveAuthenticatedRequestContext(request);
+    if (!context?.actor) {
+      return NextResponse.json(
+        { error: "Sign in to access warmups." },
+        { status: 401, headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
+    return NextResponse.json(
+      { exercises: await getVocalExercises() },
+      { headers: { "Cache-Control": "private, no-store" } }
+    );
   } catch (error) {
     return errorResponse(error);
   }

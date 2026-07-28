@@ -225,6 +225,20 @@
       "when": 1782864000000,
       "tag": "0032_recorded_playlist_status",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785211200000,
+      "tag": "0033_recorded_warmups",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785301200000,
+      "tag": "0034_vocal_exercise_alternate_audio",
+      "breakpoints": true
     }
   ]
 }

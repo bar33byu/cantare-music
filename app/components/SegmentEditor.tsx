@@ -841,6 +841,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
   }, [request, songId, songLoadKey]);
 
   const handleAudioUploaded = () => {
+    setShowReplaceAudio(true);
     setSongLoadKey((previous) => previous + 1);
     onSongUpdated?.();
   };

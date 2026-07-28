@@ -63,8 +63,8 @@ export function ReplaceAudioForm({
     }));
   };
 
-  const handleSubmit = async (audioVersion: AudioVersion) => {
-    const file = versionState[audioVersion].file;
+  const handleUpload = async (audioVersion: AudioVersion, selectedFile?: File | null) => {
+    const file = selectedFile ?? versionState[audioVersion].file;
     if (!file) {
       updateVersionState(audioVersion, { error: `Select an MP3 file for ${VERSION_DETAILS[audioVersion].label} first.` });
       return;
@@ -92,7 +92,10 @@ export function ReplaceAudioForm({
       });
       onReplaced?.();
     } catch (err) {
-      updateVersionState(audioVersion, { error: err instanceof Error ? err.message : "Audio replacement failed" });
+      updateVersionState(audioVersion, {
+        file: null,
+        error: err instanceof Error ? err.message : "Audio replacement failed",
+      });
     }
   };
 
@@ -100,14 +103,14 @@ export function ReplaceAudioForm({
     <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="replace-audio-card">
       <h3 className="text-lg font-semibold text-gray-900">{isUpload ? 'Upload Audio' : 'Audio File'}</h3>
       <p className="mt-1 text-sm text-gray-500">
-        {isUpload ? 'Upload an MP3 file to enable segment editing.' : 'Choose between replacing the source files below or recording a temporary draft take further down.'}
+        {isUpload ? 'Select an MP3 file to upload it immediately and enable segment editing.' : 'Choose between replacing the source files below or recording a temporary draft take further down.'}
       </p>
 
       {!isUpload ? (
         <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
           <h4 className="text-sm font-semibold text-slate-900">Upload or replace files</h4>
           <p className="mt-1 text-xs text-slate-600">
-            Use these slots for the main practice audio and the blended reference mix.
+            Select a file to upload it immediately. Use these slots for the main practice audio and the blended reference mix.
           </p>
         </div>
       ) : null}
@@ -141,13 +144,21 @@ export function ReplaceAudioForm({
                 <input
                   type="file"
                   accept="audio/mpeg,audio/mp3"
+                  disabled={uploading}
                   data-testid={`replace-audio-input-${version}`}
-                  onChange={(e) => {
+                  onChange={(event) => {
+                    const input = event.currentTarget;
+                    const file = input.files?.[0] ?? null;
                     updateVersionState(version, {
-                      file: e.target.files?.[0] ?? null,
+                      file,
                       success: null,
                       error: null,
                     });
+                    if (file) {
+                      void handleUpload(version, file).finally(() => {
+                        input.value = '';
+                      });
+                    }
                   }}
                   className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-full file:border-0 file:bg-indigo-50 file:px-4 file:py-2 file:font-semibold file:text-indigo-700 hover:file:bg-indigo-100"
                 />
@@ -171,21 +182,6 @@ export function ReplaceAudioForm({
                 </p>
               )}
 
-              <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={() => void handleSubmit(version)}
-                  disabled={uploading}
-                  data-testid={`replace-audio-submit-${version}`}
-                  className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40"
-                >
-                  {uploading
-                    ? (populated ? "Replacing..." : "Uploading...")
-                    : populated
-                      ? `Replace ${details.label}`
-                      : `Upload ${details.label}`}
-                </button>
-              </div>
             </div>
           );
         })}

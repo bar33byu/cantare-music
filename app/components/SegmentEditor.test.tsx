@@ -30,7 +30,12 @@ vi.mock('../hooks/useAudioPlayer', () => ({
 }));
 
 vi.mock('./ReplaceAudioForm', () => ({
-  ReplaceAudioForm: ({ children }: { children?: unknown }) => <div data-testid="replace-audio">{children as any}</div>,
+  ReplaceAudioForm: ({ children, onReplaced }: { children?: unknown; onReplaced?: () => void }) => (
+    <div data-testid="replace-audio">
+      <button type="button" data-testid="mock-audio-upload-success" onClick={onReplaced}>Complete upload</button>
+      {children as any}
+    </div>
+  ),
 }));
 
 describe('SegmentEditor', () => {
@@ -1212,6 +1217,40 @@ describe('SegmentEditor', () => {
 
     fireEvent.click(screen.getByTestId('segment-editor-replace-audio-toggle'));
     expect(screen.queryByTestId('replace-audio')).not.toBeInTheDocument();
+  });
+
+  it('keeps the audio section open after the first audio file is uploaded', async () => {
+    let songLoadCount = 0;
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (url.includes('/api/songs/song-1') && !url.includes('/segments') && method === 'GET') {
+        songLoadCount += 1;
+        return {
+          ok: true,
+          json: async () => ({
+            audioUrl: songLoadCount > 1 ? '/audio/song.mp3' : '',
+            alternateAudioUrl: '',
+            title: 'My Song',
+          }),
+        } as Response;
+      }
+      if (url.includes('/api/songs/song-1/segments') && method === 'GET') {
+        return { ok: true, json: async () => sampleSegments } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+
+    render(<SegmentEditor songId="song-1" />);
+
+    expect(await screen.findByTestId('replace-audio')).toBeInTheDocument();
+    expect(screen.queryByTestId('segment-editor-replace-audio-toggle')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-audio-upload-success'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('segment-editor-replace-audio-toggle')).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByTestId('replace-audio')).toBeInTheDocument();
+    });
   });
 
   it('moves draft recording management into the editor audio section', async () => {

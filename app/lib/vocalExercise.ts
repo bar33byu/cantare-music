@@ -21,6 +21,11 @@ export interface VocalExercise {
   difficulty?: string;
   pattern?: string;
   coachingNotes?: string[];
+  audioKey?: string;
+  audioUrl?: string;
+  alternateAudioKey?: string;
+  alternateAudioUrl?: string;
+  lyricHint?: string;
   collectionSlug?: string;
   collectionTitle?: string;
   routinePosition?: number;

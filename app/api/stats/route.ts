@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPracticeStatsSummary } from "../../../db/queries";
+import { getPracticeStatsSummary, type PracticeStatsRange } from "../../../db/queries";
 import { resolveEffectiveRequestUserId } from "../_user";
 
 export async function GET(request: NextRequest) {
   try {
     const userId = await resolveEffectiveRequestUserId(request);
-    const stats = await getPracticeStatsSummary(userId);
+    const requestedRange = request.nextUrl.searchParams.get("range");
+    const range: PracticeStatsRange = requestedRange === "90" || requestedRange === "all" ? requestedRange === "90" ? 90 : "all" : 30;
+    const stats = await getPracticeStatsSummary(userId, new Date(), range);
     return NextResponse.json(stats, {
       headers: { "Cache-Control": "no-store" },
     });
