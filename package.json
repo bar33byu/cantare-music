@@ -11,8 +11,9 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs db/migrate.ts",
     "db:seed:exercises": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/seed-vocal-exercises.ts",
+    "db:import:recorded-warmups": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/import-recorded-warmups.ts",
     "db:align:exercise-context": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/align-vocal-exercise-context.ts"
   },
   "dependencies": {

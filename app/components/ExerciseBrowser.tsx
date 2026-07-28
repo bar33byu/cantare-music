@@ -1,766 +1,287 @@
 "use client";
 
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  generateTranspositionPath,
-  getContextMetronomeBeats,
-  getExercisePitchRange,
-  midiNoteName,
-  type VocalExercise,
-  type VocalRange,
-} from "../lib/vocalExercise";
-import { getWarmupCaptureTailSeconds, useWarmupPitchTrace, type WarmupPitchTracePoint } from "../hooks/useWarmupPitchTrace";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { VocalExercise } from "../lib/vocalExercise";
 import { withUserIdHeader } from "../lib/userContext";
 
-const DEFAULT_RANGE: VocalRange = { low: 45, high: 64 };
-const MAX_PRACTICE_REPETITIONS = 15;
+// Share the same Cache Storage bucket used by playlist/song practice audio.
+const WARMUP_AUDIO_CACHE = "cantare-playlist-practice-v1";
 
-interface TimelineItem {
-  index: number;
-  offset: number;
-  startSeconds: number;
-  endSeconds: number;
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "--:--";
+  const rounded = Math.round(seconds);
+  return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
 }
 
-function PianoRoll({ exercise, range, offset, playheadBeat, pitchTrace }: {
-  exercise: VocalExercise;
-  range: VocalRange;
-  offset: number;
-  playheadBeat: number;
-  pitchTrace: WarmupPitchTracePoint[];
-}) {
-  const width = 960;
-  const labelWidth = 54;
-  const height = Math.max(280, (range.high - range.low + 1) * 15);
-  const safeDuration = Math.max(1, exercise.durationBeats);
-  const plotWidth = width - labelWidth;
-  const rowHeight = height / (range.high - range.low + 1);
-  const xForBeat = (beat: number) => labelWidth + (beat / safeDuration) * plotWidth;
-  const yForMidi = (midi: number) => (range.high - midi) * rowHeight;
-  const visibleEvents = exercise.events.filter((event) => event.midi + offset >= range.low && event.midi + offset <= range.high);
-  const beatLines = Array.from({ length: Math.ceil(safeDuration) + 1 }, (_, index) => index);
-  const pitchLines = Array.from({ length: range.high - range.low + 2 }, (_, index) => index);
-  const singX = xForBeat(exercise.exerciseStartBeat);
-  const cursorX = xForBeat(Math.max(0, Math.min(safeDuration, playheadBeat)));
-
-  return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-      <svg
-        role="img"
-        aria-label={`Piano roll from ${midiNoteName(range.low)} to ${midiNoteName(range.high)}`}
-        viewBox={`0 0 ${width} ${height}`}
-        className="block min-w-[720px] w-full"
-        data-testid="exercise-piano-roll"
-      >
-        <rect x="0" y="0" width={width} height={height} fill="#f8fafc" />
-        <rect x={labelWidth} y="0" width={Math.max(0, singX - labelWidth)} height={height} fill="#f1f5f9" />
-        {pitchLines.map((line) => (
-          <line key={`pitch-${line}`} x1={labelWidth} y1={line * rowHeight} x2={width} y2={line * rowHeight} stroke="#e2e8f0" strokeWidth="1" />
-        ))}
-        {beatLines.map((beat) => (
-          <line key={`beat-${beat}`} x1={xForBeat(beat)} y1="0" x2={xForBeat(beat)} y2={height} stroke={beat % exercise.timeSignature.numerator === 0 ? "#94a3b8" : "#cbd5e1"} strokeWidth={beat % exercise.timeSignature.numerator === 0 ? 1.5 : 1} />
-        ))}
-        {Array.from({ length: range.high - range.low + 1 }, (_, index) => range.high - index).map((midi) => (
-          <text key={midi} x={labelWidth - 7} y={yForMidi(midi) + rowHeight * 0.7} textAnchor="end" fontSize="10" fill={midi % 12 === 0 ? "#312e81" : "#64748b"} fontWeight={midi % 12 === 0 ? "700" : "400"}>
-            {midiNoteName(midi)}
-          </text>
-        ))}
-        {visibleEvents.map((event) => {
-          const midi = event.midi + offset;
-          const x = xForBeat(event.startBeat);
-          const noteWidth = Math.max(3, (event.durationBeats / safeDuration) * plotWidth);
-          const isContext = event.region === "context";
-          return (
-            <g key={event.id}>
-              <rect
-                x={x}
-                y={yForMidi(midi) + 1.5}
-                width={Math.min(noteWidth, width - x)}
-                height={Math.max(4, rowHeight - 3)}
-                rx="3"
-                fill={isContext ? "#94a3b8" : "#4f46e5"}
-                stroke={isContext ? "#475569" : "#312e81"}
-                strokeWidth="1"
-                strokeDasharray={isContext ? "4 2" : undefined}
-              />
-              <title>{`${isContext ? "Context" : "Sing"}: ${midiNoteName(midi)}`}</title>
-            </g>
-          );
-        })}
-        {pitchTrace.slice(1).map((point, index) => {
-          const previous = pitchTrace[index];
-          const target = exercise.events.find((event) => event.region === "exercise"
-            && point.beat >= event.startBeat
-            && point.beat < event.startBeat + event.durationBeats);
-          const cents = target ? Math.abs((point.midi - (target.midi + offset)) * 100) : Number.POSITIVE_INFINITY;
-          const stroke = cents <= 50 ? "#10b981" : cents <= 100 ? "#f59e0b" : "#f43f5e";
-          return (
-            <g key={`${point.beat}-${index}`}>
-              <line x1={xForBeat(previous.beat)} y1={yForMidi(previous.midi)} x2={xForBeat(point.beat)} y2={yForMidi(point.midi)} stroke="white" strokeWidth="7" strokeLinecap="round" />
-              <line x1={xForBeat(previous.beat)} y1={yForMidi(previous.midi)} x2={xForBeat(point.beat)} y2={yForMidi(point.midi)} stroke={stroke} strokeWidth="3.5" strokeLinecap="round" />
-            </g>
-          );
-        })}
-        <line x1={singX} y1="0" x2={singX} y2={height} stroke="#be123c" strokeWidth="3" />
-        <rect x={Math.min(singX + 5, width - 96)} y="7" width="90" height="22" rx="11" fill="#fff1f2" stroke="#fda4af" />
-        <text x={Math.min(singX + 50, width - 51)} y="22" textAnchor="middle" fontSize="11" fontWeight="700" fill="#9f1239">SING</text>
-        <line x1={cursorX} y1="0" x2={cursorX} y2={height} stroke="#f59e0b" strokeWidth="3" opacity="0.9" />
-      </svg>
-    </div>
-  );
+function selectionStorageKey(userId: string): string {
+  return `cantare:warmup-set:v1:${userId || "guest"}`;
 }
 
-function condenseTranspositionPath(path: number[], maxRepetitions = MAX_PRACTICE_REPETITIONS): number[] {
-  if (path.length <= maxRepetitions) return path;
-  const important = new Set([0, path.length - 1]);
-  let minIndex = 0;
-  let maxIndex = 0;
-  path.forEach((offset, index) => {
-    if (offset < path[minIndex]) minIndex = index;
-    if (offset > path[maxIndex]) maxIndex = index;
-  });
-  important.add(minIndex);
-  important.add(maxIndex);
-
-  const targetCount = Math.max(important.size, maxRepetitions);
-  for (let slot = 1; important.size < targetCount && slot < targetCount - 1; slot += 1) {
-    important.add(Math.round((slot / (targetCount - 1)) * (path.length - 1)));
+function readSavedSelection(userId: string): string[] | null {
+  try {
+    const value = window.localStorage.getItem(selectionStorageKey(userId));
+    if (value === null) return null;
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : null;
+  } catch {
+    return null;
   }
-
-  return Array.from(important)
-    .sort((a, b) => a - b)
-    .map((index) => path[index]);
 }
 
-function formatDuration(seconds: number): string {
-  const totalSeconds = Math.max(0, Math.round(seconds));
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainingSeconds = totalSeconds % 60;
-  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
-}
-
-function volumeToGain(volumePercent: number): number {
-  return Math.max(0, Math.min(1.5, volumePercent / 100));
-}
-
-function RangeKeyboard({ range, current, startingPitch }: { range: VocalRange; current: VocalRange | null; startingPitch: number | null }) {
-  const notes = Array.from({ length: range.high - range.low + 1 }, (_, index) => range.low + index);
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm" aria-label="Vocal range keyboard">
-      <div className="mb-2 flex flex-wrap justify-between gap-2 text-xs font-semibold text-slate-600">
-        <span>Saved range: {midiNoteName(range.low)} to {midiNoteName(range.high)}</span>
-        {current ? <span className="text-indigo-700">Current exercise: {midiNoteName(current.low)} to {midiNoteName(current.high)}</span> : null}
-      </div>
-      <div className="flex h-14 overflow-hidden rounded-lg border border-slate-300">
-        {notes.map((midi) => {
-          const isBlack = [1, 3, 6, 8, 10].includes(midi % 12);
-          const inExercise = Boolean(current && midi >= current.low && midi <= current.high);
-          const isStart = midi === startingPitch;
-          return (
-            <div
-              key={midi}
-              title={midiNoteName(midi)}
-              className={`relative min-w-0 flex-1 border-r border-slate-300 last:border-r-0 ${isBlack ? "bg-slate-700" : "bg-white"} ${inExercise ? "ring-2 ring-inset ring-indigo-500" : ""}`}
-            >
-              {isStart ? <span className="absolute inset-x-1 bottom-1 h-2 rounded-full bg-rose-500" aria-label={`Starting pitch ${midiNoteName(midi)}`} /> : null}
-            </div>
-          );
-        })}
-      </div>
-      <p className="mt-2 text-xs text-slate-500">Indigo outline: sung notes. Red marker: first sung pitch.</p>
-    </div>
-  );
-}
-
-function ExercisePlayer({ exercise, range, userId, isAdmin, onDelete }: {
+interface WarmupCardProps {
   exercise: VocalExercise;
-  range: VocalRange;
-  userId: string;
+  index: number;
+  enabled: boolean;
+  active: boolean;
   isAdmin: boolean;
-  onDelete: () => void;
-}) {
-  const [tempoPercent, setTempoPercent] = useState(100);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [playheadBeat, setPlayheadBeat] = useState(0);
-  const [inputLatencyMs, setInputLatencyMs] = useState(0);
-  const [contextVolume, setContextVolume] = useState(75);
-  const [singVolume, setSingVolume] = useState(100);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const sourcesRef = useRef<OscillatorNode[]>([]);
-  const frameRef = useRef<number | null>(null);
-  const playbackStartRef = useRef(0);
-  const timelineRef = useRef<TimelineItem[]>([]);
-  const activeSessionRef = useRef<{ id: string; startedAtMs: number } | null>(null);
-  const fullPath = useMemo(() => generateTranspositionPath(exercise, range), [exercise, range]);
-  const path = useMemo(() => condenseTranspositionPath(fullPath), [fullPath]);
-  const secondsPerBeatAtTempo = 60 / exercise.tempoBpm / (tempoPercent / 100);
-  const secondsPerRepetition = exercise.durationBeats * secondsPerBeatAtTempo + getWarmupCaptureTailSeconds(inputLatencyMs);
-  const practiceDuration = path.length * secondsPerRepetition;
-  const fullDuration = fullPath.length * secondsPerRepetition;
-  const contextMetronomeBeats = useMemo(() => getContextMetronomeBeats(exercise), [exercise]);
-  const offset = path[currentIndex] ?? path[0] ?? 0;
-  const currentRange = getExercisePitchRange(exercise, offset);
-  const firstExerciseNote = [...exercise.events]
-    .filter((event) => event.region === "exercise")
-    .sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi)[0];
-  const pitchTargets = useMemo(() => exercise.events
-    .filter((event) => event.region === "exercise")
-    .sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi)
-    .map((event) => ({ startBeat: event.startBeat, midi: event.midi + offset })), [exercise.events, offset]);
-  const pitchTrace = useWarmupPitchTrace({
-    isPlaying,
-    playheadBeat,
-    repetitionIndex: currentIndex,
-    exerciseStartBeat: exercise.exerciseStartBeat,
-    exerciseEndBeat: exercise.durationBeats,
-    tempoBpm: exercise.tempoBpm,
-    tempoPercent,
-    latencyMs: inputLatencyMs,
-    pitchTargets,
-  });
-  const startPitchTrace = pitchTrace.start;
+  duration: number | undefined;
+  onToggle: () => void;
+  onPlay: () => void;
+  onSave: (changes: { title: string; lyricHint: string }) => Promise<void>;
+}
+
+function WarmupCard({ exercise, index, enabled, active, isAdmin, duration, onToggle, onPlay, onSave }: WarmupCardProps) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(exercise.title);
+  const [lyricHint, setLyricHint] = useState(exercise.lyricHint ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void startPitchTrace();
-  }, [startPitchTrace]);
+    setTitle(exercise.title);
+    setLyricHint(exercise.lyricHint ?? "");
+  }, [exercise.lyricHint, exercise.title]);
 
-  const stop = useCallback((resetPlayback = true) => {
-    const activeSession = activeSessionRef.current;
-    if (activeSession) {
-      activeSessionRef.current = null;
-      const completedAt = new Date();
-      const durationSeconds = Math.max(0, (completedAt.getTime() - activeSession.startedAtMs) / 1000);
-      void fetch(`/api/exercise-practice-sessions/${activeSession.id}`, withUserIdHeader({
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          completedAt: completedAt.toISOString(),
-          durationSeconds,
-        }),
-      }, userId)).catch(() => undefined);
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({ title, lyricHint });
+      setEditing(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save this warmup");
+    } finally {
+      setSaving(false);
     }
-    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-    frameRef.current = null;
-    for (const source of sourcesRef.current) {
-      try { source.stop(); } catch { /* Already stopped. */ }
-    }
-    sourcesRef.current = [];
-    void audioContextRef.current?.close().catch(() => undefined);
-    audioContextRef.current = null;
-    setIsPlaying(false);
-    if (resetPlayback) {
-      setCurrentIndex(0);
-      setPlayheadBeat(0);
-    }
-  }, [userId]);
-
-  useEffect(() => () => stop(), [stop]);
-
-  const start = useCallback((tempoOverride = tempoPercent, startingIndex = 0, startingBeat = 0) => {
-    stop(false);
-    if (path.length === 0) return;
-    const AudioContextCtor = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextCtor) return;
-    const context = new AudioContextCtor();
-    const master = context.createGain();
-    master.gain.value = 0.62;
-    master.connect(context.destination);
-    const secondsPerBeat = 60 / exercise.tempoBpm / (tempoOverride / 100);
-    const startAt = context.currentTime + 0.08;
-    const captureTailSeconds = getWarmupCaptureTailSeconds(inputLatencyMs);
-    let cursorSeconds = -Math.max(0, startingBeat) * secondsPerBeat;
-    const timeline: TimelineItem[] = [];
-
-    path.slice(startingIndex).forEach((semitones, relativeIndex) => {
-      const index = startingIndex + relativeIndex;
-      const repetitionStart = cursorSeconds;
-      const repetitionEnd = repetitionStart + exercise.durationBeats * secondsPerBeat + captureTailSeconds;
-      timeline.push({ index, offset: semitones, startSeconds: repetitionStart, endSeconds: repetitionEnd });
-      const measureLength = exercise.timeSignature.numerator * (4 / exercise.timeSignature.denominator);
-      for (const beat of contextMetronomeBeats) {
-        const clickOffset = repetitionStart + beat * secondsPerBeat;
-        if (clickOffset < 0) continue;
-        const clickStart = startAt + clickOffset;
-        const clickEnd = clickStart + 0.035;
-        const isMeasureStart = Math.abs(beat % measureLength) < 1e-6;
-        const click = context.createOscillator();
-        const clickGain = context.createGain();
-        click.type = "sine";
-        click.frequency.value = isMeasureStart ? 1500 : 1050;
-        clickGain.gain.setValueAtTime(isMeasureStart ? 0.32 : 0.22, clickStart);
-        clickGain.gain.exponentialRampToValueAtTime(0.0001, clickEnd);
-        click.connect(clickGain);
-        clickGain.connect(master);
-        click.start(clickStart);
-        click.stop(clickEnd + 0.005);
-        sourcesRef.current.push(click);
-      }
-      for (const note of exercise.events) {
-        const noteStartOffset = repetitionStart + note.startBeat * secondsPerBeat;
-        const noteEndOffset = noteStartOffset + Math.max(0.03, note.durationBeats * secondsPerBeat);
-        if (noteEndOffset <= 0) continue;
-        const noteStart = startAt + Math.max(0, noteStartOffset);
-        const noteEnd = startAt + noteEndOffset;
-        if (noteEnd - noteStart < 0.01) continue;
-        const noteGain = context.createGain();
-        const filter = context.createBiquadFilter();
-        const baseFrequency = 440 * 2 ** ((note.midi + semitones - 69) / 12);
-        const regionVolume = note.region === "context" ? contextVolume : singVolume;
-        const peakGain = Math.max(0.005, (note.velocity / 127) * 0.42 * volumeToGain(regionVolume));
-        const attackEnd = noteStart + Math.min(0.018, (noteEnd - noteStart) * 0.18);
-        const decayEnd = Math.min(noteEnd - 0.05, attackEnd + 0.18);
-        const releaseStart = Math.max(decayEnd, noteEnd - 0.09);
-        filter.type = "lowpass";
-        filter.frequency.setValueAtTime(4600, noteStart);
-        filter.frequency.exponentialRampToValueAtTime(1700, Math.max(noteStart + 0.04, decayEnd));
-        noteGain.gain.setValueAtTime(0.0001, noteStart);
-        noteGain.gain.exponentialRampToValueAtTime(peakGain, attackEnd);
-        noteGain.gain.exponentialRampToValueAtTime(Math.max(0.004, peakGain * 0.38), Math.max(attackEnd + 0.01, decayEnd));
-        noteGain.gain.setValueAtTime(Math.max(0.004, peakGain * 0.32), releaseStart);
-        noteGain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
-
-        const partials = [
-          { type: "triangle" as OscillatorType, ratio: 1, gain: 1 },
-          { type: "sine" as OscillatorType, ratio: 2, gain: 0.34 },
-          { type: "sine" as OscillatorType, ratio: 3.01, gain: 0.16 },
-        ];
-        for (const partial of partials) {
-          const oscillator = context.createOscillator();
-          const partialGain = context.createGain();
-          oscillator.type = partial.type;
-          oscillator.frequency.setValueAtTime(baseFrequency * partial.ratio, noteStart);
-          partialGain.gain.value = partial.gain;
-          oscillator.connect(partialGain);
-          partialGain.connect(filter);
-          oscillator.start(noteStart);
-          oscillator.stop(noteEnd + 0.02);
-          sourcesRef.current.push(oscillator);
-        }
-        filter.connect(noteGain);
-        noteGain.connect(master);
-      }
-      cursorSeconds = repetitionEnd;
-    });
-
-    audioContextRef.current = context;
-    playbackStartRef.current = startAt;
-    timelineRef.current = timeline;
-    const sessionId = crypto.randomUUID();
-    const startedAt = new Date();
-    activeSessionRef.current = { id: sessionId, startedAtMs: startedAt.getTime() };
-    void fetch("/api/exercise-practice-sessions", withUserIdHeader({
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: sessionId,
-        exerciseId: exercise.id,
-        startedAt: startedAt.toISOString(),
-        tempoPercent: tempoOverride,
-        repetitionCount: path.length,
-      }),
-    }, userId)).catch(() => undefined);
-    setCurrentIndex(startingIndex);
-    setPlayheadBeat(Math.max(0, startingBeat));
-    setIsPlaying(true);
-    pitchTrace.clear();
-
-    const update = () => {
-      const elapsed = context.currentTime - playbackStartRef.current;
-      const item = timeline.find((candidate) => elapsed >= candidate.startSeconds && elapsed < candidate.endSeconds);
-      if (!item) {
-        if (elapsed >= cursorSeconds) {
-          stop();
-          return;
-        }
-        frameRef.current = requestAnimationFrame(update);
-        return;
-      }
-      setCurrentIndex(item.index);
-      setPlayheadBeat(Math.max(0, (elapsed - item.startSeconds) / secondsPerBeat));
-      frameRef.current = requestAnimationFrame(update);
-    };
-    frameRef.current = requestAnimationFrame(update);
-  }, [contextMetronomeBeats, contextVolume, exercise, inputLatencyMs, path, pitchTrace, singVolume, stop, tempoPercent, userId]);
+  };
 
   return (
-    <section className="space-y-4" data-testid="exercise-player">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Vocal exercise</p>
-          <h2 className="text-2xl font-bold text-slate-950">{exercise.title}</h2>
-          <p className="text-sm text-slate-500">
-            {exercise.category ?? "Exercise"}{exercise.syllable ? ` / ${exercise.syllable}` : ""} / {exercise.tempoBpm} BPM / {exercise.timeSignature.numerator}/{exercise.timeSignature.denominator}
+    <article className={`rounded-2xl border bg-white p-5 shadow-sm transition ${active ? "border-indigo-500 ring-2 ring-indigo-100" : "border-slate-200"}`} data-testid={`warmup-card-${exercise.id}`}>
+      <div className="flex items-start gap-4">
+        <label className="mt-1 inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-700">
+          <input type="checkbox" checked={enabled} onChange={onToggle} aria-label={`Include ${exercise.title} in set`} className="h-5 w-5 rounded border-slate-300 accent-indigo-600" />
+          <span className="sr-only">Include in set</span>
+        </label>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">Warmup {index + 1}</p>
+          {editing ? (
+            <label className="mt-1 grid gap-1 text-sm font-semibold text-slate-700">
+              Title
+              <input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-base" />
+            </label>
+          ) : <h3 className="mt-1 text-xl font-bold text-slate-950">{exercise.title}</h3>}
+        </div>
+        {duration !== undefined ? <span className="shrink-0 text-sm tabular-nums text-slate-500">{formatTime(duration)}</span> : null}
+      </div>
+
+      <section className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3" aria-label={`Lyric hints for ${exercise.title}`}>
+        <p className="text-xs font-bold uppercase tracking-[0.15em] text-amber-800">Lyric hints</p>
+        {editing ? (
+          <textarea value={lyricHint} maxLength={2_000} rows={4} onChange={(event) => setLyricHint(event.target.value)} placeholder="Add the syllables, words, breaths, or technique reminders you want while singing." className="mt-2 w-full resize-y rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-slate-800" />
+        ) : (
+          <p className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${exercise.lyricHint ? "text-slate-800" : "italic text-slate-500"}`}>
+            {exercise.lyricHint || "No lyric hints yet."}
           </p>
-          {exercise.description ? <p className="mt-1 max-w-2xl text-sm text-slate-600">{exercise.description}</p> : null}
-          {exercise.difficulty || exercise.pattern ? (
-            <p className="mt-2 text-xs font-semibold text-slate-500">
-              {exercise.difficulty ? `Difficulty: ${exercise.difficulty}` : ""}
-              {exercise.difficulty && exercise.pattern ? " / " : ""}
-              {exercise.pattern ? `Pattern: ${exercise.pattern}` : ""}
-            </p>
-          ) : null}
-          {(exercise.coachingNotes?.length ?? 0) > 0 ? (
-            <details open className="mt-3 max-w-2xl rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-sm text-slate-700">
-              <summary className="cursor-pointer font-semibold text-indigo-800">Coaching notes</summary>
-              <ul className="mt-2 list-disc space-y-1 pl-5">
-                {exercise.coachingNotes?.map((note) => <li key={note}>{note}</li>)}
-              </ul>
-            </details>
-          ) : null}
-        </div>
-        {isAdmin ? <button type="button" onClick={onDelete} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">Delete</button> : null}
+        )}
+      </section>
+
+      {error ? <p role="alert" className="mt-3 text-sm font-medium text-rose-700">{error}</p> : null}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={onPlay} disabled={!exercise.audioUrl} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+          {active ? "Restart" : "Play"}
+        </button>
+        {isAdmin && !editing ? <button type="button" onClick={() => setEditing(true)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:border-indigo-300 hover:text-indigo-700">Edit title & hints</button> : null}
+        {editing ? (
+          <>
+            <button type="button" onClick={() => void save()} disabled={saving || !title.trim()} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300">{saving ? "Saving..." : "Save"}</button>
+            <button type="button" onClick={() => { setEditing(false); setTitle(exercise.title); setLyricHint(exercise.lyricHint ?? ""); setError(null); }} disabled={saving} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
+          </>
+        ) : null}
       </div>
-
-      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="grid gap-3 xl:grid-cols-[auto_minmax(12rem,0.85fr)_minmax(18rem,1.1fr)_minmax(16rem,1fr)] xl:items-center">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              aria-label={isPlaying ? "Pause" : "Play"}
-              title={isPlaying ? "Pause" : "Play"}
-              onClick={isPlaying ? () => stop(false) : () => start(tempoPercent, currentIndex, playheadBeat)}
-              disabled={path.length === 0}
-              className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-2xl font-bold leading-none text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              {isPlaying ? "\u23f8" : "\u25b6"}
-            </button>
-            <button
-              type="button"
-              aria-label="Restart"
-              title="Restart"
-              onClick={() => start()}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 bg-white text-xl font-semibold leading-none text-slate-700 hover:border-indigo-300 hover:text-indigo-700"
-            >
-              {"\u21ba"}
-            </button>
-          </div>
-
-          <label className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-3 text-sm font-medium text-slate-700">
-            <span>Tempo</span>
-            <input
-              aria-label="Tempo"
-              type="range"
-              min="40"
-              max="150"
-              step="5"
-              value={tempoPercent}
-              onChange={(event) => {
-                const nextTempo = Number(event.target.value);
-                setTempoPercent(nextTempo);
-                if (isPlaying) start(nextTempo, currentIndex, playheadBeat);
-              }}
-              className="min-w-0"
-            />
-            <span className="w-11 text-right tabular-nums">{tempoPercent}%</span>
-          </label>
-
-          <div className="grid min-w-0 gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2">
-            <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3">
-              <button
-                type="button"
-                aria-label={pitchTrace.isListening ? "Stop listening" : "Use microphone"}
-                title={pitchTrace.isListening ? "Stop listening" : "Use microphone"}
-                onClick={pitchTrace.isListening ? pitchTrace.stop : () => void pitchTrace.start()}
-                className={`inline-flex h-8 min-w-20 items-center justify-center rounded-md px-3 text-xs font-semibold ${
-                  pitchTrace.isListening
-                    ? "border border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
-                    : "border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-50"
-                }`}
-              >
-                {pitchTrace.isListening ? "Mic on" : "Mic off"}
-              </button>
-              <label className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-sm font-medium text-slate-700">
-                <span>Delay</span>
-                <input aria-label="Microphone delay" type="range" min="0" max="400" step="10" value={inputLatencyMs} onChange={(event) => setInputLatencyMs(Number(event.target.value))} className="min-w-0" />
-                <span className="w-12 text-right tabular-nums">{inputLatencyMs} ms</span>
-              </label>
-              <button type="button" onClick={() => setInputLatencyMs(0)} className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold">Wired</button>
-              <button type="button" onClick={() => setInputLatencyMs(180)} className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold">Bluetooth</button>
-            </div>
-            <p className="truncate text-xs text-emerald-900" role="status" title={`${pitchTrace.status}. Green is within 50 cents, amber within 100, and rose is farther away.`}>
-              {pitchTrace.status}. Green within 50 cents, amber within 100, rose farther.
-              {pitchTrace.status.includes("embedded browser") ? (
-                <> <button type="button" onClick={() => window.open(window.location.href, "_blank", "noopener,noreferrer")} className="font-semibold underline">Open in browser</button>.</>
-              ) : null}
-            </p>
-          </div>
-
-          <div className="grid min-w-0 gap-2 rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2">
-            <label className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-sm font-medium text-slate-700">
-              <span>Context</span>
-              <input
-                aria-label="Context volume"
-                type="range"
-                min="0"
-                max="150"
-                step="5"
-                value={contextVolume}
-                onChange={(event) => {
-                  const nextVolume = Number(event.target.value);
-                  setContextVolume(nextVolume);
-                  if (isPlaying) start(tempoPercent, currentIndex, playheadBeat);
-                }}
-                className="min-w-0"
-              />
-              <span className="w-12 text-right tabular-nums">{contextVolume}%</span>
-            </label>
-            <label className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-sm font-medium text-slate-700">
-              <span>Sing</span>
-              <input
-                aria-label="Sing volume"
-                type="range"
-                min="0"
-                max="150"
-                step="5"
-                value={singVolume}
-                onChange={(event) => {
-                  const nextVolume = Number(event.target.value);
-                  setSingVolume(nextVolume);
-                  if (isPlaying) start(tempoPercent, currentIndex, playheadBeat);
-                }}
-                className="min-w-0"
-              />
-              <span className="w-12 text-right tabular-nums">{singVolume}%</span>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      {path.length === 0 ? (
-        <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          This exercise does not fit inside your saved range. Widen the range or choose a smaller exercise region.
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-indigo-950 px-4 py-3 text-white">
-          <span className="font-semibold">Repetition {currentIndex + 1} of {path.length}</span>
-          <span>Sing from {midiNoteName((firstExerciseNote?.midi ?? 60) + offset)}</span>
-          <span className="text-sm text-indigo-200">
-            {formatDuration(practiceDuration)}
-            {fullPath.length > path.length ? ` / full walk ${formatDuration(fullDuration)}` : ""}
-            {" / "}Transpose {offset >= 0 ? "+" : ""}{offset}
-          </span>
-        </div>
-      )}
-
-      <div>
-        <div className="mb-2 flex gap-4 text-xs font-semibold text-slate-600">
-          <span><span className="mr-1 inline-block h-3 w-5 rounded-sm border border-slate-600 bg-slate-400 align-middle" /> Context</span>
-          <span><span className="mr-1 inline-block h-3 w-5 rounded-sm border border-indigo-900 bg-indigo-600 align-middle" /> Sing</span>
-        </div>
-        <PianoRoll exercise={exercise} range={range} offset={offset} playheadBeat={playheadBeat} pitchTrace={pitchTrace.points} />
-      </div>
-
-      <RangeKeyboard range={range} current={currentRange} startingPitch={firstExerciseNote ? firstExerciseNote.midi + offset : null} />
-
-      <details className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <summary className="cursor-pointer font-semibold text-slate-900">Note-name reference</summary>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {[...exercise.events].filter((event) => event.region === "exercise").sort((a, b) => a.startBeat - b.startBeat).map((event) => (
-            <span key={event.id} className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-800">{midiNoteName(event.midi + offset)}</span>
-          ))}
-        </div>
-      </details>
-    </section>
+    </article>
   );
 }
 
-function ExerciseWorkspace({ userId, isSignedIn, isAdmin }: { userId: string; isSignedIn: boolean; isAdmin: boolean }) {
-  const [range, setRange] = useState<VocalRange>(DEFAULT_RANGE);
+function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boolean }) {
   const [exercises, setExercises] = useState<VocalExercise[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [startBeat, setStartBeat] = useState(0);
-  const [importError, setImportError] = useState("");
+  const [enabledIds, setEnabledIds] = useState<Set<string> | null>(null);
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [isRoutine, setIsRoutine] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [rangeMessage, setRangeMessage] = useState("");
-  const [showAddForm, setShowAddForm] = useState(false);
-
-  const loadExercises = useCallback(async () => {
-    try {
-      const response = await fetch("/api/exercises", { cache: "no-store" });
-      if (!response.ok) throw new Error("Unable to load exercises");
-      const payload = await response.json() as { exercises?: VocalExercise[] };
-      const nextExercises = Array.isArray(payload.exercises) ? payload.exercises : [];
-      setExercises(nextExercises);
-      setSelectedId((current) => nextExercises.some((exercise) => exercise.id === current) ? current : null);
-      setImportError("");
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Unable to load exercises");
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void loadExercises(); }, [loadExercises]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [durations, setDurations] = useState<Record<string, number>>({});
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const activeSessionRef = useRef<{ id: string; startedAt: number } | null>(null);
 
   useEffect(() => {
-    if (!isSignedIn) return;
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch("/api/users/me/vocal-range", { cache: "no-store" });
-        if (!response.ok) throw new Error("Unable to load your vocal range");
-        const payload = await response.json() as { range?: VocalRange | null };
-        if (!cancelled && payload.range) setRange(payload.range);
+        const response = await fetch("/api/exercises", { cache: "no-store" });
+        if (!response.ok) throw new Error("Could not load warmups");
+        const payload = await response.json() as { exercises?: VocalExercise[] };
+        const recorded = (payload.exercises ?? [])
+          .filter((exercise) => Boolean(exercise.audioUrl))
+          .sort((left, right) => (left.routinePosition ?? Number.MAX_SAFE_INTEGER) - (right.routinePosition ?? Number.MAX_SAFE_INTEGER) || left.title.localeCompare(right.title));
+        if (cancelled) return;
+        setExercises(recorded);
+        const saved = readSavedSelection(userId);
+        const validIds = new Set(recorded.map((exercise) => exercise.id));
+        setEnabledIds(new Set(saved === null ? validIds : saved.filter((id) => validIds.has(id))));
       } catch (error) {
-        if (!cancelled) setRangeMessage(error instanceof Error ? error.message : "Unable to load your vocal range");
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "Could not load warmups");
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [isSignedIn, userId]);
+  }, [userId]);
 
-  const selected = exercises.find((exercise) => exercise.id === selectedId) ?? null;
-  const selectedIndex = selected ? exercises.findIndex((exercise) => exercise.id === selected.id) : -1;
-  const exerciseGroups = useMemo(() => {
-    const groups = new Map<string, { title: string; exercises: VocalExercise[] }>();
-    for (const exercise of exercises) {
-      const key = exercise.collectionSlug ?? "uncollected";
-      const group = groups.get(key) ?? {
-        title: exercise.collectionTitle ?? "Other exercises",
-        exercises: [],
-      };
-      group.exercises.push(exercise);
-      groups.set(key, group);
-    }
-    return Array.from(groups.values());
+  useEffect(() => {
+    const urls = exercises.flatMap((exercise) => exercise.audioUrl ? [exercise.audioUrl] : []);
+    if (urls.length === 0 || typeof window === "undefined") return;
+    void (async () => {
+      let cache: Cache | null = null;
+      if ("caches" in window) {
+        try { cache = await window.caches.open(WARMUP_AUDIO_CACHE); } catch { cache = null; }
+      }
+      await Promise.allSettled(urls.map(async (url) => {
+        const request = new Request(url, { mode: "cors" });
+        if (cache && await cache.match(request)) return;
+        const response = await fetch(request, { cache: "force-cache" });
+        if (cache && response.ok) await cache.put(request, response.clone());
+      }));
+    })();
   }, [exercises]);
 
-  const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    if (!/\.(mid|midi)$/i.test(file.name)) {
-      setImportError("Choose a .mid or .midi file.");
+  const enabledExercises = useMemo(() => exercises.filter((exercise) => enabledIds?.has(exercise.id)), [enabledIds, exercises]);
+  const currentExercise = exercises.find((exercise) => exercise.id === currentId) ?? null;
+
+  const finishSession = useCallback(() => {
+    const active = activeSessionRef.current;
+    if (!active) return;
+    activeSessionRef.current = null;
+    const completedAt = new Date();
+    void fetch(`/api/exercise-practice-sessions/${active.id}`, withUserIdHeader({
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ completedAt: completedAt.toISOString(), durationSeconds: Math.max(0, (Date.now() - active.startedAt) / 1000) }),
+    }, userId)).catch(() => undefined);
+  }, [userId]);
+
+  useEffect(() => () => finishSession(), [finishSession]);
+
+  const play = useCallback((exercise: VocalExercise, routine: boolean) => {
+    finishSession();
+    setPlaybackError(null);
+    setIsRoutine(routine);
+    setCurrentId(exercise.id);
+    const sessionId = crypto.randomUUID();
+    const startedAt = new Date();
+    activeSessionRef.current = { id: sessionId, startedAt: startedAt.getTime() };
+    void fetch("/api/exercise-practice-sessions", withUserIdHeader({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: sessionId, exerciseId: exercise.id, startedAt: startedAt.toISOString(), tempoPercent: 100, repetitionCount: 1 }),
+    }, userId)).catch(() => undefined);
+  }, [finishSession, userId]);
+
+  useEffect(() => {
+    if (!currentExercise || !audioRef.current) return;
+    audioRef.current.currentTime = 0;
+    void audioRef.current.play().catch((error: unknown) => {
+      setPlaybackError(error instanceof Error ? error.message : "Playback could not start");
+      setIsRoutine(false);
+    });
+  }, [currentExercise]);
+
+  const handleEnded = () => {
+    finishSession();
+    if (!isRoutine || !currentExercise) {
+      setCurrentId(null);
       return;
     }
-    try {
-      const formData = new FormData();
-      formData.set("file", file);
-      formData.set("title", title);
-      formData.set("exerciseStartBeat", String(startBeat));
-      const response = await fetch("/api/exercises", {
-        method: "POST",
-        body: formData,
-      });
-      const payload = await response.json().catch(() => ({})) as { exercise?: VocalExercise; error?: string };
-      if (!response.ok || !payload.exercise) throw new Error(payload.error || "Unable to save this exercise");
-      await loadExercises();
-      setSelectedId(payload.exercise.id);
-      setTitle("");
-      setShowAddForm(false);
-      setImportError("");
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Unable to read this MIDI file.");
+    const currentIndex = enabledExercises.findIndex((exercise) => exercise.id === currentExercise.id);
+    const next = enabledExercises[currentIndex + 1];
+    if (next) play(next, true);
+    else {
+      setCurrentId(null);
+      setIsRoutine(false);
     }
   };
 
-  const deleteSelectedExercise = () => {
-    if (!selected) return;
-    void fetch(`/api/exercises/${selected.id}`, { method: "DELETE" }).then((response) => {
-      if (!response.ok) throw new Error("Unable to delete exercise");
-      setSelectedId(null);
-      return loadExercises();
-    }).catch((error) => setImportError(error instanceof Error ? error.message : "Unable to delete exercise"));
+  const persistSelection = (next: Set<string>) => {
+    setEnabledIds(next);
+    try { window.localStorage.setItem(selectionStorageKey(userId), JSON.stringify(Array.from(next))); } catch { /* Storage may be unavailable. */ }
   };
 
-  if (selected) {
-    const nextExercise = exercises[selectedIndex + 1] ?? null;
-    return (
-      <main className="fixed inset-0 z-[70] overflow-y-auto bg-slate-50" data-testid="exercise-detail-page">
-        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
-            <button type="button" onClick={() => setSelectedId(null)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-indigo-400 hover:text-indigo-700">
-              <span aria-hidden="true">&larr; </span>Exercises
-            </button>
-            <span className="hidden text-sm font-medium text-slate-500 sm:inline">{selectedIndex + 1} of {exercises.length}</span>
-            <button
-              type="button"
-              onClick={() => nextExercise && setSelectedId(nextExercise.id)}
-              disabled={!nextExercise}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              Next exercise <span aria-hidden="true">&rarr;</span>
-            </button>
-          </div>
-        </header>
-        <div className="mx-auto max-w-7xl px-4 py-6 md:px-6">
-          {importError ? <p role="alert" className="mb-4 text-sm font-medium text-rose-700">{importError}</p> : null}
-          <ExercisePlayer
-            key={selected.id}
-            exercise={selected}
-            range={range}
-            userId={userId}
-            isAdmin={isAdmin}
-            onDelete={deleteSelectedExercise}
-          />
-        </div>
-      </main>
-    );
-  }
+  const saveExercise = async (exercise: VocalExercise, changes: { title: string; lyricHint: string }) => {
+    const response = await fetch(`/api/exercises/${encodeURIComponent(exercise.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    });
+    const payload = await response.json().catch(() => ({})) as { exercise?: VocalExercise; error?: string };
+    if (!response.ok || !payload.exercise) throw new Error(payload.error ?? "Could not save this warmup");
+    setExercises((previous) => previous.map((item) => item.id === exercise.id ? payload.exercise! : item));
+  };
+
+  if (isLoading) return <p className="p-6 text-sm text-slate-600">Loading warmups...</p>;
 
   return (
-    <main className="space-y-6" data-testid="exercise-browser">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-600">Warmups and technique</p>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-950">Exercises</h1>
-          <p className="mt-1 max-w-3xl text-sm text-slate-600">Choose an exercise to open its full practice view.</p>
-        </div>
-        {isAdmin ? (
-          <button type="button" onClick={() => setShowAddForm((visible) => !visible)} className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-indigo-400 hover:text-indigo-700">
-            {showAddForm ? "Close" : "+ Add exercise"}
+    <main className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6" data-testid="exercise-browser">
+      <header className="rounded-2xl bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-900 p-6 text-white shadow-lg sm:p-8">
+        <p className="text-xs font-bold uppercase tracking-[0.22em] text-indigo-200">Recorded vocal routine</p>
+        <h1 className="mt-2 text-3xl font-bold">Warmups</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-indigo-100">Choose the exercises you want, then play the set straight through and sing along. Your choices are saved on this device.</p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button type="button" onClick={() => enabledExercises[0] && play(enabledExercises[0], true)} disabled={enabledExercises.length === 0} className="rounded-lg bg-white px-5 py-2.5 font-bold text-indigo-900 shadow-sm hover:bg-indigo-50 disabled:cursor-not-allowed disabled:bg-indigo-300">
+            Play set ({enabledExercises.length})
           </button>
-        ) : null}
+          <button type="button" onClick={() => persistSelection(new Set(exercises.map((exercise) => exercise.id)))} className="rounded-lg border border-indigo-300 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Select all</button>
+          <button type="button" onClick={() => persistSelection(new Set())} className="rounded-lg border border-indigo-300 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Clear set</button>
+        </div>
+      </header>
+
+      {loadError ? <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-800">{loadError}</p> : null}
+      {playbackError ? <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-800">{playbackError}</p> : null}
+
+      {currentExercise ? (
+        <section className="sticky top-3 z-10 rounded-2xl border border-indigo-200 bg-white/95 p-4 shadow-lg backdrop-blur" aria-label="Warmup player">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600">Now playing</p><p className="truncate font-bold text-slate-950">{currentExercise.title}</p></div>
+            {isRoutine ? <span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Set {enabledExercises.findIndex((item) => item.id === currentExercise.id) + 1} of {enabledExercises.length}</span> : null}
+          </div>
+          <audio ref={audioRef} src={currentExercise.audioUrl} controls preload="metadata" className="w-full" onEnded={handleEnded} onLoadedMetadata={(event) => setDurations((previous) => ({ ...previous, [currentExercise.id]: event.currentTarget.duration }))} onError={() => setPlaybackError("This warmup audio could not be loaded.")} />
+        </section>
+      ) : <audio ref={audioRef} className="hidden" />}
+
+      <div className="grid gap-4 md:grid-cols-2" aria-label="Warmup catalog">
+        {exercises.map((exercise, index) => (
+          <WarmupCard key={exercise.id} exercise={exercise} index={index} enabled={Boolean(enabledIds?.has(exercise.id))} active={currentId === exercise.id} isAdmin={isAdmin} duration={durations[exercise.id]} onToggle={() => {
+            const next = new Set(enabledIds ?? []);
+            if (next.has(exercise.id)) next.delete(exercise.id); else next.add(exercise.id);
+            persistSelection(next);
+          }} onPlay={() => play(exercise, false)} onSave={(changes) => saveExercise(exercise, changes)} />
+        ))}
       </div>
 
-      {rangeMessage ? <p className="text-xs font-medium text-indigo-800" role="status">{rangeMessage}</p> : null}
-
-      {isAdmin && showAddForm ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h2 className="font-bold text-slate-950">Add shared MIDI exercise</h2>
-          <div className="mt-3 grid gap-3 md:grid-cols-[1fr_12rem_auto] md:items-end">
-            <label className="grid gap-1 text-sm font-medium text-slate-700">Title (optional)<input value={title} onChange={(event) => setTitle(event.target.value)} className="rounded-lg border border-slate-300 px-3 py-2" placeholder="Triad on Mum" /></label>
-            <label className="grid gap-1 text-sm font-medium text-slate-700">Singing begins at beat<input type="number" min="0" step="0.25" value={startBeat} onChange={(event) => setStartBeat(Math.max(0, Number(event.target.value)))} className="rounded-lg border border-slate-300 px-3 py-2" /></label>
-            <label className="cursor-pointer rounded-lg bg-slate-900 px-5 py-2 text-center font-semibold text-white hover:bg-slate-700">Choose MIDI<input type="file" accept=".mid,.midi,audio/midi,audio/x-midi" onChange={handleImport} className="sr-only" /></label>
-          </div>
-        </section>
-      ) : null}
-      {importError ? <p role="alert" className="text-sm font-medium text-rose-700">{importError}</p> : null}
-
-      {isLoading ? <p className="text-sm text-slate-600">Loading exercises...</p> : exercises.length > 0 ? (
-        <div className="space-y-8" aria-label="Exercise catalog">
-          {exerciseGroups.map((group) => (
-            <section key={group.title}>
-              <h2 className="mb-3 text-xl font-bold text-slate-950">{group.title}</h2>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {group.exercises.map((exercise) => (
-                  <button key={exercise.id} type="button" onClick={() => setSelectedId(exercise.id)} className="group rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
-                    <span className="flex items-start justify-between gap-3">
-                      <span className="text-lg font-bold text-slate-950 group-hover:text-indigo-700">{exercise.title}</span>
-                      {exercise.category ? <span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">{exercise.category}</span> : null}
-                    </span>
-                    {exercise.description ? <span className="mt-2 block text-sm leading-6 text-slate-600">{exercise.description}</span> : null}
-                    <span className="mt-4 flex items-center justify-between gap-2 text-xs font-semibold text-slate-500">
-                      <span>{exercise.syllable ? `Syllable: ${exercise.syllable}` : `${exercise.tempoBpm} BPM`}</span>
-                      <span className="text-indigo-600">Open <span aria-hidden="true">&rarr;</span></span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-12 text-center text-slate-600">
-          <p className="font-semibold text-slate-800">No exercises yet</p>
-          <p className="mt-1 text-sm">An administrator can add the first shared exercise.</p>
-        </div>
-      )}
+      {exercises.length === 0 && !loadError ? <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-12 text-center"><p className="font-semibold text-slate-800">No recorded warmups yet</p><p className="mt-1 text-sm text-slate-600">Run the recorded warmup import after deploying the database migration.</p></div> : null}
     </main>
   );
 }
 
-export function ExerciseBrowser({ userId, isSignedIn, isAdmin }: { userId: string; isSignedIn: boolean; isAdmin: boolean }) {
-  return <ExerciseWorkspace key={`${userId}:${isSignedIn}:${isAdmin}`} userId={userId} isSignedIn={isSignedIn} isAdmin={isAdmin} />;
+export function ExerciseBrowser({ userId, isAdmin }: { userId: string; isSignedIn: boolean; isAdmin: boolean }) {
+  return <ExerciseWorkspace key={`${userId}:${isAdmin}`} userId={userId} isAdmin={isAdmin} />;
 }
