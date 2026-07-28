@@ -37,13 +37,6 @@ function readSavedAudioVersion(userId: string): WarmupAudioVersion {
   }
 }
 
-function resolveWarmupAudioUrl(exercise: VocalExercise | null, version: WarmupAudioVersion): string {
-  if (!exercise) return "";
-  return version === "blend"
-    ? exercise.alternateAudioUrl ?? exercise.audioUrl ?? ""
-    : exercise.audioUrl ?? exercise.alternateAudioUrl ?? "";
-}
-
 function readSavedSelection(userId: string): string[] | null {
   try {
     const value = window.localStorage.getItem(selectionStorageKey(userId));
@@ -150,8 +143,12 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
   const [loadError, setLoadError] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [durations, setDurations] = useState<Record<string, number>>({});
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const pendingPlaybackRef = useRef<{ currentTime: number; shouldPlay: boolean } | null>(null);
+  const partAudioRef = useRef<HTMLAudioElement | null>(null);
+  const blendAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioVersionRef = useRef<WarmupAudioVersion>("blend");
+  const playingVersionRef = useRef<WarmupAudioVersion | null>(null);
+  const isAudioPlayingRef = useRef(false);
+  const playbackPositionRef = useRef(0);
   const activeSessionRef = useRef<{ id: string; startedAt: number } | null>(null);
 
   useEffect(() => {
@@ -166,7 +163,9 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
           .sort((left, right) => (left.routinePosition ?? Number.MAX_SAFE_INTEGER) - (right.routinePosition ?? Number.MAX_SAFE_INTEGER) || left.title.localeCompare(right.title));
         if (cancelled) return;
         setExercises(recorded);
-        setAudioVersion(readSavedAudioVersion(userId));
+        const savedVersion = readSavedAudioVersion(userId);
+        audioVersionRef.current = savedVersion;
+        setAudioVersion(savedVersion);
         const saved = readSavedSelection(userId);
         const validIds = new Set(recorded.map((exercise) => exercise.id));
         setEnabledIds(new Set(saved === null ? validIds : saved.filter((id) => validIds.has(id))));
@@ -181,7 +180,6 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
 
   const enabledExercises = useMemo(() => exercises.filter((exercise) => enabledIds?.has(exercise.id)), [enabledIds, exercises]);
   const currentExercise = exercises.find((exercise) => exercise.id === currentId) ?? null;
-  const currentAudioUrl = resolveWarmupAudioUrl(currentExercise, audioVersion);
   const currentSetIndex = currentExercise ? enabledExercises.findIndex((exercise) => exercise.id === currentExercise.id) : -1;
 
   const finishSession = useCallback(() => {
@@ -203,7 +201,7 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
     setPlaybackError(null);
     setIsRoutine(routine);
     setCurrentId(exercise.id);
-    pendingPlaybackRef.current = { currentTime: 0, shouldPlay: true };
+    playbackPositionRef.current = 0;
     setPlayRequestId((previous) => previous + 1);
     const sessionId = createPracticeSessionId();
     const startedAt = new Date();
@@ -216,25 +214,26 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
   }, [finishSession, userId]);
 
   useEffect(() => {
-    if (!currentExercise || !currentAudioUrl || !audioRef.current) return;
-    const audio = audioRef.current;
-    const pending = pendingPlaybackRef.current ?? { currentTime: 0, shouldPlay: true };
-    pendingPlaybackRef.current = null;
+    if (!currentExercise) return;
+    const version = audioVersionRef.current;
+    const audio = version === "part" ? partAudioRef.current : blendAudioRef.current;
+    const inactiveAudio = version === "part" ? blendAudioRef.current : partAudioRef.current;
+    if (!audio) return;
     let cancelled = false;
     const resetWhenReady = () => {
       if (cancelled) return;
-      try { audio.currentTime = Math.min(pending.currentTime, Number.isFinite(audio.duration) ? audio.duration : pending.currentTime); } catch { /* Keep the browser's natural position. */ }
+      try { audio.currentTime = 0; } catch { /* The new exercise begins at zero naturally. */ }
     };
 
+    try { inactiveAudio?.pause(); } catch { /* A detached media element may reject pause. */ }
     try {
-      audio.currentTime = pending.currentTime;
+      audio.currentTime = 0;
       if (audio.readyState < 1) audio.addEventListener("loadedmetadata", resetWhenReady, { once: true });
     } catch {
       audio.addEventListener("loadedmetadata", resetWhenReady, { once: true });
     }
 
     try {
-      if (!pending.shouldPlay) return () => audio.removeEventListener("loadedmetadata", resetWhenReady);
       const result = audio.play();
       void result?.catch((error: unknown) => {
         if (cancelled) return;
@@ -250,18 +249,43 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
       cancelled = true;
       audio.removeEventListener("loadedmetadata", resetWhenReady);
     };
-  }, [currentAudioUrl, currentExercise, playRequestId]);
+  }, [currentExercise, playRequestId]);
 
   const switchAudioVersion = (nextVersion: WarmupAudioVersion) => {
     if (nextVersion === audioVersion) return;
-    const audio = audioRef.current;
-    pendingPlaybackRef.current = {
-      currentTime: audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
-      shouldPlay: Boolean(audio && !audio.paused),
+    const currentAudio = audioVersion === "part" ? partAudioRef.current : blendAudioRef.current;
+    const nextAudio = nextVersion === "part" ? partAudioRef.current : blendAudioRef.current;
+    const shouldResume = isAudioPlayingRef.current;
+    let position = playbackPositionRef.current;
+    try {
+      if (currentAudio && Number.isFinite(currentAudio.currentTime)) position = currentAudio.currentTime;
+    } catch { /* Use the last timeupdate position. */ }
+    playbackPositionRef.current = position;
+    try { currentAudio?.pause(); } catch { /* A browser may reject media operations during a source transition. */ }
+
+    const seekWhenReady = () => {
+      try { if (nextAudio) nextAudio.currentTime = position; } catch { /* Keep the browser's natural position. */ }
     };
+    if (nextAudio) {
+      try {
+        nextAudio.currentTime = position;
+        if (nextAudio.readyState < 1) nextAudio.addEventListener("loadedmetadata", seekWhenReady, { once: true });
+      } catch {
+        nextAudio.addEventListener("loadedmetadata", seekWhenReady, { once: true });
+      }
+    }
+
+    audioVersionRef.current = nextVersion;
     setAudioVersion(nextVersion);
-    setPlayRequestId((previous) => previous + 1);
     try { window.localStorage.setItem(audioVersionStorageKey(userId), nextVersion); } catch { /* Storage may be unavailable. */ }
+    if (shouldResume && nextAudio) {
+      try {
+        const result = nextAudio.play();
+        void result?.catch((error: unknown) => setPlaybackError(error instanceof Error ? error.message : "Playback could not resume"));
+      } catch (error) {
+        setPlaybackError(error instanceof Error ? error.message : "Playback could not resume");
+      }
+    }
   };
 
   const handleEnded = () => {
@@ -344,9 +368,32 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
             </section>
           </>
         ) : null}
-        <audio ref={audioRef} src={currentAudioUrl || undefined} controls preload="metadata" className="w-full" onEnded={handleEnded} onLoadedMetadata={(event) => {
-          if (currentExercise) setDurations((previous) => ({ ...previous, [currentExercise.id]: event.currentTarget.duration }));
-        }} onError={() => setPlaybackError("This warmup audio could not be loaded.")} />
+        <audio
+          ref={partAudioRef}
+          src={currentExercise?.audioUrl}
+          controls
+          preload="metadata"
+          className={audioVersion === "part" ? "w-full" : "hidden"}
+          onPlay={() => { playingVersionRef.current = "part"; isAudioPlayingRef.current = true; }}
+          onPause={() => { if (playingVersionRef.current === "part") isAudioPlayingRef.current = false; }}
+          onTimeUpdate={(event) => { if (playingVersionRef.current === "part") playbackPositionRef.current = event.currentTarget.currentTime; }}
+          onEnded={handleEnded}
+          onLoadedMetadata={(event) => { if (currentExercise) setDurations((previous) => ({ ...previous, [currentExercise.id]: event.currentTarget.duration })); }}
+          onError={() => setPlaybackError("The Part warmup audio could not be loaded.")}
+        />
+        <audio
+          ref={blendAudioRef}
+          src={currentExercise?.alternateAudioUrl ?? currentExercise?.audioUrl}
+          controls
+          preload="metadata"
+          className={audioVersion === "blend" ? "w-full" : "hidden"}
+          onPlay={() => { playingVersionRef.current = "blend"; isAudioPlayingRef.current = true; }}
+          onPause={() => { if (playingVersionRef.current === "blend") isAudioPlayingRef.current = false; }}
+          onTimeUpdate={(event) => { if (playingVersionRef.current === "blend") playbackPositionRef.current = event.currentTarget.currentTime; }}
+          onEnded={handleEnded}
+          onLoadedMetadata={(event) => { if (currentExercise) setDurations((previous) => ({ ...previous, [currentExercise.id]: event.currentTarget.duration })); }}
+          onError={() => setPlaybackError("The Blend warmup audio could not be loaded.")}
+        />
       </section>
 
       <div className="grid gap-4 md:grid-cols-2" aria-label="Warmup catalog">

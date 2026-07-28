@@ -120,7 +120,7 @@ describe("recorded warmup browser", () => {
     mockExerciseList();
     const { container } = render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
     await screen.findByRole("button", { name: "Play set (2)" });
-    const audio = container.querySelector("audio");
+    const audio = container.querySelectorAll("audio")[1];
     expect(audio).not.toBeNull();
     Object.defineProperty(audio, "currentTime", {
       configurable: true,
@@ -149,17 +149,17 @@ describe("recorded warmup browser", () => {
     mockExerciseList();
     const { container } = render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
     fireEvent.click(await screen.findByRole("button", { name: "Play set (2)" }));
-    const audio = container.querySelector("audio")!;
-    await waitFor(() => expect(audio.getAttribute("src")).toBe(exercises[0].alternateAudioUrl));
+    const [partAudio, blendAudio] = Array.from(container.querySelectorAll("audio"));
+    await waitFor(() => expect(blendAudio.getAttribute("src")).toBe(exercises[0].alternateAudioUrl));
     expect(screen.getByRole("button", { name: "Blend" })).toHaveAttribute("aria-pressed", "true");
-    audio.currentTime = 12;
-    Object.defineProperty(audio, "paused", { configurable: true, get: () => false });
+    blendAudio.currentTime = 12;
+    fireEvent.play(blendAudio);
 
     fireEvent.click(screen.getByRole("button", { name: "Part" }));
 
-    await waitFor(() => expect(audio.getAttribute("src")).toBe(exercises[0].audioUrl));
+    expect(partAudio.getAttribute("src")).toBe(exercises[0].audioUrl);
     expect(screen.getByRole("button", { name: "Part" })).toHaveAttribute("aria-pressed", "true");
-    expect(audio.currentTime).toBe(12);
+    expect(partAudio.currentTime).toBe(12);
     await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2));
   });
 
