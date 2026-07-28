@@ -111,4 +111,33 @@ describe("recorded warmup browser", () => {
     expect(screen.getByText("Set 1 of 2")).toBeInTheDocument();
     await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
   });
+
+  it("keeps playing when a browser rejects seeking before metadata is ready", async () => {
+    mockExerciseList();
+    const { container } = render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
+    await screen.findByRole("button", { name: "Play set (2)" });
+    const audio = container.querySelector("audio");
+    expect(audio).not.toBeNull();
+    Object.defineProperty(audio, "currentTime", {
+      configurable: true,
+      get: () => 0,
+      set: () => { throw new DOMException("Metadata is not loaded", "InvalidStateError"); },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Play set (2)" }));
+
+    expect(await screen.findByText("Now playing")).toBeInTheDocument();
+    await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
+    expect(screen.queryByText("This page couldn’t load")).not.toBeInTheDocument();
+  });
+
+  it("restarts the active recording when Play is pressed again", async () => {
+    mockExerciseList();
+    render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
+    const playButtons = await screen.findAllByRole("button", { name: "Play" });
+    fireEvent.click(playButtons[0]);
+    await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2));
+  });
 });

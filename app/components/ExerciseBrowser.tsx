@@ -4,13 +4,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VocalExercise } from "../lib/vocalExercise";
 import { withUserIdHeader } from "../lib/userContext";
 
-// Share the same Cache Storage bucket used by playlist/song practice audio.
-const WARMUP_AUDIO_CACHE = "cantare-playlist-practice-v1";
-
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "--:--";
   const rounded = Math.round(seconds);
   return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
+}
+
+function createPracticeSessionId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    // Some embedded browsers expose crypto but reject randomUUID calls.
+  }
+  return `warmup-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function selectionStorageKey(userId: string): string {
@@ -116,6 +122,7 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
   const [exercises, setExercises] = useState<VocalExercise[]>([]);
   const [enabledIds, setEnabledIds] = useState<Set<string> | null>(null);
   const [currentId, setCurrentId] = useState<string | null>(null);
+  const [playRequestId, setPlayRequestId] = useState(0);
   const [isRoutine, setIsRoutine] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -148,23 +155,6 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
     return () => { cancelled = true; };
   }, [userId]);
 
-  useEffect(() => {
-    const urls = exercises.flatMap((exercise) => exercise.audioUrl ? [exercise.audioUrl] : []);
-    if (urls.length === 0 || typeof window === "undefined") return;
-    void (async () => {
-      let cache: Cache | null = null;
-      if ("caches" in window) {
-        try { cache = await window.caches.open(WARMUP_AUDIO_CACHE); } catch { cache = null; }
-      }
-      await Promise.allSettled(urls.map(async (url) => {
-        const request = new Request(url, { mode: "cors" });
-        if (cache && await cache.match(request)) return;
-        const response = await fetch(request, { cache: "force-cache" });
-        if (cache && response.ok) await cache.put(request, response.clone());
-      }));
-    })();
-  }, [exercises]);
-
   const enabledExercises = useMemo(() => exercises.filter((exercise) => enabledIds?.has(exercise.id)), [enabledIds, exercises]);
   const currentExercise = exercises.find((exercise) => exercise.id === currentId) ?? null;
 
@@ -187,7 +177,8 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
     setPlaybackError(null);
     setIsRoutine(routine);
     setCurrentId(exercise.id);
-    const sessionId = crypto.randomUUID();
+    setPlayRequestId((previous) => previous + 1);
+    const sessionId = createPracticeSessionId();
     const startedAt = new Date();
     activeSessionRef.current = { id: sessionId, startedAt: startedAt.getTime() };
     void fetch("/api/exercise-practice-sessions", withUserIdHeader({
@@ -199,12 +190,36 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
 
   useEffect(() => {
     if (!currentExercise || !audioRef.current) return;
-    audioRef.current.currentTime = 0;
-    void audioRef.current.play().catch((error: unknown) => {
+    const audio = audioRef.current;
+    let cancelled = false;
+    const resetWhenReady = () => {
+      if (cancelled) return;
+      try { audio.currentTime = 0; } catch { /* The new source will begin at zero naturally. */ }
+    };
+
+    try {
+      audio.currentTime = 0;
+    } catch {
+      audio.addEventListener("loadedmetadata", resetWhenReady, { once: true });
+    }
+
+    try {
+      const result = audio.play();
+      void result?.catch((error: unknown) => {
+        if (cancelled) return;
+        setPlaybackError(error instanceof Error ? error.message : "Playback could not start");
+        setIsRoutine(false);
+      });
+    } catch (error) {
       setPlaybackError(error instanceof Error ? error.message : "Playback could not start");
       setIsRoutine(false);
-    });
-  }, [currentExercise]);
+    }
+
+    return () => {
+      cancelled = true;
+      audio.removeEventListener("loadedmetadata", resetWhenReady);
+    };
+  }, [currentExercise, playRequestId]);
 
   const handleEnded = () => {
     finishSession();
@@ -257,15 +272,19 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
       {loadError ? <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-800">{loadError}</p> : null}
       {playbackError ? <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-800">{playbackError}</p> : null}
 
-      {currentExercise ? (
-        <section className="sticky top-3 z-10 rounded-2xl border border-indigo-200 bg-white/95 p-4 shadow-lg backdrop-blur" aria-label="Warmup player">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600">Now playing</p><p className="truncate font-bold text-slate-950">{currentExercise.title}</p></div>
-            {isRoutine ? <span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Set {enabledExercises.findIndex((item) => item.id === currentExercise.id) + 1} of {enabledExercises.length}</span> : null}
-          </div>
-          <audio ref={audioRef} src={currentExercise.audioUrl} controls preload="metadata" className="w-full" onEnded={handleEnded} onLoadedMetadata={(event) => setDurations((previous) => ({ ...previous, [currentExercise.id]: event.currentTarget.duration }))} onError={() => setPlaybackError("This warmup audio could not be loaded.")} />
-        </section>
-      ) : <audio ref={audioRef} className="hidden" />}
+      <section className={`sticky top-3 z-10 rounded-2xl border border-indigo-200 bg-white/95 p-4 shadow-lg backdrop-blur ${currentExercise ? "" : "hidden"}`} aria-label="Warmup player">
+        {currentExercise ? (
+          <>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600">Now playing</p><p className="truncate font-bold text-slate-950">{currentExercise.title}</p></div>
+              {isRoutine ? <span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Set {enabledExercises.findIndex((item) => item.id === currentExercise.id) + 1} of {enabledExercises.length}</span> : null}
+            </div>
+          </>
+        ) : null}
+        <audio ref={audioRef} src={currentExercise?.audioUrl} controls preload="metadata" className="w-full" onEnded={handleEnded} onLoadedMetadata={(event) => {
+          if (currentExercise) setDurations((previous) => ({ ...previous, [currentExercise.id]: event.currentTarget.duration }));
+        }} onError={() => setPlaybackError("This warmup audio could not be loaded.")} />
+      </section>
 
       <div className="grid gap-4 md:grid-cols-2" aria-label="Warmup catalog">
         {exercises.map((exercise, index) => (
