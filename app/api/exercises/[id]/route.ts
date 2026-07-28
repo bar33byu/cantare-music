@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteVocalExercise, getVocalExercises, updateVocalExercise } from "../../../../db/queries";
-import { AUTH_SESSION_COOKIE_NAME } from "../../../lib/authTokens";
 import { setExerciseStartBeat } from "../../../lib/vocalExercise";
-import { getRequestCookie, resolveRequestContext } from "../../_user";
+import { resolveAuthenticatedRequestContext } from "../../_user";
 
 async function isAuthenticatedAdmin(request: NextRequest): Promise<boolean> {
-  if (!getRequestCookie(request, AUTH_SESSION_COOKIE_NAME)) return false;
-  const context = await resolveRequestContext(request);
-  return Boolean(context.actor?.isAdmin);
+  const context = await resolveAuthenticatedRequestContext(request);
+  return Boolean(context?.actor?.isAdmin);
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

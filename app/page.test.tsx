@@ -554,9 +554,32 @@ describe('Home page', () => {
     expect(html).not.toContain('>Cantare Music</h1>');
   });
 
-  it('places Exercise after Shared and writes its hash route', async () => {
+  it('hides Exercise from guests', () => {
     render(<Home />);
 
+    const tabs = screen.getByLabelText('Main sections').querySelectorAll('button');
+    expect(Array.from(tabs).map((tab) => tab.textContent?.trim())).toEqual([
+      'Playlists',
+      'Library',
+      'Shared',
+    ]);
+    expect(screen.queryByTestId('exercise-tab')).not.toBeInTheDocument();
+  });
+
+  it('places Exercise after Shared for signed-in users and writes its hash route', async () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      currentUserId: 'test-user',
+      users: [
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+      ],
+    }));
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('Offline test session')) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    const exerciseTab = await screen.findByTestId('exercise-tab');
     const tabs = screen.getByLabelText('Main sections').querySelectorAll('button');
     expect(Array.from(tabs).map((tab) => tab.textContent?.trim())).toEqual([
       'Playlists',
@@ -565,19 +588,39 @@ describe('Home page', () => {
       'Exercise',
     ]);
 
-    fireEvent.click(screen.getByTestId('exercise-tab'));
+    fireEvent.click(exerciseTab);
     expect(await screen.findByTestId('exercise-browser')).toBeInTheDocument();
     await waitFor(() => expect(window.location.hash).toContain('view=exercise'));
   });
 
-  it('preserves a direct Exercise hash route during startup', async () => {
+  it('shows a sign-in prompt instead of warmups for a guest direct Exercise route', async () => {
     window.history.replaceState(null, '', '/#view=exercise');
+
+    render(<Home />);
+
+    expect(await screen.findByText('Sign in to use warmups')).toBeInTheDocument();
+    expect(window.location.hash).toBe('#view=exercise');
+    expect(screen.queryByTestId('exercise-browser')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mock-playlist-browser')).not.toBeInTheDocument();
+  });
+
+  it('preserves a direct Exercise route for a signed-in user', async () => {
+    window.localStorage.setItem('cantare:user-settings', JSON.stringify({
+      segmentPrerollMs: 500,
+      currentUserId: 'test-user',
+      users: [
+        { id: 'default', username: 'default', name: 'Default User', email: '' },
+        { id: 'test-user', username: 'test-user', name: 'Test User', email: 'test@example.com' },
+      ],
+    }));
+    window.history.replaceState(null, '', '/#view=exercise');
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('Offline test session')) as unknown as typeof fetch;
 
     render(<Home />);
 
     expect(await screen.findByTestId('exercise-browser')).toBeInTheDocument();
     expect(window.location.hash).toBe('#view=exercise');
-    expect(screen.queryByTestId('mock-playlist-browser')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sign in to use warmups')).not.toBeInTheDocument();
   });
 
   it('refreshes playlist data when returning from song practice to playlist practice', async () => {

@@ -7,12 +7,11 @@ vi.mock("../../../../db/queries", () => ({
 }));
 
 vi.mock("../../_user", () => ({
-  getRequestCookie: vi.fn(),
-  resolveRequestContext: vi.fn(),
+  resolveAuthenticatedRequestContext: vi.fn(),
 }));
 
 import { getVocalExercises, updateVocalExercise } from "../../../../db/queries";
-import { getRequestCookie, resolveRequestContext } from "../../_user";
+import { resolveAuthenticatedRequestContext } from "../../_user";
 import { PATCH } from "./route";
 
 const exercise = {
@@ -33,8 +32,7 @@ const exercise = {
 describe("recorded warmup updates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getRequestCookie).mockReturnValue("session-token");
-    vi.mocked(resolveRequestContext).mockResolvedValue({ actor: { id: "admin-1", isAdmin: true } } as never);
+    vi.mocked(resolveAuthenticatedRequestContext).mockResolvedValue({ actor: { id: "admin-1", isAdmin: true } } as never);
     vi.mocked(getVocalExercises).mockResolvedValue([exercise]);
   });
 

@@ -85,6 +85,12 @@ async function resolveSessionRequestContext(request: NextRequest | Request): Pro
   };
 }
 
+export async function resolveAuthenticatedRequestContext(
+  request: NextRequest | Request
+): Promise<RequestActorContext | null> {
+  return resolveSessionRequestContext(request);
+}
+
 export async function resolveEffectiveRequestUserId(request: NextRequest | Request): Promise<string> {
   const sessionContext = await resolveSessionRequestContext(request);
   await logImpersonatedMutation(request, sessionContext);

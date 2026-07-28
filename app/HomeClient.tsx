@@ -2319,21 +2319,23 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           >
             Shared
           </button>
-          <button
-            data-testid="exercise-tab"
-            onClick={() => {
-              setSelectedSong(null);
-              setSelectedPlaylist(null);
-              setActiveView("exercise");
-            }}
-            className={`shrink-0 px-4 py-3 font-medium transition-colors ${
-              activeView === "exercise"
-                ? "border-b-2 border-violet-600 text-violet-700"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            Exercise
-          </button>
+          {isSignedIn ? (
+            <button
+              data-testid="exercise-tab"
+              onClick={() => {
+                setSelectedSong(null);
+                setSelectedPlaylist(null);
+                setActiveView("exercise");
+              }}
+              className={`shrink-0 px-4 py-3 font-medium transition-colors ${
+                activeView === "exercise"
+                  ? "border-b-2 border-violet-600 text-violet-700"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              Exercise
+            </button>
+          ) : null}
         </div>
 
         {activeView === "library" ? (
@@ -2428,11 +2430,19 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         ) : null}
 
         {activeView === "exercise" ? (
-          <ExerciseBrowser
-            userId={activeUserId}
-            isSignedIn={isSignedIn}
-            isAdmin={Boolean(adminActor?.isAdmin)}
-          />
+          isSignedIn ? (
+            <ExerciseBrowser
+              userId={activeUserId}
+              isSignedIn
+              isAdmin={Boolean(adminActor?.isAdmin)}
+            />
+          ) : (
+            <GuestWelcomePanel
+              title="Sign in to use warmups"
+              action={guestSignInForm}
+              footer="Recorded warmups and warmup practice are available to signed-in users."
+            />
+          )
         ) : null}
       </div>
     </div>
