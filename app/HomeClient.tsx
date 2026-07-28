@@ -855,6 +855,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const settingsLoadedRef = useRef(false);
   const usersHydratedFromDbRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
+  const initialHashRouteAppliedRef = useRef(false);
   const activeUserId = userSettings.currentUserId;
   const currentUser = useMemo(
     () => userSettings.users.find((user) => user.id === userSettings.currentUserId) ?? DEFAULT_USER_SETTINGS.users[0],
@@ -1515,9 +1516,12 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     window.addEventListener("popstate", onPopState);
     const currentHash = window.location.hash;
     if (currentHash) {
-      void applyHashRoute(currentHash);
+      void applyHashRoute(currentHash).finally(() => {
+        initialHashRouteAppliedRef.current = true;
+      });
     } else {
       window.history.replaceState(null, "", buildHashRoute({ view: "playlists" }));
+      initialHashRouteAppliedRef.current = true;
     }
 
     return () => {
@@ -1560,7 +1564,11 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   }, [activeView, selectedPlaylist, selectedSong, songEditorReturnView]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || isApplyingHashRouteRef.current) {
+    if (
+      typeof window === "undefined"
+      || !initialHashRouteAppliedRef.current
+      || isApplyingHashRouteRef.current
+    ) {
       return;
     }
     if (window.location.hash === currentHash) {

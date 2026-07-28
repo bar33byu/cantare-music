@@ -378,7 +378,13 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
           onPause={() => { if (playingVersionRef.current === "part") isAudioPlayingRef.current = false; }}
           onTimeUpdate={(event) => { if (playingVersionRef.current === "part") playbackPositionRef.current = event.currentTarget.currentTime; }}
           onEnded={handleEnded}
-          onLoadedMetadata={(event) => { if (currentExercise) setDurations((previous) => ({ ...previous, [currentExercise.id]: event.currentTarget.duration })); }}
+          onLoadedMetadata={(event) => {
+            const exerciseId = currentExercise?.id;
+            const duration = event.currentTarget.duration;
+            if (exerciseId && Number.isFinite(duration)) {
+              setDurations((previous) => ({ ...previous, [exerciseId]: duration }));
+            }
+          }}
           onError={() => setPlaybackError("The Part warmup audio could not be loaded.")}
         />
         <audio
@@ -391,7 +397,13 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
           onPause={() => { if (playingVersionRef.current === "blend") isAudioPlayingRef.current = false; }}
           onTimeUpdate={(event) => { if (playingVersionRef.current === "blend") playbackPositionRef.current = event.currentTarget.currentTime; }}
           onEnded={handleEnded}
-          onLoadedMetadata={(event) => { if (currentExercise) setDurations((previous) => ({ ...previous, [currentExercise.id]: event.currentTarget.duration })); }}
+          onLoadedMetadata={(event) => {
+            const exerciseId = currentExercise?.id;
+            const duration = event.currentTarget.duration;
+            if (exerciseId && Number.isFinite(duration)) {
+              setDurations((previous) => ({ ...previous, [exerciseId]: duration }));
+            }
+          }}
           onError={() => setPlaybackError("The Blend warmup audio could not be loaded.")}
         />
       </section>

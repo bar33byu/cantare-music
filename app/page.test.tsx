@@ -570,6 +570,16 @@ describe('Home page', () => {
     await waitFor(() => expect(window.location.hash).toContain('view=exercise'));
   });
 
+  it('preserves a direct Exercise hash route during startup', async () => {
+    window.history.replaceState(null, '', '/#view=exercise');
+
+    render(<Home />);
+
+    expect(await screen.findByTestId('exercise-browser')).toBeInTheDocument();
+    expect(window.location.hash).toBe('#view=exercise');
+    expect(screen.queryByTestId('mock-playlist-browser')).not.toBeInTheDocument();
+  });
+
   it('refreshes playlist data when returning from song practice to playlist practice', async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);

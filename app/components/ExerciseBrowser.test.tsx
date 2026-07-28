@@ -116,6 +116,18 @@ describe("recorded warmup browser", () => {
     await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
   });
 
+  it("records loaded audio metadata without retaining the browser event", async () => {
+    mockExerciseList();
+    const { container } = render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Play set (2)" }));
+    const blendAudio = container.querySelectorAll("audio")[1];
+    Object.defineProperty(blendAudio, "duration", { configurable: true, value: 42 });
+
+    fireEvent.loadedMetadata(blendAudio);
+
+    expect(await screen.findByText("0:42")).toBeInTheDocument();
+  });
+
   it("keeps playing when a browser rejects seeking before metadata is ready", async () => {
     mockExerciseList();
     const { container } = render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
