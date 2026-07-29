@@ -1,4 +1,4 @@
-import { eq, asc, desc, inArray, and, count, lte, sql, isNull, ne, or } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, count, lte, sql, isNull, isNotNull, ne, or } from "drizzle-orm";
 import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, songPracticeSessions, midiSources, midiAlignments, vocalExercises, vocalExerciseCollections, vocalExerciseCollectionItems, vocalExercisePracticeSessions, userVocalRanges } from "./schema";
 import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecordingRow, TapPracticeSessionRow, SongPracticeSessionRow, MidiSourceRow, MidiAlignmentRow, RawMidiNoteData, CleanedMidiNoteData, MidiCleanupSettingsData, UserRow, MagicLinkTokenRow, UserSessionRow, AuditLogRow, VocalExerciseEventData, VocalExerciseRow, VocalExercisePracticeSessionRow } from "./schema";
@@ -292,6 +292,11 @@ export interface PersistedVocalExercisePracticeSession {
   durationSeconds: number;
   tempoPercent: number;
   repetitionCount: number;
+  audioVersion: "part" | "blend" | "mixed" | "unknown";
+  practiceMode: "single" | "set" | "unknown";
+  routineId?: string | null;
+  completionStatus: "started" | "completed" | "skipped" | "stopped" | "restarted" | "legacy";
+  routineCompleted: boolean;
 }
 
 export interface PersistedSongPracticeSession {
@@ -348,6 +353,21 @@ export interface PracticeStatsSummary {
     monthly: StatsBucket[];
     weekday: StatsBucket[];
     recentSessions: PersistedVocalExercisePracticeSession[];
+    availableExercises: number;
+    uniqueExercisesPracticed: number;
+    completedSessions: number;
+    partialSessions: number;
+    legacySessions: number;
+    completedSets: number;
+    versions: Record<"part" | "blend" | "mixed" | "unknown", { sessionCount: number; seconds: number }>;
+    exerciseBreakdown: Array<{
+      exerciseId: string;
+      exerciseTitle: string;
+      sessionCount: number;
+      completedCount: number;
+      totalSeconds: number;
+      lastPracticedAt: string | null;
+    }>;
   };
   playlists: {
     totalPlaylists: number;
@@ -5739,6 +5759,11 @@ function mapVocalExercisePracticeSession(row: VocalExercisePracticeSessionRow, t
     durationSeconds: Math.max(0, row.durationSeconds ?? 0),
     tempoPercent: row.tempoPercent,
     repetitionCount: row.repetitionCount,
+    audioVersion: row.audioVersion as PersistedVocalExercisePracticeSession["audioVersion"],
+    practiceMode: row.practiceMode as PersistedVocalExercisePracticeSession["practiceMode"],
+    routineId: row.routineId,
+    completionStatus: row.completionStatus as PersistedVocalExercisePracticeSession["completionStatus"],
+    routineCompleted: row.routineCompleted,
   };
 }
 
@@ -5749,6 +5774,9 @@ export async function createVocalExercisePracticeSession(data: {
   startedAt?: Date;
   tempoPercent?: number;
   repetitionCount?: number;
+  audioVersion?: "part" | "blend";
+  practiceMode?: "single" | "set";
+  routineId?: string | null;
 }): Promise<PersistedVocalExercisePracticeSession | null> {
   try {
     const rows = await db()
@@ -5760,6 +5788,11 @@ export async function createVocalExercisePracticeSession(data: {
         startedAt: data.startedAt ?? new Date(),
         tempoPercent: Math.max(40, Math.min(150, Math.round(data.tempoPercent ?? 100))),
         repetitionCount: Math.max(0, Math.round(data.repetitionCount ?? 0)),
+        audioVersion: data.audioVersion ?? "blend",
+        practiceMode: data.practiceMode ?? "single",
+        routineId: data.routineId ?? null,
+        completionStatus: "started",
+        routineCompleted: false,
       })
       .returning();
     return mapVocalExercisePracticeSession(rows[0]);
@@ -5776,6 +5809,9 @@ export async function finishVocalExercisePracticeSession(data: {
   userId: string;
   completedAt?: Date;
   durationSeconds: number;
+  audioVersion: "part" | "blend" | "mixed";
+  completionStatus: "completed" | "skipped" | "stopped" | "restarted";
+  routineCompleted?: boolean;
 }): Promise<PersistedVocalExercisePracticeSession | null> {
   try {
     const rows = await db()
@@ -5783,6 +5819,9 @@ export async function finishVocalExercisePracticeSession(data: {
       .set({
         completedAt: data.completedAt ?? new Date(),
         durationSeconds: Math.max(0, Math.round(data.durationSeconds)),
+        audioVersion: data.audioVersion,
+        completionStatus: data.completionStatus,
+        routineCompleted: data.routineCompleted ?? false,
       })
       .where(and(eq(vocalExercisePracticeSessions.id, data.id), eq(vocalExercisePracticeSessions.userId, data.userId)))
       .returning();
@@ -5961,6 +6000,76 @@ function buildPracticeTimeSummary<T extends { startedAt: string; durationSeconds
   };
 }
 
+export function buildWarmupPracticeSummary(
+  sessions: PersistedVocalExercisePracticeSession[],
+  catalog: Array<{ id: string; title: string }>,
+) {
+  const practicedSessions = sessions.filter((session) => session.durationSeconds > 0);
+  const versions: PracticeStatsSummary["exercises"]["versions"] = {
+    part: { sessionCount: 0, seconds: 0 },
+    blend: { sessionCount: 0, seconds: 0 },
+    mixed: { sessionCount: 0, seconds: 0 },
+    unknown: { sessionCount: 0, seconds: 0 },
+  };
+  const orderedCatalog = [...catalog].sort((left, right) => {
+    const leftNumber = Number(getLeadingTitleNumber(left.title));
+    const rightNumber = Number(getLeadingTitleNumber(right.title));
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber) {
+      return leftNumber - rightNumber;
+    }
+    return left.title.localeCompare(right.title);
+  });
+  const byExercise = new Map(orderedCatalog.map((exercise) => [exercise.id, {
+    exerciseId: exercise.id,
+    exerciseTitle: exercise.title,
+    sessionCount: 0,
+    completedCount: 0,
+    totalSeconds: 0,
+    lastPracticedAt: null as string | null,
+  }]));
+
+  for (const session of practicedSessions) {
+    const version = session.audioVersion in versions ? session.audioVersion : "unknown";
+    versions[version].sessionCount += 1;
+    versions[version].seconds += session.durationSeconds;
+    const exercise = byExercise.get(session.exerciseId) ?? {
+      exerciseId: session.exerciseId,
+      exerciseTitle: session.exerciseTitle ?? "Warmup",
+      sessionCount: 0,
+      completedCount: 0,
+      totalSeconds: 0,
+      lastPracticedAt: null,
+    };
+    exercise.sessionCount += 1;
+    exercise.totalSeconds += session.durationSeconds;
+    if (session.completionStatus === "completed") exercise.completedCount += 1;
+    if (!exercise.lastPracticedAt || Date.parse(session.startedAt) > Date.parse(exercise.lastPracticedAt)) {
+      exercise.lastPracticedAt = session.startedAt;
+    }
+    byExercise.set(session.exerciseId, exercise);
+  }
+
+  return {
+    practicedSessions,
+    availableExercises: catalog.length,
+    uniqueExercisesPracticed: new Set(practicedSessions.map((session) => session.exerciseId)).size,
+    completedSessions: practicedSessions.filter((session) => session.completionStatus === "completed").length,
+    partialSessions: practicedSessions.filter((session) => (
+      session.completionStatus === "skipped"
+      || session.completionStatus === "stopped"
+      || session.completionStatus === "restarted"
+    )).length,
+    legacySessions: practicedSessions.filter((session) => session.completionStatus === "legacy").length,
+    completedSets: new Set(
+      practicedSessions
+        .filter((session) => session.routineCompleted && session.routineId)
+        .map((session) => session.routineId as string)
+    ).size,
+    versions,
+    exerciseBreakdown: Array.from(byExercise.values()),
+  };
+}
+
 export async function getPracticeStatsSummary(
   userId: string = DEFAULT_QUERY_USER_ID,
   now: Date = new Date(),
@@ -6028,7 +6137,13 @@ export async function getPracticeStatsSummary(
   }
 
   let exerciseSessions: PersistedVocalExercisePracticeSession[] = [];
+  let recordedExerciseCatalog: Array<{ id: string; title: string }> = [];
   try {
+    recordedExerciseCatalog = await db()
+      .select({ id: vocalExercises.id, title: vocalExercises.title })
+      .from(vocalExercises)
+      .where(or(isNotNull(vocalExercises.audioKey), isNotNull(vocalExercises.alternateAudioKey)))
+      .orderBy(asc(vocalExercises.title));
     const rows = await db()
       .select({
         session: vocalExercisePracticeSessions,
@@ -6048,8 +6163,9 @@ export async function getPracticeStatsSummary(
   const groupedSongSessions = groupSongPracticeSessions(songSessions);
   const rangedSongSessions = filterPracticeSessionsByRange(groupedSongSessions, range, now);
   const rangedExerciseSessions = filterPracticeSessionsByRange(exerciseSessions, range, now);
+  const warmupPractice = buildWarmupPracticeSummary(rangedExerciseSessions, recordedExerciseCatalog);
   const songPracticeSummary = buildPracticeTimeSummary(rangedSongSessions, now, range);
-  const exercisePracticeSummary = buildPracticeTimeSummary(rangedExerciseSessions, now, range);
+  const exercisePracticeSummary = buildPracticeTimeSummary(warmupPractice.practicedSessions, now, range);
 
   const playlistRows = await db()
     .select({
@@ -6134,7 +6250,15 @@ export async function getPracticeStatsSummary(
     },
     exercises: {
       ...exercisePracticeSummary,
-      recentSessions: rangedExerciseSessions.slice(0, 8),
+      availableExercises: warmupPractice.availableExercises,
+      uniqueExercisesPracticed: warmupPractice.uniqueExercisesPracticed,
+      completedSessions: warmupPractice.completedSessions,
+      partialSessions: warmupPractice.partialSessions,
+      legacySessions: warmupPractice.legacySessions,
+      completedSets: warmupPractice.completedSets,
+      versions: warmupPractice.versions,
+      exerciseBreakdown: warmupPractice.exerciseBreakdown,
+      recentSessions: warmupPractice.practicedSessions.slice(0, 12),
     },
     playlists: {
       totalPlaylists,

@@ -175,6 +175,38 @@ describe("recorded warmup browser", () => {
     await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2));
   });
 
+  it("records only active playback time and marks a Part/Blend switch as mixed", async () => {
+    const fetchMock = mockExerciseList();
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const { container } = render(<ExerciseBrowser userId="user-1" isSignedIn isAdmin={false} />);
+    const playButtons = await screen.findAllByRole("button", { name: "Play" });
+    fireEvent.click(playButtons[0]);
+    const [partAudio, blendAudio] = Array.from(container.querySelectorAll("audio"));
+
+    fireEvent.play(blendAudio);
+    now = 11_000;
+    fireEvent.pause(blendAudio);
+    now = 61_000;
+    fireEvent.click(screen.getByRole("button", { name: "Part" }));
+    fireEvent.play(partAudio);
+    now = 66_000;
+    fireEvent.ended(partAudio);
+
+    await waitFor(() => {
+      const finishCall = fetchMock.mock.calls.find(([input, init]) => (
+        String(input).startsWith("/api/exercise-practice-sessions/") && init?.method === "PATCH"
+      ));
+      expect(finishCall).toBeDefined();
+      expect(JSON.parse(String(finishCall?.[1]?.body))).toEqual(expect.objectContaining({
+        durationSeconds: 15,
+        audioVersion: "mixed",
+        completionStatus: "completed",
+        routineCompleted: false,
+      }));
+    });
+  });
+
   it("keeps lyric hints visible and skips forward and backward through the set", async () => {
     mockExerciseList();
     render(<ExerciseBrowser userId="guest-1" isSignedIn={false} isAdmin={false} />);
