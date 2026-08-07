@@ -1,7 +1,13 @@
 import type { Segment } from "../types";
 
-const EMPTY_COLOR = { r: 255, g: 255, b: 255 };
-const FULL_COLOR = { r: 22, g: 163, b: 74 };
+const MASTERY_COLORS = [
+  "rgb(255, 255, 255)", // Unrated
+  "rgb(244, 63, 94)",   // 1: rose
+  "rgb(249, 115, 22)",  // 2: orange
+  "rgb(234, 179, 8)",   // 3: amber
+  "rgb(59, 130, 246)",   // 4: blue
+  "rgb(22, 163, 74)",    // 5: green
+] as const;
 
 function clamp01(value: number): number {
   if (Number.isNaN(value)) {
@@ -15,11 +21,8 @@ export function getMasteryPercent(bySegment: Record<string, number>, segmentId: 
 }
 
 export function getMasteryColor(percent: number): string {
-  const ratio = clamp01(percent / 100);
-  const r = Math.round(EMPTY_COLOR.r + (FULL_COLOR.r - EMPTY_COLOR.r) * ratio);
-  const g = Math.round(EMPTY_COLOR.g + (FULL_COLOR.g - EMPTY_COLOR.g) * ratio);
-  const b = Math.round(EMPTY_COLOR.b + (FULL_COLOR.b - EMPTY_COLOR.b) * ratio);
-  return `rgb(${r}, ${g}, ${b})`;
+  const rating = Math.ceil(clamp01(percent / 100) * 5);
+  return MASTERY_COLORS[rating];
 }
 
 export interface MasteryTimelineChunk {

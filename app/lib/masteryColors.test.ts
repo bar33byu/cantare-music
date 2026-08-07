@@ -2,9 +2,18 @@ import { describe, expect, it } from "vitest";
 import { buildMasteryTimelineChunks, getMasteryColor } from "./masteryColors";
 
 describe("getMasteryColor", () => {
-  it("maps 0 to white and 100 to full green", () => {
+  it("maps each rating level to a distinct hue", () => {
     expect(getMasteryColor(0)).toBe("rgb(255, 255, 255)");
+    expect(getMasteryColor(20)).toBe("rgb(244, 63, 94)");
+    expect(getMasteryColor(40)).toBe("rgb(249, 115, 22)");
+    expect(getMasteryColor(60)).toBe("rgb(234, 179, 8)");
+    expect(getMasteryColor(80)).toBe("rgb(59, 130, 246)");
     expect(getMasteryColor(100)).toBe("rgb(22, 163, 74)");
+  });
+
+  it("clamps values outside the rating range", () => {
+    expect(getMasteryColor(-20)).toBe("rgb(255, 255, 255)");
+    expect(getMasteryColor(120)).toBe("rgb(22, 163, 74)");
   });
 });
 
