@@ -1285,10 +1285,16 @@ describe('PlaylistPracticeView', () => {
     const insideLabel = screen.getByTestId('playlist-practice-mastery-label-song-1');
     expect(insideLabel).toHaveTextContent('91%');
     expect(insideLabel.className).toContain('text-white');
+    expect(screen.getByTestId('playlist-practice-mastery-fill-song-1')).toHaveStyle({
+      backgroundColor: 'rgb(43, 171, 90)',
+    });
 
     const outsideLabel = screen.getByTestId('playlist-practice-mastery-label-song-2');
     expect(outsideLabel).toHaveTextContent('7%');
     expect(outsideLabel.className).toContain('text-gray-700');
+    expect(screen.getByTestId('playlist-practice-mastery-fill-song-2')).toHaveStyle({
+      backgroundColor: 'rgb(239, 249, 242)',
+    });
   });
 
   it('shows clean local-only progress on guest shared playlist cards', async () => {

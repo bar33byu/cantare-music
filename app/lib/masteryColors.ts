@@ -9,6 +9,9 @@ const MASTERY_COLORS = [
   "rgb(22, 163, 74)",    // 5: green
 ] as const;
 
+const EMPTY_GRADIENT_COLOR = { r: 255, g: 255, b: 255 };
+const FULL_GRADIENT_COLOR = { r: 22, g: 163, b: 74 };
+
 function clamp01(value: number): number {
   if (Number.isNaN(value)) {
     return 0;
@@ -23,6 +26,14 @@ export function getMasteryPercent(bySegment: Record<string, number>, segmentId: 
 export function getMasteryColor(percent: number): string {
   const rating = Math.ceil(clamp01(percent / 100) * 5);
   return MASTERY_COLORS[rating];
+}
+
+export function getMasteryGradientColor(percent: number): string {
+  const ratio = clamp01(percent / 100);
+  const r = Math.round(EMPTY_GRADIENT_COLOR.r + (FULL_GRADIENT_COLOR.r - EMPTY_GRADIENT_COLOR.r) * ratio);
+  const g = Math.round(EMPTY_GRADIENT_COLOR.g + (FULL_GRADIENT_COLOR.g - EMPTY_GRADIENT_COLOR.g) * ratio);
+  const b = Math.round(EMPTY_GRADIENT_COLOR.b + (FULL_GRADIENT_COLOR.b - EMPTY_GRADIENT_COLOR.b) * ratio);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 export interface MasteryTimelineChunk {
