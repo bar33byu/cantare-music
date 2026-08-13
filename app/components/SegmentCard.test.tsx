@@ -201,6 +201,22 @@ describe("SegmentCard", () => {
     expect(container.className).not.toContain("md:[scrollbar-width:none]");
   });
 
+  it("scrolls overflowing lyrics in proportion to segment playback", () => {
+    const view = render(<SegmentCard {...defaultProps} playbackMs={8000} />);
+    const container = screen.getByTestId("segment-lyric-scroll-container");
+
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 600 },
+    });
+
+    view.rerender(<SegmentCard {...defaultProps} playbackMs={16000} />);
+    expect(container.scrollTop).toBe(200);
+
+    view.rerender(<SegmentCard {...defaultProps} playbackMs={32000} />);
+    expect(container.scrollTop).toBe(400);
+  });
+
   it("optionally collapses lyric line breaks for compact display", () => {
     render(
       <SegmentCard

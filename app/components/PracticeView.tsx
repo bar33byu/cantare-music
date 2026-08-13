@@ -82,6 +82,7 @@ interface PracticeViewProps {
   canUseNextSegment?: boolean;
   practiceTimeTrackingEnabled?: boolean;
   practiceTimeSource?: string;
+  handsFreeViewport?: boolean;
 }
 
 type LyricVisibilityMode = "full" | "hint" | "hidden";
@@ -363,6 +364,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   canUseNextSegment: canUseNextSegmentOverride,
   practiceTimeTrackingEnabled = false,
   practiceTimeSource = "song",
+  handsFreeViewport = false,
 }) => {
   const withUserHeader = React.useCallback((init?: RequestInit): RequestInit | undefined => {
     return withUserIdHeader(init, userId);
@@ -419,6 +421,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [accuracyToast, setAccuracyToast] = React.useState<{ text: string; visible: boolean } | null>(null);
   const [tapPersistenceWarning, setTapPersistenceWarning] = React.useState<string | null>(null);
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
+  const practiceHeaderRef = React.useRef<HTMLElement | null>(null);
   const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
   const [viewportSize, setViewportSize] = React.useState({ width: 0, height: 0 });
   const practicedRecordedRef = React.useRef(false);
@@ -967,6 +970,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     setTapPersistenceWarning(null);
   }, []);
+
+  useEffect(() => {
+    if (!handsFreeViewport || autoPlayToken <= 0) {
+      return;
+    }
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      practiceHeaderRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    });
+
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [autoPlayToken, handsFreeViewport]);
 
   const showTapPersistenceWarning = React.useCallback((message: string) => {
     if (tapWarningTimerRef.current !== null) {
@@ -2604,7 +2619,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           {accuracyToast.text}
         </div>
       ) : null}
-      <header data-testid="practice-header" className={isGuidedPracticeMode ? "sr-only" : "px-4 pb-1 pt-3 md:px-8"}>
+      <header ref={practiceHeaderRef} data-testid="practice-header" className={isGuidedPracticeMode ? "sr-only" : "px-4 pb-1 pt-3 md:px-8"}>
         <div className="flex items-start justify-between gap-3">
           {breadcrumbRootLabel ? (
             <nav aria-label="Breadcrumb" className="min-w-0" data-testid="practice-breadcrumb">
@@ -2658,8 +2673,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               </span>
             </h1>
           )}
-          {onOpenContourReferenceClick || onEditSongClick ? (
+          {onOpenContourReferenceClick || onEditSongClick || (reducedControls && contourMapToggle) ? (
             <div className="flex shrink-0 items-center gap-2">
+              {reducedControls ? contourMapToggle : null}
               {onOpenContourReferenceClick && hasContourReferenceData ? (
                 <button
                   type="button"
@@ -2762,19 +2778,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             : "flex min-h-0 flex-1 flex-col"
         }
       >
-
-      {reducedControls && contourMapToggle ? (
-        <div
-          className={
-            isCompactLandscapeLayout
-              ? "col-start-2 row-start-1 flex justify-end"
-              : "flex justify-end px-4 md:px-8"
-          }
-          data-testid="practice-reduced-contour-controls"
-        >
-          {contourMapToggle}
-        </div>
-      ) : null}
 
       {!reducedControls ? (
       <div
@@ -2900,7 +2903,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       <main
         data-testid="practice-main"
         className={`flex flex-1 flex-col items-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 min-h-0 overflow-y-auto px-1 pt-0" : "px-2 pt-1 sm:px-3 sm:pt-2 md:px-8"} ${isGuidedPracticeMode ? "min-h-0 overflow-y-auto" : isCompactLandscapeLayout ? "" : "overflow-y-auto"}`}
-        style={isCompactLandscapeLayout ? undefined : { paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 8px)" }}
+        style={isCompactLandscapeLayout ? undefined : {
+          paddingBottom: reducedControls
+            ? "calc(3.75rem + env(safe-area-inset-bottom))"
+            : "calc(var(--player-height) + env(safe-area-inset-bottom) + 8px)",
+        }}
       >
         <section data-testid="practice-focus" className={`flex min-h-full w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isGuidedPracticeMode ? "max-w-4xl items-start" : isCompactLandscapeLayout ? "items-stretch max-w-none" : "items-stretch max-w-3xl"}`}>
           {!isGuidedPracticeMode && showSegmentNavigationControls ? (

@@ -1762,7 +1762,7 @@ export function PlaylistPracticeView({
               </div>
 
               {autoDrillPracticeSession ? (
-                <div className="min-h-0 rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="auto-drill-practice-surface">
+                <div className="min-h-0" data-testid="auto-drill-practice-surface">
                   <PracticeView
                     song={currentAutoDrillItem.song}
                     userId={userId}
@@ -1792,6 +1792,7 @@ export function PlaylistPracticeView({
                     canUseNextSegment={autoDrillIndex < autoDrillQueue.length - 1}
                     practiceTimeTrackingEnabled={progressStorage !== 'none'}
                     practiceTimeSource="playlist-auto"
+                    handsFreeViewport
                   />
                 </div>
               ) : null}

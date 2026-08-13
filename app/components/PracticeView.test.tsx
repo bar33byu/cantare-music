@@ -483,7 +483,8 @@ describe("PracticeView", () => {
     });
 
     expect(screen.queryByTestId("practice-top-bar")).not.toBeInTheDocument();
-    expect(screen.getByTestId("practice-reduced-contour-controls")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-card-contour-toggle").closest("header")).toBe(screen.getByTestId("practice-header"));
     expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
 
     fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));

@@ -2195,6 +2195,9 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('auto-drill-practice-surface').className).toContain('min-h-0');
     expect(screen.getByTestId('auto-drill-practice-surface').className).not.toContain('min-h-[720px]');
     expect(screen.getByTestId('segment-lyric-text')).toHaveStyle({ fontSize: 'clamp(2rem, 7vw, 4.5rem)' });
+    expect(screen.getByTestId('practice-main')).toHaveStyle({
+      paddingBottom: 'calc(3.75rem + env(safe-area-inset-bottom))',
+    });
 
     fireEvent.keyDown(window, { key: 'Escape' });
 
