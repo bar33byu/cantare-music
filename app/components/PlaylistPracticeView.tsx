@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { Playlist } from '../types';
-import { getMasteryColor } from '../lib/masteryColors';
+import { getMasteryGradientColor } from '../lib/masteryColors';
 import { compareNaturalText } from '../lib/naturalSort';
 import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
 import { SongReadinessIcons } from './SongReadinessIcons';
@@ -1489,7 +1489,7 @@ export function PlaylistPracticeView({
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="playlist-song-grid">
             {displayedSongs.map((song) => {
               const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
-              const masteryColor = getMasteryColor(mastery);
+              const masteryColor = getMasteryGradientColor(mastery);
               const shouldRenderLabelInsideBar = mastery >= 10;
               const hasPartAudio = Boolean(song.audioUrl?.trim());
               const hasBlendAudio = Boolean(song.alternateAudioUrl?.trim());
@@ -1505,6 +1505,7 @@ export function PlaylistPracticeView({
                   <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
                     <div
                       className="relative h-full rounded-tl-lg"
+                      data-testid={`playlist-practice-mastery-fill-${song.id}`}
                       style={{ width: `${mastery}%`, backgroundColor: masteryColor }}
                     >
                       {shouldRenderLabelInsideBar ? (
@@ -1761,7 +1762,7 @@ export function PlaylistPracticeView({
               </div>
 
               {autoDrillPracticeSession ? (
-                <div className="min-h-0 rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="auto-drill-practice-surface">
+                <div className="min-h-0" data-testid="auto-drill-practice-surface">
                   <PracticeView
                     song={currentAutoDrillItem.song}
                     userId={userId}
@@ -1791,6 +1792,7 @@ export function PlaylistPracticeView({
                     canUseNextSegment={autoDrillIndex < autoDrillQueue.length - 1}
                     practiceTimeTrackingEnabled={progressStorage !== 'none'}
                     practiceTimeSource="playlist-auto"
+                    handsFreeViewport
                   />
                 </div>
               ) : null}

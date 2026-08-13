@@ -169,6 +169,12 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
     }
     return renderLyricWithStableMask(lyricText, lyricVisibilityMode);
   }, [hasLyrics, lyricText, lyricVisibilityMode]);
+  const clampedPlaybackMs = Math.min(
+    segment.endMs,
+    Math.max(segment.startMs, playbackMs ?? segment.startMs)
+  );
+  const durationMs = Math.max(1, segment.endMs - segment.startMs);
+  const progress = Math.min(1, Math.max(0, (clampedPlaybackMs - segment.startMs) / durationMs));
 
   React.useLayoutEffect(() => {
     setFittedLyricFontSize(lyricFontSize);
@@ -283,12 +289,16 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
     };
   }, [hasLyrics, lyricFontSize, lyricText, lyricVisibilityMode, showContourMap]);
 
-  const clampedPlaybackMs = Math.min(
-    segment.endMs,
-    Math.max(segment.startMs, playbackMs ?? segment.startMs)
-  );
-  const durationMs = Math.max(1, segment.endMs - segment.startMs);
-  const progress = Math.min(1, Math.max(0, (clampedPlaybackMs - segment.startMs) / durationMs));
+  React.useLayoutEffect(() => {
+    const container = lyricScrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    const overflowHeight = Math.max(0, container.scrollHeight - container.clientHeight);
+    container.scrollTop = overflowHeight * progress;
+  }, [fittedLyricFontSize, lyricText, progress, segment.id]);
+
   const handleProgressClick = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!onSeek) {
       return;

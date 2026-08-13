@@ -852,10 +852,15 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [adminSelectedUserId, setAdminSelectedUserId] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminMessage, setAdminMessage] = useState("");
+  const [isOnline, setIsOnline] = useState(true);
+  const [pendingOfflineChanges, setPendingOfflineChanges] = useState(0);
+  const [hashRoutingReady, setHashRoutingReady] = useState(false);
   const settingsLoadedRef = useRef(false);
   const usersHydratedFromDbRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
   const initialHashRouteAppliedRef = useRef(false);
+  const userInteractionRevisionRef = useRef(0);
+  const hashRouteRevisionRef = useRef(0);
   const activeUserId = userSettings.currentUserId;
   const currentUser = useMemo(
     () => userSettings.users.find((user) => user.id === userSettings.currentUserId) ?? DEFAULT_USER_SETTINGS.users[0],
@@ -913,15 +918,43 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       return;
     }
 
+    setIsOnline(navigator.onLine);
+    const handleOnline = () => {
+      setIsOnline(true);
+      navigator.serviceWorker?.controller?.postMessage({ type: "CANTARE_FLUSH_OFFLINE_QUEUE" });
+    };
+    const handleOffline = () => setIsOnline(false);
+    const handleServiceWorkerMessage = (event: MessageEvent<{ type?: string; pending?: number }>) => {
+      if (event.data?.type === "CANTARE_OFFLINE_STATUS") {
+        setPendingOfflineChanges(Math.max(0, event.data.pending ?? 0));
+      }
+    };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/cantare-audio-sw.js").catch(() => {
-        // The app still works without offline audio caching.
-      });
+      navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
+      navigator.serviceWorker.register("/cantare-audio-sw.js", { scope: "/", updateViaCache: "none" })
+        .then(() => navigator.serviceWorker.ready)
+        .then((registration) => {
+          (registration.active ?? navigator.serviceWorker.controller)?.postMessage({
+            type: navigator.onLine ? "CANTARE_FLUSH_OFFLINE_QUEUE" : "CANTARE_GET_OFFLINE_STATUS",
+          });
+        })
+        .catch(() => {
+          // The app still works online when service workers are unavailable.
+        });
     }
 
     const storedSettings = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
     setUserSettings(getLocallyTrustedUserSettings(storedSettings, window.localStorage));
     settingsLoadedRef.current = true;
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      navigator.serviceWorker?.removeEventListener("message", handleServiceWorkerMessage);
+    };
   }, []);
 
   useEffect(() => {
@@ -1428,6 +1461,13 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   }, [request]);
 
   const applyHashRoute = useCallback(async (hash: string) => {
+    const routeRevision = hashRouteRevisionRef.current + 1;
+    hashRouteRevisionRef.current = routeRevision;
+    const interactionRevision = userInteractionRevisionRef.current;
+    const isCurrentRoute = () => (
+      hashRouteRevisionRef.current === routeRevision
+      && userInteractionRevisionRef.current === interactionRevision
+    );
     isApplyingHashRouteRef.current = true;
     try {
       const route = parseHashRoute(hash);
@@ -1464,6 +1504,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           return;
         }
         const playlist = await loadPlaylistById(route.playlistId);
+        if (!isCurrentRoute()) return;
         if (!playlist) {
           setActiveView("playlists");
           return;
@@ -1479,6 +1520,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           return;
         }
         const song = await loadSongById(route.songId);
+        if (!isCurrentRoute()) return;
         if (!song) {
           setActiveView("library");
           return;
@@ -1486,6 +1528,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         setSelectedSong(song);
         if (route.playlistId) {
           const playlist = await loadPlaylistById(route.playlistId);
+          if (!isCurrentRoute()) return;
           if (playlist) {
             setSelectedPlaylist(playlist);
           }
@@ -1496,7 +1539,9 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         setActiveView(route.view);
       }
     } finally {
-      isApplyingHashRouteRef.current = false;
+      if (hashRouteRevisionRef.current === routeRevision) {
+        isApplyingHashRouteRef.current = false;
+      }
     }
   }, [loadPlaylistById, loadSongById]);
 
@@ -1518,10 +1563,12 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     if (currentHash) {
       void applyHashRoute(currentHash).finally(() => {
         initialHashRouteAppliedRef.current = true;
+        setHashRoutingReady(true);
       });
     } else {
       window.history.replaceState(null, "", buildHashRoute({ view: "playlists" }));
       initialHashRouteAppliedRef.current = true;
+      setHashRoutingReady(true);
     }
 
     return () => {
@@ -1567,6 +1614,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     if (
       typeof window === "undefined"
       || !initialHashRouteAppliedRef.current
+      || !hashRoutingReady
       || isApplyingHashRouteRef.current
     ) {
       return;
@@ -1575,7 +1623,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       return;
     }
     window.history.pushState(null, "", currentHash);
-  }, [currentHash]);
+  }, [currentHash, hashRoutingReady]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1956,7 +2004,12 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <div
+      className="min-h-screen bg-gray-50 p-4"
+      onClickCapture={() => {
+        if (isApplyingHashRouteRef.current) userInteractionRevisionRef.current += 1;
+      }}
+    >
       {impersonationBanner}
       {guestClaimPrompt}
       <div className="max-w-4xl mx-auto">
@@ -1987,6 +2040,17 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             </button>
           }
         />
+        {!isOnline || pendingOfflineChanges > 0 ? (
+          <div
+            className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+            data-testid="offline-status"
+            role="status"
+          >
+            {!isOnline
+              ? `Offline${pendingOfflineChanges > 0 ? ` — ${pendingOfflineChanges} practice ${pendingOfflineChanges === 1 ? "change" : "changes"} will sync when connected.` : " — cached songs and playlists remain available."}`
+              : `Syncing ${pendingOfflineChanges} saved practice ${pendingOfflineChanges === 1 ? "change" : "changes"}…`}
+          </div>
+        ) : null}
 
         {settingsOpen ? (
           <div className="fixed inset-0 z-40" data-testid="settings-overlay">

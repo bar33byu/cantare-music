@@ -307,6 +307,41 @@ describe('Home page', () => {
     expect(screen.queryByTestId('mock-select-song')).not.toBeInTheDocument();
   });
 
+  it('does not let a slow startup route replace a screen the user navigated to', async () => {
+    window.history.replaceState(null, '', '/#view=playlist_practice&playlist=playlist-1');
+    let finishPlaylistRequest: ((response: Response) => void) | undefined;
+    global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      if (String(input) === '/api/playlists/playlist-1') {
+        return new Promise<Response>((resolve) => {
+          finishPlaylistRequest = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as Response);
+    }) as unknown as typeof fetch;
+
+    render(<Home />);
+    fireEvent.click(screen.getByTestId('library-tab'));
+    expect(await screen.findByTestId('mock-select-song')).toBeInTheDocument();
+
+    await act(async () => {
+      finishPlaylistRequest?.({ ok: true, json: async () => samplePlaylist } as Response);
+    });
+
+    expect(screen.getByTestId('mock-select-song')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-playlist-practice-view')).not.toBeInTheDocument();
+    expect(window.location.hash).toContain('view=library');
+  });
+
+  it('shows when cached data is being used offline', async () => {
+    render(<Home />);
+
+    act(() => window.dispatchEvent(new Event('offline')));
+
+    expect(await screen.findByTestId('offline-status')).toHaveTextContent(
+      'Offline — cached songs and playlists remain available.'
+    );
+  });
+
   it('allows updating segment preroll from settings panel', async () => {
     render(<Home />);
 
