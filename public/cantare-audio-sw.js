@@ -1,5 +1,5 @@
 // Cantare offline runtime and background progress sync.
-const VERSION = "v2";
+const VERSION = "v3";
 const APP_CACHE = `cantare-app-${VERSION}`;
 const API_CACHE = `cantare-api-${VERSION}`;
 const AUDIO_CACHE = `cantare-audio-${VERSION}`;
@@ -49,10 +49,17 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
+  const isAudioRequest = request.destination === "audio"
+    || /\.(?:mp3|m4a|wav|ogg|aac)(?:$|\?)/i.test(url.href);
   if (request.method === "GET") {
     if (url.origin === self.location.origin && CACHEABLE_API_PATHS.some((pattern) => pattern.test(url.pathname))) {
       event.respondWith(networkFirstApi(request));
-    } else if (request.destination === "audio" || /\.(?:mp3|m4a|wav|ogg|aac)(?:$|\?)/i.test(url.href)) {
+    } else if (isAudioRequest && request.headers.has("range")) {
+      // Media elements, especially Safari on iOS, use byte-range requests.
+      // A full response from Cache Storage is not a valid substitute for the
+      // requested 206 response, so let the browser preserve native range I/O.
+      return;
+    } else if (isAudioRequest) {
       event.respondWith(cacheFirst(request, AUDIO_CACHE));
     } else if (url.origin === self.location.origin && request.mode === "navigate") {
       event.respondWith(networkFirstNavigation(request));
