@@ -451,7 +451,22 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   } | null>(null);
   const onSegmentPlaybackCompleteRef = React.useRef(onSegmentPlaybackComplete);
   const playScopeRef = React.useRef(playScope);
-  const { isPlaying, isReady, currentMs, getCurrentMs, durationMs, endedCount = 0, playbackError, debugInfo, play, pause, seek, setPlaybackEndMs } = useAudioPlayer(directPlaybackAudioUrl, undefined, {
+  const {
+    isPlaying,
+    isReady,
+    isBuffering = false,
+    loadProgress = null,
+    currentMs,
+    getCurrentMs,
+    durationMs,
+    endedCount = 0,
+    playbackError,
+    debugInfo,
+    play,
+    pause,
+    seek,
+    setPlaybackEndMs,
+  } = useAudioPlayer(directPlaybackAudioUrl, undefined, {
     onRangeEnd: () => {
       if (playScopeRef.current === "segment") {
         onSegmentPlaybackCompleteRef.current?.();
@@ -2731,6 +2746,35 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             : "Full piece playback"}
         </p>
       </header>
+
+      {handsFreeViewport && autoPlayToken > 0 && isBuffering && !playbackError ? (
+        <div
+          data-testid="hands-free-audio-loading"
+          role="status"
+          aria-live="polite"
+          className="absolute left-1/2 top-14 z-40 w-[min(22rem,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-indigo-200 bg-white/95 px-3 py-2 text-indigo-950 shadow-lg backdrop-blur"
+        >
+          <div className="flex items-center justify-between gap-3 text-xs font-semibold">
+            <span>Preparing audio…</span>
+            <span>{loadProgress === null ? "Downloading" : `${loadProgress}%`}</span>
+          </div>
+          <div
+            data-testid="hands-free-audio-loading-progress"
+            role="progressbar"
+            aria-label="Audio download progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={loadProgress ?? undefined}
+            aria-valuetext={loadProgress === null ? "Downloading audio" : `${loadProgress}% downloaded`}
+            className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-indigo-100"
+          >
+            <div
+              className={`h-full rounded-full bg-indigo-600 ${loadProgress === null ? "w-1/3 animate-pulse" : ""}`}
+              style={loadProgress === null ? undefined : { width: `${loadProgress}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
 
       {practiceControlExplainer ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4" role="dialog" aria-modal="true" aria-labelledby="practice-control-explainer-title">

@@ -441,6 +441,38 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
   });
 
+  it("shows audio download progress while Hands Free is buffering", async () => {
+    mockUseAudioPlayer.mockReturnValue({
+      isPlaying: false,
+      isReady: false,
+      isBuffering: true,
+      loadProgress: 42,
+      currentMs: 0,
+      durationMs: 12000,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    });
+    const song = makeSong();
+
+    render(
+      <PracticeView
+        song={song}
+        initialSession={makeSession(song)}
+        handsFreeViewport
+        autoPlayToken={1}
+      />
+    );
+
+    const loadingStatus = await screen.findByTestId("hands-free-audio-loading");
+    expect(loadingStatus).toHaveTextContent("Preparing audio");
+    expect(loadingStatus).toHaveTextContent("42%");
+    expect(screen.getByTestId("hands-free-audio-loading-progress")).toHaveAttribute("aria-valuenow", "42");
+  });
+
   it("switches to the compact two-column practice shell on short landscape screens", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 844 });
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 390 });
