@@ -4,6 +4,10 @@ import { useAudioPlayer } from './useAudioPlayer';
 
 const makeAudioStub = () => {
   const listeners: Record<string, Array<() => void>> = {};
+  const buffered = {
+    length: 0,
+    end: vi.fn().mockReturnValue(0),
+  };
   const stub = {
     src: '',
     currentTime: 0,
@@ -11,6 +15,7 @@ const makeAudioStub = () => {
     playbackRate: 1,
     preload: 'none',
     readyState: 0,
+    buffered,
     play: vi.fn().mockResolvedValue(undefined),
     pause: vi.fn(),
     load: vi.fn(),
@@ -71,6 +76,37 @@ describe('useAudioPlayer', () => {
       stub.emit('canplay');
     });
     expect(result.current.isReady).toBe(true);
+  });
+
+  it('reports buffering and buffered media progress', () => {
+    const { result } = renderHook(() => useAudioPlayer('test.mp3', factory));
+
+    expect(result.current.isBuffering).toBe(true);
+    expect(result.current.loadProgress).toBeNull();
+
+    act(() => {
+      stub.buffered.length = 1;
+      stub.buffered.end.mockReturnValue(6);
+      stub.emit('progress');
+    });
+
+    expect(result.current.loadProgress).toBe(50);
+
+    act(() => {
+      stub.readyState = 3;
+      stub.emit('canplay');
+    });
+    expect(result.current.isBuffering).toBe(false);
+
+    act(() => {
+      stub.emit('waiting');
+    });
+    expect(result.current.isBuffering).toBe(true);
+
+    act(() => {
+      stub.emit('playing');
+    });
+    expect(result.current.isBuffering).toBe(false);
   });
 
   it('play() calls audio.play and sets isPlaying via play event', async () => {

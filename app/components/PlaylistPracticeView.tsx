@@ -6,6 +6,7 @@ import type { Playlist } from '../types';
 import { getMasteryGradientColor } from '../lib/masteryColors';
 import { compareNaturalText } from '../lib/naturalSort';
 import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
+import { prefetchAudioFile } from '../lib/audioPrefetch';
 import { SongReadinessIcons } from './SongReadinessIcons';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import PracticeView, { type ProgressStorageMode } from './PracticeView';
@@ -528,6 +529,25 @@ export function PlaylistPracticeView({
   }, [displayedSongs, preferredAudioVersion, ratingsBySongId]);
 
   const currentAutoDrillItem = autoDrillQueue[autoDrillIndex];
+  const nextAutoDrillAudioUrl = useMemo(() => {
+    if (!currentAutoDrillItem) {
+      return '';
+    }
+
+    const nextSongItem = autoDrillQueue
+      .slice(autoDrillIndex + 1)
+      .find((item) => item.song.id !== currentAutoDrillItem.song.id);
+
+    return toPlayableAudioUrl(resolvePreferredAudioUrl(nextSongItem?.song, preferredAudioVersion));
+  }, [autoDrillIndex, autoDrillQueue, currentAutoDrillItem, preferredAudioVersion]);
+
+  useEffect(() => {
+    if (practiceMode !== 'auto-drill' || autoDrillState !== 'playing' || !nextAutoDrillAudioUrl) {
+      return;
+    }
+
+    void prefetchAudioFile(nextAutoDrillAudioUrl);
+  }, [autoDrillState, nextAutoDrillAudioUrl, practiceMode]);
 
   useEffect(() => {
     setAutoDrillIndex((prev) => Math.min(prev, Math.max(autoDrillQueue.length - 1, 0)));

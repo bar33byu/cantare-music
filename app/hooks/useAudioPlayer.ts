@@ -3,6 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 export interface AudioPlayerControls {
   isPlaying: boolean;
   isReady: boolean;
+  isBuffering?: boolean;
+  loadProgress?: number | null;
   currentMs: number;
   getCurrentMs?: () => number;
   durationMs: number;
@@ -129,6 +131,8 @@ export function useAudioPlayer(
   const lastErrorRef = useRef<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [loadProgress, setLoadProgress] = useState<number | null>(null);
   const [currentMs, setCurrentMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
   const [endedCount, setEndedCount] = useState(0);
@@ -174,6 +178,21 @@ export function useAudioPlayer(
     });
   }, []);
 
+  const updateLoadProgress = useCallback((audio: HTMLAudioElement) => {
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0 || !audio.buffered || audio.buffered.length === 0) {
+      setLoadProgress(null);
+      return;
+    }
+
+    try {
+      const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+      const nextProgress = Math.round(Math.min(1, Math.max(0, bufferedEnd / audio.duration)) * 100);
+      setLoadProgress(nextProgress);
+    } catch {
+      setLoadProgress(null);
+    }
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -211,6 +230,7 @@ export function useAudioPlayer(
     const isStalePlayRequest = () => !mountedRef.current || audioRef.current !== audio || playRequestIdRef.current !== playRequestId;
 
     hasUserPlayIntentRef.current = true;
+    setIsBuffering(audio.readyState < 3);
     lastErrorRef.current = null;
     setPlaybackError(null);
     pendingSeekMsRef.current = startMs;
@@ -326,6 +346,8 @@ export function useAudioPlayer(
     };
     const handleCanPlay = () => {
       setIsReady(true);
+      setIsBuffering(false);
+      updateLoadProgress(audio);
       updateDebugInfo(audio, 'canplay');
       flushPendingPlay(audio);
     };
@@ -333,6 +355,7 @@ export function useAudioPlayer(
       if (Number.isFinite(audio.duration)) {
         setDurationMs(audio.duration * 1000);
       }
+      updateLoadProgress(audio);
       // Metadata availability is enough to allow user-triggered playback.
       setIsReady(true);
       updateDebugInfo(audio, 'loadedmetadata');
@@ -361,13 +384,32 @@ export function useAudioPlayer(
 
       setIsReady(false);
       setIsPlaying(false);
+      setIsBuffering(false);
       updateDebugInfo(audio, 'error');
     };
-    const handleLoadStart = () => updateDebugInfo(audio, 'loadstart');
-    const handleStalled = () => updateDebugInfo(audio, 'stalled');
-    const handleWaiting = () => updateDebugInfo(audio, 'waiting');
+    const handleLoadStart = () => {
+      setIsBuffering(true);
+      setLoadProgress(null);
+      updateDebugInfo(audio, 'loadstart');
+    };
+    const handleProgress = () => {
+      updateLoadProgress(audio);
+      updateDebugInfo(audio, 'progress');
+    };
+    const handleStalled = () => {
+      setIsBuffering(true);
+      updateDebugInfo(audio, 'stalled');
+    };
+    const handleWaiting = () => {
+      setIsBuffering(true);
+      updateDebugInfo(audio, 'waiting');
+    };
     const handleSuspend = () => updateDebugInfo(audio, 'suspend');
-    const handlePlaying = () => updateDebugInfo(audio, 'playing');
+    const handlePlaying = () => {
+      setIsBuffering(false);
+      updateLoadProgress(audio);
+      updateDebugInfo(audio, 'playing');
+    };
     const handlePauseDebug = () => updateDebugInfo(audio, 'pause');
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
@@ -378,6 +420,7 @@ export function useAudioPlayer(
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('error', handleError);
     audio.addEventListener('loadstart', handleLoadStart);
+    audio.addEventListener('progress', handleProgress);
     audio.addEventListener('stalled', handleStalled);
     audio.addEventListener('waiting', handleWaiting);
     audio.addEventListener('suspend', handleSuspend);
@@ -394,6 +437,7 @@ export function useAudioPlayer(
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('error', handleError);
       audio.removeEventListener('loadstart', handleLoadStart);
+      audio.removeEventListener('progress', handleProgress);
       audio.removeEventListener('stalled', handleStalled);
       audio.removeEventListener('waiting', handleWaiting);
       audio.removeEventListener('suspend', handleSuspend);
@@ -401,7 +445,7 @@ export function useAudioPlayer(
       audio.removeEventListener('pause', handlePauseDebug);
       audio.pause();
     };
-  }, [applyCurrentTime, flushPendingPlay, updateDebugInfo]);
+  }, [applyCurrentTime, flushPendingPlay, updateDebugInfo, updateLoadProgress]);
 
   useLayoutEffect(() => {
     currentAudioUrlRef.current = audioUrl;
@@ -414,6 +458,8 @@ export function useAudioPlayer(
     // same audio element so mobile browsers do not lose the unlocked element.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsReady(false);
+    setIsBuffering(Boolean(audioUrl));
+    setLoadProgress(null);
     setIsPlaying(false);
     setCurrentMs(0);
     setDurationMs(0);
@@ -508,6 +554,8 @@ export function useAudioPlayer(
   return {
     isPlaying,
     isReady,
+    isBuffering,
+    loadProgress,
     currentMs,
     getCurrentMs,
     durationMs,

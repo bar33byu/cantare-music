@@ -1505,6 +1505,63 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
+  it('prefetches the next song audio into the shared audio cache during Hands Free playback', async () => {
+    const cache = {
+      match: vi.fn().mockResolvedValue(undefined),
+      put: vi.fn().mockResolvedValue(undefined),
+    };
+    Object.defineProperty(window, 'caches', {
+      configurable: true,
+      value: { open: vi.fn().mockResolvedValue(cache) },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response('audio', { status: 200 }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockReturnValue({
+      isPlaying: false,
+      isReady: true,
+      currentMs: 0,
+      durationMs: 30000,
+      playbackRate: 1,
+      playbackError: null,
+      debugInfo: {
+        src: '',
+        currentSrc: '',
+        readyState: 4,
+        networkState: 1,
+        preload: 'metadata',
+        hasUserPlayIntent: false,
+        pendingSeekMs: null,
+        pendingEndMs: 0,
+        lastEvent: 'init',
+        lastEventAt: new Date().toISOString(),
+        playAttempts: 0,
+        errorCode: null,
+        errorMessage: null,
+      },
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setPlaybackEndMs: vi.fn(),
+      setPlaybackRate: vi.fn(),
+    });
+
+    render(
+      <PlaylistPracticeView
+        playlist={playlist}
+        persistProgress={false}
+        revalidatePlaylist={false}
+        onExit={() => undefined}
+        onSelectSong={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('playlist-mode-auto'));
+
+    await waitFor(() => expect(cache.put).toHaveBeenCalledTimes(1));
+    const prefetchedRequest = cache.put.mock.calls[0][0] as Request;
+    expect(prefetchedRequest.url).toBe('https://example.com/beta.mp3');
+  });
+
   it('repeats a rating-2 Auto Drill segment three total plays before advancing', async () => {
     const play = vi.fn();
     let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
