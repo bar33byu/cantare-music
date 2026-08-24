@@ -7,6 +7,7 @@ import { sessionReducer, SessionState } from "../lib/sessionReducer";
 import { computeKnowledgeScore } from "../lib/knowledgeUtils";
 import SegmentCard, { type RecentTapAttemptDisplay } from "./SegmentCard";
 import KnowledgeBar from "./KnowledgeBar";
+import RatingBar from "./RatingBar";
 import { AudioPlayer } from "./AudioPlayer";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { toPlayableAudioUrl, type PreferredAudioVersion } from "../lib/audioUrls";
@@ -3011,6 +3012,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     contourHeatMap={currentMidiContourHeatMap}
                     recentTapAttempt={recentTapAttempt?.songId === song.id ? recentTapAttempt : null}
                     onDismissRecentTapAttempt={dismissRecentTapAttempt}
+                    showRatingControls={!isCompactLandscapeLayout}
                   />
                 </div>
                 {isGuidedPracticeMode && hasSegments && currentSegment ? (
@@ -3285,6 +3287,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         }
         style={isCompactLandscapeLayout ? undefined : { paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
       >
+          {isCompactLandscapeLayout && currentSegment ? (
+            <div
+              data-testid="practice-landscape-rating-controls"
+              className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2.5"
+            >
+              <p className="mb-2 text-xs font-semibold text-slate-600">Level of knowledge</p>
+              <RatingBar
+                currentRating={currentRating}
+                onRate={handleRateCurrentSegment}
+              />
+            </div>
+          ) : null}
           <AudioPlayer
             audioUrl={activeAudioUrl}
             currentMs={currentMs}
