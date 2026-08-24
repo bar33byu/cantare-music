@@ -19,7 +19,7 @@ describe("prefetchAudioFile", () => {
 
     await expect(prefetchAudioFile("https://cdn.example.com/next.mp3")).resolves.toBe("downloaded");
 
-    expect(open).toHaveBeenCalledWith("cantare-audio-v2");
+    expect(open).toHaveBeenCalledWith("cantare-audio-v3");
     const request = fetchMock.mock.calls[0][0] as Request;
     expect(request.url).toBe("https://cdn.example.com/next.mp3");
     expect(request.mode).toBe("no-cors");

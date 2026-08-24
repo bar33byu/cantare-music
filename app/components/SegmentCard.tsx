@@ -9,6 +9,7 @@ const LYRIC_FONT_MAX_REM = 2.25; // 36px
 const LARGE_LYRIC_FONT_MAX_REM = 4.5; // 72px
 const LYRIC_FONT_MIN_REM = 0.95; // 15.2px
 const LYRIC_FIT_TOLERANCE_PX = 1;
+const LYRIC_SCROLL_COMPLETE_PROGRESS = 0.9;
 
 function getAdaptiveLyricFontSize(text: string, lyricSize: "default" | "large"): string {
   const length = text.trim().length;
@@ -56,6 +57,7 @@ interface SegmentCardProps {
   contourHeatMap?: Record<string, ContourNoteHeatStat>;
   recentTapAttempt?: RecentTapAttemptDisplay | null;
   onDismissRecentTapAttempt?: () => void;
+  showRatingControls?: boolean;
 }
 
 export interface RecentTapAttemptDisplay {
@@ -144,6 +146,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   contourHeatMap,
   recentTapAttempt,
   onDismissRecentTapAttempt,
+  showRatingControls = true,
 }) => {
   const cardRef = React.useRef<HTMLDivElement | null>(null);
   const lyricScrollRef = React.useRef<HTMLDivElement | null>(null);
@@ -175,6 +178,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
   );
   const durationMs = Math.max(1, segment.endMs - segment.startMs);
   const progress = Math.min(1, Math.max(0, (clampedPlaybackMs - segment.startMs) / durationMs));
+  const lyricScrollProgress = Math.min(1, progress / LYRIC_SCROLL_COMPLETE_PROGRESS);
 
   React.useLayoutEffect(() => {
     setFittedLyricFontSize(lyricFontSize);
@@ -296,8 +300,8 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
     }
 
     const overflowHeight = Math.max(0, container.scrollHeight - container.clientHeight);
-    container.scrollTop = overflowHeight * progress;
-  }, [fittedLyricFontSize, lyricText, progress, segment.id]);
+    container.scrollTop = overflowHeight * lyricScrollProgress;
+  }, [fittedLyricFontSize, lyricScrollProgress, lyricText, segment.id]);
 
   const handleProgressClick = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!onSeek) {
@@ -423,12 +427,16 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
         </div>
       ) : null}
 
-      <p className="mb-1.5 text-xs text-gray-500 sm:text-sm">Level of knowledge</p>
-      <RatingBar
-        currentRating={currentRating}
-        onRate={onRate}
-        disabled={false}
-      />
+      {showRatingControls ? (
+        <div data-testid="segment-rating-controls">
+          <p className="mb-1.5 text-xs text-gray-500 sm:text-sm">Level of knowledge</p>
+          <RatingBar
+            currentRating={currentRating}
+            onRate={onRate}
+            disabled={false}
+          />
+        </div>
+      ) : null}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-const AUDIO_CACHE_NAME = "cantare-audio-v2";
+const AUDIO_CACHE_NAME = "cantare-audio-v3";
 
 export type AudioPrefetchResult = "cached" | "downloaded" | "skipped" | "failed";
 

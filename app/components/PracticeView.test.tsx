@@ -54,6 +54,7 @@ vi.mock("./SegmentCard", () => ({
     showContourMap,
     contourHeatMap,
     recentTapAttempt,
+    showRatingControls,
   }: {
     segment: { id: string; label: string };
     onRate: (r: MemoryRating) => void;
@@ -72,6 +73,7 @@ vi.mock("./SegmentCard", () => ({
       missedTaps: number;
       extraTaps: number;
     } | null;
+    showRatingControls?: boolean;
   }) => (
     <div
       data-testid="mock-segment-card"
@@ -86,6 +88,7 @@ vi.mock("./SegmentCard", () => ({
       data-recent-tap-total={recentTapAttempt?.totalEvents}
       data-recent-tap-missed={recentTapAttempt?.missedTaps}
       data-recent-tap-extra={recentTapAttempt?.extraTaps}
+      data-show-rating-controls={showRatingControls ? "true" : "false"}
       data-contour-heat-miss-total={Object.values(contourHeatMap ?? {}).reduce<number>((total, value) => {
         const missCount = typeof value === "object" && value && "missCount" in value
           ? Number((value as { missCount?: number }).missCount ?? 0)
@@ -486,6 +489,12 @@ describe("PracticeView", () => {
 
     expect(screen.getByTestId("practice-transport").className).not.toContain("fixed");
     expect(screen.getByTestId("practice-transport").className).toContain("rounded-2xl");
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-rating-controls", "false");
+
+    const landscapeRatings = screen.getByTestId("practice-landscape-rating-controls");
+    expect(screen.getByTestId("practice-transport")).toContainElement(landscapeRatings);
+    fireEvent.click(within(landscapeRatings).getByTestId("rating-button-4"));
+    expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("4");
   });
 
   it("uses the compact landscape shell with reduced controls", async () => {

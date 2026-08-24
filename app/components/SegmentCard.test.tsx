@@ -98,6 +98,13 @@ describe("SegmentCard", () => {
     expect(onRate).toHaveBeenCalledWith(3);
   });
 
+  it("can omit rating controls when they are placed elsewhere in the layout", () => {
+    render(<SegmentCard {...defaultProps} showRatingControls={false} />);
+
+    expect(screen.queryByTestId("segment-rating-controls")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rating-button-3")).not.toBeInTheDocument();
+  });
+
   it("clicking progress bar seeks within current segment", () => {
     const onSeek = vi.fn();
     render(<SegmentCard {...defaultProps} onSeek={onSeek} />);
@@ -201,7 +208,7 @@ describe("SegmentCard", () => {
     expect(container.className).not.toContain("md:[scrollbar-width:none]");
   });
 
-  it("scrolls overflowing lyrics in proportion to segment playback", () => {
+  it("finishes scrolling overflowing lyrics with ten percent of playback remaining", () => {
     const view = render(<SegmentCard {...defaultProps} playbackMs={8000} />);
     const container = screen.getByTestId("segment-lyric-scroll-container");
 
@@ -211,9 +218,9 @@ describe("SegmentCard", () => {
     });
 
     view.rerender(<SegmentCard {...defaultProps} playbackMs={16000} />);
-    expect(container.scrollTop).toBe(200);
+    expect(container.scrollTop).toBeCloseTo(222.22, 1);
 
-    view.rerender(<SegmentCard {...defaultProps} playbackMs={32000} />);
+    view.rerender(<SegmentCard {...defaultProps} playbackMs={28800} />);
     expect(container.scrollTop).toBe(400);
   });
 
