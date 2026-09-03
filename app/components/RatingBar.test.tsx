@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import RatingBar from './RatingBar';
+import { getMasteryColor } from '../lib/masteryColors';
 
 describe('RatingBar', () => {
   it('renders 5 rating buttons', () => {
@@ -27,16 +28,16 @@ describe('RatingBar', () => {
   it('fills all ratings up to currentRating', () => {
     render(<RatingBar currentRating={4} onRate={vi.fn()} />);
 
-    expect(screen.getByTestId('rating-button-1').className).toContain('bg-indigo-200');
-    expect(screen.getByTestId('rating-button-2').className).toContain('bg-indigo-300');
-    expect(screen.getByTestId('rating-button-3').className).toContain('bg-indigo-500');
-    expect(screen.getByTestId('rating-button-4').className).toContain('bg-indigo-700');
+    expect(screen.getByTestId('rating-button-1')).toHaveStyle({ backgroundColor: getMasteryColor(20) });
+    expect(screen.getByTestId('rating-button-2')).toHaveStyle({ backgroundColor: getMasteryColor(40) });
+    expect(screen.getByTestId('rating-button-3')).toHaveStyle({ backgroundColor: getMasteryColor(60) });
+    expect(screen.getByTestId('rating-button-4')).toHaveStyle({ backgroundColor: getMasteryColor(80) });
     expect(screen.getByTestId('rating-button-5').className).toContain('bg-indigo-50');
   });
 
-  it('uses the darkest color for a five rating', () => {
+  it('uses the brand indigo for a five rating', () => {
     render(<RatingBar currentRating={5} onRate={vi.fn()} />);
-    expect(screen.getByTestId('rating-button-5').className).toContain('bg-slate-950');
+    expect(screen.getByTestId('rating-button-5')).toHaveStyle({ backgroundColor: getMasteryColor(100) });
   });
 
   it('disabled prop propagates to all buttons', () => {

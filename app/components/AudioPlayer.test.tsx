@@ -120,7 +120,11 @@ describe("AudioPlayer", () => {
     );
 
     // Active segment gets the audio-segment-window testid
-    expect(screen.getByTestId("audio-segment-window")).toBeInTheDocument();
+    const activeSegment = screen.getByTestId("audio-segment-window");
+    expect(activeSegment).toBeInTheDocument();
+    expect(activeSegment).toHaveClass("ring-amber-300");
+    expect(activeSegment).not.toHaveClass("bg-amber-400");
+    expect(screen.getByTestId("audio-piece-mastery-bar")).toContainElement(activeSegment);
     // Non-active segments get indexed testids
     expect(screen.getByTestId("audio-segment-item-0")).toBeInTheDocument();
     expect(screen.getByTestId("audio-segment-item-2")).toBeInTheDocument();
@@ -184,6 +188,28 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-piece-mastery-chunk-1")).toHaveStyle({
       backgroundColor: getMasteryColor(80),
     });
+  });
+
+  it("renders uncovered time white and covered unrated segments gray", () => {
+    render(
+      <AudioPlayer
+        {...defaultProps}
+        durationMs={4000}
+        segmentStartMs={1000}
+        segmentEndMs={3000}
+        segments={[
+          { id: "seg-1", songId: "song-1", order: 0, label: "A", lyricText: "", startMs: 1000, endMs: 3000 },
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId("audio-piece-mastery-chunk-0")).toHaveStyle({
+      backgroundColor: "rgb(255, 255, 255)",
+    });
+    expect(screen.getByTestId("audio-piece-mastery-chunk-1")).toHaveStyle({
+      backgroundColor: getMasteryColor(0),
+    });
+    expect(screen.getByTestId("audio-segment-item-0")).toHaveClass("border-x-2");
   });
 
   it("shows playback diagnostics", () => {

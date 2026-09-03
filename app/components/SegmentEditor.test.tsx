@@ -285,9 +285,11 @@ describe('SegmentEditor', () => {
 
       // No new sections are needed when there are already 2 existing sections.
       expect(createCalls.length).toBe(0);
-      expect(screen.getByTestId('segment-editor-bulk-panel')).toBeInTheDocument();
-      expect(screen.getByTestId('segment-editor-bulk-text')).toHaveValue(pastedLyrics);
+      expect(screen.queryByTestId('segment-editor-bulk-panel')).not.toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByTestId('segment-editor-bulk-open'));
+    expect(screen.getByTestId('segment-editor-bulk-text')).toHaveValue(pastedLyrics);
   });
 
   it('supports a custom separator for bulk lyrics', async () => {
@@ -877,6 +879,11 @@ describe('SegmentEditor', () => {
       expect(screen.getByTestId('segment-editor-song-timeline')).toBeInTheDocument();
       expect(screen.getByTestId('song-timeline-segment-seg-1')).toBeInTheDocument();
     });
+
+    expect(screen.getByTestId('segment-editor-song-timeline-viewport')).toHaveClass('overflow-hidden');
+    expect(screen.getByTestId('segment-editor-song-timeline-viewport')).not.toHaveClass('overflow-x-auto');
+    expect(screen.getByTestId('segment-editor-song-timeline-track')).toHaveClass('w-full');
+    expect(screen.getByTestId('segment-editor-song-timeline-track')).not.toHaveAttribute('style');
 
     fireEvent.change(screen.getByTestId('segment-editor-song-seek'), { target: { value: '15000' } });
     expect(seek).toHaveBeenCalledWith(15000);

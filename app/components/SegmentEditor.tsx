@@ -500,8 +500,11 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
         const firstFailure = failures[0]?.message ? ` First error: ${failures[0].message}` : '';
         setShowBulkImport(true);
         setDeleteError(`Bulk import completed with issues. Failed sections: ${failedSections}.${firstFailure}`);
-      } else if (hadExtraDeleteFailure) {
-        setDeleteError('Bulk import completed, but one or more extra sections could not be deleted.');
+      } else {
+        setShowBulkImport(false);
+        if (hadExtraDeleteFailure) {
+          setDeleteError('Bulk import completed, but one or more extra sections could not be deleted.');
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Bulk import failed. Please review the separator and try again.';
@@ -1382,8 +1385,8 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
         </div>
 
         <div data-testid="segment-editor-song-timeline" className="mt-4 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-3">
-          <div className="overflow-x-auto">
-            <div className="relative h-5 min-w-full rounded bg-indigo-100" style={{ width: `${zoomPercent}%` }}>
+          <div data-testid="segment-editor-song-timeline-viewport" className="overflow-hidden">
+            <div data-testid="segment-editor-song-timeline-track" className="relative h-5 w-full rounded bg-indigo-100">
             {orderedSegments.map((segment) => {
               const left = (segment.startMs / timelineDurationMs) * 100;
               const width = Math.max(0.8, ((segment.endMs - segment.startMs) / timelineDurationMs) * 100);
