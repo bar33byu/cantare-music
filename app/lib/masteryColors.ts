@@ -43,6 +43,7 @@ export interface MasteryTimelineChunk {
   startMs: number;
   endMs: number;
   percent: number;
+  isCovered: boolean;
 }
 
 export function buildMasteryTimelineChunks(
@@ -71,15 +72,17 @@ export function buildMasteryTimelineChunks(
     }
 
     let maxPercent = 0;
+    let isCovered = false;
     for (const segment of segments) {
       const overlaps = segment.startMs < endMs && segment.endMs > startMs;
       if (!overlaps) {
         continue;
       }
+      isCovered = true;
       maxPercent = Math.max(maxPercent, getMasteryPercent(bySegment, segment.id));
     }
 
-    chunks.push({ startMs, endMs, percent: maxPercent });
+    chunks.push({ startMs, endMs, percent: maxPercent, isCovered });
   }
 
   return chunks;

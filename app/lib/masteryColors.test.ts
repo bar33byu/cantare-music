@@ -49,9 +49,21 @@ describe("buildMasteryTimelineChunks", () => {
     const chunks = buildMasteryTimelineChunks(segments, { a: 20, b: 80 }, 6000);
 
     expect(chunks).toEqual([
-      { startMs: 0, endMs: 2000, percent: 20 },
-      { startMs: 2000, endMs: 4000, percent: 80 },
-      { startMs: 4000, endMs: 6000, percent: 80 },
+      { startMs: 0, endMs: 2000, percent: 20, isCovered: true },
+      { startMs: 2000, endMs: 4000, percent: 80, isCovered: true },
+      { startMs: 4000, endMs: 6000, percent: 80, isCovered: true },
+    ]);
+  });
+
+  it("distinguishes uncovered time from an unrated segment", () => {
+    const segments = [
+      { id: "a", songId: "song", order: 0, label: "A", lyricText: "", startMs: 1000, endMs: 3000 },
+    ];
+
+    expect(buildMasteryTimelineChunks(segments, {}, 4000)).toEqual([
+      { startMs: 0, endMs: 1000, percent: 0, isCovered: false },
+      { startMs: 1000, endMs: 3000, percent: 0, isCovered: true },
+      { startMs: 3000, endMs: 4000, percent: 0, isCovered: false },
     ]);
   });
 });
