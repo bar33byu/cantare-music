@@ -1,12 +1,12 @@
 import type { Segment } from "../types";
 
 const MASTERY_COLORS = [
-  "rgb(255, 255, 255)", // Unrated
-  "rgb(244, 63, 94)",   // 1: rose
-  "rgb(249, 115, 22)",  // 2: orange
+  "rgb(226, 232, 240)", // 0: unrated / slate
+  "rgb(225, 29, 72)",   // 1: rose
+  "rgb(234, 88, 12)",   // 2: orange
   "rgb(234, 179, 8)",   // 3: amber
-  "rgb(59, 130, 246)",   // 4: blue
-  "rgb(22, 163, 74)",    // 5: green
+  "rgb(124, 58, 237)",  // 4: violet
+  "rgb(4, 120, 87)",    // 5: emerald
 ] as const;
 
 const EMPTY_GRADIENT_COLOR = { r: 255, g: 255, b: 255 };
@@ -23,9 +23,12 @@ export function getMasteryPercent(bySegment: Record<string, number>, segmentId: 
   return bySegment[segmentId] ?? 0;
 }
 
+export function getMasteryLevel(percent: number): number {
+  return Math.ceil(clamp01(percent / 100) * 5);
+}
+
 export function getMasteryColor(percent: number): string {
-  const rating = Math.ceil(clamp01(percent / 100) * 5);
-  return MASTERY_COLORS[rating];
+  return MASTERY_COLORS[getMasteryLevel(percent)];
 }
 
 export function getMasteryGradientColor(percent: number): string {

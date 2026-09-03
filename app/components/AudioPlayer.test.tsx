@@ -120,7 +120,11 @@ describe("AudioPlayer", () => {
     );
 
     // Active segment gets the audio-segment-window testid
-    expect(screen.getByTestId("audio-segment-window")).toBeInTheDocument();
+    const activeSegment = screen.getByTestId("audio-segment-window");
+    expect(activeSegment).toBeInTheDocument();
+    expect(activeSegment).toHaveClass("ring-amber-300");
+    expect(activeSegment).not.toHaveClass("bg-amber-400");
+    expect(screen.getByTestId("audio-piece-mastery-bar")).toContainElement(activeSegment);
     // Non-active segments get indexed testids
     expect(screen.getByTestId("audio-segment-item-0")).toBeInTheDocument();
     expect(screen.getByTestId("audio-segment-item-2")).toBeInTheDocument();

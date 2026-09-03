@@ -1,19 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { buildMasteryTimelineChunks, getMasteryColor, getMasteryGradientColor } from "./masteryColors";
+import { buildMasteryTimelineChunks, getMasteryColor, getMasteryGradientColor, getMasteryLevel } from "./masteryColors";
 
 describe("getMasteryColor", () => {
   it("maps each rating level to a distinct hue", () => {
-    expect(getMasteryColor(0)).toBe("rgb(255, 255, 255)");
-    expect(getMasteryColor(20)).toBe("rgb(244, 63, 94)");
-    expect(getMasteryColor(40)).toBe("rgb(249, 115, 22)");
+    expect(getMasteryColor(0)).toBe("rgb(226, 232, 240)");
+    expect(getMasteryColor(20)).toBe("rgb(225, 29, 72)");
+    expect(getMasteryColor(40)).toBe("rgb(234, 88, 12)");
     expect(getMasteryColor(60)).toBe("rgb(234, 179, 8)");
-    expect(getMasteryColor(80)).toBe("rgb(59, 130, 246)");
-    expect(getMasteryColor(100)).toBe("rgb(22, 163, 74)");
+    expect(getMasteryColor(80)).toBe("rgb(124, 58, 237)");
+    expect(getMasteryColor(100)).toBe("rgb(4, 120, 87)");
   });
 
   it("clamps values outside the rating range", () => {
-    expect(getMasteryColor(-20)).toBe("rgb(255, 255, 255)");
-    expect(getMasteryColor(120)).toBe("rgb(22, 163, 74)");
+    expect(getMasteryColor(-20)).toBe("rgb(226, 232, 240)");
+    expect(getMasteryColor(120)).toBe("rgb(4, 120, 87)");
+  });
+});
+
+describe("getMasteryLevel", () => {
+  it("normalizes percentages to the 0-5 scale", () => {
+    expect(getMasteryLevel(Number.NaN)).toBe(0);
+    expect(getMasteryLevel(0)).toBe(0);
+    expect(getMasteryLevel(80)).toBe(4);
+    expect(getMasteryLevel(100)).toBe(5);
   });
 });
 

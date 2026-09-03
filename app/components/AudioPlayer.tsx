@@ -3,7 +3,7 @@
 import { useCallback, useId, useMemo, useState, type MouseEvent, type SyntheticEvent } from "react";
 import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
 import type { Segment } from "../types";
-import { buildMasteryTimelineChunks, getMasteryColor } from "../lib/masteryColors";
+import { buildMasteryTimelineChunks, getMasteryColor, getMasteryLevel } from "../lib/masteryColors";
 
 interface AudioPlayerProps {
   audioUrl: string;
@@ -364,12 +364,14 @@ export function AudioPlayer({
       <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
         <div
           data-testid="audio-unified-timeline"
-          className="relative mb-2 h-5 cursor-pointer"
+          className="relative mb-2 h-6 cursor-pointer"
           onClick={handleUnifiedTimelineSeek}
         >
           <div
             data-testid="audio-piece-mastery-bar"
-            className="pointer-events-none absolute inset-x-0 top-0 h-1.5 overflow-hidden rounded-full border border-indigo-200"
+            role="img"
+            aria-label="Song timeline: colors show mastery and the gold outline marks the active segment"
+            className="pointer-events-none absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 overflow-hidden rounded-full border border-slate-300"
             style={{ backgroundColor: getMasteryColor(0) }}
           >
             {masteryChunks.map((chunk, index) => {
@@ -393,9 +395,7 @@ export function AudioPlayer({
                 />
               );
             })}
-          </div>
 
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2 overflow-hidden rounded-full bg-gray-200">
             {segments.length > 0 ? (
               segments.map((segment, index) => {
                 const segWidth = safeDurationMs > 0
@@ -407,18 +407,20 @@ export function AudioPlayer({
                 const isActive = index === currentSegmentIndex;
                 const segmentLabel = segment.label.trim();
                 const showSegmentLabel = segmentLabel.length > 0 && segWidth >= MIN_SEGMENT_LABEL_WIDTH_PERCENT;
+                const segmentMastery = masteryBySegment[segment.id] ?? 0;
+                const masteryLevel = getMasteryLevel(segmentMastery);
                 return (
                   <div
                     key={segment.id}
                     data-testid={isActive ? "audio-segment-window" : `audio-segment-item-${index}`}
-                    className={`absolute inset-y-0 overflow-hidden border-r border-white/80 ${isActive ? "bg-amber-400" : "bg-amber-200/70"}`}
+                    className={`absolute inset-y-0 overflow-hidden border-r border-white/80 ${isActive ? "z-10 ring-2 ring-inset ring-amber-300" : ""}`}
                     style={{ left: `${segLeft}%`, width: `${segWidth}%` }}
-                    title={segmentLabel || undefined}
+                    title={`${segmentLabel || `Segment ${index + 1}`} - Mastery ${masteryLevel}/5`}
                   >
                     {showSegmentLabel ? (
                       <span
                         data-testid={`audio-segment-label-${index}`}
-                        className="pointer-events-none absolute inset-0 flex items-center justify-center truncate px-0.5 text-center text-[8px] font-semibold leading-none text-slate-800/75"
+                        className={`pointer-events-none absolute inset-0 flex items-center justify-center truncate px-0.5 text-center text-[8px] font-bold leading-none ${masteryLevel >= 4 ? "text-white/95" : "text-slate-900/75"}`}
                       >
                         {segmentLabel}
                       </span>
@@ -429,7 +431,7 @@ export function AudioPlayer({
             ) : (
               <div
                 data-testid="audio-segment-window"
-                className="absolute top-0 h-2.5 rounded-full bg-amber-300/90"
+                className="absolute inset-y-0 rounded-full ring-2 ring-inset ring-amber-300"
                 style={{ left: `${segmentOffset}%`, width: `${segmentWidth}%` }}
               />
             )}
