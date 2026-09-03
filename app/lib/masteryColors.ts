@@ -2,15 +2,24 @@ import type { Segment } from "../types";
 
 const MASTERY_COLORS = [
   "rgb(226, 232, 240)", // 0: unrated / slate
-  "rgb(225, 29, 72)",   // 1: rose
+  "rgb(219, 39, 119)",  // 1: pink
   "rgb(234, 88, 12)",   // 2: orange
-  "rgb(234, 179, 8)",   // 3: amber
-  "rgb(124, 58, 237)",  // 4: violet
-  "rgb(4, 120, 87)",    // 5: emerald
+  "rgb(202, 138, 4)",   // 3: gold
+  "rgb(8, 145, 178)",   // 4: cyan
+  "rgb(79, 70, 229)",   // 5: indigo
+] as const;
+
+const MASTERY_TEXT_COLORS = [
+  "rgb(2, 6, 23)",       // 0: dark text
+  "rgb(255, 255, 255)",  // 1: light text
+  "rgb(2, 6, 23)",       // 2: dark text
+  "rgb(2, 6, 23)",       // 3: dark text
+  "rgb(2, 6, 23)",       // 4: dark text
+  "rgb(255, 255, 255)",  // 5: light text
 ] as const;
 
 const EMPTY_GRADIENT_COLOR = { r: 255, g: 255, b: 255 };
-const FULL_GRADIENT_COLOR = { r: 22, g: 163, b: 74 };
+const FULL_GRADIENT_COLOR = { r: 79, g: 70, b: 229 };
 
 function clamp01(value: number): number {
   if (Number.isNaN(value)) {
@@ -29,6 +38,10 @@ export function getMasteryLevel(percent: number): number {
 
 export function getMasteryColor(percent: number): string {
   return MASTERY_COLORS[getMasteryLevel(percent)];
+}
+
+export function getMasteryTextColor(percent: number): string {
+  return MASTERY_TEXT_COLORS[getMasteryLevel(percent)];
 }
 
 export function getMasteryGradientColor(percent: number): string {

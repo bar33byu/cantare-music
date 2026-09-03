@@ -3,7 +3,7 @@
 import { useCallback, useId, useMemo, useState, type MouseEvent, type SyntheticEvent } from "react";
 import type { AudioDebugInfo } from "../hooks/useAudioPlayer";
 import type { Segment } from "../types";
-import { buildMasteryTimelineChunks, getMasteryColor, getMasteryLevel } from "../lib/masteryColors";
+import { buildMasteryTimelineChunks, getMasteryColor, getMasteryLevel, getMasteryTextColor } from "../lib/masteryColors";
 
 interface AudioPlayerProps {
   audioUrl: string;
@@ -419,7 +419,8 @@ export function AudioPlayer({
                     {showSegmentLabel ? (
                       <span
                         data-testid={`audio-segment-label-${index}`}
-                        className={`pointer-events-none absolute inset-0 flex items-center justify-center truncate px-0.5 text-center text-[8px] font-bold leading-none ${masteryLevel >= 4 ? "text-white/95" : "text-slate-900/75"}`}
+                        className="pointer-events-none absolute inset-0 flex items-center justify-center truncate px-0.5 text-center text-[8px] font-bold leading-none"
+                        style={{ color: getMasteryTextColor(segmentMastery) }}
                       >
                         {segmentLabel}
                       </span>

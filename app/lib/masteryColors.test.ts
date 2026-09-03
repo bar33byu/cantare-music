@@ -1,19 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { buildMasteryTimelineChunks, getMasteryColor, getMasteryGradientColor, getMasteryLevel } from "./masteryColors";
+import { buildMasteryTimelineChunks, getMasteryColor, getMasteryGradientColor, getMasteryLevel, getMasteryTextColor } from "./masteryColors";
 
 describe("getMasteryColor", () => {
   it("maps each rating level to a distinct hue", () => {
     expect(getMasteryColor(0)).toBe("rgb(226, 232, 240)");
-    expect(getMasteryColor(20)).toBe("rgb(225, 29, 72)");
+    expect(getMasteryColor(20)).toBe("rgb(219, 39, 119)");
     expect(getMasteryColor(40)).toBe("rgb(234, 88, 12)");
-    expect(getMasteryColor(60)).toBe("rgb(234, 179, 8)");
-    expect(getMasteryColor(80)).toBe("rgb(124, 58, 237)");
-    expect(getMasteryColor(100)).toBe("rgb(4, 120, 87)");
+    expect(getMasteryColor(60)).toBe("rgb(202, 138, 4)");
+    expect(getMasteryColor(80)).toBe("rgb(8, 145, 178)");
+    expect(getMasteryColor(100)).toBe("rgb(79, 70, 229)");
   });
 
   it("clamps values outside the rating range", () => {
     expect(getMasteryColor(-20)).toBe("rgb(226, 232, 240)");
-    expect(getMasteryColor(120)).toBe("rgb(4, 120, 87)");
+    expect(getMasteryColor(120)).toBe("rgb(79, 70, 229)");
+  });
+
+  it("uses readable text colors across the scale", () => {
+    expect(getMasteryTextColor(0)).toBe("rgb(2, 6, 23)");
+    expect(getMasteryTextColor(20)).toBe("rgb(255, 255, 255)");
+    expect(getMasteryTextColor(80)).toBe("rgb(2, 6, 23)");
+    expect(getMasteryTextColor(100)).toBe("rgb(255, 255, 255)");
   });
 });
 
@@ -27,15 +34,15 @@ describe("getMasteryLevel", () => {
 });
 
 describe("getMasteryGradientColor", () => {
-  it("interpolates along the original white-to-green playlist gradient", () => {
+  it("interpolates from white to the brand indigo for playlist mastery", () => {
     expect(getMasteryGradientColor(0)).toBe("rgb(255, 255, 255)");
-    expect(getMasteryGradientColor(50)).toBe("rgb(139, 209, 165)");
-    expect(getMasteryGradientColor(100)).toBe("rgb(22, 163, 74)");
+    expect(getMasteryGradientColor(50)).toBe("rgb(167, 163, 242)");
+    expect(getMasteryGradientColor(100)).toBe("rgb(79, 70, 229)");
   });
 
   it("clamps values outside the mastery range", () => {
     expect(getMasteryGradientColor(-20)).toBe("rgb(255, 255, 255)");
-    expect(getMasteryGradientColor(120)).toBe("rgb(22, 163, 74)");
+    expect(getMasteryGradientColor(120)).toBe("rgb(79, 70, 229)");
   });
 });
 

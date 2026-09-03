@@ -1531,7 +1531,7 @@ export function PlaylistPracticeView({
                       {shouldRenderLabelInsideBar ? (
                         <span
                           data-testid={`playlist-practice-mastery-label-${song.id}`}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-white"
+                          className={`absolute right-1 top-1/2 -translate-y-1/2 text-[11px] font-semibold ${mastery >= 90 ? 'text-white' : 'text-slate-950'}`}
                         >
                           {mastery}%
                         </span>

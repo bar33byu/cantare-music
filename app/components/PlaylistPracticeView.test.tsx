@@ -1286,14 +1286,14 @@ describe('PlaylistPracticeView', () => {
     expect(insideLabel).toHaveTextContent('91%');
     expect(insideLabel.className).toContain('text-white');
     expect(screen.getByTestId('playlist-practice-mastery-fill-song-1')).toHaveStyle({
-      backgroundColor: 'rgb(43, 171, 90)',
+      backgroundColor: 'rgb(95, 87, 231)',
     });
 
     const outsideLabel = screen.getByTestId('playlist-practice-mastery-label-song-2');
     expect(outsideLabel).toHaveTextContent('7%');
     expect(outsideLabel.className).toContain('text-gray-700');
     expect(screen.getByTestId('playlist-practice-mastery-fill-song-2')).toHaveStyle({
-      backgroundColor: 'rgb(239, 249, 242)',
+      backgroundColor: 'rgb(243, 242, 253)',
     });
   });
 
