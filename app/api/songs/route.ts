@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { formatError } from "../_errors";
 import { getAllSongs, createSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getMidiContourStatusBySongIds, getSegmentsBySongIds } from '../../../db/queries';
 import { resolveEffectiveRequestUserId } from '../_user';
 
@@ -16,15 +17,6 @@ function toIsoString(value: unknown): string | null {
     }
   }
   return null;
-}
-
-function formatError(error: unknown) {
-  const message = error instanceof Error ? error.message : 'Unknown server error';
-  const shouldExpose =
-    process.env.NODE_ENV === 'development' ||
-    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === 'true';
-
-  return shouldExpose ? { error: message } : { error: 'Internal server error' };
 }
 
 function isMissingDatabaseConfigError(error: unknown): boolean {

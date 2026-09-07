@@ -1,5 +1,4 @@
 import type {
-  BlendTapHeatMapMarker,
   DirectionTap,
   TapAudioVersion,
   TapScoreResult,
@@ -703,42 +702,6 @@ export function scoreTapAttemptProgressAgainstMidiKey(
       : Math.round((prefixScore.matchedTaps / segmentKey.taps.length) * 100),
     details: [...prefixScore.details, ...missingDetails],
   };
-}
-
-export function buildMidiBlendTapHeatMap(
-  segmentKey: MidiSegmentAnswerKey | null,
-  scoredAttempts: TapScoreResult[]
-): BlendTapHeatMapMarker[] {
-  if (!segmentKey) {
-    return [];
-  }
-
-  return segmentKey.notes.map((note, index) => {
-    const missingCount = 0;
-    let timingMissCount = 0;
-    let directionMissCount = 0;
-    let missCount = 0;
-    for (const attempt of scoredAttempts) {
-      const detail = attempt.details.find((item) => item.index === index);
-      if (!detail || detail.status === "matched" || detail.status === "extra" || detail.status === "missing") {
-        continue;
-      }
-      missCount += 1;
-      if (detail.status === "timing") timingMissCount += 1;
-      if (detail.status === "direction") directionMissCount += 1;
-    }
-    const attemptCount = scoredAttempts.length;
-    const missRate = attemptCount === 0 ? 0 : missCount / attemptCount;
-    return {
-      index: note.sourceWholeSongNoteIndex,
-      missRate,
-      troubleLevel: missRate >= 0.67 ? "high" : missRate >= 0.34 ? "medium" : missRate > 0 ? "low" : "none",
-      missingCount,
-      timingMissCount,
-      directionMissCount,
-      attemptCount,
-    };
-  });
 }
 
 export function buildMidiContourTapHeatMap(

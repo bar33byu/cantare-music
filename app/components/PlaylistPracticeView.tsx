@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { flushSync } from 'react-dom';
 import type { Playlist } from '../types';
 import { getMasteryGradientColor } from '../lib/masteryColors';
-import { compareNaturalText } from '../lib/naturalSort';
+import { sortSongs, type SongSortKey, type SongSortState } from '../lib/songSort';
 import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
 import { prefetchAudioFile } from '../lib/audioPrefetch';
 import { SongReadinessIcons } from './SongReadinessIcons';
@@ -17,15 +17,14 @@ import type { SessionState } from '../lib/sessionReducer';
 import type { AutoDrillState, PracticeMode } from '../lib/autoDrill';
 import { getAutoDrillTargetPasses } from '../lib/autoDrill';
 import type { MemoryRating } from '../types';
+import { SongSortMenu } from './SongSortMenu';
 
-type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
 type FocusSortKey = 'mastery' | 'due-date' | 'song-order';
 type PlaylistMode = 'practice' | 'focus' | 'listen' | 'auto';
 type ExplainedMode = Extract<PlaylistMode, 'focus' | 'listen' | 'auto'>;
-interface SortState { key: SortKey; asc: boolean }
 const SORT_STORAGE_KEY = 'playlist-practice-sort';
 const MODE_EXPLAINER_STORAGE_KEY_PREFIX = 'playlist-practice-mode-explainer:';
-const DEFAULT_SORT: SortState = { key: 'date-practiced', asc: false };
+const DEFAULT_SORT: SongSortState = { key: 'date-practiced', asc: false };
 const DEFAULT_FOCUS_PREROLL_MS = 5000;
 const FOCUS_MASTERED_RATING = 5;
 const AUTO_DRILL_PREROLL_MS = 500;
@@ -33,23 +32,16 @@ const HANDS_FREE_LABEL = 'Hands Free';
 const AUTO_DRILL_PERMISSION_WARNING =
   'Automatic audio is blocked on this device. Tap Play once to continue.';
 
-const sortKeyLabel: Record<SortKey, string> = {
-  alphabetical: 'Alphabetical',
-  'date-added': 'Date Added',
-  'date-practiced': 'Last Practiced',
-  'memory-score': 'Memory Score',
-};
-
-const sortDirLabel: Record<SortKey, [string, string]> = {
+const sortDirLabel: Record<SongSortKey, [string, string]> = {
   alphabetical: ['Z–A', 'A–Z'],
   'date-added': ['Newest', 'Oldest'],
   'date-practiced': ['Recent', 'Oldest'],
   'memory-score': ['Lowest', 'Lowest'],
 };
 
-const defaultAscForKey = (key: SortKey) => key === 'alphabetical' || key === 'memory-score';
+const defaultAscForKey = (key: SongSortKey) => key === 'alphabetical' || key === 'memory-score';
 
-const normalizeSort = (sort: SortState): SortState => (
+const normalizeSort = (sort: SongSortState): SongSortState => (
   sort.key === 'memory-score' ? { ...sort, asc: true } : sort
 );
 
@@ -234,7 +226,7 @@ export function PlaylistPracticeView({
 }: PlaylistPracticeViewProps) {
   const [livePlaylist, setLivePlaylist] = useState(playlist);
   const [playlistScore, setPlaylistScore] = useState(0);
-  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
+  const [sort, setSort] = useState<SongSortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const [mode, setMode] = useState<PlaylistMode>('practice');
@@ -356,27 +348,7 @@ export function PlaylistPracticeView({
   }, [accountProgressEnabled, livePlaylist.songs, ratingsBySongId]);
 
   const displayedSongs = useMemo(() => {
-    const dir = sort.asc ? 1 : -1;
-    return [...songsWithProgress].sort((a, b) => {
-      switch (sort.key) {
-        case 'alphabetical':
-          return dir * compareNaturalText(a.title, b.title);
-        case 'date-added':
-          return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
-        case 'date-practiced': {
-          const aTime = a.lastPracticedAt ?? '';
-          const bTime = b.lastPracticedAt ?? '';
-          if (!aTime && !bTime) return 0;
-          if (!aTime) return dir;
-          if (!bTime) return -dir;
-          return dir * aTime.localeCompare(bTime);
-        }
-        case 'memory-score':
-          return dir * ((a.masteryPercent ?? 0) - (b.masteryPercent ?? 0));
-        default:
-          return 0;
-      }
-    });
+    return sortSongs(songsWithProgress, sort);
   }, [songsWithProgress, sort]);
 
   useEffect(() => {
@@ -1175,10 +1147,10 @@ export function PlaylistPracticeView({
           parsed !== null &&
           typeof parsed === 'object' &&
           'key' in parsed && 'asc' in parsed &&
-          ['alphabetical', 'date-added', 'date-practiced', 'memory-score'].includes((parsed as SortState).key) &&
-          typeof (parsed as SortState).asc === 'boolean'
+          ['alphabetical', 'date-added', 'date-practiced', 'memory-score'].includes((parsed as SongSortState).key) &&
+          typeof (parsed as SongSortState).asc === 'boolean'
         ) {
-          setSort(normalizeSort(parsed as SortState));
+          setSort(normalizeSort(parsed as SongSortState));
         }
       }
     } catch {
@@ -1186,7 +1158,7 @@ export function PlaylistPracticeView({
     }
   }, []);
 
-  const updateSort = (next: SortState) => {
+  const updateSort = (next: SongSortState) => {
     const normalized = normalizeSort(next);
     setSort(normalized);
     try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(normalized)); } catch { /* ignore */ }
@@ -1453,57 +1425,15 @@ export function PlaylistPracticeView({
         <>
           {/* Sort toolbar */}
           <div className="flex items-center gap-2">
-            <div className="relative ml-auto">
-              <button
-                type="button"
-                data-testid="playlist-sort-toggle"
-                onClick={() => setShowSortMenu((prev) => !prev)}
-                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm text-gray-500 hover:bg-gray-100"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                  <line x1="8" y1="6" x2="21" y2="6" />
-                  <line x1="8" y1="12" x2="21" y2="12" />
-                  <line x1="8" y1="18" x2="21" y2="18" />
-                  <polyline points="3 6 4 7 6 5" />
-                  <polyline points="3 12 4 13 6 11" />
-                  <polyline points="3 18 4 19 6 17" />
-                </svg>
-                {sortDirLabel[sort.key][sort.asc ? 1 : 0]}
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              {showSortMenu && (
-                <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-gray-200 bg-white shadow-lg">
-                  {(['alphabetical', 'date-added', 'date-practiced', 'memory-score'] as const).map((key) => {
-                    const isActive = sort.key === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        data-testid={`playlist-sort-${key}`}
-                        onClick={() => {
-                          updateSort({ key, asc: isActive ? !sort.asc : defaultAscForKey(key) });
-                          setShowSortMenu(false);
-                        }}
-                        className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg hover:bg-gray-50 ${
-                          isActive ? 'font-semibold text-blue-600' : 'text-gray-700'
-                        }`}
-                      >
-                        {sortKeyLabel[key]}
-                        {isActive && (
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                            {sort.asc
-                              ? <polyline points="18 15 12 9 6 15" />
-                              : <polyline points="6 9 12 15 18 9" />}
-                          </svg>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <SongSortMenu
+              sort={sort}
+              isOpen={showSortMenu}
+              testIdPrefix="playlist-sort"
+              directionLabels={sortDirLabel}
+              defaultAscForKey={defaultAscForKey}
+              onOpenChange={setShowSortMenu}
+              onSortChange={updateSort}
+            />
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="playlist-song-grid">

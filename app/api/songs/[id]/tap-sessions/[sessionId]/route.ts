@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { formatError } from "../../../../_errors";
 import {
   addTapPracticeTap,
   finalizeTapPracticeSession,
@@ -26,15 +27,6 @@ import { DEFAULT_TAP_TIMING_TOLERANCE_MS } from '../../../../../lib/tapPracticeC
 import { centsBetween, scoreVoicePitchAttempts, type VoicePitchAttempt } from '../../../../../lib/pitchPractice';
 import type { TapScoreResult } from '../../../../../lib/enhancedTapPractice';
 import { resolveEffectiveRequestUserId } from '../../../../_user';
-
-function formatError(error: unknown) {
-  const message = error instanceof Error ? error.message : 'Unknown server error';
-  const shouldExpose =
-    process.env.NODE_ENV === 'development' ||
-    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === 'true';
-
-  return shouldExpose ? { error: message } : { error: 'Internal server error' };
-}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);

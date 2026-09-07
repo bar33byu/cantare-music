@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getExercisePitchRange } from "./vocalExercise";
-import { parseVocalExerciseSeed, parseVocalExerciseSeedBundle, scientificPitchToMidi } from "./vocalExerciseSeed";
+import { parseVocalExerciseSeedBundle, scientificPitchToMidi } from "./vocalExerciseSeed";
 import baritoneWarmupsSeed from "../data/baritone-passaggio-warmups.seed.json";
 import legacyExercisesSeed from "../data/legacy-vocal-exercises.seed.json";
 
@@ -19,7 +19,7 @@ describe("vocal exercise seed mapping", () => {
   });
 
   it("flattens chords while preserving metadata and sung range semantics", () => {
-    const [exercise] = parseVocalExerciseSeed({
+    const [exercise] = parseVocalExerciseSeedBundle({
       format: "cantare_exercise_seed_v1",
       defaults: {
         timeSignature: { numerator: 4, denominator: 4 },
@@ -38,7 +38,7 @@ describe("vocal exercise seed mapping", () => {
           { region: "exercise", startBeat: 5, durationBeats: 1, notes: ["G3"], lyric: "mum" },
         ],
       }],
-    }, "2026-06-21T00:00:00.000Z");
+    }, "2026-06-21T00:00:00.000Z").exercises;
 
     expect(exercise.id).toBe("seed:triad");
     expect(exercise.events).toHaveLength(5);

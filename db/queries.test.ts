@@ -891,23 +891,6 @@ describe("upsertSegments", () => {
   });
 });
 
-describe("updateSongAudioKey", () => {
-  it("sets only audioKey, does not touch other fields", async () => {
-    const chain = makeChain();
-    updateSpy.mockReturnValue(chain);
-
-    const { updateSongAudioKey } = await getQueries();
-    await updateSongAudioKey("song-1", "r2/audio/song-1.mp3");
-
-    expect(updateSpy).toHaveBeenCalledWith(songs);
-    const setSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
-    // Only audioKey is passed — no title, artist, or createdAt
-    expect(setSpy).toHaveBeenCalledWith({ audioKey: "r2/audio/song-1.mp3" });
-    const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
-    expect(whereSpy).toHaveBeenCalled();
-  });
-});
-
 describe("markSongPracticed", () => {
   it("updates lastPracticedAt for the song", async () => {
     const chain = makeChain();
@@ -1373,33 +1356,6 @@ describe("saveRatings", () => {
     const { saveRatings } = await getQueries();
     await saveRatings([]);
     expect(insertSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe("deleteRatingsForSong", () => {
-  it("deletes ratings for all segments of a song", async () => {
-    const selectChain = makeChain([{ id: "seg-1" }, { id: "seg-2" }]);
-    const deleteChain = makeChain();
-    selectSpy
-      .mockReturnValueOnce(makeChain([{ id: "song-1", sourceSongId: null }]))
-      .mockReturnValueOnce(makeChain([{ id: "seg-1", sourceSegmentId: null }, { id: "seg-2", sourceSegmentId: null }]))
-      .mockReturnValueOnce(selectChain);
-    deleteSpy.mockReturnValue(deleteChain);
-
-    const { deleteRatingsForSong } = await getQueries();
-    await deleteRatingsForSong("song-1");
-
-    expect(selectSpy).toHaveBeenCalled();
-  });
-
-  it("does not delete when song has no segments", async () => {
-    const selectChain = makeChain([]);
-    selectSpy.mockReturnValue(selectChain);
-
-    const { deleteRatingsForSong } = await getQueries();
-    await deleteRatingsForSong("song-1");
-
-    expect(selectSpy).toHaveBeenCalled();
   });
 });
 

@@ -789,7 +789,7 @@ export function SegmentEditor({ songId, userId, onSongUpdated, onSongDeleted }: 
           setSegments(data.sort((a, b) => a.order - b.order));
         }
       } catch {
-        // SegmentList owns user-facing fetch errors, so this stays silent.
+        // Keep the currently displayed segments when a background refresh fails.
       }
     };
 

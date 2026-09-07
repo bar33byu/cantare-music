@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   alignMidiByFirstAudioStart,
   appendAlignmentTap,
-  buildMidiBlendTapHeatMap,
   buildMidiContourTapHeatMap,
   cleanMidiNotes,
   createMidiAlignment,
@@ -234,23 +233,6 @@ describe("midiGuidedTapPractice", () => {
 
     expect(score.scorePercent).toBe(50);
     expect(score.details.map((detail) => detail.status)).toEqual(["matched", "missing"]);
-  });
-
-  it("builds a blend heat map from MIDI score details", () => {
-    const notes = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
-    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
-    const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
-    const score = scoreTapAttemptAgainstMidiKey(segmentKey, [
-      { timeOffsetMs: 0, direction: "same" },
-      { timeOffsetMs: 1000, direction: "down" },
-    ], 400);
-
-    expect(buildMidiBlendTapHeatMap(segmentKey, [score])[1]).toEqual(expect.objectContaining({
-      missingCount: 0,
-      directionMissCount: 1,
-      timingMissCount: 0,
-      missRate: 1,
-    }));
   });
 
   it("builds capped contour heat stats from MIDI score details", () => {

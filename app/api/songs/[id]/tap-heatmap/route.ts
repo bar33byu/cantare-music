@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { formatError } from "../../../_errors";
 import {
   getLatestCompleteMidiAlignmentForSource,
   getLatestMidiSourceForSong,
@@ -17,15 +18,6 @@ import { resolveEffectiveRequestUserId } from '../../../_user';
 
 const TAP_HEAT_MAP_SESSION_LIMIT = 200;
 const TAP_HEAT_MAP_ATTEMPT_LIMIT = 5;
-
-function formatError(error: unknown) {
-  const message = error instanceof Error ? error.message : 'Unknown server error';
-  const shouldExpose =
-    process.env.NODE_ENV === 'development' ||
-    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === 'true';
-
-  return shouldExpose ? { error: message } : { error: 'Internal server error' };
-}
 
 function isTapScoreResult(value: unknown): value is TapScoreResult {
   return Boolean(value && typeof value === 'object' && Array.isArray((value as TapScoreResult).details));

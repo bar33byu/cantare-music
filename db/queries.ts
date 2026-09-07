@@ -5,12 +5,9 @@ import type { SongRow, SegmentRow, PlaylistRow, OrphanedAudioKeyRow, DraftRecord
 import { getPublicUrl } from "../lib/r2";
 import type { PracticeInputMethod, SelfRating, TapAudioVersion, TapDirection, TapPracticeMode, TapScoreResult } from "../app/lib/enhancedTapPractice";
 import type { MidiAlignment } from "../app/lib/midiGuidedTapPractice";
+import type { PlaylistRefreshCandidate, PlaylistRefreshPreview } from "../shared/domainTypes";
 
 const DEFAULT_QUERY_USER_ID = "default";
-
-async function ensureMigratedSchema(): Promise<void> {
-  // Schema is managed by Drizzle migrations. Request handlers must not run DDL.
-}
 
 function normalizeDbUserId(value: string | null | undefined): string {
   if (!value) {
@@ -935,14 +932,6 @@ function isMissingEnhancedTapPracticeColumnError(error: unknown): boolean {
   return false;
 }
 
-async function ensureTapPracticeTables(): Promise<void> {
-  await ensureMigratedSchema();
-}
-
-async function ensureDraftRecordingTables(): Promise<void> {
-  await ensureMigratedSchema();
-}
-
 // Audit logs are intentionally lightweight: high-risk auth/account events only.
 export async function logAuditEvent(input: AuditLogInput): Promise<AuditLogRow | null> {
   try {
@@ -1342,32 +1331,6 @@ export async function upsertUser(data: {
 
 // ── Songs ──────────────────────────────────────────────────────────────────
 
-export async function getOrCreateUserForEmail(email: string): Promise<PublicUser> {
-  const result = await getOrCreateUserForEmailWithStatus(email);
-  return result.user;
-}
-
-export interface PlaylistRefreshCandidate {
-  sourceSongId: string;
-  currentSongId?: string | null;
-  title: string;
-  artist?: string;
-  position: number;
-  status: "new" | "refreshable";
-  segmentCount: number;
-  hasPartAudio: boolean;
-  hasBlendAudio: boolean;
-}
-
-export interface PlaylistRefreshPreview {
-  sourcePlaylist: {
-    id: string;
-    name: string;
-    owner: SharedPlaylistDetail["owner"];
-  };
-  candidates: PlaylistRefreshCandidate[];
-}
-
 export interface RefreshImportedPlaylistResult {
   importedCount: number;
   playlist: PlaylistDetail;
@@ -1420,12 +1383,7 @@ export interface UserAccountDeletionStatus {
   scheduledFor: string | null;
 }
 
-async function ensureUserAccountDeletionColumns(): Promise<void> {
-  await ensureMigratedSchema();
-}
-
 export async function getUserAccountDeletionStatus(userId: string): Promise<UserAccountDeletionStatus | null> {
-  await ensureUserAccountDeletionColumns();
 
   const rows = await db()
     .select({
@@ -1452,7 +1410,6 @@ export async function scheduleUserAccountDeletion(
   requestedAt: Date,
   scheduledFor: Date
 ): Promise<UserAccountDeletionStatus | null> {
-  await ensureUserAccountDeletionColumns();
 
   const rows = await db()
     .update(users)
@@ -1479,7 +1436,6 @@ export async function scheduleUserAccountDeletion(
 }
 
 export async function cancelUserAccountDeletion(userId: string): Promise<UserAccountDeletionStatus | null> {
-  await ensureUserAccountDeletionColumns();
 
   const rows = await db()
     .update(users)
@@ -1506,7 +1462,6 @@ export async function cancelUserAccountDeletion(userId: string): Promise<UserAcc
 }
 
 export async function getUsersPendingAccountDeletion(before: Date = new Date()): Promise<PublicUser[]> {
-  await ensureUserAccountDeletionColumns();
 
   const rows = await db()
     .select({
@@ -1628,7 +1583,6 @@ export async function isStorageKeyReferenced(
 }
 
 export async function purgeUserAccountData(userId: string): Promise<boolean> {
-  await ensureUserAccountDeletionColumns();
   const user = await getUserById(userId);
   if (!user) {
     return false;
@@ -2063,17 +2017,6 @@ export async function createSong(data: {
   }
 }
 
-export async function updateSongAudioKey(
-  id: string,
-  audioKey: string,
-  userId: string = DEFAULT_QUERY_USER_ID
-): Promise<void> {
-  await db()
-    .update(songs)
-    .set({ audioKey })
-    .where(and(eq(songs.id, id), eq(songs.userId, userId)));
-}
-
 export async function updateSong(
   id: string,
   updates: Partial<Pick<SongRow, 'audioKey' | 'alternateAudioKey' | 'title' | 'artist' | 'pitchContourNotes'>>,
@@ -2186,7 +2129,6 @@ export async function createDraftRecording(data: {
   title?: string | null;
   createdAt?: Date;
 }, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedDraftRecording> {
-  await ensureDraftRecordingTables();
   if (data.songId) {
     const song = await getSongById(data.songId, userId);
     if (!song) {
@@ -2218,7 +2160,6 @@ export async function getUnassignedDraftRecordings(
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedDraftRecording[]> {
   try {
-    await ensureDraftRecordingTables();
     const rows = await db()
       .select()
       .from(draftRecordings)
@@ -2239,7 +2180,6 @@ export async function assignDraftRecordingToSong(
   songId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedDraftRecording | null> {
-  await ensureDraftRecordingTables();
   const song = await getSongById(songId, userId);
   if (!song) {
     return null;
@@ -2263,7 +2203,6 @@ export async function discardUnassignedDraftRecording(
   draftRecordingId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedDraftRecording | null> {
-  await ensureDraftRecordingTables();
   const rows = await db()
     .update(draftRecordings)
     .set({
@@ -2287,7 +2226,6 @@ export async function updateDraftRecordingTrim(
   data: { trimStartMs: number; trimEndMs: number },
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedDraftRecording | null> {
-  await ensureDraftRecordingTables();
   const song = await getSongById(songId, userId);
   if (!song) {
     return null;
@@ -2311,7 +2249,6 @@ export async function promoteDraftRecordingToSongVersion(
   data: { trimStartMs?: number | null; trimEndMs?: number | null } = {},
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PromoteDraftRecordingResult | null> {
-  await ensureDraftRecordingTables();
   const song = await getSongById(songId, userId);
   if (!song) {
     return null;
@@ -2362,7 +2299,6 @@ export async function discardDraftRecording(
   draftRecordingId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedDraftRecording | null> {
-  await ensureDraftRecordingTables();
   const song = await getSongById(songId, userId);
   if (!song) {
     return null;
@@ -2400,7 +2336,6 @@ async function getDraftRecordingsForSongByStatus(
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedDraftRecording[]> {
   try {
-    await ensureDraftRecordingTables();
     const rows = await db()
       .select({ draftRecording: draftRecordings })
       .from(draftRecordings)
@@ -2925,22 +2860,6 @@ export async function saveRatings(
     );
 }
 
-export async function deleteRatingsForSong(
-  songId: string,
-  userId: string = DEFAULT_QUERY_USER_ID
-): Promise<void> {
-  const segmentGroups = await getScoreSegmentGroupsForSong(songId, userId);
-  const songSegments = segmentGroups.allScoreSegmentIds;
-
-  if (songSegments.length === 0) {
-    return;
-  }
-
-  await db()
-    .delete(practiceRatings)
-    .where(and(eq(practiceRatings.userId, userId), inArray(practiceRatings.segmentId, songSegments)));
-}
-
 // ── Tap Practice ─────────────────────────────────────────────────────────
 
 export interface GuestProgressClaimResult {
@@ -3193,10 +3112,6 @@ function normalizeTapAudioVersion(value: string | null | undefined): TapAudioVer
   return value === "blend" ? "blend" : "straight";
 }
 
-async function ensureMidiTables(): Promise<void> {
-  await ensureMigratedSchema();
-}
-
 function normalizeTapPracticeMode(value: string | null | undefined): TapPracticeMode {
   return value === "answer_key" ? "answer_key" : "practice";
 }
@@ -3251,7 +3166,6 @@ export async function deleteExpiredTapPracticeData(
       .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
-      await ensureTapPracticeTables();
       await db()
         .delete(tapPracticeSessions)
         .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
@@ -3288,7 +3202,6 @@ async function pruneTapPracticeSessionsForSegment(
       .orderBy(desc(tapPracticeSessions.startedAt));
   } catch (error) {
     if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await ensureTapPracticeTables();
       sessions = await db()
         .select({
           id: tapPracticeSessions.id,
@@ -3328,7 +3241,6 @@ async function pruneTapPracticeSessionsForSegment(
       .where(inArray(tapPracticeSessions.id, staleSessionIds));
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
-      await ensureTapPracticeTables();
       await db()
         .delete(tapPracticeSessions)
         .where(inArray(tapPracticeSessions.id, staleSessionIds));
@@ -3349,25 +3261,21 @@ export async function createTapPracticeSession(
     inputMethod?: PracticeInputMethod;
   } = {}
 ): Promise<PersistedTapPracticeSessionSummary> {
-  try {
-    const rows = await db()
-      .insert(tapPracticeSessions)
-      .values({
-        id: crypto.randomUUID(),
-        userId,
-        songId,
-        segmentId: options.segmentId ?? null,
-        audioVersion: options.audioVersion ?? "straight",
-        mode: options.mode ?? "practice",
-        inputMethod: options.inputMethod ?? "tap",
-        startedAt,
-      })
-      .returning();
+  const rows = await db()
+    .insert(tapPracticeSessions)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      songId,
+      segmentId: options.segmentId ?? null,
+      audioVersion: options.audioVersion ?? "straight",
+      mode: options.mode ?? "practice",
+      inputMethod: options.inputMethod ?? "tap",
+      startedAt,
+    })
+    .returning();
 
-    return mapTapPracticeSession(rows[0]);
-  } catch (error) {
-    throw error;
-  }
+  return mapTapPracticeSession(rows[0]);
 }
 
 export async function getSegmentsBySongIds(
@@ -3455,7 +3363,6 @@ export async function addTapPracticeTap(
       });
   } catch (error) {
     if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await ensureTapPracticeTables();
       await db()
         .insert(tapPracticeTaps)
         .values({
@@ -3501,7 +3408,6 @@ export async function updateTapPracticeSessionProgress(
       .where(eq(tapPracticeSessions.id, sessionId));
   } catch (error) {
     if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await ensureTapPracticeTables();
       await db()
         .update(tapPracticeSessions)
         .set({
@@ -3520,26 +3426,6 @@ export async function updateTapPracticeSessionProgress(
   }
 
   return getTapPracticeSessionDetail(sessionId, userId);
-}
-
-export async function deleteTapPracticeSessionsForSong(
-  songId: string,
-  userId: string = DEFAULT_QUERY_USER_ID
-): Promise<void> {
-  try {
-    await db()
-      .delete(tapPracticeSessions)
-      .where(and(eq(tapPracticeSessions.songId, songId), eq(tapPracticeSessions.userId, userId)));
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
-      await ensureTapPracticeTables();
-      await db()
-        .delete(tapPracticeSessions)
-        .where(and(eq(tapPracticeSessions.songId, songId), eq(tapPracticeSessions.userId, userId)));
-      return;
-    }
-    throw error;
-  }
 }
 
 export async function listTapPracticeSessionsForSong(
@@ -3570,7 +3456,6 @@ export async function listTapPracticeSessionsForSong(
       .orderBy(desc(tapPracticeSessions.startedAt));
   } catch (error) {
     if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await ensureTapPracticeTables();
       sessions = await db()
         .select({
           id: tapPracticeSessions.id,
@@ -3609,7 +3494,6 @@ export async function listTapPracticeSessionsForSong(
       .where(inArray(tapPracticeTaps.sessionId, sessionIds));
   } catch (error) {
     if (isMissingTapPracticeTableError(error)) {
-      await ensureTapPracticeTables();
       tapRows = await db()
         .select({ sessionId: tapPracticeTaps.sessionId })
         .from(tapPracticeTaps)
@@ -3657,7 +3541,6 @@ export async function getTapPracticeSessionDetail(
       .limit(1);
   } catch (error) {
     if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await ensureTapPracticeTables();
       sessionRows = await db()
         .select({
           id: tapPracticeSessions.id,
@@ -3705,7 +3588,6 @@ export async function getTapPracticeSessionDetail(
       .orderBy(asc(tapPracticeTaps.createdAt));
   } catch (error) {
     if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await ensureTapPracticeTables();
       taps = await db()
         .select()
         .from(tapPracticeTaps)
@@ -3779,7 +3661,6 @@ export async function finalizeTapPracticeSession(
       .where(eq(tapPracticeSessions.id, sessionId));
   } catch (error) {
     if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await ensureTapPracticeTables();
       await db()
         .update(tapPracticeSessions)
         .set({
@@ -3802,9 +3683,7 @@ export async function finalizeTapPracticeSession(
   return getTapPracticeSessionDetail(sessionId, userId);
 }
 
-// ── Playlists ─────────────────────────────────────────────────────────────
-
-// MIDI-guided Tap Practice
+// ── MIDI-guided Tap Practice ──────────────────────────────────────────────
 
 function mapMidiSource(row: MidiSourceRow): PersistedMidiSource {
   return {
@@ -3858,7 +3737,6 @@ export async function createMidiSource(data: Omit<PersistedMidiSource, "uploaded
     return mapMidiSource(rows[0]);
   } catch (error) {
     if (isMissingMidiTableError(error)) {
-      await ensureMidiTables();
       const rows = await db()
         .insert(midiSources)
         .values({
@@ -3886,7 +3764,6 @@ export async function getLatestMidiSourceForSong(songId: string, userId: string 
     return rows[0] ? mapMidiSource(rows[0].source) : null;
   } catch (error) {
     if (isMissingMidiTableError(error)) {
-      await ensureMidiTables();
       return null;
     }
     throw error;
@@ -3922,7 +3799,6 @@ export async function getMidiContourStatusBySongIds(
     return bySong;
   } catch (error) {
     if (isMissingMidiTableError(error)) {
-      await ensureMidiTables();
       return bySong;
     }
     throw error;
@@ -3940,7 +3816,6 @@ export async function getMidiSourceById(midiSourceId: string, userId: string = D
     return rows[0] ? mapMidiSource(rows[0].source) : null;
   } catch (error) {
     if (isMissingMidiTableError(error)) {
-      await ensureMidiTables();
       return null;
     }
     throw error;
@@ -3957,7 +3832,6 @@ export async function updateMidiSourceCleanup(
     ignoredShortNoteCount: number;
   }
 ): Promise<PersistedMidiSource | null> {
-  await ensureMidiTables();
   const source = await getMidiSourceById(midiSourceId, userId);
   if (!source) {
     return null;
@@ -3987,7 +3861,6 @@ export async function getLatestMidiAlignmentForSource(midiSourceId: string, user
     return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
   } catch (error) {
     if (isMissingMidiTableError(error)) {
-      await ensureMidiTables();
       return null;
     }
     throw error;
@@ -4006,7 +3879,6 @@ export async function getLatestCompleteMidiAlignmentForSource(midiSourceId: stri
     return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
   } catch (error) {
     if (isMissingMidiTableError(error)) {
-      await ensureMidiTables();
       return null;
     }
     throw error;
@@ -4024,7 +3896,6 @@ export async function upsertMidiAlignment(
   },
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<MidiAlignment> {
-  await ensureMidiTables();
   const song = await getSongById(data.songId, userId);
   if (!song) {
     throw new Error("Song not found");
@@ -4054,6 +3925,8 @@ export async function upsertMidiAlignment(
     .returning();
   return mapMidiAlignment(rows[0]);
 }
+
+// ── Playlists ─────────────────────────────────────────────────────────────
 
 function toIso(value: Date | null): string {
   return value ? value.toISOString() : new Date(0).toISOString();
@@ -4090,10 +3963,6 @@ function emptyPlaylistHealthStats() {
     songsWithSegments: 0,
     songsWithMidiContour: 0,
   };
-}
-
-async function ensurePlaylistSharingColumns(): Promise<void> {
-  await ensureMigratedSchema();
 }
 
 function normalizeShareAudioMode(mode: unknown): PlaylistShareAudioMode {
@@ -4439,7 +4308,6 @@ export async function enablePlaylistSharing(
   userId: string = DEFAULT_QUERY_USER_ID,
   shareAudioMode: PlaylistShareAudioMode = "both"
 ): Promise<PlaylistSummary | null> {
-  await ensurePlaylistSharingColumns();
   const existingRows = await db()
     .select()
     .from(playlists)
@@ -4478,7 +4346,6 @@ export async function disablePlaylistSharing(
   id: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<boolean> {
-  await ensurePlaylistSharingColumns();
   const rows = await db()
     .update(playlists)
     .set({ shareToken: null, sharedAt: null })
@@ -4493,7 +4360,6 @@ export async function enablePlaylistPublicSharing(
   userId: string = DEFAULT_QUERY_USER_ID,
   shareAudioMode: PlaylistShareAudioMode = "both"
 ): Promise<PlaylistSummary | null> {
-  await ensurePlaylistSharingColumns();
   const existingRows = await db()
     .select()
     .from(playlists)
@@ -4528,7 +4394,6 @@ export async function disablePlaylistPublicSharing(
   id: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<boolean> {
-  await ensurePlaylistSharingColumns();
   const rows = await db()
     .update(playlists)
     .set({ isPublic: false, publishedAt: null })
@@ -4539,7 +4404,6 @@ export async function disablePlaylistPublicSharing(
 }
 
 export async function getPublicSharedPlaylists(excludeOwnerUserId?: string): Promise<PublicSharedPlaylistSummary[]> {
-  await ensurePlaylistSharingColumns();
   let rows: Array<{
     playlist: PlaylistRow;
     ownerId: string;
@@ -4615,7 +4479,6 @@ export async function getPublicSharedPlaylists(excludeOwnerUserId?: string): Pro
 }
 
 export async function getPublicPlaylistById(id: string, viewerUserId?: string): Promise<SharedPlaylistDetail | null> {
-  await ensurePlaylistSharingColumns();
   let rows: Array<{
     playlist: PlaylistRow;
     ownerId: string;
@@ -4683,7 +4546,6 @@ export async function getSharedPlaylistByToken(token: string): Promise<SharedPla
   if (!token.trim()) {
     return null;
   }
-  await ensurePlaylistSharingColumns();
 
   let rows: Array<{
     playlist: PlaylistRow;
@@ -4749,7 +4611,6 @@ export async function getPlaylistImportsForSource(
   sourcePlaylistId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PlaylistSummary[]> {
-  await ensurePlaylistSharingColumns();
   const rows = await db()
     .select()
     .from(playlists)
@@ -5085,7 +4946,6 @@ export async function importSharedPlaylist(
   userId: string = DEFAULT_QUERY_USER_ID,
   options: { force?: boolean; shareAudioMode?: PlaylistShareAudioMode } = {}
 ): Promise<{ status: "imported"; playlist: PlaylistSummary } | { status: "already_imported"; playlist: PlaylistSummary }> {
-  await ensurePlaylistSharingColumns();
   const source = await getSharedPlaylistByToken(token);
   if (!source) {
     throw Object.assign(new Error("Shared playlist not found"), { code: "SHARED_PLAYLIST_NOT_FOUND" });
@@ -5099,7 +4959,6 @@ export async function importPublicPlaylist(
   userId: string = DEFAULT_QUERY_USER_ID,
   options: { force?: boolean; shareAudioMode?: PlaylistShareAudioMode } = {}
 ): Promise<{ status: "imported"; playlist: PlaylistSummary } | { status: "already_imported"; playlist: PlaylistSummary }> {
-  await ensurePlaylistSharingColumns();
   const source = await getPublicPlaylistById(playlistId, userId);
   if (!source) {
     throw Object.assign(new Error("Shared playlist not found"), { code: "SHARED_PLAYLIST_NOT_FOUND" });

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { formatError } from "../../../_errors";
 import { getImportedPlaylistRefreshPreview, refreshImportedPlaylistSongs } from '../../../../../db/queries';
 import { resolveEffectiveRequestUserId } from '../../../_user';
 
@@ -6,15 +7,6 @@ const userScopedHeaders = {
   'Cache-Control': 'private, no-store',
   Vary: 'X-User-ID',
 };
-
-function formatError(error: unknown) {
-  const message = error instanceof Error ? error.message : 'Unknown server error';
-  const shouldExpose =
-    process.env.NODE_ENV === 'development' ||
-    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === 'true';
-
-  return shouldExpose ? { error: message } : { error: 'Internal server error' };
-}
 
 function errorCode(error: unknown): string | undefined {
   return error instanceof Error ? (error as Error & { code?: string }).code : undefined;

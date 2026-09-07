@@ -226,33 +226,6 @@ export function getExercisePitchRange(exercise: VocalExercise, offset = 0): Voca
   };
 }
 
-export function generateTranspositionPath(exercise: VocalExercise, range: VocalRange): number[] {
-  const exerciseRange = getExercisePitchRange(exercise);
-  if (!exerciseRange || range.low > range.high) return [];
-  const minimumOffset = range.low - exerciseRange.low;
-  const maximumOffset = range.high - exerciseRange.high;
-  if (minimumOffset > maximumOffset) return [];
-
-  const rangeCenter = (range.low + range.high) / 2;
-  const exerciseCenter = (exerciseRange.low + exerciseRange.high) / 2;
-  const start = Math.max(minimumOffset, Math.min(maximumOffset, Math.round(rangeCenter - exerciseCenter)));
-  const path = [start];
-  for (let offset = start + 1; offset <= maximumOffset; offset += 1) path.push(offset);
-  for (let offset = maximumOffset - 1; offset >= minimumOffset; offset -= 1) path.push(offset);
-  for (let offset = minimumOffset + 1; offset <= start; offset += 1) path.push(offset);
-  return path;
-}
-
-export function getContextMetronomeBeats(exercise: VocalExercise): number[] {
-  const beatLength = 4 / exercise.timeSignature.denominator;
-  if (!Number.isFinite(beatLength) || beatLength <= 0 || exercise.exerciseStartBeat <= 0) return [];
-  const beats: number[] = [];
-  for (let beat = 0; beat < exercise.exerciseStartBeat - 1e-9; beat += beatLength) {
-    beats.push(Math.round(beat * 1_000_000) / 1_000_000);
-  }
-  return beats;
-}
-
 export function alignContextToMetronome(exercise: VocalExercise): VocalExercise {
   const demonstrationEvents = exercise.events.filter((event) => event.role === "context_demonstration");
   const originalExerciseStart = demonstrationEvents.length > 0
