@@ -2874,6 +2874,29 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("none");
   });
 
+  it("leaves keyboard events to focused controls, composition, and dialogs", async () => {
+    await renderAndWaitForRatings(makeSong(3));
+    mockPlay.mockClear();
+    mockSeek.mockClear();
+    const control = screen.getByTestId("rate-1-btn");
+    fireEvent.keyDown(control, { key: " " });
+    fireEvent.keyDown(control, { key: "ArrowRight" });
+    fireEvent.keyDown(window, { key: " ", isComposing: true });
+    expect(mockPlay).not.toHaveBeenCalled();
+    expect(mockSeek).not.toHaveBeenCalled();
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.appendChild(dialog);
+    try {
+      fireEvent.keyDown(window, { key: " " });
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      expect(mockPlay).not.toHaveBeenCalled();
+      expect(mockSeek).not.toHaveBeenCalled();
+    } finally {
+      dialog.remove();
+    }
+  });
+
   it("supports keyboard transport and rating shortcuts", async () => {
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,

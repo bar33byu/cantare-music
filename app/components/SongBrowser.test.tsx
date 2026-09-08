@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { SongBrowser } from './SongBrowser';
 
 // Mock fetch
@@ -48,6 +49,20 @@ describe('SongBrowser', () => {
     vi.clearAllMocks();
     (window as any).confirm = vi.fn(() => true);
     localStorage.clear();
+  });
+
+  it('opens a song with the keyboard without triggering library deletion', async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve(mockSongs) });
+    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
+    const open = await screen.findByRole('button', { name: 'Open Test Song 1' });
+    open.focus();
+    await user.keyboard('{Enter}');
+    expect(mockOnSelectSong).toHaveBeenCalledWith(mockSongs[0]);
+    mockOnSelectSong.mockClear();
+    await user.keyboard(' ');
+    expect(mockOnSelectSong).toHaveBeenCalledTimes(1);
+    expect(window.confirm).not.toHaveBeenCalled();
   });
 
   it('shows loading state initially', () => {

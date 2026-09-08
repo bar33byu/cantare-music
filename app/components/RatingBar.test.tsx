@@ -48,12 +48,12 @@ describe('RatingBar', () => {
     });
   });
 
-  it('uses compact mobile sizing classes to preserve room on narrow screens', () => {
+  it('keeps rating targets at least 44px on mobile and desktop', () => {
     render(<RatingBar onRate={vi.fn()} />);
     const button = screen.getByTestId('rating-button-3');
-    expect(button.className).toContain('h-9');
-    expect(button.className).toContain('w-9');
-    expect(button.className).toContain('sm:h-10');
-    expect(button.className).toContain('sm:w-10');
+    expect(button.className).toContain('h-11');
+    expect(button.className).toContain('w-11');
+    expect(button.className).toContain('sm:h-11');
+    expect(button.className).toContain('sm:w-11');
   });
 });

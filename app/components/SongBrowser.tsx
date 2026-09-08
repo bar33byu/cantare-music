@@ -279,7 +279,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           data-testid="song-browser-filter-toggle"
@@ -296,8 +296,9 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
             }
           }}
           title="Filter songs"
-          className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm transition-colors ${
-            showFilter ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'
+          aria-expanded={showFilter}
+          className={`flex min-h-11 items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors ${
+            showFilter ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-100'
           }`}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
@@ -313,8 +314,9 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
               placeholder="Search titles..."
+              aria-label="Search song titles"
               autoFocus
-              className="min-w-[12rem] flex-1 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-400 focus:outline-none"
+              className="min-h-11 min-w-0 w-full flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
             />
             {([
               ['partAudio', 'Missing part audio'],
@@ -368,12 +370,16 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           return (
           <div
             key={song.id}
-            className={`relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 ${
-              selectedSongId === song.id ? 'border-blue-500' : 'border-transparent'
-            }`}
-            onClick={() => onSelectSong(song)}
-            data-testid={`song-item-${song.id}`}
+            className="library-card"
+            data-selected={selectedSongId === song.id}
           >
+            <button
+              type="button"
+              className="library-card-action"
+              aria-label={`Open ${song.title}`}
+              onClick={() => onSelectSong(song)}
+              data-testid={`song-item-${song.id}`}
+            />
             <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100" data-testid={`song-mastery-track-${song.id}`}>
               <div
                 className="h-full rounded-tl-lg"
@@ -392,8 +398,9 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
                 {song.artist}
               </p>
             )}
-            <div className="absolute bottom-3 right-3">
+            <div className="mt-4">
               <SongReadinessIcons
+                showLabels
                 hasPartAudio={hasPartAudio}
                 hasBlendAudio={hasBlendAudio}
                 hasSegments={hasSegments}
@@ -405,7 +412,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
               {getLastPracticedLabel(song.lastPracticedAt)}
             </p>
             {selectedSongId === song.id && (
-              <div className="mt-2 text-sm text-blue-600 font-medium" data-testid={`song-selected-${song.id}`}>
+              <div className="mt-2 text-sm text-indigo-600 font-medium" data-testid={`song-selected-${song.id}`}>
                 Currently Selected
               </div>
             )}
@@ -419,7 +426,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
                     event.stopPropagation();
                     void handleDeleteSong(song);
                   }}
-                  className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+                  className="relative z-10 min-h-11 rounded-lg px-2 text-sm text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
                 >
                   {deletingSongId === song.id ? 'Deleting...' : 'Delete Song'}
                 </button>

@@ -6,6 +6,7 @@ interface SongReadinessIconsProps {
   hasSegments: boolean;
   hasMidiContour: boolean;
   testIdPrefix?: string;
+  showLabels?: boolean;
 }
 
 function ReadinessDot({
@@ -13,11 +14,15 @@ function ReadinessDot({
   title,
   testId,
   children,
+  showLabels,
+  label,
 }: {
   enabled: boolean;
   title: string;
   testId?: string;
   children: ReactNode;
+  label: string;
+  showLabels?: boolean;
 }) {
   return (
     <span
@@ -25,24 +30,29 @@ function ReadinessDot({
       aria-label={title}
       data-testid={testId}
       className={[
-        'inline-flex h-5 w-5 items-center justify-center rounded-full border',
+        showLabels
+          ? 'inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium'
+          : 'inline-flex h-5 w-5 items-center justify-center rounded-full border',
         enabled
           ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-          : 'border-rose-300 bg-rose-50 text-rose-700',
+          : 'border-slate-200 bg-slate-50 text-slate-600',
       ].join(' ')}
     >
       {children}
+      {showLabels ? <span>{label}{enabled ? '' : ': not added'}</span> : null}
     </span>
   );
 }
 
-export function SongReadinessIcons({ hasPartAudio, hasBlendAudio, hasSegments, hasMidiContour, testIdPrefix }: SongReadinessIconsProps) {
+export function SongReadinessIcons({ hasPartAudio, hasBlendAudio, hasSegments, hasMidiContour, testIdPrefix, showLabels = false }: SongReadinessIconsProps) {
   return (
     <div
-      className="inline-flex items-center gap-1"
+      className="inline-flex flex-wrap items-center gap-1"
       data-testid={testIdPrefix ? `${testIdPrefix}-readiness` : undefined}
     >
       <ReadinessDot
+        showLabels={showLabels}
+        label="Part"
         enabled={hasPartAudio}
         title={hasPartAudio ? 'Part audio present' : 'Part audio missing'}
         testId={testIdPrefix ? `${testIdPrefix}-readiness-part-audio` : undefined}
@@ -54,6 +64,8 @@ export function SongReadinessIcons({ hasPartAudio, hasBlendAudio, hasSegments, h
       </ReadinessDot>
 
       <ReadinessDot
+        showLabels={showLabels}
+        label="Blend"
         enabled={hasBlendAudio}
         title={hasBlendAudio ? 'Blend audio present' : 'Blend audio missing'}
         testId={testIdPrefix ? `${testIdPrefix}-readiness-blend-audio` : undefined}
@@ -67,6 +79,8 @@ export function SongReadinessIcons({ hasPartAudio, hasBlendAudio, hasSegments, h
       </ReadinessDot>
 
       <ReadinessDot
+        showLabels={showLabels}
+        label="Sections"
         enabled={hasSegments}
         title={hasSegments ? 'Sections present' : 'Sections missing'}
         testId={testIdPrefix ? `${testIdPrefix}-readiness-segments` : undefined}
@@ -79,6 +93,8 @@ export function SongReadinessIcons({ hasPartAudio, hasBlendAudio, hasSegments, h
       </ReadinessDot>
 
       <ReadinessDot
+        showLabels={showLabels}
+        label="MIDI contour"
         enabled={hasMidiContour}
         title={hasMidiContour ? 'MIDI contour present' : 'MIDI contour missing'}
         testId={testIdPrefix ? `${testIdPrefix}-readiness-midi-contour` : undefined}

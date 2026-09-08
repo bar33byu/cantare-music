@@ -2240,6 +2240,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         <div className="mb-6 flex gap-0 overflow-x-auto border-b border-gray-300" aria-label="Main sections">
           <button
             data-testid="playlists-tab"
+            aria-pressed={activeView === "playlists"}
             onClick={() => {
               setSelectedSong(null);
               setActiveView("playlists");
@@ -2254,13 +2255,14 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           </button>
           <button
             data-testid="library-tab"
+            aria-pressed={activeView === "library"}
             onClick={() => {
               setSelectedPlaylist(null);
               setActiveView("library");
             }}
             className={`shrink-0 px-4 py-3 font-medium transition-colors ${
               activeView === "library"
-                ? "border-b-2 border-blue-600 text-blue-600"
+                ? "border-b-2 border-indigo-600 text-indigo-600"
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
@@ -2268,6 +2270,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           </button>
           <button
             data-testid="shared-tab"
+            aria-pressed={activeView === "shared"}
             onClick={() => {
               setSelectedSong(null);
               setSelectedPlaylist(null);
@@ -2275,7 +2278,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             }}
             className={`shrink-0 px-4 py-3 font-medium transition-colors ${
               activeView === "shared"
-                ? "border-b-2 border-emerald-600 text-emerald-700"
+                ? "border-b-2 border-indigo-600 text-indigo-600"
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
@@ -2284,6 +2287,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           {isSignedIn ? (
             <button
               data-testid="exercise-tab"
+              aria-pressed={activeView === "exercise"}
               onClick={() => {
                 setSelectedSong(null);
                 setSelectedPlaylist(null);
@@ -2291,7 +2295,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               }}
               className={`shrink-0 px-4 py-3 font-medium transition-colors ${
                 activeView === "exercise"
-                  ? "border-b-2 border-violet-600 text-violet-700"
+                  ? "border-b-2 border-indigo-600 text-indigo-600"
                   : "text-gray-600 hover:text-gray-900"
               }`}
             >

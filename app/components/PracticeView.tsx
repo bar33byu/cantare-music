@@ -2106,10 +2106,26 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey) {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) {
         return;
       }
       if (isTextInputLike(event.target)) {
+        return;
+      }
+
+      // Native controls and open dialogs own their keyboard interaction.
+      if (document.querySelector('[role="dialog"], dialog[open]')) {
+        return;
+      }
+      if (event.target instanceof HTMLElement && event.target.closest(
+        '[role="slider"], [role="menu"], [role="listbox"]'
+      )) {
+        return;
+      }
+
+      if (event.target instanceof HTMLElement &&
+        event.target.closest('button, a[href], summary, [role="button"]') &&
+        [" ", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
         return;
       }
 

@@ -1070,7 +1070,7 @@ export function PlaylistPracticeView({
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && !document.querySelector('[role="dialog"], dialog[open]')) {
         event.preventDefault();
         stopAutoDrill();
       }
@@ -1449,9 +1449,14 @@ export function PlaylistPracticeView({
                 <div
                   key={song.id}
                   data-testid={`playlist-practice-song-${song.id}`}
-                  className="relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent"
-                  onClick={() => onSelectSong(song)}
+                  className="library-card"
                 >
+                  <button
+                    type="button"
+                    className="library-card-action"
+                    aria-label={`Open ${song.title}`}
+                    onClick={() => onSelectSong(song)}
+                  />
                   <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
                     <div
                       className="relative h-full rounded-tl-lg"

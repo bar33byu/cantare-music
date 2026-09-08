@@ -97,3 +97,45 @@ body {
     animation: none;
   }
 }
+
+/* Quiet polish: shared surfaces and a keyboard-only focus treatment. */
+:root {
+  --ui-surface: #ffffff;
+  --ui-border: #e2e8f0;
+  --ui-accent: #4f46e5;
+  --ui-radius: 0.875rem;
+}
+
+@layer components {
+  .library-card {
+    position: relative;
+    isolation: isolate;
+    padding: 2.75rem 1.25rem 1.25rem;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius);
+    background: var(--ui-surface);
+    box-shadow: 0 1px 3px rgb(15 23 42 / 0.04);
+  }
+  .library-card:focus-within {
+    border-color: var(--ui-accent);
+  }
+  .library-card[data-selected="true"] {
+    border-color: var(--ui-accent);
+    box-shadow: 0 0 0 1px var(--ui-accent);
+  }
+  .library-card-action {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    cursor: pointer;
+  }
+  .library-card-action:hover {
+    background: rgb(79 70 229 / 0.025);
+  }
+}
+
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 3px;
+}
