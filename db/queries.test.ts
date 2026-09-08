@@ -195,78 +195,6 @@ describe("users", () => {
     });
   });
 
-  it("upsertUser falls back to legacy user columns when account deletion columns are missing", async () => {
-    const failingChain = {
-      values: vi.fn(() => ({
-        onConflictDoUpdate: vi.fn(() => ({
-          returning: vi.fn(() => {
-            throw new Error('column "account_deletion_requested_at" does not exist');
-          }),
-        })),
-      })),
-    };
-    const legacyRow = {
-      id: "internal-user-legacy",
-      username: "legacy-singer",
-      name: "Legacy Singer",
-      email: "legacy@example.com",
-      avatarUrl: null,
-      profileVisibility: "private",
-    };
-    const fallbackChain = makeChain([legacyRow]);
-    insertSpy
-      .mockReturnValueOnce(failingChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(fallbackChain);
-
-    const { upsertUser } = await getQueries();
-    const result = await upsertUser(legacyRow);
-
-    expect(insertSpy).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({
-      ...legacyRow,
-      accountDeletionRequestedAt: null,
-      accountDeletionScheduledFor: null,
-    });
-  });
-
-  it("getUserByEmail falls back to legacy user columns when account deletion columns are missing", async () => {
-    const failingChain = {
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(() => {
-            throw new Error('column "account_deletion_scheduled_for" does not exist');
-          }),
-        })),
-      })),
-    };
-    const fallbackChain = makeChain([{
-      id: "user-legacy",
-      username: "legacy-singer",
-      name: "Legacy Singer",
-      email: "legacy@example.com",
-      avatarUrl: null,
-      profileVisibility: "private",
-    }]);
-    selectSpy
-      .mockReturnValueOnce(failingChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(fallbackChain);
-
-    const { getUserByEmail } = await getQueries();
-    const result = await getUserByEmail("legacy@example.com");
-
-    expect(selectSpy).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({
-      id: "user-legacy",
-      username: "legacy-singer",
-      name: "Legacy Singer",
-      email: "legacy@example.com",
-      avatarUrl: null,
-      profileVisibility: "private",
-      accountDeletionRequestedAt: null,
-      accountDeletionScheduledFor: null,
-    });
-  });
-
   it("getAllUsers maps profile fields and keeps profiles private by default", async () => {
     const chain = makeChain([
       {
@@ -374,47 +302,6 @@ describe("users", () => {
     expect(result).toEqual(row);
   });
 
-  it("getUserForSessionTokenHash falls back to legacy user columns when account deletion columns are missing", async () => {
-    const failingChain = {
-      from: vi.fn(() => ({
-        innerJoin: vi.fn(() => ({
-          where: vi.fn(() => ({
-            limit: vi.fn(() => {
-              throw new Error('column "account_deletion_requested_at" does not exist');
-            }),
-          })),
-        })),
-      })),
-    };
-    const fallbackChain = makeChain([{
-      user: {
-        id: "user-1",
-        username: "session-user",
-        name: "Session User",
-        email: "session@example.com",
-        avatarUrl: null,
-        profileVisibility: "private",
-      },
-    }]);
-    selectSpy
-      .mockReturnValueOnce(failingChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(fallbackChain);
-
-    const { getUserForSessionTokenHash } = await getQueries();
-    const result = await getUserForSessionTokenHash("hashed-session-token");
-
-    expect(selectSpy).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({
-      id: "user-1",
-      username: "session-user",
-      name: "Session User",
-      email: "session@example.com",
-      avatarUrl: null,
-      profileVisibility: "private",
-      accountDeletionRequestedAt: null,
-      accountDeletionScheduledFor: null,
-    });
-  });
 });
 
 describe("shared playlist import title helpers", () => {
@@ -507,73 +394,6 @@ describe("getAllSongs", () => {
     expect(orderBySpy).toHaveBeenCalledWith(desc(songs.createdAt));
   });
 
-  it("falls back when last_practiced_at column is missing", async () => {
-    const missingColumnChain = {
-      from: vi.fn(() => {
-        throw new Error('column "last_practiced_at" does not exist');
-      }),
-    };
-    const fallbackRows = [
-      {
-        id: "song-1",
-        title: "Song 1",
-        artist: null,
-        audioKey: null,
-        createdAt: new Date("2026-04-02T00:00:00.000Z"),
-      },
-    ];
-    const fallbackChain = makeChain(fallbackRows);
-    selectSpy
-      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(fallbackChain);
-
-    const { getAllSongs } = await getQueries();
-    const result = await getAllSongs();
-
-    expect(selectSpy).toHaveBeenCalledTimes(2);
-    expect(result).toEqual([
-      {
-        ...fallbackRows[0],
-        alternateAudioKey: null,
-        lastPracticedAt: null,
-        pitchContourNotes: [],
-      },
-    ]);
-  });
-
-  it("falls back even when primary select fails with generic error", async () => {
-    const failingChain = {
-      from: vi.fn(() => {
-        throw new Error('Failed query: select ...');
-      }),
-    };
-    const fallbackRows = [
-      {
-        id: "song-9",
-        title: "Fallback Song",
-        artist: null,
-        audioKey: null,
-        createdAt: new Date("2026-04-02T00:00:00.000Z"),
-      },
-    ];
-    const fallbackChain = makeChain(fallbackRows);
-
-    selectSpy
-      .mockReturnValueOnce(failingChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(fallbackChain);
-
-    const { getAllSongs } = await getQueries();
-    const result = await getAllSongs();
-
-    expect(result).toEqual([
-      {
-        ...fallbackRows[0],
-        alternateAudioKey: null,
-        lastPracticedAt: null,
-        pitchContourNotes: [],
-      },
-    ]);
-  });
 });
 
 describe("deleteSong", () => {
@@ -866,29 +686,6 @@ describe("upsertSegments", () => {
     expect(insertSpy).not.toHaveBeenCalled();
   });
 
-  it("falls back when pitch_contour_notes column is missing", async () => {
-    const deleteChain = makeChain();
-    const missingColumnChain = {
-      values: vi.fn(() => {
-        throw new Error('column "pitch_contour_notes" does not exist');
-      }),
-    };
-    const fallbackInsertChain = makeChain([]);
-    deleteSpy.mockReturnValue(deleteChain);
-    insertSpy
-      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(fallbackInsertChain);
-
-    const { upsertSegments } = await getQueries();
-    await upsertSegments("song-1", [
-      { id: "s1", label: "Verse 1", order: 0, startMs: 0, endMs: 1000, lyricText: "Hello" },
-    ]);
-
-    const fallbackValuesSpy = (fallbackInsertChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
-    expect(fallbackValuesSpy).toHaveBeenCalledWith([
-      { id: "s1", label: "Verse 1", order: 0, startMs: 0, endMs: 1000, lyricText: "Hello", songId: "song-1", sourceSegmentId: "s1" },
-    ]);
-  });
 });
 
 describe("markSongPracticed", () => {
@@ -898,7 +695,7 @@ describe("markSongPracticed", () => {
 
     const { markSongPracticed } = await getQueries();
     const practicedAt = new Date("2026-04-02T12:34:56.000Z");
-    await markSongPracticed("song-1", practicedAt);
+    await markSongPracticed("song-1", "default", practicedAt);
 
     expect(updateSpy).toHaveBeenCalledWith(songs);
     const setSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
@@ -907,39 +704,6 @@ describe("markSongPracticed", () => {
     expect(whereSpy).toHaveBeenCalled();
   });
 
-  it("no-ops when last_practiced_at column is missing", async () => {
-    const failingChain = {
-      set: vi.fn(() => ({
-        where: vi.fn(() => {
-          throw new Error('column "last_practiced_at" of relation "songs" does not exist');
-        }),
-      })),
-    };
-    updateSpy.mockReturnValue(failingChain as unknown as ReturnType<typeof makeChain>);
-
-    const { markSongPracticed } = await getQueries();
-    await expect(markSongPracticed("song-1", new Date("2026-04-02T12:34:56.000Z"))).resolves.toBeUndefined();
-  });
-
-  it("no-ops when missing-column error is on cause", async () => {
-    const error = new Error('Failed query: update "songs" set "last_practiced_at" = $1 where "songs"."id" = $2');
-    (error as Error & { cause?: unknown }).cause = {
-      code: '42703',
-      message: 'column "last_practiced_at" of relation "songs" does not exist',
-    };
-
-    const failingChain = {
-      set: vi.fn(() => ({
-        where: vi.fn(() => {
-          throw error;
-        }),
-      })),
-    };
-    updateSpy.mockReturnValue(failingChain as unknown as ReturnType<typeof makeChain>);
-
-    const { markSongPracticed } = await getQueries();
-    await expect(markSongPracticed("song-1", new Date("2026-04-02T12:34:56.000Z"))).resolves.toBeUndefined();
-  });
 });
 
 describe("createSegment", () => {
@@ -1009,50 +773,6 @@ describe("createSegment", () => {
     });
   });
 
-  it("falls back when pitch_contour_notes column is missing", async () => {
-    const missingColumnChain = {
-      values: vi.fn(() => {
-        throw new Error('column "pitch_contour_notes" does not exist');
-      }),
-    };
-    const fallbackRows = [{
-      id: "seg-1",
-      songId: "song-1",
-      label: "Verse 1",
-      order: 1,
-      startMs: 0,
-      endMs: 1000,
-      lyricText: "Lyrics here",
-    }];
-    const fallbackChain = makeChain(fallbackRows);
-    insertSpy
-      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(fallbackChain);
-
-    const { createSegment } = await getQueries();
-    const result = await createSegment({
-      id: "seg-1",
-      songId: "song-1",
-      label: "Verse 1",
-      order: 1,
-      startMs: 0,
-      endMs: 1000,
-      lyricText: "Lyrics here",
-      pitchContourNotes: [{ id: "n-1", timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
-    });
-
-    const fallbackValuesSpy = (fallbackChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["values"];
-    expect(fallbackValuesSpy).toHaveBeenCalledWith({
-      id: "seg-1",
-      songId: "song-1",
-      label: "Verse 1",
-      order: 1,
-      startMs: 0,
-      endMs: 1000,
-      lyricText: "Lyrics here",
-    });
-    expect(result).toEqual({ ...fallbackRows[0], pitchContourNotes: [] });
-  });
 });
 
 describe("updateSegment", () => {
@@ -1070,81 +790,6 @@ describe("updateSegment", () => {
     expect(whereSpy).toHaveBeenCalledWith(eq(segments.id, "seg-1"));
   });
 
-  it("falls back when pitch_contour_notes column is missing", async () => {
-    const missingColumnChain = {
-      set: vi.fn(() => ({
-        where: vi.fn(() => {
-          throw new Error('column "pitch_contour_notes" does not exist');
-        }),
-      })),
-    };
-    const fallbackChain = makeChain();
-    updateSpy
-      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(fallbackChain);
-
-    const { updateSegment } = await getQueries();
-    await updateSegment("seg-1", {
-      label: "Chorus",
-      pitchContourNotes: [{ id: "n-1", timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
-    });
-
-    const fallbackSetSpy = (fallbackChain as unknown as Record<string, ReturnType<typeof vi.fn>>)["set"];
-    expect(fallbackSetSpy).toHaveBeenCalledWith({ label: "Chorus" });
-  });
-
-  it("throws migration-required error when only pitch contour notes are updated on a legacy schema", async () => {
-    const missingColumnChain = {
-      set: vi.fn(() => ({
-        where: vi.fn(() => {
-          throw new Error('column "pitch_contour_notes" does not exist');
-        }),
-      })),
-    };
-    updateSpy.mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>);
-
-    const { updateSegment } = await getQueries();
-    await expect(updateSegment("seg-1", {
-      pitchContourNotes: [{ id: "n-1", timeOffsetMs: 0, durationMs: 100, lane: 0.5 }],
-    })).rejects.toMatchObject({ code: "PITCH_CONTOUR_MIGRATION_REQUIRED" });
-
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("getSegmentsBySongId", () => {
-  it("falls back when pitch_contour_notes column is missing", async () => {
-    const missingColumnChain = {
-      from: vi.fn(() => {
-        throw new Error('column "pitch_contour_notes" does not exist');
-      }),
-    };
-    const fallbackRows = [
-      {
-        id: "seg-1",
-        songId: "song-1",
-        label: "Verse 1",
-        order: 0,
-        startMs: 0,
-        endMs: 1000,
-        lyricText: "Lyrics here",
-      },
-    ];
-    const fallbackChain = makeChain(fallbackRows);
-    selectSpy
-      .mockReturnValueOnce(missingColumnChain as unknown as ReturnType<typeof makeChain>)
-      .mockReturnValueOnce(fallbackChain);
-
-    const { getSegmentsBySongId } = await getQueries();
-    const result = await getSegmentsBySongId("song-1");
-
-    expect(result).toEqual([
-      {
-        ...fallbackRows[0],
-        pitchContourNotes: [],
-      },
-    ]);
-  });
 });
 
 describe("deleteSegment", () => {
@@ -1306,11 +951,22 @@ describe("saveRatings", () => {
   it("replaces existing rows per segment with latest ratings", async () => {
     const deleteChain = makeChain();
     const insertChain = makeChain([]);
+    const currentSegments = [
+      { id: "seg-1", songId: "song-1", label: "Verse", order: 0, startMs: 0, endMs: 1000, lyricText: "One", sourceSegmentId: "seg-1", pitchContourNotes: [] },
+      { id: "seg-2", songId: "song-1", label: "Chorus", order: 1, startMs: 1000, endMs: 2000, lyricText: "Two", sourceSegmentId: "seg-2", pitchContourNotes: [] },
+    ];
+    selectSpy
+      .mockReturnValueOnce(makeChain([{ id: "song-1", sourceSongId: null }]))
+      .mockReturnValueOnce(makeChain(currentSegments))
+      .mockReturnValueOnce(makeChain([
+        { id: "seg-1", sourceSegmentId: "seg-1" },
+        { id: "seg-2", sourceSegmentId: "seg-2" },
+      ]));
     deleteSpy.mockReturnValue(deleteChain);
     insertSpy.mockReturnValue(insertChain);
 
     const { saveRatings } = await getQueries();
-    await saveRatings([
+    await saveRatings("song-1", "default", [
       {
         segmentId: "seg-1",
         rating: 5,
@@ -1354,7 +1010,7 @@ describe("saveRatings", () => {
 
   it("skips insert when there are no ratings", async () => {
     const { saveRatings } = await getQueries();
-    await saveRatings([]);
+    await saveRatings("song-1", "default", []);
     expect(insertSpy).not.toHaveBeenCalled();
   });
 });
@@ -1545,10 +1201,10 @@ describe("getAllPlaylists", () => {
     selectSpy.mockReturnValue(chain);
 
     const { getAllPlaylists } = await getQueries();
-    await getAllPlaylists(true);
+    await getAllPlaylists("default", true);
 
     const whereSpy = (chain as unknown as Record<string, ReturnType<typeof vi.fn>>)["where"];
-    expect(whereSpy).not.toHaveBeenCalled();
+    expect(whereSpy).toHaveBeenCalled();
   });
 });
 
