@@ -2,6 +2,7 @@
 
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { KeyboardShortcuts } from "./components/KeyboardShortcuts";
 import PracticeView from "./components/PracticeView";
 import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
@@ -1764,7 +1765,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     };
 
     return (
-      <div className="min-h-screen bg-gray-50 p-4">
+      <div className="min-h-screen bg-gray-50">
         {impersonationBanner}
         {guestClaimPrompt}
         <div className="max-w-4xl mx-auto">
@@ -2046,6 +2047,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                     Song mastery, stale repertoire, and exercise practice-time trends.
                   </p>
                 </SettingsSection>
+                <KeyboardShortcuts />
                 <SettingsSection title="Playback" tone="muted" testId="settings-section-playback">
                   <div>
                     <p className="text-sm text-gray-700">Default audio</p>

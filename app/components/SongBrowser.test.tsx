@@ -361,7 +361,7 @@ describe('SongBrowser', () => {
     expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
   });
 
-  it('clears filter when filter toggle is clicked a second time', async () => {
+  it('keeps search visible and preserves the query when asset filters close', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(mockSongs),
@@ -379,8 +379,10 @@ describe('SongBrowser', () => {
     expect(screen.queryByTestId('song-item-song-2')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('song-browser-filter-toggle'));
-    expect(screen.queryByTestId('song-browser-filter-input')).not.toBeInTheDocument();
+    expect(screen.getByTestId('song-browser-filter-input')).toHaveValue('Song 1');
     expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('song-item-song-2')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('song-browser-filter-input'), { target: { value: '' } });
     expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
   });
 

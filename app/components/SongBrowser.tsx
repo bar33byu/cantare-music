@@ -280,13 +280,22 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              data-testid="song-browser-filter-input"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              placeholder="Search titles..."
+              aria-label="Search song titles"
+              className="min-h-11 min-w-0 w-full sm:flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+            />
+
         <button
           type="button"
           data-testid="song-browser-filter-toggle"
           onClick={() => {
             setShowFilter((prev) => !prev);
             if (showFilter) {
-              setFilterText('');
               setMissingFilters({
                 partAudio: false,
                 blendAudio: false,
@@ -308,16 +317,6 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
         </button>
         {showFilter ? (
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-            <input
-              type="text"
-              data-testid="song-browser-filter-input"
-              value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
-              placeholder="Search titles..."
-              aria-label="Search song titles"
-              autoFocus
-              className="min-h-11 min-w-0 w-full flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
-            />
             {([
               ['partAudio', 'Missing part audio'],
               ['blendAudio', 'Missing blend audio'],

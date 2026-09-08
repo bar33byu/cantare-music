@@ -200,7 +200,7 @@ describe('Home page', () => {
     opener.focus();
     fireEvent.click(opener);
     const panel = screen.getByRole('dialog', { name: 'Settings' });
-    const close = screen.getByRole('button', { name: 'Close', exact: true });
+    const close = screen.getByRole('button', { name: 'Close' });
     expect(close).toHaveFocus();
     fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
     expect(panel.contains(document.activeElement)).toBe(true);

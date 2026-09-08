@@ -2897,6 +2897,17 @@ describe("PracticeView", () => {
     }
   });
 
+  it("can disable practice shortcuts without disabling visible controls", async () => {
+    localStorage.setItem("cantare-keyboard-preferences", JSON.stringify({ enabled: false, hints: "never" }));
+    await renderAndWaitForRatings(makeSong(3));
+    mockPlay.mockClear();
+    fireEvent.keyDown(window, { key: " " });
+    expect(mockPlay).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("rate-1-btn"));
+    expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("1");
+    localStorage.removeItem("cantare-keyboard-preferences");
+  });
+
   it("supports keyboard transport and rating shortcuts", async () => {
     mockUseAudioPlayer.mockReturnValue({
       isPlaying: false,

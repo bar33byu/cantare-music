@@ -1,5 +1,7 @@
 "use client";
 
+import { KeyboardShortcuts } from "./KeyboardShortcuts";
+import { useKeyboardPreferences } from "../hooks/useKeyboardPreferences";
 import React, { useEffect, useMemo, useReducer } from "react";
 import { flushSync } from "react-dom";
 import { Song, MemoryRating, PitchContourNote, ContourNoteHeatStat } from "../types/index";
@@ -67,6 +69,7 @@ interface PracticeViewProps {
   sharedPlaylistToken?: string;
   collapseLyricLineBreaks?: boolean;
   lyricSize?: "default" | "large";
+  embedded?: boolean;
   defaultLooping?: boolean;
   playScope?: "song" | "segment";
   autoPlayOnMount?: boolean;
@@ -349,6 +352,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   sharedPlaylistToken,
   collapseLyricLineBreaks = false,
   lyricSize = "default",
+  embedded = false,
   defaultLooping = false,
   playScope = "song",
   autoPlayOnMount = false,
@@ -424,6 +428,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const songTitleRef = React.useRef<HTMLSpanElement | null>(null);
   const practiceHeaderRef = React.useRef<HTMLElement | null>(null);
   const [isSongTitleTruncated, setIsSongTitleTruncated] = React.useState(false);
+  const { enabled: keyboardShortcutsEnabled } = useKeyboardPreferences();
   const [viewportSize, setViewportSize] = React.useState({ width: 0, height: 0 });
   const practicedRecordedRef = React.useRef(false);
   const accumulatedPlaybackMsRef = React.useRef(0);
@@ -2106,7 +2111,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) {
+      if (!keyboardShortcutsEnabled || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) {
         return;
       }
       if (isTextInputLike(event.target)) {
@@ -2118,7 +2123,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
       if (event.target instanceof HTMLElement && event.target.closest(
-        '[role="slider"], [role="menu"], [role="listbox"]'
+        '[role="slider"], [role="menu"], [role="listbox"], [data-shortcut-help]'
       )) {
         return;
       }
@@ -2226,7 +2231,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, isTapPracticeMode, ratingKeysEnabled, recordKeyboardTap]);
+}, [keyboardShortcutsEnabled, handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, isTapPracticeMode, ratingKeysEnabled, recordKeyboardTap]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
@@ -2762,7 +2767,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             ? `Segment ${session.currentSegmentIndex + 1} of ${song.segments.length}`
             : "Full piece playback"}
         </p>
+        {!isGuidedPracticeMode ? <KeyboardShortcuts context="practice" /> : null}
       </header>
+      {isGuidedPracticeMode ? <div className="mx-4 shrink-0"><KeyboardShortcuts context={isTapPracticeMode ? "tap" : "practice"} /></div> : null}
 
       {handsFreeViewport && autoPlayToken > 0 && isBuffering && !playbackError ? (
         <div
@@ -2963,14 +2970,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       <main
         data-testid="practice-main"
-        className={`flex flex-1 flex-col items-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 min-h-0 overflow-y-auto px-1 pt-0" : "px-2 pt-1 sm:px-3 sm:pt-2 md:px-8"} ${isGuidedPracticeMode ? "min-h-0 overflow-y-auto" : isCompactLandscapeLayout ? "" : "overflow-y-auto"}`}
+        className={`flex min-h-0 flex-1 flex-col items-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 min-h-0 overflow-y-auto px-1 pt-0" : "px-2 pt-1 sm:px-3 sm:pt-2 md:px-8"} ${isGuidedPracticeMode ? "min-h-0 overflow-y-auto" : isCompactLandscapeLayout ? "" : "overflow-y-auto"}`}
         style={isCompactLandscapeLayout ? undefined : {
-          paddingBottom: reducedControls
-            ? "calc(3.75rem + env(safe-area-inset-bottom))"
-            : "calc(var(--player-height) + env(safe-area-inset-bottom) + 8px)",
+          paddingBottom: embedded
+            ? reducedControls ? "calc(3.75rem + env(safe-area-inset-bottom))" : "calc(var(--player-height) + env(safe-area-inset-bottom) + 8px)"
+            : "0.5rem",
         }}
       >
-        <section data-testid="practice-focus" className={`flex min-h-full w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isGuidedPracticeMode ? "max-w-4xl items-start" : isCompactLandscapeLayout ? "items-stretch max-w-none" : "items-stretch max-w-3xl"}`}>
+        <section data-testid="practice-focus" className={`flex ${embedded ? "min-h-full" : "h-full min-h-0"} w-full justify-center ${!embedded && !isGuidedPracticeMode && !isCompactLandscapeLayout ? "practice-standard-focus" : ""} gap-1.5 sm:gap-2 md:gap-3 ${isGuidedPracticeMode ? "max-w-4xl items-start" : isCompactLandscapeLayout ? "items-stretch max-w-none" : "items-stretch max-w-3xl"}`}>
           {!isGuidedPracticeMode && showSegmentNavigationControls ? (
             <button
               type="button"
@@ -3299,7 +3306,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         className={
           isCompactLandscapeLayout
             ? "col-start-2 row-start-2 self-stretch overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm"
-            : "fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
+            : embedded
+              ? "fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-2 backdrop-blur md:px-8"
+              : "z-40 shrink-0 border-t border-gray-200 bg-white/95 px-4 py-2 md:px-8"
         }
         style={isCompactLandscapeLayout ? undefined : { paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)" }}
       >
