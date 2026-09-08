@@ -476,7 +476,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
 
   return (
     <section data-testid="playlist-detail" className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex max-w-2xl flex-wrap items-center gap-2">
             <label htmlFor="playlist-name-input" className="sr-only">Playlist title</label>
@@ -494,7 +494,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
                   void handleSavePlaylistName();
                 }
               }}
-              className="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-2xl font-bold text-gray-950"
+              className="min-w-0 w-full flex-none rounded border border-gray-300 px-3 py-2 text-lg font-bold text-gray-950 sm:w-auto sm:flex-1 sm:text-2xl"
             />
             <button
               type="button"
@@ -533,7 +533,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
           </div>
           {playlistEventDateError ? <p data-testid="playlist-detail-event-date-error" className="mt-1 text-sm text-red-600">{playlistEventDateError}</p> : null}
         </div>
-        <div className="flex gap-2">
+        <div className="flex shrink-0 gap-2">
           <button data-testid="playlist-detail-back" className="rounded border border-gray-300 px-3 py-2" onClick={onBack}>← Back</button>
           <button data-testid="playlist-detail-practice" className="rounded bg-indigo-600 px-3 py-2 text-white" onClick={() => onPractice(playlist)}>Practice</button>
         </div>

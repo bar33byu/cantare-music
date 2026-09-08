@@ -801,6 +801,60 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [playlistPracticeReadOnly, setPlaylistPracticeReadOnly] = useState(false);
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsPanelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!settingsOpen || !settingsPanelRef.current) return;
+    const panel = settingsPanelRef.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusable = () => Array.from(panel.querySelectorAll<HTMLElement>(
+      'button, a[href], input, select, textarea, summary, [tabindex]'
+    )).filter((element) => {
+      if (element.tabIndex < 0 || element.matches(':disabled') || element.closest('[hidden], [inert]')) return false;
+      if (getComputedStyle(element).display === "none" || getComputedStyle(element).visibility === "hidden") return false;
+      // Exclude controls inside collapsed settings sections.
+      let ancestor = element.parentElement;
+      while (ancestor && ancestor !== panel) {
+        if (ancestor instanceof HTMLDetailsElement && !ancestor.open &&
+          !ancestor.querySelector(':scope > summary')?.contains(element)) return false;
+        ancestor = ancestor.parentElement;
+      }
+      return true;
+    });
+    (focusable()[0] ?? panel).focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.defaultPrevented) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setSettingsOpen(false);
+      } else if (event.key === "Tab") {
+        const items = focusable();
+        const first = items[0] ?? panel;
+        const last = items[items.length - 1] ?? panel;
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel)) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof Node && !panel.contains(event.target)) (focusable()[0] ?? panel).focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusin", onFocusIn);
+      document.body.style.overflow = previousOverflow;
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [settingsOpen]);
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [signOutLoading, setSignOutLoading] = useState(false);
   const [profileDisplayName, setProfileDisplayName] = useState("");
@@ -1955,10 +2009,15 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             <button
               type="button"
               aria-label="Close settings"
+              tabIndex={-1}
               onClick={() => setSettingsOpen(false)}
               className="absolute inset-0 bg-black/20"
             />
             <section
+              ref={settingsPanelRef}
+              role="dialog"
+              aria-modal="true"
+              tabIndex={-1}
               aria-label="Settings"
               className="absolute inset-x-4 bottom-4 top-16 flex w-auto flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-xl sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-20 sm:max-h-[calc(100dvh-6rem)] sm:w-[min(92vw,24rem)]"
               data-testid="settings-panel"
