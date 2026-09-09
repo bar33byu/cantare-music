@@ -71,6 +71,9 @@ describe("AudioPlayer", () => {
     render(<AudioPlayer {...defaultProps} />);
     expect(screen.getByTestId("audio-skip-back")).toHaveTextContent("-5");
     expect(screen.getByTestId("audio-skip-forward")).toHaveTextContent("+5");
+    expect(screen.getByTestId("audio-skip-back")).toHaveAttribute("title", expect.stringContaining("Left arrow or J"));
+    expect(screen.getByTestId("audio-play-pause")).toHaveAttribute("title", "Play (Space or K)");
+    expect(screen.getByTestId("audio-skip-forward")).toHaveAttribute("title", expect.stringContaining("Right arrow or L"));
   });
 
   it("renders loop toggle button and calls onToggleLoop", () => {

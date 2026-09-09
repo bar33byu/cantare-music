@@ -33,6 +33,7 @@ const RatingBar: React.FC<RatingBarProps> = ({
           onClick={() => onRate(rating)}
           disabled={disabled}
           aria-label={`Rate ${rating}`}
+          title={`Rate ${rating} (key ${rating})`}
           aria-pressed={isExactSelection ? "true" : "false"}
           style={isFilled ? {
             backgroundColor: getMasteryColor(masteryPercent),

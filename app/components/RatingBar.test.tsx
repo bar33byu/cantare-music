@@ -8,6 +8,7 @@ describe('RatingBar', () => {
   it('renders 5 rating buttons', () => {
     render(<RatingBar onRate={vi.fn()} />);
     expect(screen.getAllByRole('button')).toHaveLength(5);
+    expect(screen.getByTestId('rating-button-3')).toHaveAttribute('title', 'Rate 3 (key 3)');
   });
 
   it('clicking a button calls onRate with the correct value', async () => {

@@ -272,6 +272,7 @@ export function AudioPlayer({
           <button
             type="button"
             aria-label="Skip backward 5 seconds"
+            title="Skip back 5 seconds (Left arrow or J)"
             onClick={onSkipBack}
             data-testid="audio-skip-back"
             disabled={!isReady}
@@ -291,6 +292,7 @@ export function AudioPlayer({
           type="button"
           onClick={handlePlayPauseClick}
           aria-label={isPlaying ? "Pause" : "Play"}
+          title={`${isPlaying ? "Pause" : "Play"} (Space or K)`}
           data-testid="audio-play-pause"
           className="flex h-11 w-[72px] items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
         >
@@ -309,6 +311,7 @@ export function AudioPlayer({
           <button
             type="button"
             aria-label="Skip forward 5 seconds"
+            title="Skip forward 5 seconds (Right arrow or L)"
             onClick={onSkipForward}
             data-testid="audio-skip-forward"
             disabled={!isReady}

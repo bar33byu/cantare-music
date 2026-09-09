@@ -531,6 +531,23 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
 
     expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "true");
+
+    fireEvent.keyDown(window, { key: ";" });
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
+  });
+
+  it("keeps semicolon as a pitch key during Tap practice", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+    const song = { ...makeSong(1), pitchContourNotes: [] };
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-tap-mode-toggle")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+    fireEvent.keyDown(window, { key: ";" });
+
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
   });
 
   it("forwards the requested lyric size to the segment card", async () => {
@@ -2898,7 +2915,7 @@ describe("PracticeView", () => {
   });
 
   it("can disable practice shortcuts without disabling visible controls", async () => {
-    localStorage.setItem("cantare-keyboard-preferences", JSON.stringify({ enabled: false, hints: "never" }));
+    localStorage.setItem("cantare-keyboard-preferences", JSON.stringify({ enabled: false }));
     await renderAndWaitForRatings(makeSong(3));
     mockPlay.mockClear();
     fireEvent.keyDown(window, { key: " " });

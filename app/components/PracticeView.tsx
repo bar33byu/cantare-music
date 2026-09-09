@@ -1,6 +1,5 @@
 "use client";
 
-import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { useKeyboardPreferences } from "../hooks/useKeyboardPreferences";
 import React, { useEffect, useMemo, useReducer } from "react";
 import { flushSync } from "react-dom";
@@ -2223,6 +2222,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
 
+      if (event.key === ";" && hasCardContourData) {
+        event.preventDefault();
+        requestPracticeControlChange("contour");
+        return;
+      }
+
       if (ratingKeysEnabled && /^[1-5]$/.test(event.key)) {
         event.preventDefault();
         handleRateCurrentSegment(Number(event.key) as MemoryRating);
@@ -2231,7 +2236,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [keyboardShortcutsEnabled, handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, isTapPracticeMode, ratingKeysEnabled, recordKeyboardTap]);
+}, [hasCardContourData, keyboardShortcutsEnabled, handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, isTapPracticeMode, ratingKeysEnabled, recordKeyboardTap, requestPracticeControlChange]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
@@ -2633,6 +2638,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       data-testid="practice-card-contour-toggle"
       onClick={() => requestPracticeControlChange("contour")}
       aria-pressed={showCardContourMap}
+      title="Toggle contour preview (;)"
       className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
         showCardContourMap
           ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
@@ -2767,9 +2773,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             ? `Segment ${session.currentSegmentIndex + 1} of ${song.segments.length}`
             : "Full piece playback"}
         </p>
-        {!isGuidedPracticeMode ? <KeyboardShortcuts context="practice" /> : null}
       </header>
-      {isGuidedPracticeMode ? <div className="mx-4 shrink-0"><KeyboardShortcuts context={isTapPracticeMode ? "tap" : "practice"} /></div> : null}
 
       {handsFreeViewport && autoPlayToken > 0 && isBuffering && !playbackError ? (
         <div
@@ -2982,6 +2986,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             <button
               type="button"
               aria-label="Previous segment"
+              title="Previous section (Page Up or U)"
               data-testid="practice-prev-segment"
               onClick={handlePrevSegment}
               disabled={!canUsePrevSegment}
@@ -3240,6 +3245,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             <button
               type="button"
               aria-label="Next segment"
+              title="Next section (Page Down or O)"
               data-testid="practice-next-segment"
               onClick={handleNextSegment}
               disabled={!canUseNextSegment}
