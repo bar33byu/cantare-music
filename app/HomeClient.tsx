@@ -856,7 +856,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [pendingOfflineChanges, setPendingOfflineChanges] = useState(0);
   const [hashRoutingReady, setHashRoutingReady] = useState(false);
   const settingsLoadedRef = useRef(false);
-  const usersHydratedFromDbRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
   const initialHashRouteAppliedRef = useRef(false);
   const userInteractionRevisionRef = useRef(0);
@@ -1083,56 +1082,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   }, [currentUser.id, isSignedIn]);
 
   useEffect(() => {
-    if (!settingsOpen || usersHydratedFromDbRef.current) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const hydrateUsersFromDatabase = async () => {
-      try {
-        const response = await fetch('/api/users');
-        if (!response.ok) {
-          return;
-        }
-
-        const payload = (await response.json()) as { users?: KnownUser[] };
-        if (!Array.isArray(payload.users) || payload.users.length === 0) {
-          return;
-        }
-
-        const dbUsers = normalizeKnownUsers(payload.users);
-        if (cancelled) {
-          return;
-        }
-
-        setUserSettings((previous) => {
-          const users = mergeUsersWithDatabase(previous.users, dbUsers);
-          const currentUserId = users.some((user) => user.id === previous.currentUserId)
-            ? previous.currentUserId
-            : DEFAULT_USER_ID;
-
-          return {
-            ...previous,
-            users,
-            currentUserId,
-          };
-        });
-      } catch {
-        // Keep local cache fallback when DB users endpoint is unavailable.
-      } finally {
-        usersHydratedFromDbRef.current = true;
-      }
-    };
-
-    void hydrateUsersFromDatabase();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [settingsOpen]);
-
-  useEffect(() => {
     if (!settingsOpen || !adminActor?.isAdmin) {
       return;
     }
@@ -1207,7 +1156,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       }
       setProfileSetupPrompt(false);
       setProfileMessage("Profile saved.");
-      usersHydratedFromDbRef.current = false;
     } catch (error) {
       setProfileMessage(error instanceof Error ? error.message : "Could not save profile.");
     } finally {
@@ -1245,7 +1193,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       }
       setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
       setAccountDeletionMessage("Account scheduled for deletion.");
-      usersHydratedFromDbRef.current = false;
     } catch (error) {
       setAccountDeletionMessage(error instanceof Error ? error.message : "Could not schedule account deletion.");
     } finally {
@@ -1273,7 +1220,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       }
       setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
       setAccountDeletionMessage("Scheduled account deletion canceled.");
-      usersHydratedFromDbRef.current = false;
     } catch (error) {
       setAccountDeletionMessage(error instanceof Error ? error.message : "Could not cancel account deletion.");
     } finally {

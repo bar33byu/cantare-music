@@ -481,495 +481,29 @@ export interface PublicSharedPlaylistSummary extends PlaylistSummary {
   };
 }
 
-function isMissingLastPracticedColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  if (message.includes("last_practiced_at") && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeMessage.includes("last_practiced_at") && causeMessage.includes("does not exist")) {
-      return true;
-    }
-    if (causeCode === "42703" && message.includes("last_practiced_at")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingPitchContourNotesColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  if (message.includes("pitch_contour_notes") && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeMessage.includes("pitch_contour_notes") && causeMessage.includes("does not exist")) {
-      return true;
-    }
-    if (causeCode === "42703" && message.includes("pitch_contour_notes")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingAlternateAudioKeyColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  if (message.includes("alternate_audio_key") && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeMessage.includes("alternate_audio_key") && causeMessage.includes("does not exist")) {
-      return true;
-    }
-    if (causeCode === "42703" && message.includes("alternate_audio_key")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingUserIdColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  if (message.includes("user_id") && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeMessage.includes("user_id") && causeMessage.includes("does not exist")) {
-      return true;
-    }
-    if (causeCode === "42703" && message.includes("user_id")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingUsersTableError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  if (message.includes('relation "users" does not exist') || (message.includes("users") && message.includes("does not exist"))) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeMessage.includes('relation "users" does not exist')) {
-      return true;
-    }
-    if (causeCode === "42P01" && causeMessage.includes("users")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingAuthTableError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  const mentionsAuthTables = message.includes("magic_link_tokens") || message.includes("user_sessions");
-  if (mentionsAuthTables && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeCode === "42P01" && (causeMessage.includes("magic_link_tokens") || causeMessage.includes("user_sessions"))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingAuditLogTableError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  if (message.includes("audit_logs") && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeCode === "42P01" && causeMessage.includes("audit_logs")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingUserProfileColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const profileColumns = [
-    "username",
-    "email",
-    "avatar_url",
-    "profile_visibility",
-    "updated_at",
-    "account_deletion_requested_at",
-    "account_deletion_scheduled_for",
-  ];
-  const message = error.message.toLowerCase();
-  if (profileColumns.some((column) => message.includes(column)) && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (profileColumns.some((column) => causeMessage.includes(column)) && causeMessage.includes("does not exist")) {
-      return true;
-    }
-    if (causeCode === "42703" && profileColumns.some((column) => message.includes(column))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingPlaylistSharingColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const columns = ["share_token", "shared_at", "share_audio_mode", "public_share_audio_mode", "source_playlist_id", "source_owner_id", "source_share_token", "imported_at", "is_public", "published_at", "performance_status"];
-  const message = error.message.toLowerCase();
-  if (columns.some((column) => message.includes(column)) && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (columns.some((column) => causeMessage.includes(column)) && causeMessage.includes("does not exist")) {
-      return true;
-    }
-    if (causeCode === "42703" && columns.some((column) => message.includes(column))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingImportLineageColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const columns = ["source_song_id", "source_segment_id"];
-  const message = error.message.toLowerCase();
-  if (columns.some((column) => message.includes(column)) && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (columns.some((column) => causeMessage.includes(column)) && causeMessage.includes("does not exist")) {
-      return true;
-    }
-    if (causeCode === "42703" && columns.some((column) => message.includes(column))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingTapPracticeTableError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  const mentionsTapTables =
-    message.includes("tap_practice_sessions") ||
-    message.includes("tap_practice_taps") ||
-    (message.includes("tap_practice") && message.includes("does not exist"));
-
-  if (mentionsTapTables && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    const causeMentionsTapTables =
-      causeMessage.includes("tap_practice_sessions") ||
-      causeMessage.includes("tap_practice_taps") ||
-      causeMessage.includes("tap_practice");
-
-    if (causeCode === "42P01" && causeMentionsTapTables) {
-      return true;
-    }
-
-    if (causeMentionsTapTables && causeMessage.includes("does not exist")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingVocalExercisePracticeSessionTableError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  if (message.includes("vocal_exercise_practice_sessions") && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeCode === "42P01" && causeMessage.includes("vocal_exercise_practice_sessions")) {
-      return true;
-    }
-    if (causeMessage.includes("vocal_exercise_practice_sessions") && causeMessage.includes("does not exist")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingSongPracticeSessionTableError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  if (message.includes("song_practice_sessions") && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeCode === "42P01" && causeMessage.includes("song_practice_sessions")) {
-      return true;
-    }
-    if (causeMessage.includes("song_practice_sessions") && causeMessage.includes("does not exist")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingDraftRecordingTableError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  if (message.includes("draft_recordings") && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (causeCode === "42P01" && causeMessage.includes("draft_recordings")) {
-      return true;
-    }
-    if (causeMessage.includes("draft_recordings") && causeMessage.includes("does not exist")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingMidiTableError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  const mentionsMidiTables =
-    message.includes("midi_sources") ||
-    message.includes("midi_alignments") ||
-    (message.includes("midi_") && message.includes("does not exist"));
-
-  if (mentionsMidiTables && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    const causeMentionsMidiTables = causeMessage.includes("midi_sources") || causeMessage.includes("midi_alignments") || causeMessage.includes("midi_");
-    if (causeCode === "42P01" && causeMentionsMidiTables) {
-      return true;
-    }
-    if (causeMentionsMidiTables && causeMessage.includes("does not exist")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isMissingEnhancedTapPracticeColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  const columnNames = [
-    "segment_id",
-    "audio_version",
-    "mode",
-    "input_method",
-    "completed_at",
-    "finalized_at",
-    "auto_score_percent",
-    "self_rating",
-    "score_details",
-    "direction",
-  ];
-  if (columnNames.some((column) => message.includes(column)) && message.includes("does not exist")) {
-    return true;
-  }
-
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const causeRecord = cause as Record<string, unknown>;
-    const causeMessage = typeof causeRecord.message === "string" ? causeRecord.message.toLowerCase() : "";
-    const causeCode = typeof causeRecord.code === "string" ? causeRecord.code : "";
-    if (columnNames.some((column) => causeMessage.includes(column)) && causeMessage.includes("does not exist")) {
-      return true;
-    }
-    if (causeCode === "42703" && columnNames.some((column) => message.includes(column))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 // Audit logs are intentionally lightweight: high-risk auth/account events only.
 export async function logAuditEvent(input: AuditLogInput): Promise<AuditLogRow | null> {
-  try {
-    const rows = await db()
-      .insert(auditLogs)
-      .values({
-        id: crypto.randomUUID(),
-        eventType: input.eventType,
-        actorUserId: input.actorUserId ?? null,
-        effectiveUserId: input.effectiveUserId ?? null,
-        resourceType: input.resourceType ?? null,
-        resourceId: input.resourceId ?? null,
-        metadata: input.metadata ?? {},
-      })
-      .returning();
-    return rows[0] ?? null;
-  } catch (error) {
-    if (isMissingAuditLogTableError(error)) {
-      console.warn("Audit log table is missing; skipping audit event", input.eventType);
-      return null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .insert(auditLogs)
+    .values({
+      id: crypto.randomUUID(),
+      eventType: input.eventType,
+      actorUserId: input.actorUserId ?? null,
+      effectiveUserId: input.effectiveUserId ?? null,
+      resourceType: input.resourceType ?? null,
+      resourceId: input.resourceId ?? null,
+      metadata: input.metadata ?? {},
+    })
+    .returning();
+  return rows[0] ?? null;
 }
 
 export async function listAuditLogsForTroubleshooting(limit: number = 100): Promise<AuditLogRow[]> {
-  try {
-    return await db()
-      .select()
-      .from(auditLogs)
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(Math.min(Math.max(limit, 1), 500));
-  } catch (error) {
-    if (isMissingAuditLogTableError(error)) {
-      return [];
-    }
-    throw error;
-  }
+  return db()
+    .select()
+    .from(auditLogs)
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(Math.min(Math.max(limit, 1), 500));
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────
@@ -983,26 +517,6 @@ export interface PublicUser {
   profileVisibility: string;
   accountDeletionRequestedAt?: string | null;
   accountDeletionScheduledFor?: string | null;
-}
-
-type LegacyUserRow = Pick<UserRow, "id" | "username" | "name" | "email" | "avatarUrl" | "profileVisibility">;
-
-function fallbackUsername(id: string, name: string): string {
-  const base = (name || id).trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
-  return base || "default";
-}
-
-function mapLegacyUserRow(row: LegacyUserRow): PublicUser {
-  return {
-    id: row.id,
-    username: row.username,
-    name: row.name,
-    email: row.email,
-    avatarUrl: row.avatarUrl,
-    profileVisibility: row.profileVisibility,
-    accountDeletionRequestedAt: null,
-    accountDeletionScheduledFor: null,
-  };
 }
 
 function mapUserRow(
@@ -1031,59 +545,20 @@ function usernameFromEmail(email: string): string {
 }
 
 export async function getAllUsers(): Promise<PublicUser[]> {
-  try {
-    const rows = await db()
-      .select({
-        id: users.id,
-        username: users.username,
-        name: users.name,
-        email: users.email,
-        avatarUrl: users.avatarUrl,
-        profileVisibility: users.profileVisibility,
-        accountDeletionRequestedAt: users.accountDeletionRequestedAt,
-        accountDeletionScheduledFor: users.accountDeletionScheduledFor,
-      })
-      .from(users)
-      .orderBy(asc(users.name));
-    if (rows.length === 0) {
-      return [{
-        id: DEFAULT_QUERY_USER_ID,
-        username: "default",
-        name: "Default User",
-        email: "",
-        avatarUrl: null,
-        profileVisibility: "private",
-        accountDeletionRequestedAt: null,
-        accountDeletionScheduledFor: null,
-      }];
-    }
-    return rows.map(mapUserRow);
-  } catch (error) {
-    if (!isMissingUsersTableError(error)) {
-      if (isMissingUserProfileColumnError(error)) {
-        const legacyRows = await db().select({ id: users.id, name: users.name }).from(users).orderBy(asc(users.name));
-        return legacyRows.length > 0
-          ? legacyRows.map((row) => ({
-              id: row.id,
-              username: fallbackUsername(row.id, row.name),
-              name: row.name,
-              email: "",
-              avatarUrl: null,
-              profileVisibility: "private",
-            }))
-          : [{
-              id: DEFAULT_QUERY_USER_ID,
-              username: "default",
-              name: "Default User",
-              email: "",
-              avatarUrl: null,
-              profileVisibility: "private",
-              accountDeletionRequestedAt: null,
-              accountDeletionScheduledFor: null,
-            }];
-      }
-      throw error;
-    }
+  const rows = await db()
+    .select({
+      id: users.id,
+      username: users.username,
+      name: users.name,
+      email: users.email,
+      avatarUrl: users.avatarUrl,
+      profileVisibility: users.profileVisibility,
+      accountDeletionRequestedAt: users.accountDeletionRequestedAt,
+      accountDeletionScheduledFor: users.accountDeletionScheduledFor,
+    })
+    .from(users)
+    .orderBy(asc(users.name));
+  if (rows.length === 0) {
     return [{
       id: DEFAULT_QUERY_USER_ID,
       username: "default",
@@ -1095,57 +570,25 @@ export async function getAllUsers(): Promise<PublicUser[]> {
       accountDeletionScheduledFor: null,
     }];
   }
+  return rows.map(mapUserRow);
 }
 
 export async function getUserById(id: string): Promise<PublicUser | null> {
-  try {
-    const rows = await db()
-      .select({
-        id: users.id,
-        username: users.username,
-        name: users.name,
-        email: users.email,
-        avatarUrl: users.avatarUrl,
-        profileVisibility: users.profileVisibility,
-        accountDeletionRequestedAt: users.accountDeletionRequestedAt,
-        accountDeletionScheduledFor: users.accountDeletionScheduledFor,
-      })
-      .from(users)
-      .where(eq(users.id, id))
-      .limit(1);
-    return rows[0] ? mapUserRow(rows[0]) : null;
-  } catch (error) {
-    if (isMissingUsersTableError(error)) {
-      return id === DEFAULT_QUERY_USER_ID
-        ? {
-            id: DEFAULT_QUERY_USER_ID,
-            username: "default",
-            name: "Default User",
-            email: "",
-            avatarUrl: null,
-            profileVisibility: "private",
-            accountDeletionRequestedAt: null,
-            accountDeletionScheduledFor: null,
-          }
-        : null;
-    }
-    if (isMissingUserProfileColumnError(error)) {
-      const rows = await db()
-        .select({
-          id: users.id,
-          username: users.username,
-          name: users.name,
-          email: users.email,
-          avatarUrl: users.avatarUrl,
-          profileVisibility: users.profileVisibility,
-        })
-        .from(users)
-        .where(eq(users.id, id))
-        .limit(1);
-      return rows[0] ? mapLegacyUserRow(rows[0]) : null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .select({
+      id: users.id,
+      username: users.username,
+      name: users.name,
+      email: users.email,
+      avatarUrl: users.avatarUrl,
+      profileVisibility: users.profileVisibility,
+      accountDeletionRequestedAt: users.accountDeletionRequestedAt,
+      accountDeletionScheduledFor: users.accountDeletionScheduledFor,
+    })
+    .from(users)
+    .where(eq(users.id, id))
+    .limit(1);
+  return rows[0] ? mapUserRow(rows[0]) : null;
 }
 
 export async function getUserByEmail(email: string): Promise<PublicUser | null> {
@@ -1154,8 +597,7 @@ export async function getUserByEmail(email: string): Promise<PublicUser | null> 
     return null;
   }
 
-  try {
-    const rows = await db()
+  const rows = await db()
       .select({
         id: users.id,
         username: users.username,
@@ -1169,28 +611,7 @@ export async function getUserByEmail(email: string): Promise<PublicUser | null> 
       .from(users)
       .where(eq(users.email, normalizedEmail))
       .limit(1);
-    return rows[0] ? mapUserRow(rows[0]) : null;
-  } catch (error) {
-    if (isMissingUsersTableError(error)) {
-      return null;
-    }
-    if (isMissingUserProfileColumnError(error)) {
-      const rows = await db()
-        .select({
-          id: users.id,
-          username: users.username,
-          name: users.name,
-          email: users.email,
-          avatarUrl: users.avatarUrl,
-          profileVisibility: users.profileVisibility,
-        })
-        .from(users)
-        .where(eq(users.email, normalizedEmail))
-        .limit(1);
-      return rows[0] ? mapLegacyUserRow(rows[0]) : null;
-    }
-    throw error;
-  }
+  return rows[0] ? mapUserRow(rows[0]) : null;
 }
 
 export async function updateUserProfile(
@@ -1210,8 +631,7 @@ export async function updateUserProfile(
   if (data.avatarUrl !== undefined) updates.avatarUrl = data.avatarUrl;
   if (data.profileVisibility !== undefined) updates.profileVisibility = data.profileVisibility;
 
-  try {
-    const rows = await db()
+  const rows = await db()
       .update(users)
       .set(updates)
       .where(eq(users.id, id))
@@ -1225,28 +645,7 @@ export async function updateUserProfile(
         accountDeletionRequestedAt: users.accountDeletionRequestedAt,
         accountDeletionScheduledFor: users.accountDeletionScheduledFor,
       });
-    return rows[0] ? mapUserRow(rows[0]) : null;
-  } catch (error) {
-    if (isMissingUsersTableError(error)) {
-      return null;
-    }
-    if (isMissingUserProfileColumnError(error)) {
-      const rows = await db()
-        .update(users)
-        .set(updates)
-        .where(eq(users.id, id))
-        .returning({
-          id: users.id,
-          username: users.username,
-          name: users.name,
-          email: users.email,
-          avatarUrl: users.avatarUrl,
-          profileVisibility: users.profileVisibility,
-        });
-      return rows[0] ? mapLegacyUserRow(rows[0]) : null;
-    }
-    throw error;
-  }
+  return rows[0] ? mapUserRow(rows[0]) : null;
 }
 
 export async function upsertUser(data: {
@@ -1267,8 +666,7 @@ export async function upsertUser(data: {
     updatedAt: new Date(),
   };
 
-  try {
-    const rows = await db()
+  const rows = await db()
       .insert(users)
       .values(values)
       .onConflictDoUpdate({
@@ -1292,41 +690,9 @@ export async function upsertUser(data: {
         accountDeletionRequestedAt: users.accountDeletionRequestedAt,
         accountDeletionScheduledFor: users.accountDeletionScheduledFor,
       });
-    return rows[0]
-      ? mapUserRow(rows[0])
-      : { ...values, avatarUrl: values.avatarUrl, accountDeletionRequestedAt: null, accountDeletionScheduledFor: null };
-  } catch (error) {
-    if (isMissingUserProfileColumnError(error)) {
-      const rows = await db()
-        .insert(users)
-        .values(values)
-        .onConflictDoUpdate({
-          target: users.id,
-          set: {
-            username: values.username,
-            name: values.name,
-            email: values.email,
-            avatarUrl: values.avatarUrl,
-            profileVisibility: values.profileVisibility,
-            updatedAt: values.updatedAt,
-          },
-        })
-        .returning({
-          id: users.id,
-          username: users.username,
-          name: users.name,
-          email: users.email,
-          avatarUrl: users.avatarUrl,
-          profileVisibility: users.profileVisibility,
-        });
-      const row = rows[0] ?? values;
-      return mapLegacyUserRow(row);
-    }
-    if (!isMissingUsersTableError(error)) {
-      throw error;
-    }
-    return { ...values, avatarUrl: values.avatarUrl, accountDeletionRequestedAt: null, accountDeletionScheduledFor: null };
-  }
+  return rows[0]
+    ? mapUserRow(rows[0])
+    : { ...values, avatarUrl: values.avatarUrl, accountDeletionRequestedAt: null, accountDeletionScheduledFor: null };
 }
 
 // ── Songs ──────────────────────────────────────────────────────────────────
@@ -1608,30 +974,20 @@ export async function createMagicLinkToken(data: {
   tokenHash: string;
   expiresAt: Date;
 }): Promise<MagicLinkTokenRow> {
-  try {
-    const rows = await db()
-      .insert(magicLinkTokens)
-      .values({
-        id: crypto.randomUUID(),
-        email: normalizeEmail(data.email),
-        tokenHash: data.tokenHash,
-        expiresAt: data.expiresAt,
-      })
-      .returning();
-    return rows[0];
-  } catch (error) {
-    if (isMissingAuthTableError(error)) {
-      throw Object.assign(new Error("Auth tables are missing; run database migrations before enabling magic-link auth."), {
-        code: "AUTH_MIGRATION_REQUIRED",
-      });
-    }
-    throw error;
-  }
+  const rows = await db()
+    .insert(magicLinkTokens)
+    .values({
+      id: crypto.randomUUID(),
+      email: normalizeEmail(data.email),
+      tokenHash: data.tokenHash,
+      expiresAt: data.expiresAt,
+    })
+    .returning();
+  return rows[0];
 }
 
 export async function consumeMagicLinkToken(tokenHash: string, now: Date = new Date()): Promise<MagicLinkTokenRow | null> {
-  try {
-    const rows = await db()
+  const rows = await db()
       .select()
       .from(magicLinkTokens)
       .where(eq(magicLinkTokens.tokenHash, tokenHash))
@@ -1646,13 +1002,7 @@ export async function consumeMagicLinkToken(tokenHash: string, now: Date = new D
       .set({ consumedAt: now })
       .where(and(eq(magicLinkTokens.tokenHash, tokenHash), sql`${magicLinkTokens.consumedAt} IS NULL`))
       .returning();
-    return consumedRows[0] ?? null;
-  } catch (error) {
-    if (isMissingAuthTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  return consumedRows[0] ?? null;
 }
 
 export async function createUserSession(data: {
@@ -1660,300 +1010,53 @@ export async function createUserSession(data: {
   tokenHash: string;
   expiresAt: Date;
 }): Promise<UserSessionRow> {
-  try {
-    const rows = await db()
-      .insert(userSessions)
-      .values({
-        id: crypto.randomUUID(),
-        userId: data.userId,
-        tokenHash: data.tokenHash,
-        expiresAt: data.expiresAt,
-      })
-      .returning();
-    return rows[0];
-  } catch (error) {
-    if (isMissingAuthTableError(error)) {
-      throw Object.assign(new Error("Auth tables are missing; run database migrations before enabling sessions."), {
-        code: "AUTH_MIGRATION_REQUIRED",
-      });
-    }
-    throw error;
-  }
+  const rows = await db()
+    .insert(userSessions)
+    .values({
+      id: crypto.randomUUID(),
+      userId: data.userId,
+      tokenHash: data.tokenHash,
+      expiresAt: data.expiresAt,
+    })
+    .returning();
+  return rows[0];
 }
 
 export async function getUserForSessionTokenHash(tokenHash: string, now: Date = new Date()): Promise<PublicUser | null> {
-  try {
-    const rows = await db()
-      .select({ user: users, session: userSessions })
-      .from(userSessions)
-      .innerJoin(users, eq(userSessions.userId, users.id))
-      .where(and(eq(userSessions.tokenHash, tokenHash), sql`${userSessions.revokedAt} IS NULL`, sql`${userSessions.expiresAt} > ${now}`))
-      .limit(1);
-    return rows[0] ? mapUserRow(rows[0].user) : null;
-  } catch (error) {
-    if (isMissingAuthTableError(error) || isMissingUsersTableError(error)) {
-      return null;
-    }
-    if (isMissingUserProfileColumnError(error)) {
-      const rows = await db()
-        .select({
-          user: {
-            id: users.id,
-            username: users.username,
-            name: users.name,
-            email: users.email,
-            avatarUrl: users.avatarUrl,
-            profileVisibility: users.profileVisibility,
-          },
-        })
-        .from(userSessions)
-        .innerJoin(users, eq(userSessions.userId, users.id))
-        .where(and(eq(userSessions.tokenHash, tokenHash), sql`${userSessions.revokedAt} IS NULL`, sql`${userSessions.expiresAt} > ${now}`))
-        .limit(1);
-      return rows[0] ? mapLegacyUserRow(rows[0].user) : null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .select({ user: users, session: userSessions })
+    .from(userSessions)
+    .innerJoin(users, eq(userSessions.userId, users.id))
+    .where(and(eq(userSessions.tokenHash, tokenHash), sql`${userSessions.revokedAt} IS NULL`, sql`${userSessions.expiresAt} > ${now}`))
+    .limit(1);
+  return rows[0] ? mapUserRow(rows[0].user) : null;
 }
 
 export async function revokeUserSession(tokenHash: string, revokedAt: Date = new Date()): Promise<void> {
-  try {
-    await db()
-      .update(userSessions)
-      .set({ revokedAt })
-      .where(eq(userSessions.tokenHash, tokenHash));
-  } catch (error) {
-    if (!isMissingAuthTableError(error)) {
-      throw error;
-    }
-  }
+  await db()
+    .update(userSessions)
+    .set({ revokedAt })
+    .where(eq(userSessions.tokenHash, tokenHash));
 }
 
 export async function getAllSongs(userId: string = DEFAULT_QUERY_USER_ID): Promise<SongRow[]> {
-  let primaryError: unknown;
-  try {
-    return await db()
-      .select()
-      .from(songs)
-      .where(eq(songs.userId, userId))
-      .orderBy(desc(songs.createdAt));
-  } catch (error) {
-    primaryError = error;
-  }
-
-  if (isMissingPitchContourNotesColumnError(primaryError)) {
-    return db()
-      .select({
-        id: songs.id,
-        userId: songs.userId,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        createdAt: songs.createdAt,
-        lastPracticedAt: songs.lastPracticedAt,
-      })
-      .from(songs)
-      .where(eq(songs.userId, userId))
-      .orderBy(desc(songs.createdAt))
-      .then((rows) => rows.map((row) => ({ ...row, alternateAudioKey: null, pitchContourNotes: [] } as SongRow)));
-  }
-
-  if (isMissingAlternateAudioKeyColumnError(primaryError)) {
-    return db()
-      .select({
-        id: songs.id,
-        userId: songs.userId,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        pitchContourNotes: songs.pitchContourNotes,
-        createdAt: songs.createdAt,
-        lastPracticedAt: songs.lastPracticedAt,
-      })
-      .from(songs)
-      .where(eq(songs.userId, userId))
-      .orderBy(desc(songs.createdAt))
-      .then((rows) => rows.map((row) => ({ ...row, alternateAudioKey: null } as SongRow)));
-  }
-
-  if (isMissingUserIdColumnError(primaryError)) {
-    try {
-      const legacyRows = await db()
-        .select({
-          id: songs.id,
-          title: songs.title,
-          artist: songs.artist,
-          audioKey: songs.audioKey,
-          createdAt: songs.createdAt,
-          lastPracticedAt: songs.lastPracticedAt,
-        })
-        .from(songs)
-        .orderBy(desc(songs.createdAt));
-
-      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, pitchContourNotes: [] } as SongRow));
-    } catch (legacyError) {
-      if (!isMissingLastPracticedColumnError(legacyError)) {
-        throw legacyError;
-      }
-
-      const legacyRows = await db()
-        .select({
-          id: songs.id,
-          title: songs.title,
-          artist: songs.artist,
-          audioKey: songs.audioKey,
-          createdAt: songs.createdAt,
-        })
-        .from(songs)
-        .orderBy(desc(songs.createdAt));
-
-      return legacyRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
-    }
-  }
-
-  try {
-    const legacyRows = await db()
-      .select({
-        id: songs.id,
-        userId: songs.userId,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        createdAt: songs.createdAt,
-      })
-      .from(songs)
-      .where(eq(songs.userId, userId))
-      .orderBy(desc(songs.createdAt));
-
-    return legacyRows.map((row) => ({ ...row, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow));
-  } catch {
-    throw primaryError;
-  }
+  return db()
+    .select()
+    .from(songs)
+    .where(eq(songs.userId, userId))
+    .orderBy(desc(songs.createdAt));
 }
 
 export async function getSongById(
   id: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<SongRow | undefined> {
-  let primaryError: unknown;
-  try {
-    const rows = await db()
-      .select()
-      .from(songs)
-      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-      .limit(1);
-    return rows[0];
-  } catch (error) {
-    primaryError = error;
-  }
-
-  if (isMissingPitchContourNotesColumnError(primaryError)) {
-    const rows = await db()
-      .select({
-        id: songs.id,
-        userId: songs.userId,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        createdAt: songs.createdAt,
-        lastPracticedAt: songs.lastPracticedAt,
-      })
-      .from(songs)
-      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-      .limit(1);
-
-    const row = rows[0];
-    return row ? ({ ...row, alternateAudioKey: null, pitchContourNotes: [] } as SongRow) : undefined;
-  }
-
-  if (isMissingAlternateAudioKeyColumnError(primaryError)) {
-    const rows = await db()
-      .select({
-        id: songs.id,
-        userId: songs.userId,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        pitchContourNotes: songs.pitchContourNotes,
-        createdAt: songs.createdAt,
-        lastPracticedAt: songs.lastPracticedAt,
-      })
-      .from(songs)
-      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-      .limit(1);
-
-    const row = rows[0];
-    return row ? ({ ...row, alternateAudioKey: null } as SongRow) : undefined;
-  }
-
-  if (isMissingUserIdColumnError(primaryError)) {
-    try {
-      const rows = await db()
-        .select({
-          id: songs.id,
-          title: songs.title,
-          artist: songs.artist,
-          audioKey: songs.audioKey,
-          createdAt: songs.createdAt,
-          lastPracticedAt: songs.lastPracticedAt,
-        })
-        .from(songs)
-        .where(eq(songs.id, id))
-        .limit(1);
-      const row = rows[0];
-      if (!row) {
-        return undefined;
-      }
-      return { ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, pitchContourNotes: [] } as SongRow;
-    } catch (legacyError) {
-      if (!isMissingLastPracticedColumnError(legacyError)) {
-        throw legacyError;
-      }
-
-      const rows = await db()
-        .select({
-          id: songs.id,
-          title: songs.title,
-          artist: songs.artist,
-          audioKey: songs.audioKey,
-          createdAt: songs.createdAt,
-        })
-        .from(songs)
-        .where(eq(songs.id, id))
-        .limit(1);
-
-      const row = rows[0];
-      if (!row) {
-        return undefined;
-      }
-
-      return { ...row, userId: DEFAULT_QUERY_USER_ID, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
-    }
-  }
-
-  try {
-    const rows = await db()
-      .select({
-        id: songs.id,
-        userId: songs.userId,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        createdAt: songs.createdAt,
-      })
-      .from(songs)
-      .where(and(eq(songs.id, id), eq(songs.userId, userId)))
-      .limit(1);
-
-    const row = rows[0];
-    if (!row) {
-      return undefined;
-    }
-
-    return { ...row, alternateAudioKey: null, lastPracticedAt: null, pitchContourNotes: [] } as SongRow;
-  } catch {
-    throw primaryError;
-  }
+  const rows = await db()
+    .select()
+    .from(songs)
+    .where(and(eq(songs.id, id), eq(songs.userId, userId)))
+    .limit(1);
+  return rows[0];
 }
 
 export async function createSong(data: {
@@ -1964,57 +1067,19 @@ export async function createSong(data: {
   audioKey?: string;
   alternateAudioKey?: string;
 }): Promise<SongRow> {
-  try {
-    const rows = await db()
-      .insert(songs)
-      .values({
-        id: data.id,
-        userId: data.userId,
-        title: data.title,
-        artist: data.artist ?? null,
-        audioKey: data.audioKey ?? null,
-        alternateAudioKey: data.alternateAudioKey ?? null,
-        sourceSongId: data.id,
-      })
-      .returning();
-    return rows[0];
-  } catch (error) {
-    if (!isMissingUserIdColumnError(error) && !isMissingImportLineageColumnError(error)) {
-      throw error;
-    }
-
-    try {
-      const rows = await db()
-        .insert(songs)
-        .values({
-          id: data.id,
-          userId: data.userId,
-          title: data.title,
-          artist: data.artist ?? null,
-          audioKey: data.audioKey ?? null,
-          alternateAudioKey: data.alternateAudioKey ?? null,
-        })
-        .returning();
-
-      return { ...rows[0], sourceSongId: data.id } as SongRow;
-    } catch (fallbackError) {
-      if (!isMissingUserIdColumnError(fallbackError)) {
-        throw fallbackError;
-      }
-
-      const rows = await db()
-        .insert(songs)
-        .values({
-          id: data.id,
-          title: data.title,
-          artist: data.artist ?? null,
-          audioKey: data.audioKey ?? null,
-        })
-        .returning();
-
-      return { ...rows[0], userId: DEFAULT_QUERY_USER_ID, sourceSongId: data.id } as SongRow;
-    }
-  }
+  const rows = await db()
+    .insert(songs)
+    .values({
+      id: data.id,
+      userId: data.userId,
+      title: data.title,
+      artist: data.artist ?? null,
+      audioKey: data.audioKey ?? null,
+      alternateAudioKey: data.alternateAudioKey ?? null,
+      sourceSongId: data.id,
+    })
+    .returning();
+  return rows[0];
 }
 
 export async function updateSong(
@@ -2022,69 +1087,21 @@ export async function updateSong(
   updates: Partial<Pick<SongRow, 'audioKey' | 'alternateAudioKey' | 'title' | 'artist' | 'pitchContourNotes'>>,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<void> {
-  try {
-    await db()
-      .update(songs)
-      .set(updates)
-      .where(and(eq(songs.id, id), eq(songs.userId, userId)));
-  } catch (error) {
-    if (isMissingAlternateAudioKeyColumnError(error)) {
-      const legacyUpdates = { ...updates };
-      delete legacyUpdates.alternateAudioKey;
-      if (Object.keys(legacyUpdates).length === 0) {
-        const migrationError = new Error(
-          'Alternate song audio requires database migration 0009_alternate_audio_key.sql before it can be saved.'
-        ) as Error & { code?: string };
-        migrationError.code = 'SONG_ALTERNATE_AUDIO_MIGRATION_REQUIRED';
-        throw migrationError;
-      }
-
-      await db()
-        .update(songs)
-        .set(legacyUpdates)
-        .where(and(eq(songs.id, id), eq(songs.userId, userId)));
-      return;
-    }
-
-    if (!isMissingPitchContourNotesColumnError(error) && !isMissingImportLineageColumnError(error)) {
-      throw error;
-    }
-
-    const legacyUpdates = { ...updates };
-    delete legacyUpdates.pitchContourNotes;
-    if (Object.keys(legacyUpdates).length === 0) {
-      const migrationError = new Error(
-        'Song pitch contour notes require database migration 0008_song_timeline_contour.sql before they can be saved.'
-      ) as Error & { code?: string };
-      migrationError.code = 'SONG_PITCH_CONTOUR_MIGRATION_REQUIRED';
-      throw migrationError;
-    }
-
-    await db()
-      .update(songs)
-      .set(legacyUpdates)
-      .where(and(eq(songs.id, id), eq(songs.userId, userId)));
-  }
+  await db()
+    .update(songs)
+    .set(updates)
+    .where(and(eq(songs.id, id), eq(songs.userId, userId)));
 }
 
 export async function markSongPracticed(
   id: string,
-  userIdOrPracticedAt: string | Date = DEFAULT_QUERY_USER_ID,
-  maybePracticedAt: Date = new Date()
+  userId: string = DEFAULT_QUERY_USER_ID,
+  practicedAt: Date = new Date()
 ): Promise<void> {
-  const userId = typeof userIdOrPracticedAt === "string" ? userIdOrPracticedAt : DEFAULT_QUERY_USER_ID;
-  const practicedAt = userIdOrPracticedAt instanceof Date ? userIdOrPracticedAt : maybePracticedAt;
-  try {
-    await db()
-      .update(songs)
-      .set({ lastPracticedAt: practicedAt })
-      .where(and(eq(songs.id, id), eq(songs.userId, userId)));
-  } catch (error) {
-    if (isMissingLastPracticedColumnError(error)) {
-      return;
-    }
-    throw error;
-  }
+  await db()
+    .update(songs)
+    .set({ lastPracticedAt: practicedAt })
+    .where(and(eq(songs.id, id), eq(songs.userId, userId)));
 }
 
 export async function deleteSong(id: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<void> {
@@ -2159,20 +1176,13 @@ export type PlaylistShareAudioMode = "part" | "blend" | "both";
 export async function getUnassignedDraftRecordings(
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedDraftRecording[]> {
-  try {
-    const rows = await db()
-      .select()
-      .from(draftRecordings)
-      .where(and(eq(draftRecordings.userId, userId), isNull(draftRecordings.songId), eq(draftRecordings.status, "draft")))
-      .orderBy(desc(draftRecordings.createdAt));
+  const rows = await db()
+    .select()
+    .from(draftRecordings)
+    .where(and(eq(draftRecordings.userId, userId), isNull(draftRecordings.songId), eq(draftRecordings.status, "draft")))
+    .orderBy(desc(draftRecordings.createdAt));
 
-    return rows.map(mapDraftRecording);
-  } catch (error) {
-    if (isMissingDraftRecordingTableError(error)) {
-      return [];
-    }
-    throw error;
-  }
+  return rows.map(mapDraftRecording);
 }
 
 export async function assignDraftRecordingToSong(
@@ -2335,21 +1345,14 @@ async function getDraftRecordingsForSongByStatus(
   status: "draft" | "archived",
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedDraftRecording[]> {
-  try {
-    const rows = await db()
-      .select({ draftRecording: draftRecordings })
-      .from(draftRecordings)
-      .innerJoin(songs, eq(draftRecordings.songId, songs.id))
-      .where(and(eq(draftRecordings.songId, songId), eq(draftRecordings.status, status), eq(songs.userId, userId)))
-      .orderBy(desc(draftRecordings.createdAt));
+  const rows = await db()
+    .select({ draftRecording: draftRecordings })
+    .from(draftRecordings)
+    .innerJoin(songs, eq(draftRecordings.songId, songs.id))
+    .where(and(eq(draftRecordings.songId, songId), eq(draftRecordings.status, status), eq(songs.userId, userId)))
+    .orderBy(desc(draftRecordings.createdAt));
 
-    return rows.map((row) => mapDraftRecording(row.draftRecording));
-  } catch (error) {
-    if (isMissingDraftRecordingTableError(error)) {
-      return [];
-    }
-    throw error;
-  }
+  return rows.map((row) => mapDraftRecording(row.draftRecording));
 }
 
 // ── Segments ───────────────────────────────────────────────────────────────
@@ -2357,42 +1360,11 @@ async function getDraftRecordingsForSongByStatus(
 export async function getSegmentsBySongId(
   songId: string
 ): Promise<SegmentRow[]> {
-  let primaryError: unknown;
-  try {
-    return await db()
-      .select()
-      .from(segments)
-      .where(eq(segments.songId, songId))
-      .orderBy(asc(segments.order));
-  } catch (error) {
-    primaryError = error;
-    if (!isMissingPitchContourNotesColumnError(error)) {
-      throw error;
-    }
-  }
-
-  try {
-    const legacyRows = await db()
-      .select({
-        id: segments.id,
-        songId: segments.songId,
-        label: segments.label,
-        order: segments.order,
-        startMs: segments.startMs,
-        endMs: segments.endMs,
-        lyricText: segments.lyricText,
-      })
-      .from(segments)
-      .where(eq(segments.songId, songId))
-      .orderBy(asc(segments.order));
-
-    return legacyRows.map((row) => ({
-      ...row,
-      pitchContourNotes: [],
-    } as SegmentRow));
-  } catch {
-    throw primaryError;
-  }
+  return db()
+    .select()
+    .from(segments)
+    .where(eq(segments.songId, songId))
+    .orderBy(asc(segments.order));
 }
 
 export async function upsertSegments(
@@ -2409,33 +1381,14 @@ export async function upsertSegments(
 ): Promise<void> {
   await db().delete(segments).where(eq(segments.songId, songId));
   if (newSegments.length > 0) {
-    try {
-      await db().insert(segments).values(
-        newSegments.map((s) => ({
-          ...s,
-          songId,
-          sourceSegmentId: s.id,
-          pitchContourNotes: s.pitchContourNotes ?? [],
-        }))
-      );
-    } catch (error) {
-      if (!isMissingPitchContourNotesColumnError(error) && !isMissingImportLineageColumnError(error)) {
-        throw error;
-      }
-
-      const includeSourceSegmentId = !isMissingImportLineageColumnError(error);
-      await db().insert(segments).values(
-        newSegments.map((segment) => {
-          const legacySegment = { ...segment };
-          delete legacySegment.pitchContourNotes;
-          return {
-            ...legacySegment,
-            songId,
-            ...(includeSourceSegmentId ? { sourceSegmentId: segment.id } : {}),
-          };
-        })
-      );
-    }
+    await db().insert(segments).values(
+      newSegments.map((segment) => ({
+        ...segment,
+        songId,
+        sourceSegmentId: segment.id,
+        pitchContourNotes: segment.pitchContourNotes ?? [],
+      }))
+    );
   }
 }
 
@@ -2449,63 +1402,25 @@ export async function createSegment(data: {
   lyricText: string;
   pitchContourNotes?: SegmentRow["pitchContourNotes"];
 }): Promise<SegmentRow> {
-  try {
-    const rows = await db()
-      .insert(segments)
-      .values({
-        ...data,
-        sourceSegmentId: data.id,
-        pitchContourNotes: data.pitchContourNotes ?? [],
-      })
-      .returning();
-    return rows[0];
-  } catch (error) {
-    if (!isMissingPitchContourNotesColumnError(error) && !isMissingImportLineageColumnError(error)) {
-      throw error;
-    }
-
-    const legacyData = { ...data };
-    delete legacyData.pitchContourNotes;
-    const rows = await db()
-      .insert(segments)
-      .values(legacyData)
-      .returning();
-    return {
-      ...rows[0],
-      pitchContourNotes: [],
-    } as SegmentRow;
-  }
+  const rows = await db()
+    .insert(segments)
+    .values({
+      ...data,
+      sourceSegmentId: data.id,
+      pitchContourNotes: data.pitchContourNotes ?? [],
+    })
+    .returning();
+  return rows[0];
 }
 
 export async function updateSegment(
   id: string,
   updates: Partial<Pick<SegmentRow, 'label' | 'order' | 'startMs' | 'endMs' | 'lyricText' | 'pitchContourNotes'>>
 ): Promise<void> {
-  try {
-    await db()
-      .update(segments)
-      .set(updates)
-      .where(eq(segments.id, id));
-  } catch (error) {
-    if (!isMissingPitchContourNotesColumnError(error)) {
-      throw error;
-    }
-
-    const legacyUpdates = { ...updates };
-    delete legacyUpdates.pitchContourNotes;
-    if (Object.keys(legacyUpdates).length === 0) {
-      const migrationError = new Error(
-        'Pitch contour notes require database migration 0004_song_pitch_contour.sql before they can be saved.'
-      ) as Error & { code?: string };
-      migrationError.code = 'PITCH_CONTOUR_MIGRATION_REQUIRED';
-      throw migrationError;
-    }
-
-    await db()
-      .update(segments)
-      .set(legacyUpdates)
-      .where(eq(segments.id, id));
-  }
+  await db()
+    .update(segments)
+    .set(updates)
+    .where(eq(segments.id, id));
 }
 
 export async function reorderSegments(
@@ -2529,39 +1444,16 @@ export async function getRatingsForSong(
     return [];
   }
 
-  let rows: Array<{
-    id: string;
-    segmentId: string;
-    rating: number;
-    ratedAt: Date;
-  }>;
-  try {
-    rows = await db()
-      .select({
-        id: practiceRatings.id,
-        segmentId: practiceRatings.segmentId,
-        rating: practiceRatings.rating,
-        ratedAt: practiceRatings.ratedAt,
-      })
-      .from(practiceRatings)
-      .where(and(eq(practiceRatings.userId, userId), inArray(practiceRatings.segmentId, segmentGroups.allScoreSegmentIds)))
-      .orderBy(desc(practiceRatings.ratedAt));
-  } catch (error) {
-    if (!isMissingUserIdColumnError(error) && !isMissingPlaylistSharingColumnError(error)) {
-      throw error;
-    }
-
-    rows = await db()
-      .select({
-        id: practiceRatings.id,
-        segmentId: practiceRatings.segmentId,
-        rating: practiceRatings.rating,
-        ratedAt: practiceRatings.ratedAt,
-      })
-      .from(practiceRatings)
-      .where(inArray(practiceRatings.segmentId, segmentGroups.allScoreSegmentIds))
-      .orderBy(desc(practiceRatings.ratedAt));
-  }
+  const rows = await db()
+    .select({
+      id: practiceRatings.id,
+      segmentId: practiceRatings.segmentId,
+      rating: practiceRatings.rating,
+      ratedAt: practiceRatings.ratedAt,
+    })
+    .from(practiceRatings)
+    .where(and(eq(practiceRatings.userId, userId), inArray(practiceRatings.segmentId, segmentGroups.allScoreSegmentIds)))
+    .orderBy(desc(practiceRatings.ratedAt));
 
   // Keep only the latest rating per segment.
   const latestBySegment: Record<string, PersistedSegmentRating> = {};
@@ -2598,25 +1490,11 @@ async function getScoreSegmentGroupsForSong(
   songId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<ScoreSegmentGroups> {
-  let songRows: Array<{ id: string; sourceSongId?: string | null }>;
-  try {
-    songRows = await db()
-      .select({ id: songs.id, sourceSongId: songs.sourceSongId })
-      .from(songs)
-      .where(and(eq(songs.id, songId), eq(songs.userId, userId)))
-      .limit(1);
-  } catch (error) {
-    if (!isMissingImportLineageColumnError(error)) {
-      throw error;
-    }
-
-    const legacyRows = await db()
-      .select({ id: songs.id })
-      .from(songs)
-      .where(and(eq(songs.id, songId), eq(songs.userId, userId)))
-      .limit(1);
-    songRows = legacyRows.map((row) => ({ ...row, sourceSongId: row.id }));
-  }
+  const songRows = await db()
+    .select({ id: songs.id, sourceSongId: songs.sourceSongId })
+    .from(songs)
+    .where(and(eq(songs.id, songId), eq(songs.userId, userId)))
+    .limit(1);
   const currentSegments = await getSegmentsBySongId(songId);
 
   const song = songRows[0];
@@ -2646,25 +1524,14 @@ async function getScoreSegmentGroupsForSong(
     };
   }
 
-  let siblingSegments: Array<{ id: string; sourceSegmentId?: string | null }>;
-  try {
-    siblingSegments = await db()
-      .select({
-        id: segments.id,
-        sourceSegmentId: segments.sourceSegmentId,
-      })
-      .from(segments)
-      .innerJoin(songs, eq(segments.songId, songs.id))
-      .where(and(eq(songs.userId, userId), sql`COALESCE(${songs.sourceSongId}, ${songs.id}) = ${scoreSongId}`));
-  } catch (error) {
-    if (!isMissingImportLineageColumnError(error)) {
-      throw error;
-    }
-    siblingSegments = currentSegments.map((segment) => ({
-      id: segment.id,
-      sourceSegmentId: segment.sourceSegmentId ?? segment.id,
-    }));
-  }
+  const siblingSegments = await db()
+    .select({
+      id: segments.id,
+      sourceSegmentId: segments.sourceSegmentId,
+    })
+    .from(segments)
+    .innerJoin(songs, eq(segments.songId, songs.id))
+    .where(and(eq(songs.userId, userId), sql`COALESCE(${songs.sourceSongId}, ${songs.id}) = ${scoreSongId}`));
 
   const scoreSegmentIdBySegmentId = new Map<string, string>();
   const scoreGroupSegmentIdsByCurrentSegmentId = new Map<string, string[]>();
@@ -2782,38 +1649,14 @@ export async function getSongKnowledgeBySongIds(
 }
 
 export async function saveRatings(
-  songIdOrRatings: string | Array<{
-    segmentId: string;
-    rating: PersistedMemoryRating;
-    ratedAt: Date;
-  }>,
-  userIdOrRatings?: string | Array<{
-    segmentId: string;
-    rating: PersistedMemoryRating;
-    ratedAt: Date;
-  }>,
-  maybeRatings?: Array<{
+  songId: string,
+  userId: string,
+  ratings: Array<{
     segmentId: string;
     rating: PersistedMemoryRating;
     ratedAt: Date;
   }>
 ): Promise<void> {
-  let songId: string | undefined;
-  let userId = DEFAULT_QUERY_USER_ID;
-  let ratings: Array<{ segmentId: string; rating: PersistedMemoryRating; ratedAt: Date }>;
-
-  if (Array.isArray(songIdOrRatings)) {
-    ratings = songIdOrRatings;
-  } else {
-    songId = songIdOrRatings;
-    if (Array.isArray(userIdOrRatings)) {
-      ratings = userIdOrRatings;
-    } else {
-      userId = userIdOrRatings ?? DEFAULT_QUERY_USER_ID;
-      ratings = maybeRatings ?? [];
-    }
-  }
-
   if (ratings.length === 0) {
     return;
   }
@@ -2827,13 +1670,9 @@ export async function saveRatings(
   }
 
   const uniqueRatings = Array.from(latestBySegment.values());
-  let filteredRatings = uniqueRatings;
-  let deleteSegmentIdsByCurrentSegmentId = new Map<string, string[]>();
-  if (songId) {
-    const segmentGroups = await getScoreSegmentGroupsForSong(songId, userId);
-    deleteSegmentIdsByCurrentSegmentId = segmentGroups.scoreGroupSegmentIdsByCurrentSegmentId;
-    filteredRatings = uniqueRatings.filter((rating) => deleteSegmentIdsByCurrentSegmentId.has(rating.segmentId));
-  }
+  const segmentGroups = await getScoreSegmentGroupsForSong(songId, userId);
+  const deleteSegmentIdsByCurrentSegmentId = segmentGroups.scoreGroupSegmentIdsByCurrentSegmentId;
+  const filteredRatings = uniqueRatings.filter((rating) => deleteSegmentIdsByCurrentSegmentId.has(rating.segmentId));
 
   if (filteredRatings.length === 0) {
     return;
@@ -3058,16 +1897,10 @@ export async function claimGuestProgressForUser(
         .update(songs)
         .set({ userId: targetUserId })
         .where(and(eq(songs.id, guestSong.id), eq(songs.userId, guestUserId)));
-      try {
-        await db()
-          .update(tapPracticeSessions)
-          .set({ userId: targetUserId })
-          .where(and(eq(tapPracticeSessions.songId, guestSong.id), eq(tapPracticeSessions.userId, guestUserId)));
-      } catch (error) {
-        if (!isMissingTapPracticeTableError(error)) {
-          throw error;
-        }
-      }
+      await db()
+        .update(tapPracticeSessions)
+        .set({ userId: targetUserId })
+        .where(and(eq(tapPracticeSessions.songId, guestSong.id), eq(tapPracticeSessions.userId, guestUserId)));
 
       result.claimedSongIds.push(guestSong.id);
       result.transferredSongIds.push(guestSong.id);
@@ -3160,19 +1993,9 @@ export async function deleteExpiredTapPracticeData(
   userId: string = DEFAULT_QUERY_USER_ID,
   cutoff: Date = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
 ): Promise<void> {
-  try {
-    await db()
-      .delete(tapPracticeSessions)
-      .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
-      await db()
-        .delete(tapPracticeSessions)
-        .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
-      return;
-    }
-    throw error;
-  }
+  await db()
+    .delete(tapPracticeSessions)
+    .where(and(eq(tapPracticeSessions.userId, userId), lte(tapPracticeSessions.startedAt, cutoff)));
 }
 
 async function pruneTapPracticeSessionsForSegment(
@@ -3183,44 +2006,21 @@ async function pruneTapPracticeSessionsForSegment(
   userId: string = DEFAULT_QUERY_USER_ID,
   keepLimit: number = TAP_PRACTICE_SESSION_KEEP_LIMIT
 ): Promise<void> {
-  let sessions: Array<{ id: string; startedAt: Date }> = [];
-  try {
-    sessions = await db()
-      .select({
-        id: tapPracticeSessions.id,
-        startedAt: tapPracticeSessions.startedAt,
-      })
-      .from(tapPracticeSessions)
-      .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
-      .where(and(
-        eq(tapPracticeSessions.songId, songId),
-        eq(tapPracticeSessions.segmentId, segmentId),
-        eq(tapPracticeSessions.mode, "practice"),
-        eq(tapPracticeSessions.inputMethod, inputMethod),
-        eq(songs.userId, userId)
-      ))
-      .orderBy(desc(tapPracticeSessions.startedAt));
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      sessions = await db()
-        .select({
-          id: tapPracticeSessions.id,
-          startedAt: tapPracticeSessions.startedAt,
-        })
-        .from(tapPracticeSessions)
-        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
-        .where(and(
-          eq(tapPracticeSessions.songId, songId),
-          eq(tapPracticeSessions.segmentId, segmentId),
-          eq(tapPracticeSessions.mode, "practice"),
-          eq(tapPracticeSessions.inputMethod, inputMethod),
-          eq(songs.userId, userId)
-        ))
-        .orderBy(desc(tapPracticeSessions.startedAt));
-    } else {
-      throw error;
-    }
-  }
+  const sessions = await db()
+    .select({
+      id: tapPracticeSessions.id,
+      startedAt: tapPracticeSessions.startedAt,
+    })
+    .from(tapPracticeSessions)
+    .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+    .where(and(
+      eq(tapPracticeSessions.songId, songId),
+      eq(tapPracticeSessions.segmentId, segmentId),
+      eq(tapPracticeSessions.mode, "practice"),
+      eq(tapPracticeSessions.inputMethod, inputMethod),
+      eq(songs.userId, userId)
+    ))
+    .orderBy(desc(tapPracticeSessions.startedAt));
 
   const retained = new Set<string>([currentSessionId]);
   for (const session of sessions) {
@@ -3235,19 +2035,9 @@ async function pruneTapPracticeSessionsForSegment(
     return;
   }
 
-  try {
-    await db()
-      .delete(tapPracticeSessions)
-      .where(inArray(tapPracticeSessions.id, staleSessionIds));
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
-      await db()
-        .delete(tapPracticeSessions)
-        .where(inArray(tapPracticeSessions.id, staleSessionIds));
-      return;
-    }
-    throw error;
-  }
+  await db()
+    .delete(tapPracticeSessions)
+    .where(inArray(tapPracticeSessions.id, staleSessionIds));
 }
 
 export async function createTapPracticeSession(
@@ -3287,53 +2077,16 @@ export async function getSegmentsBySongIds(
     return bySong;
   }
 
-  let primaryError: unknown;
-  try {
-    const rows = await db()
-      .select()
-      .from(segments)
-      .where(inArray(segments.songId, uniqueSongIds))
-      .orderBy(asc(segments.songId), asc(segments.order));
+  const rows = await db()
+    .select()
+    .from(segments)
+    .where(inArray(segments.songId, uniqueSongIds))
+    .orderBy(asc(segments.songId), asc(segments.order));
 
-    for (const row of rows) {
-      bySong[row.songId] = [...(bySong[row.songId] ?? []), row];
-    }
-    return bySong;
-  } catch (error) {
-    primaryError = error;
-    if (!isMissingPitchContourNotesColumnError(error)) {
-      throw error;
-    }
+  for (const row of rows) {
+    bySong[row.songId] = [...(bySong[row.songId] ?? []), row];
   }
-
-  try {
-    const legacyRows = await db()
-      .select({
-        id: segments.id,
-        songId: segments.songId,
-        label: segments.label,
-        order: segments.order,
-        startMs: segments.startMs,
-        endMs: segments.endMs,
-        lyricText: segments.lyricText,
-      })
-      .from(segments)
-      .where(inArray(segments.songId, uniqueSongIds))
-      .orderBy(asc(segments.songId), asc(segments.order));
-
-    for (const row of legacyRows) {
-      bySong[row.songId] = [
-        ...(bySong[row.songId] ?? []),
-        {
-          ...row,
-          pitchContourNotes: [],
-        } as SegmentRow,
-      ];
-    }
-    return bySong;
-  } catch {
-    throw primaryError;
-  }
+  return bySong;
 }
 
 export async function addTapPracticeTap(
@@ -3347,39 +2100,19 @@ export async function addTapPracticeTap(
     direction?: TapDirection;
   }
 ): Promise<void> {
-  try {
-    await db()
-      .insert(tapPracticeTaps)
-      .values({
-        id: crypto.randomUUID(),
-        sessionId,
-        segmentId: data.segmentId,
-        noteId: data.noteId,
-        timeOffsetMs: data.timeOffsetMs,
-        durationMs: data.durationMs,
-        laneMilli: laneToMilli(data.lane),
-        direction: data.direction ?? null,
-        createdAt: new Date(),
-      });
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await db()
-        .insert(tapPracticeTaps)
-        .values({
-          id: crypto.randomUUID(),
-          sessionId,
-          segmentId: data.segmentId,
-          noteId: data.noteId,
-          timeOffsetMs: data.timeOffsetMs,
-          durationMs: data.durationMs,
-          laneMilli: laneToMilli(data.lane),
-          direction: data.direction ?? null,
-          createdAt: new Date(),
-        });
-      return;
-    }
-    throw error;
-  }
+  await db()
+    .insert(tapPracticeTaps)
+    .values({
+      id: crypto.randomUUID(),
+      sessionId,
+      segmentId: data.segmentId,
+      noteId: data.noteId,
+      timeOffsetMs: data.timeOffsetMs,
+      durationMs: data.durationMs,
+      laneMilli: laneToMilli(data.lane),
+      direction: data.direction ?? null,
+      createdAt: new Date(),
+    });
 }
 
 export async function updateTapPracticeSessionProgress(
@@ -3397,29 +2130,14 @@ export async function updateTapPracticeSessionProgress(
   }
 
   const completedAt = data.completedAt ?? new Date();
-  try {
-    await db()
-      .update(tapPracticeSessions)
-      .set({
-        completedAt,
-        autoScorePercent: data.autoScorePercent ?? null,
-        scoreDetails: data.scoreDetails ?? {},
-      })
-      .where(eq(tapPracticeSessions.id, sessionId));
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await db()
-        .update(tapPracticeSessions)
-        .set({
-          completedAt,
-          autoScorePercent: data.autoScorePercent ?? null,
-          scoreDetails: data.scoreDetails ?? {},
-        })
-        .where(eq(tapPracticeSessions.id, sessionId));
-    } else {
-      throw error;
-    }
-  }
+  await db()
+    .update(tapPracticeSessions)
+    .set({
+      completedAt,
+      autoScorePercent: data.autoScorePercent ?? null,
+      scoreDetails: data.scoreDetails ?? {},
+    })
+    .where(eq(tapPracticeSessions.id, sessionId));
 
   if (existing.segmentId && existing.mode === "practice") {
     await pruneTapPracticeSessionsForSegment(existing.songId, existing.segmentId, sessionId, existing.inputMethod ?? "tap", userId);
@@ -3433,52 +2151,25 @@ export async function listTapPracticeSessionsForSong(
   userId: string = DEFAULT_QUERY_USER_ID,
   limit: number = 20
 ): Promise<PersistedTapPracticeSessionSummary[]> {
-  let sessions: TapPracticeSessionProjection[] = [];
-  try {
-    sessions = await db()
-      .select({
-        id: tapPracticeSessions.id,
-        songId: tapPracticeSessions.songId,
-        segmentId: tapPracticeSessions.segmentId,
-        audioVersion: tapPracticeSessions.audioVersion,
-        mode: tapPracticeSessions.mode,
-        inputMethod: tapPracticeSessions.inputMethod,
-        startedAt: tapPracticeSessions.startedAt,
-        completedAt: tapPracticeSessions.completedAt,
-        finalizedAt: tapPracticeSessions.finalizedAt,
-        autoScorePercent: tapPracticeSessions.autoScorePercent,
-        selfRating: tapPracticeSessions.selfRating,
-        scoreDetails: tapPracticeSessions.scoreDetails,
-      })
-      .from(tapPracticeSessions)
-      .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
-      .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
-      .orderBy(desc(tapPracticeSessions.startedAt));
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      sessions = await db()
-        .select({
-          id: tapPracticeSessions.id,
-          songId: tapPracticeSessions.songId,
-          segmentId: tapPracticeSessions.segmentId,
-          audioVersion: tapPracticeSessions.audioVersion,
-          mode: tapPracticeSessions.mode,
-          inputMethod: tapPracticeSessions.inputMethod,
-          startedAt: tapPracticeSessions.startedAt,
-          completedAt: tapPracticeSessions.completedAt,
-          finalizedAt: tapPracticeSessions.finalizedAt,
-          autoScorePercent: tapPracticeSessions.autoScorePercent,
-          selfRating: tapPracticeSessions.selfRating,
-          scoreDetails: tapPracticeSessions.scoreDetails,
-        })
-        .from(tapPracticeSessions)
-        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
-        .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
-        .orderBy(desc(tapPracticeSessions.startedAt));
-    } else {
-      throw error;
-    }
-  }
+  const sessions: TapPracticeSessionProjection[] = await db()
+    .select({
+      id: tapPracticeSessions.id,
+      songId: tapPracticeSessions.songId,
+      segmentId: tapPracticeSessions.segmentId,
+      audioVersion: tapPracticeSessions.audioVersion,
+      mode: tapPracticeSessions.mode,
+      inputMethod: tapPracticeSessions.inputMethod,
+      startedAt: tapPracticeSessions.startedAt,
+      completedAt: tapPracticeSessions.completedAt,
+      finalizedAt: tapPracticeSessions.finalizedAt,
+      autoScorePercent: tapPracticeSessions.autoScorePercent,
+      selfRating: tapPracticeSessions.selfRating,
+      scoreDetails: tapPracticeSessions.scoreDetails,
+    })
+    .from(tapPracticeSessions)
+    .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+    .where(and(eq(tapPracticeSessions.songId, songId), eq(songs.userId, userId)))
+    .orderBy(desc(tapPracticeSessions.startedAt));
 
   const selectedSessions = sessions.slice(0, Math.max(1, limit));
   if (selectedSessions.length === 0) {
@@ -3486,22 +2177,10 @@ export async function listTapPracticeSessionsForSong(
   }
 
   const sessionIds = selectedSessions.map((row) => row.id);
-  let tapRows: Array<{ sessionId: string }> = [];
-  try {
-    tapRows = await db()
-      .select({ sessionId: tapPracticeTaps.sessionId })
-      .from(tapPracticeTaps)
-      .where(inArray(tapPracticeTaps.sessionId, sessionIds));
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error)) {
-      tapRows = await db()
-        .select({ sessionId: tapPracticeTaps.sessionId })
-        .from(tapPracticeTaps)
-        .where(inArray(tapPracticeTaps.sessionId, sessionIds));
-    } else {
-      throw error;
-    }
-  }
+  const tapRows = await db()
+    .select({ sessionId: tapPracticeTaps.sessionId })
+    .from(tapPracticeTaps)
+    .where(inArray(tapPracticeTaps.sessionId, sessionIds));
 
   const tapCountBySession = tapRows.reduce<Record<string, number>>((accumulator, row) => {
     accumulator[row.sessionId] = (accumulator[row.sessionId] ?? 0) + 1;
@@ -3518,85 +2197,36 @@ export async function getTapPracticeSessionDetail(
   sessionId: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PersistedTapPracticeSessionDetail | null> {
-  let sessionRows: TapPracticeSessionProjection[] = [];
-  try {
-    sessionRows = await db()
-      .select({
-        id: tapPracticeSessions.id,
-        songId: tapPracticeSessions.songId,
-        segmentId: tapPracticeSessions.segmentId,
-        audioVersion: tapPracticeSessions.audioVersion,
-        mode: tapPracticeSessions.mode,
-        inputMethod: tapPracticeSessions.inputMethod,
-        startedAt: tapPracticeSessions.startedAt,
-        completedAt: tapPracticeSessions.completedAt,
-        finalizedAt: tapPracticeSessions.finalizedAt,
-        autoScorePercent: tapPracticeSessions.autoScorePercent,
-        selfRating: tapPracticeSessions.selfRating,
-        scoreDetails: tapPracticeSessions.scoreDetails,
-      })
-      .from(tapPracticeSessions)
-      .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
-      .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
-      .limit(1);
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      sessionRows = await db()
-        .select({
-          id: tapPracticeSessions.id,
-          songId: tapPracticeSessions.songId,
-          segmentId: tapPracticeSessions.segmentId,
-          audioVersion: tapPracticeSessions.audioVersion,
-          mode: tapPracticeSessions.mode,
-          inputMethod: tapPracticeSessions.inputMethod,
-          startedAt: tapPracticeSessions.startedAt,
-          completedAt: tapPracticeSessions.completedAt,
-          finalizedAt: tapPracticeSessions.finalizedAt,
-          autoScorePercent: tapPracticeSessions.autoScorePercent,
-          selfRating: tapPracticeSessions.selfRating,
-          scoreDetails: tapPracticeSessions.scoreDetails,
-        })
-        .from(tapPracticeSessions)
-        .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
-        .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
-        .limit(1);
-    } else {
-      throw error;
-    }
-  }
+  const sessionRows: TapPracticeSessionProjection[] = await db()
+    .select({
+      id: tapPracticeSessions.id,
+      songId: tapPracticeSessions.songId,
+      segmentId: tapPracticeSessions.segmentId,
+      audioVersion: tapPracticeSessions.audioVersion,
+      mode: tapPracticeSessions.mode,
+      inputMethod: tapPracticeSessions.inputMethod,
+      startedAt: tapPracticeSessions.startedAt,
+      completedAt: tapPracticeSessions.completedAt,
+      finalizedAt: tapPracticeSessions.finalizedAt,
+      autoScorePercent: tapPracticeSessions.autoScorePercent,
+      selfRating: tapPracticeSessions.selfRating,
+      scoreDetails: tapPracticeSessions.scoreDetails,
+    })
+    .from(tapPracticeSessions)
+    .innerJoin(songs, eq(tapPracticeSessions.songId, songs.id))
+    .where(and(eq(tapPracticeSessions.id, sessionId), eq(songs.userId, userId)))
+    .limit(1);
 
   const sessionRow = sessionRows[0];
   if (!sessionRow) {
     return null;
   }
 
-  let taps: Array<{
-    id: string;
-    noteId: string;
-    segmentId: string;
-    timeOffsetMs: number;
-    durationMs: number;
-    laneMilli: number;
-    direction: string | null;
-    createdAt: Date;
-  }> = [];
-  try {
-    taps = await db()
-      .select()
-      .from(tapPracticeTaps)
-      .where(eq(tapPracticeTaps.sessionId, sessionId))
-      .orderBy(asc(tapPracticeTaps.createdAt));
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      taps = await db()
-        .select()
-        .from(tapPracticeTaps)
-        .where(eq(tapPracticeTaps.sessionId, sessionId))
-        .orderBy(asc(tapPracticeTaps.createdAt));
-    } else {
-      throw error;
-    }
-  }
+  const taps = await db()
+    .select()
+    .from(tapPracticeTaps)
+    .where(eq(tapPracticeTaps.sessionId, sessionId))
+    .orderBy(asc(tapPracticeTaps.createdAt));
 
   const selfRating = sessionRow.selfRating === 1 || sessionRow.selfRating === 2 || sessionRow.selfRating === 3 || sessionRow.selfRating === 4 || sessionRow.selfRating === 5 ? sessionRow.selfRating : undefined;
   return {
@@ -3648,33 +2278,16 @@ export async function finalizeTapPracticeSession(
   }
 
   const completedAt = data.completedAt ?? new Date();
-  try {
-    await db()
-      .update(tapPracticeSessions)
-      .set({
-        completedAt,
-        finalizedAt: new Date(),
-        autoScorePercent: data.autoScorePercent ?? null,
-        selfRating: data.selfRating ?? null,
-        scoreDetails: data.scoreDetails ?? {},
-      })
-      .where(eq(tapPracticeSessions.id, sessionId));
-  } catch (error) {
-    if (isMissingTapPracticeTableError(error) || isMissingEnhancedTapPracticeColumnError(error)) {
-      await db()
-        .update(tapPracticeSessions)
-        .set({
-          completedAt,
-          finalizedAt: new Date(),
-          autoScorePercent: data.autoScorePercent ?? null,
-          selfRating: data.selfRating ?? null,
-          scoreDetails: data.scoreDetails ?? {},
-        })
-        .where(eq(tapPracticeSessions.id, sessionId));
-    } else {
-      throw error;
-    }
-  }
+  await db()
+    .update(tapPracticeSessions)
+    .set({
+      completedAt,
+      finalizedAt: new Date(),
+      autoScorePercent: data.autoScorePercent ?? null,
+      selfRating: data.selfRating ?? null,
+      scoreDetails: data.scoreDetails ?? {},
+    })
+    .where(eq(tapPracticeSessions.id, sessionId));
 
   if (existing.segmentId && existing.mode === "practice") {
     await pruneTapPracticeSessionsForSegment(existing.songId, existing.segmentId, sessionId, existing.inputMethod ?? "tap", userId);
@@ -3724,50 +2337,27 @@ function mapMidiAlignment(row: MidiAlignmentRow): MidiAlignment {
 }
 
 export async function createMidiSource(data: Omit<PersistedMidiSource, "uploadedAt">): Promise<PersistedMidiSource> {
-  try {
-    const rows = await db()
-      .insert(midiSources)
-      .values({
-        ...data,
-        uploadedAt: new Date(),
-        contentType: data.contentType ?? null,
-        parseError: data.parseError ?? null,
-      })
-      .returning();
-    return mapMidiSource(rows[0]);
-  } catch (error) {
-    if (isMissingMidiTableError(error)) {
-      const rows = await db()
-        .insert(midiSources)
-        .values({
-          ...data,
-          uploadedAt: new Date(),
-          contentType: data.contentType ?? null,
-          parseError: data.parseError ?? null,
-        })
-        .returning();
-      return mapMidiSource(rows[0]);
-    }
-    throw error;
-  }
+  const rows = await db()
+    .insert(midiSources)
+    .values({
+      ...data,
+      uploadedAt: new Date(),
+      contentType: data.contentType ?? null,
+      parseError: data.parseError ?? null,
+    })
+    .returning();
+  return mapMidiSource(rows[0]);
 }
 
 export async function getLatestMidiSourceForSong(songId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedMidiSource | null> {
-  try {
-    const rows = await db()
-      .select({ source: midiSources })
-      .from(midiSources)
-      .innerJoin(songs, eq(midiSources.songId, songs.id))
-      .where(and(eq(midiSources.songId, songId), eq(songs.userId, userId)))
-      .orderBy(desc(midiSources.uploadedAt))
-      .limit(1);
-    return rows[0] ? mapMidiSource(rows[0].source) : null;
-  } catch (error) {
-    if (isMissingMidiTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .select({ source: midiSources })
+    .from(midiSources)
+    .innerJoin(songs, eq(midiSources.songId, songs.id))
+    .where(and(eq(midiSources.songId, songId), eq(songs.userId, userId)))
+    .orderBy(desc(midiSources.uploadedAt))
+    .limit(1);
+  return rows[0] ? mapMidiSource(rows[0].source) : null;
 }
 
 export async function getMidiContourStatusBySongIds(
@@ -3780,46 +2370,32 @@ export async function getMidiContourStatusBySongIds(
     return bySong;
   }
 
-  try {
-    const rows = await db()
-      .select({
-        songId: midiSources.songId,
-        cleanedNoteCount: midiSources.cleanedNoteCount,
-      })
-      .from(midiSources)
-      .innerJoin(songs, eq(midiSources.songId, songs.id))
-      .where(and(eq(songs.userId, userId), inArray(midiSources.songId, uniqueSongIds)))
-      .orderBy(desc(midiSources.uploadedAt));
+  const rows = await db()
+    .select({
+      songId: midiSources.songId,
+      cleanedNoteCount: midiSources.cleanedNoteCount,
+    })
+    .from(midiSources)
+    .innerJoin(songs, eq(midiSources.songId, songs.id))
+    .where(and(eq(songs.userId, userId), inArray(midiSources.songId, uniqueSongIds)))
+    .orderBy(desc(midiSources.uploadedAt));
 
-    for (const row of rows) {
-      if (bySong[row.songId] === undefined) {
-        bySong[row.songId] = row.cleanedNoteCount > 0;
-      }
+  for (const row of rows) {
+    if (bySong[row.songId] === undefined) {
+      bySong[row.songId] = row.cleanedNoteCount > 0;
     }
-    return bySong;
-  } catch (error) {
-    if (isMissingMidiTableError(error)) {
-      return bySong;
-    }
-    throw error;
   }
+  return bySong;
 }
 
 export async function getMidiSourceById(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<PersistedMidiSource | null> {
-  try {
-    const rows = await db()
-      .select({ source: midiSources })
-      .from(midiSources)
-      .innerJoin(songs, eq(midiSources.songId, songs.id))
-      .where(and(eq(midiSources.id, midiSourceId), eq(songs.userId, userId)))
-      .limit(1);
-    return rows[0] ? mapMidiSource(rows[0].source) : null;
-  } catch (error) {
-    if (isMissingMidiTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .select({ source: midiSources })
+    .from(midiSources)
+    .innerJoin(songs, eq(midiSources.songId, songs.id))
+    .where(and(eq(midiSources.id, midiSourceId), eq(songs.userId, userId)))
+    .limit(1);
+  return rows[0] ? mapMidiSource(rows[0].source) : null;
 }
 
 export async function updateMidiSourceCleanup(
@@ -3850,39 +2426,25 @@ export async function updateMidiSourceCleanup(
 }
 
 export async function getLatestMidiAlignmentForSource(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<MidiAlignment | null> {
-  try {
-    const rows = await db()
-      .select({ alignment: midiAlignments })
-      .from(midiAlignments)
-      .innerJoin(songs, eq(midiAlignments.songId, songs.id))
-      .where(and(eq(midiAlignments.midiSourceId, midiSourceId), eq(songs.userId, userId)))
-      .orderBy(desc(midiAlignments.updatedAt))
-      .limit(1);
-    return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
-  } catch (error) {
-    if (isMissingMidiTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .select({ alignment: midiAlignments })
+    .from(midiAlignments)
+    .innerJoin(songs, eq(midiAlignments.songId, songs.id))
+    .where(and(eq(midiAlignments.midiSourceId, midiSourceId), eq(songs.userId, userId)))
+    .orderBy(desc(midiAlignments.updatedAt))
+    .limit(1);
+  return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
 }
 
 export async function getLatestCompleteMidiAlignmentForSource(midiSourceId: string, userId: string = DEFAULT_QUERY_USER_ID): Promise<MidiAlignment | null> {
-  try {
-    const rows = await db()
-      .select({ alignment: midiAlignments })
-      .from(midiAlignments)
-      .innerJoin(songs, eq(midiAlignments.songId, songs.id))
-      .where(and(eq(midiAlignments.midiSourceId, midiSourceId), eq(midiAlignments.isComplete, true), eq(songs.userId, userId)))
-      .orderBy(desc(midiAlignments.updatedAt))
-      .limit(1);
-    return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
-  } catch (error) {
-    if (isMissingMidiTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .select({ alignment: midiAlignments })
+    .from(midiAlignments)
+    .innerJoin(songs, eq(midiAlignments.songId, songs.id))
+    .where(and(eq(midiAlignments.midiSourceId, midiSourceId), eq(midiAlignments.isComplete, true), eq(songs.userId, userId)))
+    .orderBy(desc(midiAlignments.updatedAt))
+    .limit(1);
+  return rows[0] ? mapMidiAlignment(rows[0].alignment) : null;
 }
 
 export async function upsertMidiAlignment(
@@ -3987,72 +2549,13 @@ function createShareToken(): string {
 }
 
 export async function getAllPlaylists(
-  userIdOrIncludeRetired: string | boolean = DEFAULT_QUERY_USER_ID,
-  maybeIncludeRetired = false
+  userId: string = DEFAULT_QUERY_USER_ID,
+  includeRetired = false
 ): Promise<PlaylistSummary[]> {
-  const legacyMode = typeof userIdOrIncludeRetired === "boolean";
-  const userId = typeof userIdOrIncludeRetired === "string" ? userIdOrIncludeRetired : DEFAULT_QUERY_USER_ID;
-  const includeRetired = typeof userIdOrIncludeRetired === "boolean" ? userIdOrIncludeRetired : maybeIncludeRetired;
   const baseQuery = db().select().from(playlists).orderBy(desc(playlists.createdAt));
-  let rows: PlaylistRow[];
-  try {
-    rows = legacyMode
-      ? includeRetired
-        ? await baseQuery
-        : await baseQuery.where(eq(playlists.isRetired, false))
-      : includeRetired
-        ? await baseQuery.where(eq(playlists.userId, userId))
-        : await baseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
-  } catch (error) {
-    if (!isMissingUserIdColumnError(error) && !isMissingPlaylistSharingColumnError(error)) {
-      throw error;
-    }
-
-    const legacyBaseQuery = db()
-      .select({
-        id: playlists.id,
-        userId: playlists.userId,
-        name: playlists.name,
-        eventDate: playlists.eventDate,
-        isRetired: playlists.isRetired,
-        createdAt: playlists.createdAt,
-      })
-      .from(playlists)
-      .orderBy(desc(playlists.createdAt));
-
-    try {
-      const legacyRows = legacyMode
-        ? includeRetired
-          ? await legacyBaseQuery
-          : await legacyBaseQuery.where(eq(playlists.isRetired, false))
-        : includeRetired
-          ? await legacyBaseQuery.where(eq(playlists.userId, userId))
-          : await legacyBaseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
-
-      rows = legacyRows.map((row) => ({ ...row, performanceStatus: null, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
-    } catch (legacyError) {
-      if (!isMissingUserIdColumnError(legacyError)) {
-        throw legacyError;
-      }
-
-      const userlessBaseQuery = db()
-        .select({
-          id: playlists.id,
-          name: playlists.name,
-          eventDate: playlists.eventDate,
-          isRetired: playlists.isRetired,
-          createdAt: playlists.createdAt,
-        })
-        .from(playlists)
-        .orderBy(desc(playlists.createdAt));
-
-      const userlessRows = includeRetired
-        ? await userlessBaseQuery
-        : await userlessBaseQuery.where(eq(playlists.isRetired, false));
-
-      rows = userlessRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, performanceStatus: null, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
-    }
-  }
+  const rows = includeRetired
+    ? await baseQuery.where(eq(playlists.userId, userId))
+    : await baseQuery.where(and(eq(playlists.userId, userId), eq(playlists.isRetired, false)));
 
   // Get song counts for each playlist
   const songCounts = await db()
@@ -4082,7 +2585,7 @@ export async function getAllPlaylists(
     })
     .from(playlistSongs)
     .innerJoin(songs, eq(playlistSongs.songId, songs.id))
-    .where(legacyMode ? inArray(playlistSongs.playlistId, playlistIds) : and(inArray(playlistSongs.playlistId, playlistIds), eq(songs.userId, userId)));
+    .where(and(inArray(playlistSongs.playlistId, playlistIds), eq(songs.userId, userId)));
 
   const songIds = Array.from(new Set(linkedSongs.map((song) => song.songId)));
   const [segmentCountRows, midiContourRows, knowledgeBySong] = await Promise.all([
@@ -4156,115 +2659,35 @@ export async function getPlaylistById(
   id: string,
   userId: string = DEFAULT_QUERY_USER_ID
 ): Promise<PlaylistDetail | null> {
-  let playlistRows: PlaylistRow[];
-  try {
-    playlistRows = await db()
-      .select()
-      .from(playlists)
-      .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
-      .limit(1);
-  } catch (error) {
-    if (!isMissingUserIdColumnError(error) && !isMissingPlaylistSharingColumnError(error)) {
-      throw error;
-    }
-
-    try {
-      const legacyPlaylistRows = await db()
-        .select({
-          id: playlists.id,
-          userId: playlists.userId,
-          name: playlists.name,
-          eventDate: playlists.eventDate,
-          isRetired: playlists.isRetired,
-          createdAt: playlists.createdAt,
-        })
-        .from(playlists)
-        .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
-        .limit(1);
-
-      playlistRows = legacyPlaylistRows.map((row) => ({ ...row, performanceStatus: null, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
-    } catch (legacyError) {
-      if (!isMissingUserIdColumnError(legacyError)) {
-        throw legacyError;
-      }
-
-      const userlessPlaylistRows = await db()
-        .select({
-          id: playlists.id,
-          name: playlists.name,
-          eventDate: playlists.eventDate,
-          isRetired: playlists.isRetired,
-          createdAt: playlists.createdAt,
-        })
-        .from(playlists)
-        .where(eq(playlists.id, id))
-        .limit(1);
-
-      playlistRows = userlessPlaylistRows.map((row) => ({ ...row, userId: DEFAULT_QUERY_USER_ID, performanceStatus: null, isPublic: false, publishedAt: null, shareToken: null, sharedAt: null, shareAudioMode: "both", publicShareAudioMode: "both" } as PlaylistRow));
-    }
-  }
+  const playlistRows = await db()
+    .select()
+    .from(playlists)
+    .where(and(eq(playlists.id, id), eq(playlists.userId, userId)))
+    .limit(1);
 
   const playlist = playlistRows[0];
   if (!playlist) {
     return null;
   }
 
-  let linkedSongs: Array<{
-    playlistId: string;
-    songId: string;
-    position: number;
-    title: string;
-    artist: string | null;
-    audioKey: string | null;
-    alternateAudioKey: string | null;
-    pitchContourNotes: SongRow["pitchContourNotes"];
-    createdAt: Date | null;
-    lastPracticedAt: Date | null;
-    sourceSongId: string | null;
-  }>;
-  try {
-    linkedSongs = await db()
-      .select({
-        playlistId: playlistSongs.playlistId,
-        songId: playlistSongs.songId,
-        position: playlistSongs.position,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        alternateAudioKey: songs.alternateAudioKey,
-        pitchContourNotes: songs.pitchContourNotes,
-        createdAt: songs.createdAt,
-        lastPracticedAt: songs.lastPracticedAt,
-        sourceSongId: songs.sourceSongId,
-      })
-      .from(playlistSongs)
-      .innerJoin(songs, eq(playlistSongs.songId, songs.id))
-      .where(and(eq(playlistSongs.playlistId, id), eq(songs.userId, playlist.userId)))
-      .orderBy(asc(playlistSongs.position));
-  } catch (error) {
-    if (!isMissingUserIdColumnError(error) && !isMissingPitchContourNotesColumnError(error) && !isMissingAlternateAudioKeyColumnError(error)) {
-      throw error;
-    }
-
-    linkedSongs = await db()
-      .select({
-        playlistId: playlistSongs.playlistId,
-        songId: playlistSongs.songId,
-        position: playlistSongs.position,
-        title: songs.title,
-        artist: songs.artist,
-        audioKey: songs.audioKey,
-        alternateAudioKey: sql<string | null>`null`,
-        pitchContourNotes: sql<SongRow["pitchContourNotes"]>`'[]'::jsonb`,
-        createdAt: songs.createdAt,
-        lastPracticedAt: songs.lastPracticedAt,
-        sourceSongId: sql<string | null>`null`,
-      })
-      .from(playlistSongs)
-      .innerJoin(songs, eq(playlistSongs.songId, songs.id))
-      .where(eq(playlistSongs.playlistId, id))
-      .orderBy(asc(playlistSongs.position));
-  }
+  const linkedSongs = await db()
+    .select({
+      playlistId: playlistSongs.playlistId,
+      songId: playlistSongs.songId,
+      position: playlistSongs.position,
+      title: songs.title,
+      artist: songs.artist,
+      audioKey: songs.audioKey,
+      alternateAudioKey: songs.alternateAudioKey,
+      pitchContourNotes: songs.pitchContourNotes,
+      createdAt: songs.createdAt,
+      lastPracticedAt: songs.lastPracticedAt,
+      sourceSongId: songs.sourceSongId,
+    })
+    .from(playlistSongs)
+    .innerJoin(songs, eq(playlistSongs.songId, songs.id))
+    .where(and(eq(playlistSongs.playlistId, id), eq(songs.userId, playlist.userId)))
+    .orderBy(asc(playlistSongs.position));
 
   const songIds = linkedSongs.map((s) => s.songId);
   const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts, midiContourEntries] = await Promise.all([
@@ -4404,45 +2827,17 @@ export async function disablePlaylistPublicSharing(
 }
 
 export async function getPublicSharedPlaylists(excludeOwnerUserId?: string): Promise<PublicSharedPlaylistSummary[]> {
-  let rows: Array<{
-    playlist: PlaylistRow;
-    ownerId: string;
-    ownerName: string;
-    ownerUsername: string;
-  }>;
-
-  try {
-    rows = await db()
-      .select({
-        playlist: playlists,
-        ownerId: users.id,
-        ownerName: users.name,
-        ownerUsername: users.username,
-      })
-      .from(playlists)
-      .innerJoin(users, eq(playlists.userId, users.id))
-      .where(and(eq(playlists.isPublic, true), eq(playlists.isRetired, false)))
-      .orderBy(desc(playlists.publishedAt));
-  } catch (error) {
-    if (isMissingPlaylistSharingColumnError(error)) {
-      return [];
-    }
-    if (!isMissingUsersTableError(error) && !isMissingUserProfileColumnError(error)) {
-      throw error;
-    }
-
-    const playlistRows = await db()
-      .select()
-      .from(playlists)
-      .where(and(eq(playlists.isPublic, true), eq(playlists.isRetired, false)))
-      .orderBy(desc(playlists.publishedAt));
-    rows = playlistRows.map((playlist) => ({
-      playlist,
-      ownerId: playlist.userId,
-      ownerName: "Default User",
-      ownerUsername: "default",
-    }));
-  }
+  let rows = await db()
+    .select({
+      playlist: playlists,
+      ownerId: users.id,
+      ownerName: users.name,
+      ownerUsername: users.username,
+    })
+    .from(playlists)
+    .innerJoin(users, eq(playlists.userId, users.id))
+    .where(and(eq(playlists.isPublic, true), eq(playlists.isRetired, false)))
+    .orderBy(desc(playlists.publishedAt));
 
   if (rows.length === 0) {
     return [];
@@ -4479,45 +2874,17 @@ export async function getPublicSharedPlaylists(excludeOwnerUserId?: string): Pro
 }
 
 export async function getPublicPlaylistById(id: string, viewerUserId?: string): Promise<SharedPlaylistDetail | null> {
-  let rows: Array<{
-    playlist: PlaylistRow;
-    ownerId: string;
-    ownerName: string;
-    ownerUsername: string;
-  }>;
-
-  try {
-    rows = await db()
-      .select({
-        playlist: playlists,
-        ownerId: users.id,
-        ownerName: users.name,
-        ownerUsername: users.username,
-      })
-      .from(playlists)
-      .innerJoin(users, eq(playlists.userId, users.id))
-      .where(and(eq(playlists.id, id), eq(playlists.isPublic, true), eq(playlists.isRetired, false)))
-      .limit(1);
-  } catch (error) {
-    if (isMissingPlaylistSharingColumnError(error)) {
-      return null;
-    }
-    if (!isMissingUsersTableError(error) && !isMissingUserProfileColumnError(error)) {
-      throw error;
-    }
-
-    const playlistRows = await db()
-      .select()
-      .from(playlists)
-      .where(and(eq(playlists.id, id), eq(playlists.isPublic, true), eq(playlists.isRetired, false)))
-      .limit(1);
-    rows = playlistRows.map((playlist) => ({
-      playlist,
-      ownerId: playlist.userId,
-      ownerName: "Default User",
-      ownerUsername: "default",
-    }));
-  }
+  const rows = await db()
+    .select({
+      playlist: playlists,
+      ownerId: users.id,
+      ownerName: users.name,
+      ownerUsername: users.username,
+    })
+    .from(playlists)
+    .innerJoin(users, eq(playlists.userId, users.id))
+    .where(and(eq(playlists.id, id), eq(playlists.isPublic, true), eq(playlists.isRetired, false)))
+    .limit(1);
 
   const row = rows[0];
   if (!row) {
@@ -4547,45 +2914,17 @@ export async function getSharedPlaylistByToken(token: string): Promise<SharedPla
     return null;
   }
 
-  let rows: Array<{
-    playlist: PlaylistRow;
-    ownerId: string;
-    ownerName: string;
-    ownerUsername: string;
-  }>;
-
-  try {
-    rows = await db()
-      .select({
-        playlist: playlists,
-        ownerId: users.id,
-        ownerName: users.name,
-        ownerUsername: users.username,
-      })
-      .from(playlists)
-      .innerJoin(users, eq(playlists.userId, users.id))
-      .where(eq(playlists.shareToken, token))
-      .limit(1);
-  } catch (error) {
-    if (isMissingPlaylistSharingColumnError(error)) {
-      return null;
-    }
-    if (isMissingUsersTableError(error) || isMissingUserProfileColumnError(error)) {
-      const playlistRows = await db()
-        .select()
-        .from(playlists)
-        .where(eq(playlists.shareToken, token))
-        .limit(1);
-      rows = playlistRows.map((playlist) => ({
-        playlist,
-        ownerId: playlist.userId,
-        ownerName: "Default User",
-        ownerUsername: "default",
-      }));
-    } else {
-      throw error;
-    }
-  }
+  const rows = await db()
+    .select({
+      playlist: playlists,
+      ownerId: users.id,
+      ownerName: users.name,
+      ownerUsername: users.username,
+    })
+    .from(playlists)
+    .innerJoin(users, eq(playlists.userId, users.id))
+    .where(eq(playlists.shareToken, token))
+    .limit(1);
 
   const row = rows[0];
   if (!row || !row.playlist.shareToken) {
@@ -4875,70 +3214,63 @@ export async function refreshImportedPlaylistSongs(
 }
 
 async function cloneMidiDataForImportedSong(sourceSongId: string, importedSongId: string): Promise<void> {
-  try {
-    const sourceRows = await db()
-      .select()
-      .from(midiSources)
-      .where(eq(midiSources.songId, sourceSongId));
+  const sourceRows = await db()
+    .select()
+    .from(midiSources)
+    .where(eq(midiSources.songId, sourceSongId));
 
-    if (sourceRows.length === 0) {
-      return;
-    }
-
-    const sourceIdMap = new Map<string, string>();
-    const importedSources = sourceRows.map((source) => {
-      const importedSourceId = crypto.randomUUID();
-      sourceIdMap.set(source.id, importedSourceId);
-      return {
-        id: importedSourceId,
-        songId: importedSongId,
-        originalFilename: source.originalFilename,
-        storageKey: source.storageKey,
-        uploadedAt: source.uploadedAt,
-        contentType: source.contentType,
-        fileSize: source.fileSize,
-        parseStatus: source.parseStatus,
-        cleanupSettings: source.cleanupSettings,
-        rawNotes: source.rawNotes,
-        cleanedNotes: source.cleanedNotes,
-        rawNoteCount: source.rawNoteCount,
-        cleanedNoteCount: source.cleanedNoteCount,
-        ignoredShortNoteCount: source.ignoredShortNoteCount,
-        parseError: source.parseError,
-      };
-    });
-
-    await db().insert(midiSources).values(importedSources);
-
-    const alignmentRows = await db()
-      .select()
-      .from(midiAlignments)
-      .where(inArray(midiAlignments.midiSourceId, Array.from(sourceIdMap.keys())));
-
-    if (alignmentRows.length === 0) {
-      return;
-    }
-
-    await db().insert(midiAlignments).values(
-      alignmentRows.map((alignment) => ({
-        id: crypto.randomUUID(),
-        songId: importedSongId,
-        midiSourceId: sourceIdMap.get(alignment.midiSourceId) ?? alignment.midiSourceId,
-        tappedStartTimesSeconds: alignment.tappedStartTimesSeconds,
-        retainedMidiNoteCount: alignment.retainedMidiNoteCount,
-        isComplete: alignment.isComplete,
-        status: alignment.status,
-        notes: alignment.notes,
-        createdAt: alignment.createdAt,
-        updatedAt: alignment.updatedAt,
-      }))
-    );
-  } catch (error) {
-    if (isMissingMidiTableError(error)) {
-      return;
-    }
-    throw error;
+  if (sourceRows.length === 0) {
+    return;
   }
+
+  const sourceIdMap = new Map<string, string>();
+  const importedSources = sourceRows.map((source) => {
+    const importedSourceId = crypto.randomUUID();
+    sourceIdMap.set(source.id, importedSourceId);
+    return {
+      id: importedSourceId,
+      songId: importedSongId,
+      originalFilename: source.originalFilename,
+      storageKey: source.storageKey,
+      uploadedAt: source.uploadedAt,
+      contentType: source.contentType,
+      fileSize: source.fileSize,
+      parseStatus: source.parseStatus,
+      cleanupSettings: source.cleanupSettings,
+      rawNotes: source.rawNotes,
+      cleanedNotes: source.cleanedNotes,
+      rawNoteCount: source.rawNoteCount,
+      cleanedNoteCount: source.cleanedNoteCount,
+      ignoredShortNoteCount: source.ignoredShortNoteCount,
+      parseError: source.parseError,
+    };
+  });
+
+  await db().insert(midiSources).values(importedSources);
+
+  const alignmentRows = await db()
+    .select()
+    .from(midiAlignments)
+    .where(inArray(midiAlignments.midiSourceId, Array.from(sourceIdMap.keys())));
+
+  if (alignmentRows.length === 0) {
+    return;
+  }
+
+  await db().insert(midiAlignments).values(
+    alignmentRows.map((alignment) => ({
+      id: crypto.randomUUID(),
+      songId: importedSongId,
+      midiSourceId: sourceIdMap.get(alignment.midiSourceId) ?? alignment.midiSourceId,
+      tappedStartTimesSeconds: alignment.tappedStartTimesSeconds,
+      retainedMidiNoteCount: alignment.retainedMidiNoteCount,
+      isComplete: alignment.isComplete,
+      status: alignment.status,
+      notes: alignment.notes,
+      createdAt: alignment.createdAt,
+      updatedAt: alignment.updatedAt,
+    }))
+  );
 }
 
 export async function importSharedPlaylist(
@@ -5148,35 +3480,18 @@ export async function createPlaylist(data: {
 }): Promise<PlaylistSummary> {
   const eventDate = data.eventDate ?? extractPlaylistEventDateFromName(data.name);
   const performanceStatus = normalizePlaylistPerformanceStatus(data.performanceStatus);
-  try {
-    const rows = await db()
-      .insert(playlists)
-      .values({
-        id: crypto.randomUUID(),
-        userId: data.userId,
-        name: data.name,
-        eventDate,
-        performanceStatus,
-      })
-      .returning();
+  const rows = await db()
+    .insert(playlists)
+    .values({
+      id: crypto.randomUUID(),
+      userId: data.userId,
+      name: data.name,
+      eventDate,
+      performanceStatus,
+    })
+    .returning();
 
-    return mapPlaylistSummary(rows[0]);
-  } catch (error) {
-    if (!isMissingUserIdColumnError(error)) {
-      throw error;
-    }
-
-    const rows = await db()
-      .insert(playlists)
-      .values({
-        id: crypto.randomUUID(),
-        name: data.name,
-        eventDate,
-      })
-      .returning();
-
-    return mapPlaylistSummary(rows[0]);
-  }
+  return mapPlaylistSummary(rows[0]);
 }
 
 export async function updatePlaylist(
@@ -5562,25 +3877,18 @@ export async function createSongPracticeSession(data: {
   source?: string;
   startedAt?: Date;
 }): Promise<PersistedSongPracticeSession | null> {
-  try {
-    const rows = await db()
-      .insert(songPracticeSessions)
-      .values({
-        id: data.id ?? crypto.randomUUID(),
-        userId: data.userId,
-        songId: data.songId,
-        segmentId: data.segmentId ?? null,
-        source: data.source ?? "song",
-        startedAt: data.startedAt ?? new Date(),
-      })
-      .returning();
-    return mapSongPracticeSession(rows[0]);
-  } catch (error) {
-    if (isMissingSongPracticeSessionTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .insert(songPracticeSessions)
+    .values({
+      id: data.id ?? crypto.randomUUID(),
+      userId: data.userId,
+      songId: data.songId,
+      segmentId: data.segmentId ?? null,
+      source: data.source ?? "song",
+      startedAt: data.startedAt ?? new Date(),
+    })
+    .returning();
+  return mapSongPracticeSession(rows[0]);
 }
 
 export async function finishSongPracticeSession(data: {
@@ -5589,22 +3897,15 @@ export async function finishSongPracticeSession(data: {
   completedAt?: Date;
   durationSeconds: number;
 }): Promise<PersistedSongPracticeSession | null> {
-  try {
-    const rows = await db()
-      .update(songPracticeSessions)
-      .set({
-        completedAt: data.completedAt ?? new Date(),
-        durationSeconds: Math.max(0, Math.round(data.durationSeconds)),
-      })
-      .where(and(eq(songPracticeSessions.id, data.id), eq(songPracticeSessions.userId, data.userId)))
-      .returning();
-    return rows[0] ? mapSongPracticeSession(rows[0]) : null;
-  } catch (error) {
-    if (isMissingSongPracticeSessionTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .update(songPracticeSessions)
+    .set({
+      completedAt: data.completedAt ?? new Date(),
+      durationSeconds: Math.max(0, Math.round(data.durationSeconds)),
+    })
+    .where(and(eq(songPracticeSessions.id, data.id), eq(songPracticeSessions.userId, data.userId)))
+    .returning();
+  return rows[0] ? mapSongPracticeSession(rows[0]) : null;
 }
 
 function mapVocalExercisePracticeSession(row: VocalExercisePracticeSessionRow, title?: string | null): PersistedVocalExercisePracticeSession {
@@ -5637,30 +3938,23 @@ export async function createVocalExercisePracticeSession(data: {
   practiceMode?: "single" | "set";
   routineId?: string | null;
 }): Promise<PersistedVocalExercisePracticeSession | null> {
-  try {
-    const rows = await db()
-      .insert(vocalExercisePracticeSessions)
-      .values({
-        id: data.id ?? crypto.randomUUID(),
-        userId: data.userId,
-        exerciseId: data.exerciseId,
-        startedAt: data.startedAt ?? new Date(),
-        tempoPercent: Math.max(40, Math.min(150, Math.round(data.tempoPercent ?? 100))),
-        repetitionCount: Math.max(0, Math.round(data.repetitionCount ?? 0)),
-        audioVersion: data.audioVersion ?? "blend",
-        practiceMode: data.practiceMode ?? "single",
-        routineId: data.routineId ?? null,
-        completionStatus: "started",
-        routineCompleted: false,
-      })
-      .returning();
-    return mapVocalExercisePracticeSession(rows[0]);
-  } catch (error) {
-    if (isMissingVocalExercisePracticeSessionTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .insert(vocalExercisePracticeSessions)
+    .values({
+      id: data.id ?? crypto.randomUUID(),
+      userId: data.userId,
+      exerciseId: data.exerciseId,
+      startedAt: data.startedAt ?? new Date(),
+      tempoPercent: Math.max(40, Math.min(150, Math.round(data.tempoPercent ?? 100))),
+      repetitionCount: Math.max(0, Math.round(data.repetitionCount ?? 0)),
+      audioVersion: data.audioVersion ?? "blend",
+      practiceMode: data.practiceMode ?? "single",
+      routineId: data.routineId ?? null,
+      completionStatus: "started",
+      routineCompleted: false,
+    })
+    .returning();
+  return mapVocalExercisePracticeSession(rows[0]);
 }
 
 export async function finishVocalExercisePracticeSession(data: {
@@ -5672,25 +3966,18 @@ export async function finishVocalExercisePracticeSession(data: {
   completionStatus: "completed" | "skipped" | "stopped" | "restarted";
   routineCompleted?: boolean;
 }): Promise<PersistedVocalExercisePracticeSession | null> {
-  try {
-    const rows = await db()
-      .update(vocalExercisePracticeSessions)
-      .set({
-        completedAt: data.completedAt ?? new Date(),
-        durationSeconds: Math.max(0, Math.round(data.durationSeconds)),
-        audioVersion: data.audioVersion,
-        completionStatus: data.completionStatus,
-        routineCompleted: data.routineCompleted ?? false,
-      })
-      .where(and(eq(vocalExercisePracticeSessions.id, data.id), eq(vocalExercisePracticeSessions.userId, data.userId)))
-      .returning();
-    return rows[0] ? mapVocalExercisePracticeSession(rows[0]) : null;
-  } catch (error) {
-    if (isMissingVocalExercisePracticeSessionTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  const rows = await db()
+    .update(vocalExercisePracticeSessions)
+    .set({
+      completedAt: data.completedAt ?? new Date(),
+      durationSeconds: Math.max(0, Math.round(data.durationSeconds)),
+      audioVersion: data.audioVersion,
+      completionStatus: data.completionStatus,
+      routineCompleted: data.routineCompleted ?? false,
+    })
+    .where(and(eq(vocalExercisePracticeSessions.id, data.id), eq(vocalExercisePracticeSessions.userId, data.userId)))
+    .returning();
+  return rows[0] ? mapVocalExercisePracticeSession(rows[0]) : null;
 }
 
 function dateKey(value: Date): string {
@@ -5977,47 +4264,32 @@ export async function getPracticeStatsSummary(
       return aTime - bTime || a.title.localeCompare(b.title);
     })[0];
 
-  let songSessions: PersistedSongPracticeSession[] = [];
-  try {
-    const rows = await db()
-      .select({
-        session: songPracticeSessions,
-        title: songs.title,
-      })
-      .from(songPracticeSessions)
-      .leftJoin(songs, eq(songs.id, songPracticeSessions.songId))
-      .where(eq(songPracticeSessions.userId, userId))
-      .orderBy(desc(songPracticeSessions.startedAt));
-    songSessions = rows.map((row) => mapSongPracticeSession(row.session, row.title));
-  } catch (error) {
-    if (!isMissingSongPracticeSessionTableError(error)) {
-      throw error;
-    }
-  }
+  const songSessionRows = await db()
+    .select({
+      session: songPracticeSessions,
+      title: songs.title,
+    })
+    .from(songPracticeSessions)
+    .leftJoin(songs, eq(songs.id, songPracticeSessions.songId))
+    .where(eq(songPracticeSessions.userId, userId))
+    .orderBy(desc(songPracticeSessions.startedAt));
+  const songSessions = songSessionRows.map((row) => mapSongPracticeSession(row.session, row.title));
 
-  let exerciseSessions: PersistedVocalExercisePracticeSession[] = [];
-  let recordedExerciseCatalog: Array<{ id: string; title: string }> = [];
-  try {
-    recordedExerciseCatalog = await db()
-      .select({ id: vocalExercises.id, title: vocalExercises.title })
-      .from(vocalExercises)
-      .where(or(isNotNull(vocalExercises.audioKey), isNotNull(vocalExercises.alternateAudioKey)))
-      .orderBy(asc(vocalExercises.title));
-    const rows = await db()
-      .select({
-        session: vocalExercisePracticeSessions,
-        title: vocalExercises.title,
-      })
-      .from(vocalExercisePracticeSessions)
-      .leftJoin(vocalExercises, eq(vocalExercises.id, vocalExercisePracticeSessions.exerciseId))
-      .where(eq(vocalExercisePracticeSessions.userId, userId))
-      .orderBy(desc(vocalExercisePracticeSessions.startedAt));
-    exerciseSessions = rows.map((row) => mapVocalExercisePracticeSession(row.session, row.title));
-  } catch (error) {
-    if (!isMissingVocalExercisePracticeSessionTableError(error)) {
-      throw error;
-    }
-  }
+  const recordedExerciseCatalog = await db()
+    .select({ id: vocalExercises.id, title: vocalExercises.title })
+    .from(vocalExercises)
+    .where(or(isNotNull(vocalExercises.audioKey), isNotNull(vocalExercises.alternateAudioKey)))
+    .orderBy(asc(vocalExercises.title));
+  const exerciseSessionRows = await db()
+    .select({
+      session: vocalExercisePracticeSessions,
+      title: vocalExercises.title,
+    })
+    .from(vocalExercisePracticeSessions)
+    .leftJoin(vocalExercises, eq(vocalExercises.id, vocalExercisePracticeSessions.exerciseId))
+    .where(eq(vocalExercisePracticeSessions.userId, userId))
+    .orderBy(desc(vocalExercisePracticeSessions.startedAt));
+  const exerciseSessions = exerciseSessionRows.map((row) => mapVocalExercisePracticeSession(row.session, row.title));
 
   const groupedSongSessions = groupSongPracticeSessions(songSessions);
   const rangedSongSessions = filterPracticeSessionsByRange(groupedSongSessions, range, now);

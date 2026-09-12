@@ -429,7 +429,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                         </span>
                       ) : null}
                     </div>
-                    {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(playlist.eventDate).toLocaleDateString()}</p> : null}
+                    {playlist.eventDate ? <p className="text-sm text-gray-500">{new Date(`${playlist.eventDate}T00:00:00`).toLocaleDateString()}</p> : null}
                     {playlist.isRetired && playlist.performanceStatus ? (
                       <p className="text-sm font-medium text-gray-600">{playlist.performanceStatus}</p>
                     ) : null}

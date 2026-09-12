@@ -47,201 +47,208 @@
     {
       "idx": 6,
       "version": "7",
+      "when": 1775700000000,
+      "tag": "0006_multi_user_isolation",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
       "when": 1775900000000,
       "tag": "0007_tap_practice_debug",
       "breakpoints": true
     },
     {
-      "idx": 7,
+      "idx": 8,
       "version": "7",
       "when": 1777694400000,
       "tag": "0008_song_timeline_contour",
       "breakpoints": true
     },
     {
-      "idx": 8,
+      "idx": 9,
       "version": "7",
       "when": 1778544000000,
       "tag": "0009_alternate_audio_key",
       "breakpoints": true
     },
     {
-      "idx": 9,
+      "idx": 10,
       "version": "7",
       "when": 1778976000000,
       "tag": "0010_enhanced_tap_practice",
       "breakpoints": true
     },
     {
-      "idx": 10,
+      "idx": 11,
       "version": "7",
       "when": 1779235200000,
       "tag": "0011_midi_guided_tap_practice",
       "breakpoints": true
     },
     {
-      "idx": 11,
+      "idx": 12,
       "version": "7",
       "when": 1779580800000,
       "tag": "0012_user_account_profiles",
       "breakpoints": true
     },
     {
-      "idx": 12,
+      "idx": 13,
       "version": "7",
       "when": 1779667200000,
       "tag": "0013_magic_link_auth",
       "breakpoints": true
     },
     {
-      "idx": 13,
+      "idx": 14,
       "version": "7",
       "when": 1779753600000,
       "tag": "0014_playlist_sharing",
       "breakpoints": true
     },
     {
-      "idx": 14,
+      "idx": 15,
       "version": "7",
       "when": 1779840000000,
       "tag": "0015_playlist_import_lineage",
       "breakpoints": true
     },
     {
-      "idx": 15,
+      "idx": 16,
       "version": "7",
       "when": 1779926400000,
       "tag": "0016_song_level_scoring",
       "breakpoints": true
     },
     {
-      "idx": 16,
+      "idx": 17,
       "version": "7",
       "when": 1780012800000,
       "tag": "0017_minimal_audit_logs",
       "breakpoints": true
     },
     {
-      "idx": 17,
+      "idx": 18,
       "version": "7",
       "when": 1780099200000,
       "tag": "0018_public_shared_playlists",
       "breakpoints": true
     },
     {
-      "idx": 18,
+      "idx": 19,
       "version": "7",
       "when": 1780185600000,
       "tag": "0019_song_draft_recordings",
       "breakpoints": true
     },
     {
-      "idx": 19,
+      "idx": 20,
       "version": "7",
       "when": 1780272000000,
       "tag": "0020_promote_draft_recordings",
       "breakpoints": true
     },
     {
-      "idx": 20,
+      "idx": 21,
       "version": "7",
       "when": 1781308800000,
       "tag": "0021_unassigned_draft_recordings",
       "breakpoints": true
     },
     {
-      "idx": 21,
+      "idx": 22,
       "version": "7",
       "when": 1781395200000,
       "tag": "0022_playlist_share_audio_mode",
       "breakpoints": true
     },
     {
-      "idx": 22,
+      "idx": 23,
       "version": "7",
       "when": 1781481600000,
       "tag": "0023_public_playlist_share_audio_mode",
       "breakpoints": true
     },
     {
-      "idx": 23,
+      "idx": 24,
       "version": "7",
       "when": 1781568000000,
       "tag": "0024_user_account_deletion",
       "breakpoints": true
     },
     {
-      "idx": 24,
+      "idx": 25,
       "version": "7",
       "when": 1781910000000,
       "tag": "0025_pitch_practice",
       "breakpoints": true
     },
     {
-      "idx": 25,
+      "idx": 26,
       "version": "7",
       "when": 1782097200000,
       "tag": "0026_vocal_exercises",
       "breakpoints": true
     },
     {
-      "idx": 26,
+      "idx": 27,
       "version": "7",
       "when": 1782099000000,
       "tag": "0027_vocal_exercise_seed_metadata",
       "breakpoints": true
     },
     {
-      "idx": 27,
+      "idx": 28,
       "version": "7",
       "when": 1782100800000,
       "tag": "0028_vocal_exercise_collections",
       "breakpoints": true
     },
     {
-      "idx": 28,
+      "idx": 29,
       "version": "7",
       "when": 1782604800000,
       "tag": "0029_vocal_exercise_practice_sessions",
       "breakpoints": true
     },
     {
-      "idx": 29,
+      "idx": 30,
       "version": "7",
       "when": 1782691200000,
       "tag": "0030_song_practice_sessions",
       "breakpoints": true
     },
     {
-      "idx": 30,
+      "idx": 31,
       "version": "7",
       "when": 1782777600000,
       "tag": "0031_playlist_performances",
       "breakpoints": true
     },
     {
-      "idx": 31,
+      "idx": 32,
       "version": "7",
       "when": 1782864000000,
       "tag": "0032_recorded_playlist_status",
       "breakpoints": true
     },
     {
-      "idx": 32,
+      "idx": 33,
       "version": "7",
       "when": 1785211200000,
       "tag": "0033_recorded_warmups",
       "breakpoints": true
     },
     {
-      "idx": 33,
+      "idx": 34,
       "version": "7",
       "when": 1785301200000,
       "tag": "0034_vocal_exercise_alternate_audio",
       "breakpoints": true
     },
     {
-      "idx": 34,
+      "idx": 35,
       "version": "7",
       "when": 1785304800000,
       "tag": "0035_recorded_warmup_practice_metrics",
