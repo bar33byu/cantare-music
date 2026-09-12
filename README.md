@@ -1,6 +1,6 @@
 # Cantare
 
-Cantare 5.0 is a practice application for singers to learn and master songs through deliberate, segment-based repetition, two-version audio playback, MIDI-guided melodic contour training, playlist practice modes, draft rehearsal recordings, and playlist sharing.
+Cantare 5.1.0 is a practice application for singers to learn and master songs through deliberate, segment-based repetition, two-version audio playback, MIDI-guided melodic contour training, playlist practice modes, draft rehearsal recordings, and playlist sharing.
 
 > **Credits:** Cantare is a clone built to replicate the core functionality of Musicators Digital Memorization (https://musicators.com/memory). All credit for the original concept and feature design goes to the Musicators team.
 
@@ -23,8 +23,8 @@ Cantare lets you upload songs, divide them into labeled segments, add lyrics, an
 - **Tap practice** - tap along only when a MIDI contour is available, compare attempts against the MIDI-derived up/down/same key, and persist recent attempts.
 - **Pitch practice** - sing along through the microphone when aligned MIDI is available, receive exact-octave pitch feedback, and feed attempted-note results into the same contour history as Tap practice without recording audio.
 - **Contour heat map** - color the card contour from recent tap misses so trouble spots become visible immediately and improve as more attempts are saved.
-- **Playlist practice** - group songs into rehearsal playlists with aggregate stats, asset summaries, Focus, Auto Drill, Listen, and standard Songs modes.
-- **Auto Drill** - automatically loop segments based on ratings, allow forward/back navigation with the card arrows, and keep the auto-drill header compact.
+- **Playlist practice** - group songs into rehearsal playlists with aggregate stats and asset summaries. Songs mode highlights segment readiness and lets you choose what to practice; Hands Free drills playlist segments; Listen plays songs sequentially.
+- **Hands Free** - automatically repeat segments based on your memory ratings, move backward or forward with the card arrows, and keep playback controls compact.
 - **Listen mode** - play playlist songs sequentially without the practice-card workflow, including smooth Part/Blend switching during playback.
 - **Playlist sharing** - publish playlists to the Shared tab or create direct share links, with independent Part, Blend, or Part and Blend audio settings for each sharing mechanism.
 - **Playlist imports** - copy shared playlists into a singer's own library while preserving source lineage and applying the selected shared audio scope.

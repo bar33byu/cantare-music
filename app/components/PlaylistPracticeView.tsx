@@ -19,14 +19,11 @@ import { getAutoDrillTargetPasses } from '../lib/autoDrill';
 import type { MemoryRating } from '../types';
 import { SongSortMenu } from './SongSortMenu';
 
-type FocusSortKey = 'mastery' | 'due-date' | 'song-order';
-type PlaylistMode = 'practice' | 'focus' | 'listen' | 'auto';
-type ExplainedMode = Extract<PlaylistMode, 'focus' | 'listen' | 'auto'>;
+type PlaylistMode = 'practice' | 'listen' | 'auto';
+type ExplainedMode = Extract<PlaylistMode, 'listen' | 'auto'>;
 const SORT_STORAGE_KEY = 'playlist-practice-sort';
 const MODE_EXPLAINER_STORAGE_KEY_PREFIX = 'playlist-practice-mode-explainer:';
 const DEFAULT_SORT: SongSortState = { key: 'date-practiced', asc: false };
-const DEFAULT_FOCUS_PREROLL_MS = 5000;
-const FOCUS_MASTERED_RATING = 5;
 const AUTO_DRILL_PREROLL_MS = 500;
 const HANDS_FREE_LABEL = 'Hands Free';
 const AUTO_DRILL_PERMISSION_WARNING =
@@ -47,17 +44,11 @@ const normalizeSort = (sort: SongSortState): SongSortState => (
 
 const modeLabel: Record<PlaylistMode, string> = {
   practice: 'Songs',
-  focus: 'Focus',
   auto: HANDS_FREE_LABEL,
   listen: 'Listen',
 };
 
 const modeExplainerCopy: Record<ExplainedMode, { title: string; description: string; detail: string }> = {
-  focus: {
-    title: 'Focus mode',
-    description: 'Focus mode pulls individual segments into a queue so you can work the weakest or stalest material first.',
-    detail: 'It is built for targeted repetition instead of running whole songs from top to bottom.',
-  },
   auto: {
     title: HANDS_FREE_LABEL,
     description: `${HANDS_FREE_LABEL} steps through the playlist for you and keeps repeating segments until it is time to advance.`,
@@ -92,16 +83,6 @@ function markModeExplainerSeen(mode: ExplainedMode): void {
   } catch {
     // Ignore storage failures; the explainer can show again.
   }
-}
-
-interface FocusQueueItem {
-  id: string;
-  song: Playlist["songs"][number];
-  segment: Segment;
-  songIndex: number;
-  segmentIndex: number;
-  latestRating?: SegmentRating;
-  masteryPercent: number;
 }
 
 interface AutoDrillQueueItem {
@@ -198,7 +179,6 @@ interface PlaylistPracticeViewProps {
   progressStorage?: ProgressStorageMode;
   revalidatePlaylist?: boolean;
   sharedPlaylistToken?: string;
-  segmentPrerollMs?: number;
   preferredAudioVersion?: PreferredAudioVersion;
   onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
   collapseLyricLineBreaks?: boolean;
@@ -216,7 +196,6 @@ export function PlaylistPracticeView({
   progressStorage: progressStorageOverride,
   revalidatePlaylist = true,
   sharedPlaylistToken,
-  segmentPrerollMs = DEFAULT_FOCUS_PREROLL_MS,
   preferredAudioVersion = 'part',
   onPreferredAudioVersionChange,
   collapseLyricLineBreaks = false,
@@ -239,20 +218,12 @@ export function PlaylistPracticeView({
   const [autoDrillCompletedPasses, setAutoDrillCompletedPasses] = useState<Record<string, number>>({});
   const [autoDrillRunRatings, setAutoDrillRunRatings] = useState<Record<string, MemoryRating>>({});
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
-  const [currentFocusIndex, setCurrentFocusIndex] = useState(0);
-  const [focusAutoPlayItemId, setFocusAutoPlayItemId] = useState<string | null>(null);
   const [isListenPlaying, setIsListenPlaying] = useState(false);
-  const [focusSortKey, setFocusSortKey] = useState<FocusSortKey>('mastery');
-  const [focusPrerollMs, setFocusPrerollMs] = useState(segmentPrerollMs);
   const [ratingsBySongId, setRatingsBySongId] = useState<Record<string, SegmentRating[]>>({});
-  const [focusRatingsLoading, setFocusRatingsLoading] = useState(false);
-  const [focusRatingsError, setFocusRatingsError] = useState<string | null>(null);
-  const lastObservedFocusItemIdRef = useRef<string | null>(null);
-  const lastObservedFocusRatingRef = useRef<string | null>(null);
   const listenStartedSongIdRef = useRef<string | null>(null);
   const pendingListenAudioSwitchRef = useRef<{ songId: string; currentMs: number; wasPlaying: boolean } | null>(null);
   const autoDrillRunIdRef = useRef(0);
-  const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again' | 'continuous'>('full');
+  const [autoDrillTransition, setAutoDrillTransition] = useState<'full' | 'quick' | 'previous' | 'again' | 'continuous'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
   const autoDrillAudioFallbackItemRef = useRef<string | null>(null);
   const [modeExplainer, setModeExplainer] = useState<ExplainedMode | null>(null);
@@ -352,10 +323,6 @@ export function PlaylistPracticeView({
   }, [songsWithProgress, sort]);
 
   useEffect(() => {
-    setFocusPrerollMs(segmentPrerollMs);
-  }, [segmentPrerollMs]);
-
-  useEffect(() => {
     let cancelled = false;
     const songsWithSegments = livePlaylist.songs.filter((song) => song.segments.length > 0);
 
@@ -363,25 +330,19 @@ export function PlaylistPracticeView({
       setRatingsBySongId(Object.fromEntries(
         livePlaylist.songs.map((song) => [song.id, getGuestSongRatings(song.id)] as const)
       ));
-      setFocusRatingsLoading(false);
-      setFocusRatingsError(null);
       return;
     }
 
-    if (mode !== 'focus' && mode !== 'auto') {
+    if (mode !== 'auto') {
       return;
     }
 
     if (songsWithSegments.length === 0 || progressStorage === 'none') {
       setRatingsBySongId({});
-      setFocusRatingsLoading(false);
-      setFocusRatingsError(null);
       return;
     }
 
     const loadRatings = async () => {
-      setFocusRatingsLoading(true);
-      setFocusRatingsError(null);
       try {
         const entries = await Promise.all(
           songsWithSegments.map(async (song) => {
@@ -401,13 +362,7 @@ export function PlaylistPracticeView({
           setRatingsBySongId(Object.fromEntries(entries));
         }
       } catch {
-        if (!cancelled) {
-          setFocusRatingsError('Could not load segment ratings. Focus Queue is still available.');
-        }
-      } finally {
-        if (!cancelled) {
-          setFocusRatingsLoading(false);
-        }
+        // Hands Free can still run when saved ratings are unavailable.
       }
     };
 
@@ -416,64 +371,7 @@ export function PlaylistPracticeView({
     return () => {
       cancelled = true;
     };
-  }, [accountProgressEnabled, livePlaylist.songs, localProgressEnabled, mode, progressStorage, refetchTrigger, userScopedHeaders]);
-
-  const focusQueue = useMemo<FocusQueueItem[]>(() => {
-    const items = livePlaylist.songs.flatMap((song, songIndex) => {
-      const ratings = ratingsBySongId[song.id] ?? [];
-      return [...song.segments]
-        .sort((a, b) => a.order - b.order || a.startMs - b.startMs)
-        .map((segment, segmentIndex) => {
-          const latestRating = ratings
-            .filter((rating) => rating.segmentId === segment.id)
-            .sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt))[0];
-          return {
-            id: `${song.id}:${segment.id}`,
-            song,
-            segment,
-            songIndex,
-            segmentIndex,
-            latestRating,
-            masteryPercent: latestRating ? latestRating.rating * 20 : 0,
-          };
-        })
-        .filter((item) => (item.latestRating?.rating ?? 0) < FOCUS_MASTERED_RATING);
-    });
-
-    if (focusSortKey === 'song-order') {
-      return items.sort((a, b) => a.songIndex - b.songIndex || a.segmentIndex - b.segmentIndex);
-    }
-
-    const groupedBySong = new Map<number, FocusQueueItem[]>();
-    for (const item of items) {
-      const group = groupedBySong.get(item.songIndex) ?? [];
-      group.push(item);
-      groupedBySong.set(item.songIndex, group);
-    }
-
-    return [...groupedBySong.values()]
-      .map((group) => [...group].sort((a, b) => a.segmentIndex - b.segmentIndex))
-      .sort((aGroup, bGroup) => {
-        const aFirst = aGroup[0];
-        const bFirst = bGroup[0];
-        if (!aFirst || !bFirst) {
-          return 0;
-        }
-
-        if (focusSortKey === 'due-date') {
-          const aOldest = Math.min(...aGroup.map((item) => item.latestRating ? Date.parse(item.latestRating.ratedAt) : 0));
-          const bOldest = Math.min(...bGroup.map((item) => item.latestRating ? Date.parse(item.latestRating.ratedAt) : 0));
-          const aWeakest = Math.min(...aGroup.map((item) => item.masteryPercent));
-          const bWeakest = Math.min(...bGroup.map((item) => item.masteryPercent));
-          return aOldest - bOldest || aWeakest - bWeakest || aFirst.songIndex - bFirst.songIndex;
-        }
-
-        const aWeakest = Math.min(...aGroup.map((item) => item.masteryPercent));
-        const bWeakest = Math.min(...bGroup.map((item) => item.masteryPercent));
-        return aWeakest - bWeakest || aFirst.songIndex - bFirst.songIndex;
-      })
-      .flat();
-  }, [focusSortKey, livePlaylist.songs, ratingsBySongId]);
+  }, [livePlaylist.songs, localProgressEnabled, mode, progressStorage, refetchTrigger, userScopedHeaders]);
 
   const autoDrillQueue = useMemo<AutoDrillQueueItem[]>(() => {
     return displayedSongs.flatMap((song, songIndex) => {
@@ -525,51 +423,6 @@ export function PlaylistPracticeView({
     setAutoDrillIndex((prev) => Math.min(prev, Math.max(autoDrillQueue.length - 1, 0)));
   }, [autoDrillQueue.length]);
 
-  useEffect(() => {
-    setCurrentFocusIndex((prev) => Math.min(prev, Math.max(focusQueue.length - 1, 0)));
-  }, [focusQueue.length]);
-
-  const currentFocusItem = focusQueue[currentFocusIndex];
-  const handlePrevFocusSegment = useCallback((options?: { wasPlaying: boolean }) => {
-    setCurrentFocusIndex((prev) => {
-      const nextIndex = Math.max(prev - 1, 0);
-      setFocusAutoPlayItemId(options?.wasPlaying ? focusQueue[nextIndex]?.id ?? null : null);
-      return nextIndex;
-    });
-  }, [focusQueue]);
-  const handleNextFocusSegment = useCallback((options?: { wasPlaying: boolean }) => {
-    setCurrentFocusIndex((prev) => {
-      const nextIndex = Math.min(prev + 1, Math.max(focusQueue.length - 1, 0));
-      setFocusAutoPlayItemId(options?.wasPlaying ? focusQueue[nextIndex]?.id ?? null : null);
-      return nextIndex;
-    });
-  }, [focusQueue]);
-
-  useEffect(() => {
-    if (!focusAutoPlayItemId || currentFocusItem?.id !== focusAutoPlayItemId) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => setFocusAutoPlayItemId(null), 0);
-    return () => window.clearTimeout(timer);
-  }, [currentFocusItem?.id, focusAutoPlayItemId]);
-
-  const focusPracticeSession = useMemo<SessionState | null>(() => {
-    if (!currentFocusItem) {
-      return null;
-    }
-
-    return {
-      id: `playlist-focus-${playlist.id}-${currentFocusItem.segment.id}`,
-      songId: currentFocusItem.song.id,
-      currentSongId: currentFocusItem.song.id,
-      currentSegmentIndex: currentFocusItem.segmentIndex,
-      isLocked: false,
-      ratings: ratingsBySongId[currentFocusItem.song.id] ?? [],
-      startedAt: new Date().toISOString(),
-    };
-  }, [currentFocusItem, playlist.id, ratingsBySongId]);
-
   const autoDrillPracticeSession = useMemo<SessionState | null>(() => {
     if (!currentAutoDrillItem) {
       return null;
@@ -586,26 +439,9 @@ export function PlaylistPracticeView({
     };
   }, [currentAutoDrillItem, playlist.id, ratingsBySongId]);
 
-  useEffect(() => {
-    if (!currentFocusItem) {
-      lastObservedFocusItemIdRef.current = null;
-      lastObservedFocusRatingRef.current = null;
-      return;
-    }
-
-    if (lastObservedFocusItemIdRef.current === currentFocusItem.id) {
-      return;
-    }
-
-    lastObservedFocusItemIdRef.current = currentFocusItem.id;
-    lastObservedFocusRatingRef.current = currentFocusItem.latestRating
-      ? `${currentFocusItem.segment.id}:${currentFocusItem.latestRating.rating}:${currentFocusItem.latestRating.ratedAt}`
-      : null;
-  }, [currentFocusItem]);
-
   const listenQueue = displayedSongs;
   const currentSong = listenQueue[currentSongIndex];
-  const playbackSong = mode === 'focus' || mode === 'auto' ? undefined : currentSong;
+  const playbackSong = mode === 'auto' ? undefined : currentSong;
   const currentSongId = playbackSong?.id;
   const hasCurrentSongAudio = Boolean(resolvePreferredAudioUrl(playbackSong, preferredAudioVersion));
   const findNextPlayableIndex = useCallback((startIndex: number) => {
@@ -763,45 +599,6 @@ export function PlaylistPracticeView({
     }
   };
 
-  const handleFocusSessionChange = useCallback((session: SessionState) => {
-    if (!currentFocusItem) {
-      return;
-    }
-
-    const activeSegment = currentFocusItem.song.segments[session.currentSegmentIndex];
-    if (activeSegment) {
-      const nextFocusIndex = focusQueue.findIndex(
-        (item) => item.song.id === currentFocusItem.song.id && item.segment.id === activeSegment.id
-      );
-      if (nextFocusIndex !== -1 && nextFocusIndex !== currentFocusIndex) {
-        setCurrentFocusIndex(nextFocusIndex);
-      }
-    }
-  }, [currentFocusIndex, currentFocusItem, focusQueue]);
-
-  const handleFocusRatingsSaved = useCallback((ratings: SessionState["ratings"]) => {
-    if (!currentFocusItem) {
-      return;
-    }
-
-    setRatingsBySongId((prev) => ({ ...prev, [currentFocusItem.song.id]: ratings }));
-
-    const latestForQueuedSegment = ratings
-      .filter((rating) => rating.segmentId === currentFocusItem.segment.id)
-      .sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt))[0];
-
-    const nextObservedKey = latestForQueuedSegment
-      ? `${currentFocusItem.segment.id}:${latestForQueuedSegment.rating}:${latestForQueuedSegment.ratedAt}`
-      : null;
-
-    if (!nextObservedKey || nextObservedKey === lastObservedFocusRatingRef.current) {
-      return;
-    }
-
-    lastObservedFocusRatingRef.current = nextObservedKey;
-    setRefetchTrigger((prev) => prev + 1);
-  }, [currentFocusItem]);
-
   const stopAutoDrill = useCallback(() => {
     autoDrillRunIdRef.current += 1;
     setPracticeMode('manual');
@@ -812,7 +609,7 @@ export function PlaylistPracticeView({
 
   const startAutoDrill = useCallback(() => {
     autoDrillRunIdRef.current += 1;
-    autoDrillTransitionRef.current = 'full';
+    setAutoDrillTransition('full');
     autoDrillHandledCompletionRef.current = null;
     setMode('auto');
     setPracticeMode('auto-drill');
@@ -841,7 +638,7 @@ export function PlaylistPracticeView({
   }, [practiceMode, startAutoDrill]);
 
   const requestModeChange = useCallback((nextMode: PlaylistMode) => {
-    if ((nextMode === 'focus' || nextMode === 'listen' || nextMode === 'auto') && !hasSeenModeExplainer(nextMode)) {
+    if ((nextMode === 'listen' || nextMode === 'auto') && !hasSeenModeExplainer(nextMode)) {
       setModeExplainer(nextMode);
       return;
     }
@@ -886,9 +683,9 @@ export function PlaylistPracticeView({
 
     const nextItem = autoDrillQueue[autoDrillIndex + 1];
     const continuesMasteredSong = options?.continueWithoutPrompt && nextItem?.song.id === fromItem.song.id;
-    autoDrillTransitionRef.current = continuesMasteredSong
+    setAutoDrillTransition(continuesMasteredSong
       ? 'continuous'
-      : nextItem?.song.id === fromItem.song.id ? 'quick' : 'full';
+      : nextItem?.song.id === fromItem.song.id ? 'quick' : 'full');
     setAutoDrillIndex((prev) => Math.min(prev + 1, Math.max(autoDrillQueue.length - 1, 0)));
     setAutoDrillState('announcing');
     setAutoDrillPlaybackWarning(null);
@@ -920,9 +717,9 @@ export function PlaylistPracticeView({
       ...prev,
       [targetItem.id]: 0,
     }));
-    autoDrillTransitionRef.current = direction === 'previous'
+    setAutoDrillTransition(direction === 'previous'
       ? 'previous'
-      : targetItem.song.id === currentAutoDrillItem.song.id ? 'quick' : 'full';
+      : targetItem.song.id === currentAutoDrillItem.song.id ? 'quick' : 'full');
     setAutoDrillIndex(targetIndex);
     setAutoDrillState('announcing');
     setAutoDrillPlaybackWarning(null);
@@ -971,7 +768,7 @@ export function PlaylistPracticeView({
     setAutoDrillPlaybackWarning(null);
 
     if (shouldReplaySegment) {
-      autoDrillTransitionRef.current = 'again';
+      setAutoDrillTransition('again');
       setAutoDrillState('repeating');
       setAutoDrillMessage('Again');
       return;
@@ -1007,7 +804,7 @@ export function PlaylistPracticeView({
     ) {
       autoDrillAudioFallbackItemRef.current = currentAutoDrillItem.id;
       onPreferredAudioVersionChange(alternateVersion);
-      autoDrillTransitionRef.current = 'again';
+      setAutoDrillTransition('again');
       setAutoDrillPlaybackWarning(
         `${preferredAudioVersion === 'part' ? 'Part' : 'Blend'} audio could not load. Retrying with ${alternateVersion === 'part' ? 'Part' : 'Blend'} audio.`
       );
@@ -1058,7 +855,7 @@ export function PlaylistPracticeView({
         });
         return;
       }
-      autoDrillTransitionRef.current = 'again';
+      setAutoDrillTransition('again');
       setAutoDrillState('repeating');
       setAutoDrillMessage('Again');
     }
@@ -1105,7 +902,7 @@ export function PlaylistPracticeView({
     let cancelled = false;
 
     const runTransition = async () => {
-      const transition = autoDrillTransitionRef.current;
+      const transition = autoDrillTransition;
 
       if (transition === 'continuous') {
         // A mastered same-song segment should flow directly into the next segment.
@@ -1136,7 +933,7 @@ export function PlaylistPracticeView({
     return () => {
       cancelled = true;
     };
-  }, [autoDrillIndex, autoDrillState, currentAutoDrillItem, practiceMode]);
+  }, [autoDrillIndex, autoDrillState, autoDrillTransition, currentAutoDrillItem, practiceMode]);
 
   useEffect(() => {
     try {
@@ -1324,7 +1121,6 @@ export function PlaylistPracticeView({
           <div className="inline-flex h-10 min-w-0 max-w-full rounded border border-indigo-300 bg-white p-0.5">
             {([
               ['practice', modeLabel.practice],
-              ['focus', modeLabel.focus],
               ['auto', modeLabel.auto],
               ['listen', modeLabel.listen],
             ] as const).map(([nextMode, label]) => (
@@ -1497,152 +1293,6 @@ export function PlaylistPracticeView({
         </>
       )}
 
-      {mode === 'focus' && (
-        <div
-          className="space-y-4"
-          data-testid="playlist-focus-queue"
-          style={{ paddingBottom: "calc(var(--player-height) + env(safe-area-inset-bottom) + 16px)" }}
-        >
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="inline-flex rounded border border-gray-300 bg-white p-0.5">
-              {([
-                ['mastery', 'Weakest'],
-                ['due-date', 'Oldest'],
-                ['song-order', 'Song Order'],
-              ] as const).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  data-testid={`focus-sort-${key}`}
-                  aria-pressed={focusSortKey === key}
-                  onClick={() => {
-                    setFocusSortKey(key);
-                    setCurrentFocusIndex(0);
-                  }}
-                  className={`rounded px-3 py-1.5 text-sm font-semibold ${
-                    focusSortKey === key
-                      ? 'bg-slate-900 text-white'
-                      : 'text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              Pre-roll
-              <select
-                data-testid="focus-preroll-select"
-                value={focusPrerollMs}
-                onChange={(event) => setFocusPrerollMs(Number(event.target.value))}
-                className="rounded border border-gray-300 bg-white px-2 py-1 text-sm"
-              >
-                <option value={0}>0s</option>
-                <option value={1000}>1s</option>
-                <option value={2000}>2s</option>
-                <option value={5000}>5s</option>
-                <option value={10000}>10s</option>
-              </select>
-            </label>
-          </div>
-
-          {focusRatingsLoading ? (
-            <div className="rounded border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
-              Loading segment ratings...
-            </div>
-          ) : null}
-
-          {focusRatingsError ? (
-            <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              {focusRatingsError}
-            </div>
-          ) : null}
-
-          {!currentFocusItem ? (
-            <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              No segments currently need focused practice.
-            </div>
-          ) : (
-            <>
-              <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3" data-testid="focus-current-segment">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-indigo-800">
-                      Focus: {currentFocusItem.song.title}
-                      {currentFocusItem.song.artist ? ` - ${currentFocusItem.song.artist}` : ''}
-                    </p>
-                    <p className="text-sm text-indigo-950">
-                      {currentFocusItem.segment.label} - Song {currentFocusItem.songIndex + 1} of {livePlaylist.songs.length} - Segment {currentFocusItem.segmentIndex + 1} of {currentFocusItem.song.segments.length} - {formatMs(currentFocusItem.segment.startMs)} to {formatMs(currentFocusItem.segment.endMs)}
-                    </p>
-                  </div>
-                  <span className="text-sm font-medium text-indigo-900">
-                    {currentFocusIndex + 1} of {focusQueue.length}
-                  </span>
-                </div>
-              </div>
-
-              {focusPracticeSession ? (
-                <div className="min-h-0 rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="focus-practice-surface">
-                  <PracticeView
-                    key={`${currentFocusItem.song.id}:${currentFocusItem.segment.id}`}
-                    song={currentFocusItem.song}
-                    userId={userId}
-                    persistProgress={persistProgress}
-                    progressStorage={progressStorage}
-                    readOnlyDataUserId={readOnlyDataUserId}
-                    sharedPlaylistToken={sharedPlaylistToken}
-                    initialSession={focusPracticeSession}
-                    onSessionChange={handleFocusSessionChange}
-                    onRatingsSaved={handleFocusRatingsSaved}
-                    segmentPrerollMs={focusPrerollMs}
-                    preferredAudioVersion={preferredAudioVersion}
-                    onPreferredAudioVersionChange={onPreferredAudioVersionChange}
-                    collapseLyricLineBreaks={collapseLyricLineBreaks}
-                    lyricSize="large"
-                    defaultLooping
-                    playScope="segment"
-                    autoPlayOnMount={focusAutoPlayItemId === currentFocusItem.id}
-                    onPrevSegment={handlePrevFocusSegment}
-                    onNextSegment={handleNextFocusSegment}
-                    canUsePrevSegment={currentFocusIndex > 0}
-                    canUseNextSegment={currentFocusIndex < focusQueue.length - 1}
-                    practiceTimeTrackingEnabled={progressStorage !== 'none'}
-                    practiceTimeSource="playlist-focus"
-                  />
-                </div>
-              ) : null}
-
-              <div className="grid gap-3 md:grid-cols-2" data-testid="focus-queue-list">
-                {focusQueue.slice(0, 8).map((item, index) => {
-                  const isActive = index === currentFocusIndex;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      data-testid={`focus-queue-item-${item.segment.id}`}
-                      onClick={() => setCurrentFocusIndex(index)}
-                      className={`rounded-lg border p-3 text-left transition ${
-                        isActive
-                          ? 'border-indigo-500 bg-indigo-50'
-                          : 'border-gray-200 bg-white hover:border-indigo-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-semibold text-gray-950">Segment {item.segmentIndex + 1}</span>
-                        <span className="text-xs font-semibold text-gray-500">{item.masteryPercent}% memorized</span>
-                      </div>
-                      <p className="mt-1 text-xs text-gray-500">
-                        {item.song.title} - {formatMs(item.segment.startMs)}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
       {mode === 'auto' && (
         <div className="space-y-3" data-testid="playlist-auto-drill">
           <div
@@ -1723,7 +1373,7 @@ export function PlaylistPracticeView({
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel={HANDS_FREE_LABEL}
-                    segmentPrerollMs={autoDrillTransitionRef.current === 'continuous' ? 0 : AUTO_DRILL_PREROLL_MS}
+                    segmentPrerollMs={autoDrillTransition === 'continuous' ? 0 : AUTO_DRILL_PREROLL_MS}
                     preferredAudioVersion={preferredAudioVersion}
                     onPreferredAudioVersionChange={onPreferredAudioVersionChange}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
