@@ -292,8 +292,36 @@ describe('PlaylistBrowser', () => {
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Blend audio 2/3');
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('Sections 2/3');
     expect(screen.getByTestId('playlist-health-pl-1')).toHaveTextContent('MIDI contour 1/3');
+    expect(screen.getByTestId('playlist-health-pl-1-part-audio')).toHaveAttribute('aria-valuenow', '67');
+    expect(screen.getByTestId('playlist-health-pl-1-part-audio')).toHaveAttribute('aria-valuetext', '2 of 3 songs have Part audio');
+    expect(screen.getByTestId('playlist-health-pl-1-part-audio')).toHaveClass('border-rose-200');
+    expect(screen.getByTestId('playlist-health-pl-1-part-audio-fill')).toHaveStyle({ width: '67%' });
     expect(screen.getByTestId('playlist-knowledge-pl-1')).toHaveTextContent('Knowledge: 85%');
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks fully prepared playlist health metrics as ready', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        playlists: [{
+          ...basePlaylist,
+          healthStats: {
+            songsWithPartAudio: 3,
+            songsWithBlendAudio: 3,
+            songsWithSegments: 3,
+            songsWithMidiContour: 3,
+          },
+        }],
+      }),
+    });
+
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+
+    const partAudioMetric = await screen.findByTestId('playlist-health-pl-1-part-audio');
+    expect(partAudioMetric).toHaveAttribute('aria-valuenow', '100');
+    expect(partAudioMetric).toHaveClass('border-emerald-200');
+    expect(screen.getByTestId('playlist-health-pl-1-part-audio-fill')).toHaveStyle({ width: '100%' });
   });
 
   it('refetches playlists when userId changes', async () => {

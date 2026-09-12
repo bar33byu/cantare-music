@@ -386,6 +386,12 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
             const knowledgePercent = Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100);
             const stats = statsByPlaylist[playlist.id] ?? EMPTY_PLAYLIST_STATS;
             const totalSongs = Math.max(playlist.songCount ?? 0, 0);
+            const healthMetrics = [
+              { key: 'part-audio', label: 'Part audio', count: stats.songsWithPartAudio },
+              { key: 'blend-audio', label: 'Blend audio', count: stats.songsWithBlendAudio },
+              { key: 'sections', label: 'Sections', count: stats.songsWithSegments },
+              { key: 'midi-contour', label: 'MIDI contour', count: stats.songsWithMidiContour },
+            ] as const;
             const isPublicShared = Boolean(playlist.isPublic);
             const isUrlShared = Boolean(playlist.shareToken);
             return (
@@ -437,19 +443,43 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                     <p className="text-sm font-semibold text-indigo-800" data-testid={`playlist-knowledge-${playlist.id}`}>
                       Knowledge: {knowledgePercent}%
                     </p>
-                    <div className="mt-2 hidden grid-cols-4 gap-2 text-[11px] text-indigo-900 lg:grid" data-testid={`playlist-health-${playlist.id}`}>
-                      <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
-                        Part audio {stats.songsWithPartAudio}/{totalSongs}
-                      </span>
-                      <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
-                        Blend audio {stats.songsWithBlendAudio}/{totalSongs}
-                      </span>
-                      <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
-                        Sections {stats.songsWithSegments}/{totalSongs}
-                      </span>
-                      <span className="rounded border border-indigo-200/70 bg-white/70 px-2 py-1">
-                        MIDI contour {stats.songsWithMidiContour}/{totalSongs}
-                      </span>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] lg:grid-cols-4" data-testid={`playlist-health-${playlist.id}`}>
+                      {healthMetrics.map(({ key, label, count }) => {
+                        const readyCount = Math.min(Math.max(count, 0), totalSongs);
+                        const readyPercent = totalSongs > 0 ? Math.round((readyCount / totalSongs) * 100) : 0;
+                        const isComplete = totalSongs > 0 && readyCount === totalSongs;
+                        const completionLabel = totalSongs > 0
+                          ? `${readyCount} of ${totalSongs} songs have ${label}`
+                          : `No songs in playlist for ${label.toLowerCase()} readiness`;
+
+                        return (
+                          <div
+                            key={key}
+                            role="progressbar"
+                            aria-label={`${label} readiness`}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={readyPercent}
+                            aria-valuetext={completionLabel}
+                            title={completionLabel}
+                            data-testid={`playlist-health-${playlist.id}-${key}`}
+                            className={`relative overflow-hidden rounded border px-2 py-1 ${
+                              isComplete
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                : 'border-rose-200 bg-white/80 text-rose-800'
+                            }`}
+                          >
+                            <span className="relative">{label} {readyCount}/{totalSongs}</span>
+                            <div className="absolute inset-x-0 bottom-0 h-1 bg-rose-100" aria-hidden="true">
+                              <div
+                                data-testid={`playlist-health-${playlist.id}-${key}-fill`}
+                                className="h-full bg-emerald-500"
+                                style={{ width: `${readyPercent}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </button>
 
