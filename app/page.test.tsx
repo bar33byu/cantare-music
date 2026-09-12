@@ -194,26 +194,6 @@ describe('Home page', () => {
     }) as unknown as typeof fetch;
   });
 
-  it('contains settings focus and restores the opener on Escape', () => {
-    render(<Home />);
-    const opener = screen.getByTestId('home-settings-toggle');
-    opener.focus();
-    fireEvent.click(opener);
-    const panel = screen.getByRole('dialog', { name: 'Settings' });
-    const close = screen.getByRole('button', { name: 'Close' });
-    expect(close).toHaveFocus();
-    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
-    expect(panel.contains(document.activeElement)).toBe(true);
-    expect(document.activeElement).not.toBe(close);
-    fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
-    expect(close).toHaveFocus();
-    opener.focus();
-    expect(close).toHaveFocus();
-    fireEvent.keyDown(close, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
-    expect(opener).toHaveFocus();
-  });
-
   it('shows playlists by default and opens song practice when selecting a song from library', async () => {
     render(<Home />);
 

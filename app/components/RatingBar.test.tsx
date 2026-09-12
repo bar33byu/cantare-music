@@ -8,7 +8,6 @@ describe('RatingBar', () => {
   it('renders 5 rating buttons', () => {
     render(<RatingBar onRate={vi.fn()} />);
     expect(screen.getAllByRole('button')).toHaveLength(5);
-    expect(screen.getByTestId('rating-button-3')).toHaveAttribute('title', 'Rate 3 (key 3)');
   });
 
   it('clicking a button calls onRate with the correct value', async () => {
@@ -49,12 +48,12 @@ describe('RatingBar', () => {
     });
   });
 
-  it('keeps rating targets at least 44px on mobile and desktop', () => {
+  it('uses compact mobile sizing classes to preserve room on narrow screens', () => {
     render(<RatingBar onRate={vi.fn()} />);
     const button = screen.getByTestId('rating-button-3');
-    expect(button.className).toContain('h-11');
-    expect(button.className).toContain('w-11');
-    expect(button.className).toContain('sm:h-11');
-    expect(button.className).toContain('sm:w-11');
+    expect(button.className).toContain('h-9');
+    expect(button.className).toContain('w-9');
+    expect(button.className).toContain('sm:h-10');
+    expect(button.className).toContain('sm:w-10');
   });
 });

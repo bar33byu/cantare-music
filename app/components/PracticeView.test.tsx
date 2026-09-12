@@ -531,23 +531,6 @@ describe("PracticeView", () => {
     fireEvent.click(screen.getByTestId("practice-card-contour-toggle"));
 
     expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "true");
-
-    fireEvent.keyDown(window, { key: ";" });
-    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
-  });
-
-  it("keeps semicolon as a pitch key during Tap practice", async () => {
-    mockPracticeFetchWithMidiAnswerKey();
-    const song = { ...makeSong(1), pitchContourNotes: [] };
-    render(<PracticeView song={song} initialSession={makeSession(song)} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("practice-tap-mode-toggle")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
-    fireEvent.keyDown(window, { key: ";" });
-
-    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "false");
   });
 
   it("forwards the requested lyric size to the segment card", async () => {
@@ -2889,40 +2872,6 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByTestId("rate-1-btn"));
     expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("none");
-  });
-
-  it("leaves keyboard events to focused controls, composition, and dialogs", async () => {
-    await renderAndWaitForRatings(makeSong(3));
-    mockPlay.mockClear();
-    mockSeek.mockClear();
-    const control = screen.getByTestId("rate-1-btn");
-    fireEvent.keyDown(control, { key: " " });
-    fireEvent.keyDown(control, { key: "ArrowRight" });
-    fireEvent.keyDown(window, { key: " ", isComposing: true });
-    expect(mockPlay).not.toHaveBeenCalled();
-    expect(mockSeek).not.toHaveBeenCalled();
-    const dialog = document.createElement("div");
-    dialog.setAttribute("role", "dialog");
-    document.body.appendChild(dialog);
-    try {
-      fireEvent.keyDown(window, { key: " " });
-      fireEvent.keyDown(window, { key: "ArrowRight" });
-      expect(mockPlay).not.toHaveBeenCalled();
-      expect(mockSeek).not.toHaveBeenCalled();
-    } finally {
-      dialog.remove();
-    }
-  });
-
-  it("can disable practice shortcuts without disabling visible controls", async () => {
-    localStorage.setItem("cantare-keyboard-preferences", JSON.stringify({ enabled: false }));
-    await renderAndWaitForRatings(makeSong(3));
-    mockPlay.mockClear();
-    fireEvent.keyDown(window, { key: " " });
-    expect(mockPlay).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("rate-1-btn"));
-    expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("1");
-    localStorage.removeItem("cantare-keyboard-preferences");
   });
 
   it("supports keyboard transport and rating shortcuts", async () => {

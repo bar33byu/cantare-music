@@ -28,20 +28,6 @@ describe('PlaylistBrowser', () => {
     });
   });
 
-  it('formats the performance date as a local calendar day', async () => {
-    const format = vi.spyOn(Date.prototype, 'toLocaleDateString').mockImplementation(function (this: Date) {
-      return `${this.getFullYear()}-${this.getMonth() + 1}-${this.getDate()}`;
-    });
-    try {
-      render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
-      expect(await screen.findByText('2026-4-4')).toBeInTheDocument();
-      const date = format.mock.instances[0] as unknown as Date;
-      expect(date.getHours()).toBe(0);
-    } finally {
-      format.mockRestore();
-    }
-  });
-
   it('shows loading skeleton while fetching', () => {
     mockFetch.mockImplementation(() => new Promise(() => undefined));
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);

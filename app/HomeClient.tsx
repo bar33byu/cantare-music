@@ -2,7 +2,6 @@
 
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { KeyboardShortcuts } from "./components/KeyboardShortcuts";
 import PracticeView from "./components/PracticeView";
 import { PlaylistBrowser } from "./components/PlaylistBrowser";
 import { PlaylistDetail } from "./components/PlaylistDetail";
@@ -74,7 +73,8 @@ interface HashRouteState {
 interface UserSettings {
   segmentPrerollMs: number;
   preferredAudioVersion: PreferredAudioVersion;
-  currentUser: KnownUser;
+  currentUserId: string;
+  users: KnownUser[];
 }
 
 interface BuildInfo {
@@ -99,17 +99,11 @@ const LIBRARY_DRAFT_RECORDING_MIME_TYPES = [
 ] as const;
 
 const SETTINGS_STORAGE_KEY = "cantare:user-settings";
-const DEFAULT_USER: KnownUser = {
-  id: DEFAULT_USER_ID,
-  username: "default",
-  name: "Default User",
-  email: "",
-  profileVisibility: "private",
-};
 const DEFAULT_USER_SETTINGS: UserSettings = {
   segmentPrerollMs: 500,
   preferredAudioVersion: "part",
-  currentUser: DEFAULT_USER,
+  currentUserId: DEFAULT_USER_ID,
+  users: [{ id: DEFAULT_USER_ID, username: "default", name: "Default User", email: "", profileVisibility: "private" }],
 };
 
 function makeAnonymousKnownUser(id: string): KnownUser {
@@ -122,34 +116,37 @@ function makeAnonymousKnownUser(id: string): KnownUser {
   };
 }
 
-function normalizeKnownUser(user: Partial<KnownUser> | null | undefined): KnownUser | null {
-  if (!user || typeof user.id !== "string" || typeof user.name !== "string") {
-    return null;
+function normalizeKnownUsers(users: Array<Partial<KnownUser>> | undefined): KnownUser[] {
+  if (!Array.isArray(users)) {
+    return DEFAULT_USER_SETTINGS.users;
   }
 
-  const id = normalizeUserId(user.id);
-  const username = normalizeUsername(user.username) || createPublicUsernameFromName(user.name || id);
-  return {
-    id,
-    username,
-    name: user.name.trim() || username,
-    email: typeof user.email === "string" ? user.email.trim().toLowerCase() : "",
-    avatarUrl: user.avatarUrl ?? null,
-    profileVisibility: user.profileVisibility ?? "private",
-    accountDeletionRequestedAt: user.accountDeletionRequestedAt ?? null,
-    accountDeletionScheduledFor: user.accountDeletionScheduledFor ?? null,
-    isAdmin: user.isAdmin ?? false,
-  };
-}
-
-function normalizeKnownUsers(users: Array<Partial<KnownUser>> | undefined): KnownUser[] {
   const deduped = new Map<string, KnownUser>();
-  for (const user of users ?? []) {
-    const normalized = normalizeKnownUser(user);
-    if (normalized && !deduped.has(normalized.id)) {
-      deduped.set(normalized.id, normalized);
+  for (const user of users) {
+    if (!user || typeof user.id !== "string" || typeof user.name !== "string") {
+      continue;
+    }
+    const id = normalizeUserId(user.id);
+    const username = normalizeUsername(user.username) || createPublicUsernameFromName(user.name || id);
+    if (!deduped.has(id)) {
+      deduped.set(id, {
+        id,
+        username,
+        name: user.name.trim() || username,
+        email: typeof user.email === "string" ? user.email.trim().toLowerCase() : "",
+        avatarUrl: user.avatarUrl ?? null,
+        profileVisibility: user.profileVisibility ?? "private",
+        accountDeletionRequestedAt: user.accountDeletionRequestedAt ?? null,
+        accountDeletionScheduledFor: user.accountDeletionScheduledFor ?? null,
+        isAdmin: user.isAdmin ?? false,
+      });
     }
   }
+
+  if (!deduped.has(DEFAULT_USER_ID)) {
+    deduped.set(DEFAULT_USER_ID, DEFAULT_USER_SETTINGS.users[0]);
+  }
+
   return Array.from(deduped.values());
 }
 
@@ -176,24 +173,30 @@ function normalizePreferredAudioVersion(value: unknown): PreferredAudioVersion {
   return value === "blend" ? "blend" : "part";
 }
 
+function readCookieValue(name: string): string | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const prefix = `${name}=`;
+  const entry = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix));
+  return entry ? decodeURIComponent(entry.slice(prefix.length)) : null;
+}
+
 function parseStoredSettings(raw: string | null): UserSettings {
   if (!raw) {
     return DEFAULT_USER_SETTINGS;
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<UserSettings> & {
-      currentUserId?: string;
-      users?: Array<Partial<KnownUser>>;
-    };
-    const legacyCurrentUserId = normalizeUserId(parsed.currentUserId);
-    const currentUser = normalizeKnownUser(parsed.currentUser)
-      ?? normalizeKnownUser(parsed.users?.find((user) => normalizeUserId(user.id) === legacyCurrentUserId))
-      ?? DEFAULT_USER;
+    const parsed = JSON.parse(raw) as Partial<UserSettings>;
+    const users = normalizeKnownUsers(parsed.users);
+    const currentUserId = normalizeUserId(parsed.currentUserId ?? DEFAULT_USER_SETTINGS.currentUserId);
     return {
       segmentPrerollMs: clampSegmentPrerollMs(parsed.segmentPrerollMs ?? DEFAULT_USER_SETTINGS.segmentPrerollMs),
       preferredAudioVersion: normalizePreferredAudioVersion(parsed.preferredAudioVersion),
-      currentUser,
+      currentUserId: users.some((user) => user.id === currentUserId) ? currentUserId : DEFAULT_USER_ID,
+      users,
     };
   } catch {
     return DEFAULT_USER_SETTINGS;
@@ -202,14 +205,19 @@ function parseStoredSettings(raw: string | null): UserSettings {
 
 function getGuestUserSettings(storedSettings: UserSettings, storage: Storage): UserSettings {
   const guestUserId = getOrCreateAnonymousUserId(storage);
+  const users = storedSettings.users.some((user) => user.id === guestUserId)
+    ? storedSettings.users
+    : [...storedSettings.users, makeAnonymousKnownUser(guestUserId)];
+
   return {
     ...storedSettings,
-    currentUser: makeAnonymousKnownUser(guestUserId),
+    currentUserId: guestUserId,
+    users,
   };
 }
 
 function getLocallyTrustedUserSettings(storedSettings: UserSettings, storage: Storage): UserSettings {
-  const currentUser = storedSettings.currentUser;
+  const currentUser = storedSettings.users.find((user) => user.id === storedSettings.currentUserId);
   const hasPreviouslyAuthenticatedUser = Boolean(
     currentUser &&
     currentUser.id !== DEFAULT_USER_ID &&
@@ -218,6 +226,28 @@ function getLocallyTrustedUserSettings(storedSettings: UserSettings, storage: St
   );
 
   return hasPreviouslyAuthenticatedUser ? storedSettings : getGuestUserSettings(storedSettings, storage);
+}
+
+function mergeUsersWithDatabase(cachedUsers: KnownUser[], dbUsers: KnownUser[]): KnownUser[] {
+  const merged = new Map<string, KnownUser>();
+
+  for (const user of cachedUsers) {
+    const id = normalizeUserId(user.id);
+    const username = normalizeUsername(user.username) || createPublicUsernameFromName(user.name || id);
+    merged.set(id, { ...user, id, username, name: user.name.trim() || username });
+  }
+
+  for (const user of dbUsers) {
+    const id = normalizeUserId(user.id);
+    const username = normalizeUsername(user.username) || createPublicUsernameFromName(user.name || id);
+    merged.set(id, { ...user, id, username, name: user.name.trim() || username });
+  }
+
+  if (!merged.has(DEFAULT_USER_ID)) {
+    merged.set(DEFAULT_USER_ID, DEFAULT_USER_SETTINGS.users[0]);
+  }
+
+  return Array.from(merged.values());
 }
 
 function parseHashRoute(hash: string): HashRouteState {
@@ -802,60 +832,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [playlistPracticeReadOnly, setPlaylistPracticeReadOnly] = useState(false);
   const [songEditorReturnView, setSongEditorReturnView] = useState<SongEditorReturnView>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsPanelRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    if (!settingsOpen || !settingsPanelRef.current) return;
-    const panel = settingsPanelRef.current;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const focusable = () => Array.from(panel.querySelectorAll<HTMLElement>(
-      'button, a[href], input, select, textarea, summary, [tabindex]'
-    )).filter((element) => {
-      if (element.tabIndex < 0 || element.matches(':disabled') || element.closest('[hidden], [inert]')) return false;
-      if (getComputedStyle(element).display === "none" || getComputedStyle(element).visibility === "hidden") return false;
-      // Exclude controls inside collapsed settings sections.
-      let ancestor = element.parentElement;
-      while (ancestor && ancestor !== panel) {
-        if (ancestor instanceof HTMLDetailsElement && !ancestor.open &&
-          !ancestor.querySelector(':scope > summary')?.contains(element)) return false;
-        ancestor = ancestor.parentElement;
-      }
-      return true;
-    });
-    (focusable()[0] ?? panel).focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.defaultPrevented) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        setSettingsOpen(false);
-      } else if (event.key === "Tab") {
-        const items = focusable();
-        const first = items[0] ?? panel;
-        const last = items[items.length - 1] ?? panel;
-        if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel)) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    const onFocusIn = (event: FocusEvent) => {
-      if (event.target instanceof Node && !panel.contains(event.target)) (focusable()[0] ?? panel).focus();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("focusin", onFocusIn);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("focusin", onFocusIn);
-      document.body.style.overflow = previousOverflow;
-      if (opener?.isConnected) opener.focus();
-    };
-  }, [settingsOpen]);
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [signOutLoading, setSignOutLoading] = useState(false);
   const [profileDisplayName, setProfileDisplayName] = useState("");
@@ -880,25 +856,27 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   const [pendingOfflineChanges, setPendingOfflineChanges] = useState(0);
   const [hashRoutingReady, setHashRoutingReady] = useState(false);
   const settingsLoadedRef = useRef(false);
+  const usersHydratedFromDbRef = useRef(false);
   const isApplyingHashRouteRef = useRef(false);
   const initialHashRouteAppliedRef = useRef(false);
   const userInteractionRevisionRef = useRef(0);
   const hashRouteRevisionRef = useRef(0);
-  const currentUser = userSettings.currentUser;
-  const activeUserId = currentUser.id;
+  const activeUserId = userSettings.currentUserId;
+  const currentUser = useMemo(
+    () => userSettings.users.find((user) => user.id === userSettings.currentUserId) ?? DEFAULT_USER_SETTINGS.users[0],
+    [userSettings.currentUserId, userSettings.users]
+  );
   const isSignedIn = Boolean((currentUser.email ?? "").trim() || (sessionActor?.email ?? "").trim());
   const appTitle = isSignedIn ? "Cantare Music" : "Cantare Music (Guest)";
   const adminActor = sessionActor?.isAdmin ? sessionActor : currentUser.isAdmin ? currentUser : null;
 
   const applyAuthenticatedUser = useCallback((user: KnownUser) => {
-    const currentUser = normalizeKnownUser(user);
-    if (!currentUser) {
-      return;
-    }
     setUserSettings((previous) => {
+      const users = mergeUsersWithDatabase(previous.users, normalizeKnownUsers([user]));
       return {
         ...previous,
-        currentUser,
+        currentUserId: normalizeUserId(user.id),
+        users,
       };
     });
   }, []);
@@ -915,14 +893,12 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     if (effectiveUser) {
-      const currentUser = normalizeKnownUser(effectiveUser);
-      if (!currentUser) {
-        return;
-      }
       setUserSettings((previous) => {
+        const users = mergeUsersWithDatabase(previous.users, normalizeKnownUsers([actor, effectiveUser].filter(Boolean) as KnownUser[]));
         return {
           ...previous,
-          currentUser,
+          currentUserId: normalizeUserId(effectiveUser.id),
+          users,
         };
       });
     }
@@ -989,6 +965,21 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     const params = new URLSearchParams(window.location.search);
     const shouldCleanAuthParam = params.get("auth") === "signed-in";
     const shouldPromptForUsername = shouldCleanAuthParam && params.get("setup") === "username";
+    const cookieUserId = normalizeUserId(readCookieValue(USER_COOKIE_NAME));
+    const storedSettings = getLocallyTrustedUserSettings(
+      parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY)),
+      window.localStorage
+    );
+    const locallyTrustedUser = storedSettings.users.find((user) => user.id === storedSettings.currentUserId);
+    const hasLocallyTrustedSession = Boolean(locallyTrustedUser?.email?.trim());
+    if (
+      (cookieUserId === DEFAULT_USER_ID || isAnonymousUserId(cookieUserId)) &&
+      !shouldCleanAuthParam &&
+      !hasLocallyTrustedSession
+    ) {
+      return;
+    }
+
     let cancelled = false;
     void (async () => {
       try {
@@ -1029,7 +1020,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
 
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(userSettings));
-    const cookieValue = encodeURIComponent(userSettings.currentUser.id);
+    const cookieValue = encodeURIComponent(userSettings.currentUserId);
     document.cookie = `${USER_COOKIE_NAME}=${cookieValue}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
   }, [userSettings]);
 
@@ -1090,6 +1081,56 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     setGuestClaimVisible(hasGuestProgress() && !hasDeclinedGuestProgressClaim(currentUser.id));
     setGuestClaimMessage("");
   }, [currentUser.id, isSignedIn]);
+
+  useEffect(() => {
+    if (!settingsOpen || usersHydratedFromDbRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const hydrateUsersFromDatabase = async () => {
+      try {
+        const response = await fetch('/api/users');
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as { users?: KnownUser[] };
+        if (!Array.isArray(payload.users) || payload.users.length === 0) {
+          return;
+        }
+
+        const dbUsers = normalizeKnownUsers(payload.users);
+        if (cancelled) {
+          return;
+        }
+
+        setUserSettings((previous) => {
+          const users = mergeUsersWithDatabase(previous.users, dbUsers);
+          const currentUserId = users.some((user) => user.id === previous.currentUserId)
+            ? previous.currentUserId
+            : DEFAULT_USER_ID;
+
+          return {
+            ...previous,
+            users,
+            currentUserId,
+          };
+        });
+      } catch {
+        // Keep local cache fallback when DB users endpoint is unavailable.
+      } finally {
+        usersHydratedFromDbRef.current = true;
+      }
+    };
+
+    void hydrateUsersFromDatabase();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsOpen]);
 
   useEffect(() => {
     if (!settingsOpen || !adminActor?.isAdmin) {
@@ -1166,6 +1207,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       }
       setProfileSetupPrompt(false);
       setProfileMessage("Profile saved.");
+      usersHydratedFromDbRef.current = false;
     } catch (error) {
       setProfileMessage(error instanceof Error ? error.message : "Could not save profile.");
     } finally {
@@ -1203,6 +1245,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       }
       setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
       setAccountDeletionMessage("Account scheduled for deletion.");
+      usersHydratedFromDbRef.current = false;
     } catch (error) {
       setAccountDeletionMessage(error instanceof Error ? error.message : "Could not schedule account deletion.");
     } finally {
@@ -1230,6 +1273,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       }
       setAccountDeletion(payload.deletion ?? { requestedAt: null, scheduledFor: null });
       setAccountDeletionMessage("Scheduled account deletion canceled.");
+      usersHydratedFromDbRef.current = false;
     } catch (error) {
       setAccountDeletionMessage(error instanceof Error ? error.message : "Could not cancel account deletion.");
     } finally {
@@ -1247,7 +1291,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       const guestUserId = typeof window === "undefined" ? DEFAULT_USER_ID : getOrCreateAnonymousUserId(window.localStorage);
       setUserSettings((previous) => ({
         ...previous,
-        currentUser: makeAnonymousKnownUser(guestUserId),
+        currentUserId: guestUserId,
+        users: previous.users.some((user) => user.id === guestUserId)
+          ? previous.users
+          : [...previous.users, makeAnonymousKnownUser(guestUserId)],
       }));
       setSessionActor(null);
       setImpersonation(null);
@@ -1765,7 +1812,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     };
 
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gray-50 p-4">
         {impersonationBanner}
         {guestClaimPrompt}
         <div className="max-w-4xl mx-auto">
@@ -2010,15 +2057,10 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             <button
               type="button"
               aria-label="Close settings"
-              tabIndex={-1}
               onClick={() => setSettingsOpen(false)}
               className="absolute inset-0 bg-black/20"
             />
             <section
-              ref={settingsPanelRef}
-              role="dialog"
-              aria-modal="true"
-              tabIndex={-1}
               aria-label="Settings"
               className="absolute inset-x-4 bottom-4 top-16 flex w-auto flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-xl sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-20 sm:max-h-[calc(100dvh-6rem)] sm:w-[min(92vw,24rem)]"
               data-testid="settings-panel"
@@ -2047,7 +2089,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
                     Song mastery, stale repertoire, and exercise practice-time trends.
                   </p>
                 </SettingsSection>
-                <KeyboardShortcuts />
                 <SettingsSection title="Playback" tone="muted" testId="settings-section-playback">
                   <div>
                     <p className="text-sm text-gray-700">Default audio</p>
@@ -2301,7 +2342,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         <div className="mb-6 flex gap-0 overflow-x-auto border-b border-gray-300" aria-label="Main sections">
           <button
             data-testid="playlists-tab"
-            aria-pressed={activeView === "playlists"}
             onClick={() => {
               setSelectedSong(null);
               setActiveView("playlists");
@@ -2316,14 +2356,13 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           </button>
           <button
             data-testid="library-tab"
-            aria-pressed={activeView === "library"}
             onClick={() => {
               setSelectedPlaylist(null);
               setActiveView("library");
             }}
             className={`shrink-0 px-4 py-3 font-medium transition-colors ${
               activeView === "library"
-                ? "border-b-2 border-indigo-600 text-indigo-600"
+                ? "border-b-2 border-blue-600 text-blue-600"
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
@@ -2331,7 +2370,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           </button>
           <button
             data-testid="shared-tab"
-            aria-pressed={activeView === "shared"}
             onClick={() => {
               setSelectedSong(null);
               setSelectedPlaylist(null);
@@ -2339,7 +2377,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             }}
             className={`shrink-0 px-4 py-3 font-medium transition-colors ${
               activeView === "shared"
-                ? "border-b-2 border-indigo-600 text-indigo-600"
+                ? "border-b-2 border-emerald-600 text-emerald-700"
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
@@ -2348,7 +2386,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           {isSignedIn ? (
             <button
               data-testid="exercise-tab"
-              aria-pressed={activeView === "exercise"}
               onClick={() => {
                 setSelectedSong(null);
                 setSelectedPlaylist(null);
@@ -2356,7 +2393,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               }}
               className={`shrink-0 px-4 py-3 font-medium transition-colors ${
                 activeView === "exercise"
-                  ? "border-b-2 border-indigo-600 text-indigo-600"
+                  ? "border-b-2 border-violet-600 text-violet-700"
                   : "text-gray-600 hover:text-gray-900"
               }`}
             >

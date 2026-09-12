@@ -267,16 +267,15 @@ export function AudioPlayer({
           <p className="mt-0.5 break-words text-xs text-rose-700">{playbackError}</p>
         </div>
       ) : null}
-      <div className="flex flex-wrap items-center justify-center gap-2">
+      <div className="flex items-center justify-center gap-2">
         {!reducedControls ? (
           <button
             type="button"
             aria-label="Skip backward 5 seconds"
-            title="Skip back 5 seconds (Left arrow or J)"
             onClick={onSkipBack}
             data-testid="audio-skip-back"
             disabled={!isReady}
-            className="flex h-11 w-12 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+            className="flex h-9 w-12 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
           >
             <span className="inline-flex items-center justify-center">
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
@@ -292,9 +291,8 @@ export function AudioPlayer({
           type="button"
           onClick={handlePlayPauseClick}
           aria-label={isPlaying ? "Pause" : "Play"}
-          title={`${isPlaying ? "Pause" : "Play"} (Space or K)`}
           data-testid="audio-play-pause"
-          className="flex h-11 w-[72px] items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+          className="flex h-9 w-[72px] items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {isPlaying ? (
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
@@ -311,11 +309,10 @@ export function AudioPlayer({
           <button
             type="button"
             aria-label="Skip forward 5 seconds"
-            title="Skip forward 5 seconds (Right arrow or L)"
             onClick={onSkipForward}
             data-testid="audio-skip-forward"
             disabled={!isReady}
-            className="flex h-11 w-12 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+            className="flex h-9 w-12 items-center justify-center rounded-xl border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
           >
             <span className="inline-flex items-center justify-center">
               <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
@@ -334,7 +331,7 @@ export function AudioPlayer({
             onClick={onToggleLoop}
             data-testid="audio-loop-toggle"
             title={isLooping ? "Loop: on (R to toggle)" : "Loop: off (R to toggle)"}
-            className={`flex h-11 w-[84px] items-center justify-center rounded-xl border text-sm transition ${
+            className={`flex h-9 w-[84px] items-center justify-center rounded-xl border text-sm transition ${
               isLooping
                 ? "border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-700"
                 : "border-indigo-300 text-indigo-700 hover:bg-indigo-50"
@@ -355,7 +352,7 @@ export function AudioPlayer({
               data-testid="audio-lyric-visibility-toggle"
               aria-label="Toggle lyric visibility"
               onClick={onToggleLyricMode}
-              className="h-11 rounded-xl border border-slate-300 bg-slate-50 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              className="h-9 rounded-xl border border-slate-300 bg-slate-50 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
             >
               Lyrics: {lyricModeLabel ?? "Full"}
             </button>
@@ -367,7 +364,7 @@ export function AudioPlayer({
       <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
         <div
           data-testid="audio-unified-timeline"
-          className="relative mb-2 h-6 cursor-pointer rounded-full focus-within:outline-2 focus-within:outline-offset-4 focus-within:outline-indigo-600"
+          className="relative mb-2 h-6 cursor-pointer"
           onClick={handleUnifiedTimelineSeek}
         >
           <div
@@ -452,8 +449,6 @@ export function AudioPlayer({
             max={safeDurationMs}
             value={clampedCurrentMs}
             onChange={(event) => onSeekSong(Number(event.target.value))}
-            aria-label="Playback position"
-            aria-valuetext={`${formatMs(clampedCurrentMs)} of ${formatMs(safeDurationMs)}`}
             data-testid="audio-slider"
             disabled={!isReady}
             className="sr-only"

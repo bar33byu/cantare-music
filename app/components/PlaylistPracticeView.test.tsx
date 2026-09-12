@@ -173,7 +173,7 @@ describe('PlaylistPracticeView', () => {
     render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={onSelectSong} />);
 
     await waitFor(() => expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId('playlist-practice-song-song-1').querySelector('button')!);
+    fireEvent.click(screen.getByTestId('playlist-practice-song-song-1'));
     expect(onSelectSong).toHaveBeenCalledWith(expect.objectContaining({ id: 'song-1', title: 'Alpha' }));
   });
 

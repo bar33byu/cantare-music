@@ -1,6 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import userEvent from '@testing-library/user-event';
 import { SongBrowser } from './SongBrowser';
 
 // Mock fetch
@@ -49,20 +48,6 @@ describe('SongBrowser', () => {
     vi.clearAllMocks();
     (window as any).confirm = vi.fn(() => true);
     localStorage.clear();
-  });
-
-  it('opens a song with the keyboard without triggering library deletion', async () => {
-    const user = userEvent.setup();
-    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve(mockSongs) });
-    render(<SongBrowser onSelectSong={mockOnSelectSong} />);
-    const open = await screen.findByRole('button', { name: 'Open Test Song 1' });
-    open.focus();
-    await user.keyboard('{Enter}');
-    expect(mockOnSelectSong).toHaveBeenCalledWith(mockSongs[0]);
-    mockOnSelectSong.mockClear();
-    await user.keyboard(' ');
-    expect(mockOnSelectSong).toHaveBeenCalledTimes(1);
-    expect(window.confirm).not.toHaveBeenCalled();
   });
 
   it('shows loading state initially', () => {
@@ -361,7 +346,7 @@ describe('SongBrowser', () => {
     expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
   });
 
-  it('keeps search visible and preserves the query when asset filters close', async () => {
+  it('clears filter when filter toggle is clicked a second time', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(mockSongs),
@@ -379,10 +364,8 @@ describe('SongBrowser', () => {
     expect(screen.queryByTestId('song-item-song-2')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('song-browser-filter-toggle'));
-    expect(screen.getByTestId('song-browser-filter-input')).toHaveValue('Song 1');
+    expect(screen.queryByTestId('song-browser-filter-input')).not.toBeInTheDocument();
     expect(screen.getByTestId('song-item-song-1')).toBeInTheDocument();
-    expect(screen.queryByTestId('song-item-song-2')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByTestId('song-browser-filter-input'), { target: { value: '' } });
     expect(screen.getByTestId('song-item-song-2')).toBeInTheDocument();
   });
 

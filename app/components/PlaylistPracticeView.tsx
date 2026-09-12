@@ -1,6 +1,5 @@
 "use client";
 
-import { useKeyboardPreferences } from "../hooks/useKeyboardPreferences";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { Playlist } from '../types';
@@ -256,7 +255,6 @@ export function PlaylistPracticeView({
   const autoDrillTransitionRef = useRef<'full' | 'quick' | 'previous' | 'again' | 'continuous'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
   const autoDrillAudioFallbackItemRef = useRef<string | null>(null);
-  const { enabled: keyboardShortcutsEnabled } = useKeyboardPreferences();
   const [modeExplainer, setModeExplainer] = useState<ExplainedMode | null>(null);
 
   const userScopedHeaders = useMemo(() => {
@@ -1072,7 +1070,7 @@ export function PlaylistPracticeView({
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (keyboardShortcutsEnabled && event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && !document.querySelector('[role="dialog"], dialog[open]')) {
+      if (event.key === 'Escape') {
         event.preventDefault();
         stopAutoDrill();
       }
@@ -1080,7 +1078,7 @@ export function PlaylistPracticeView({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [keyboardShortcutsEnabled, practiceMode, stopAutoDrill]);
+  }, [practiceMode, stopAutoDrill]);
 
   useEffect(() => {
     if (practiceMode !== 'auto-drill') {
@@ -1388,13 +1386,6 @@ export function PlaylistPracticeView({
         </div>
       </header>
 
-      <p className="text-sm text-slate-600" data-testid="playlist-mode-description">
-        {mode === 'practice' ? 'Choose a song to practice its sections at your own pace.'
-          : mode === 'focus' ? 'Practice sections across this playlist, starting with the weakest by default.'
-          : mode === 'auto' ? 'Hands Free repeats sections and advances through the playlist with minimal tapping.'
-          : 'Listen plays songs continuously through the playlist.'}
-      </p>
-
       {modeExplainer ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4" role="dialog" aria-modal="true" aria-labelledby="playlist-mode-explainer-title">
           <div className="w-full max-w-md rounded-xl border border-indigo-100 bg-white p-5 shadow-xl">
@@ -1458,14 +1449,9 @@ export function PlaylistPracticeView({
                 <div
                   key={song.id}
                   data-testid={`playlist-practice-song-${song.id}`}
-                  className="library-card"
+                  className="relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent"
+                  onClick={() => onSelectSong(song)}
                 >
-                  <button
-                    type="button"
-                    className="library-card-action"
-                    aria-label={`Open ${song.title}`}
-                    onClick={() => onSelectSong(song)}
-                  />
                   <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">
                     <div
                       className="relative h-full rounded-tl-lg"
@@ -1494,9 +1480,8 @@ export function PlaylistPracticeView({
 
                   <h3 className="text-xl font-semibold text-gray-900 mb-2">{song.title}</h3>
                   {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
-                  <div className="mt-3">
+                  <div className="absolute bottom-3 right-3">
                     <SongReadinessIcons
-                      showLabels
                       hasPartAudio={hasPartAudio}
                       hasBlendAudio={hasBlendAudio}
                       hasSegments={hasSegments}
@@ -1599,7 +1584,6 @@ export function PlaylistPracticeView({
               {focusPracticeSession ? (
                 <div className="min-h-0 rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="focus-practice-surface">
                   <PracticeView
-                    embedded
                     key={`${currentFocusItem.song.id}:${currentFocusItem.segment.id}`}
                     song={currentFocusItem.song}
                     userId={userId}
@@ -1730,7 +1714,6 @@ export function PlaylistPracticeView({
               {autoDrillPracticeSession ? (
                 <div className="min-h-0" data-testid="auto-drill-practice-surface">
                   <PracticeView
-                    embedded
                     song={currentAutoDrillItem.song}
                     userId={userId}
                     persistProgress={persistProgress}

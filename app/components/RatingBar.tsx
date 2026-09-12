@@ -27,20 +27,18 @@ const RatingBar: React.FC<RatingBarProps> = ({
 
         return (
         <button
-          type="button"
           key={rating}
           data-testid={`rating-button-${rating}`}
           onClick={() => onRate(rating)}
           disabled={disabled}
           aria-label={`Rate ${rating}`}
-          title={`Rate ${rating} (key ${rating})`}
           aria-pressed={isExactSelection ? "true" : "false"}
           style={isFilled ? {
             backgroundColor: getMasteryColor(masteryPercent),
             color: getMasteryTextColor(masteryPercent),
           } : undefined}
           className={[
-            "h-11 w-11 rounded-full text-[13px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 sm:h-11 sm:w-11 sm:text-sm",
+            "h-9 w-9 rounded-full text-[13px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 sm:h-10 sm:w-10 sm:text-sm",
             isFilled ? "" : EMPTY_RATING_STYLE,
             isExactSelection ? "shadow-sm ring-2 ring-indigo-300 ring-offset-2" : "",
             disabled ? "opacity-40 cursor-not-allowed" : "",
