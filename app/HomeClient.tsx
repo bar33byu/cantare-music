@@ -99,12 +99,37 @@ const LIBRARY_DRAFT_RECORDING_MIME_TYPES = [
 ] as const;
 
 const SETTINGS_STORAGE_KEY = "cantare:user-settings";
+const API_CACHE_PREFIX = "cantare-api-";
 const DEFAULT_USER_SETTINGS: UserSettings = {
   segmentPrerollMs: 500,
   preferredAudioVersion: "part",
   currentUserId: DEFAULT_USER_ID,
   users: [{ id: DEFAULT_USER_ID, username: "default", name: "Default User", email: "", profileVisibility: "private" }],
 };
+
+async function readCachedApiJson<T>(path: string, userId: string): Promise<T | null> {
+  if (typeof window === "undefined" || !window.caches) {
+    return null;
+  }
+
+  try {
+    const cacheNames = (await window.caches.keys()).filter((name) => name.startsWith(API_CACHE_PREFIX));
+    const cacheKeyUrl = new URL(path, window.location.origin);
+    cacheKeyUrl.searchParams.set("__cantare_user", userId || "cookie-user");
+    const cacheKey = new Request(cacheKeyUrl.toString(), { method: "GET" });
+
+    for (const cacheName of cacheNames.reverse()) {
+      const response = await (await window.caches.open(cacheName)).match(cacheKey);
+      if (response?.ok) {
+        return (await response.json()) as T;
+      }
+    }
+  } catch {
+    // Cache Storage is an enhancement; the network request remains the fallback.
+  }
+
+  return null;
+}
 
 function makeAnonymousKnownUser(id: string): KnownUser {
   return {
@@ -1390,20 +1415,39 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
   });
   const selectedAdminUserIsVisible = filteredAdminUsers.some((user) => user.id === adminSelectedUserId);
 
+  const chooseStartupView = (view: "playlists" | "library" | "shared" | "exercise") => {
+    userInteractionRevisionRef.current += 1;
+    initialHashRouteAppliedRef.current = true;
+    isApplyingHashRouteRef.current = false;
+    setSelectedSong(null);
+    setSelectedPlaylist(null);
+    setActiveView(view);
+    window.history.replaceState(null, "", buildHashRoute({ view }));
+    setHashRoutingReady(true);
+  };
+
   const loadSongById = useCallback(async (songId: string): Promise<Song | null> => {
-    const response = await request(`/api/songs/${songId}`);
-    if (!response.ok) {
+    try {
+      const response = await request(`/api/songs/${songId}`);
+      if (!response.ok) {
+        return null;
+      }
+      return (await response.json()) as Song;
+    } catch {
       return null;
     }
-    return (await response.json()) as Song;
   }, [request]);
 
   const loadPlaylistById = useCallback(async (playlistId: string): Promise<Playlist | null> => {
-    const response = await request(`/api/playlists/${playlistId}`);
-    if (!response.ok) {
+    try {
+      const response = await request(`/api/playlists/${playlistId}`);
+      if (!response.ok) {
+        return null;
+      }
+      return (await response.json()) as Playlist;
+    } catch {
       return null;
     }
-    return (await response.json()) as Playlist;
   }, [request]);
 
   const applyHashRoute = useCallback(async (hash: string) => {
@@ -1449,7 +1493,12 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           setActiveView("playlists");
           return;
         }
-        const playlist = await loadPlaylistById(route.playlistId);
+        const cachedPlaylist = await readCachedApiJson<Playlist>(
+          `/api/playlists/${encodeURIComponent(route.playlistId)}`,
+          activeUserId
+        );
+        const hasCachedPlaylist = cachedPlaylist?.id === route.playlistId;
+        const playlist = hasCachedPlaylist ? cachedPlaylist : await loadPlaylistById(route.playlistId);
         if (!isCurrentRoute()) return;
         if (!playlist) {
           setActiveView("playlists");
@@ -1457,6 +1506,13 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         }
         setSelectedPlaylist(playlist);
         setActiveView(route.view);
+        if (hasCachedPlaylist) {
+          void loadPlaylistById(route.playlistId).then((freshPlaylist) => {
+            if (freshPlaylist?.id === route.playlistId && isCurrentRoute() && window.location.hash === hash) {
+              setSelectedPlaylist(freshPlaylist);
+            }
+          });
+        }
         return;
       }
 
@@ -1465,31 +1521,53 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           setActiveView("library");
           return;
         }
-        const song = await loadSongById(route.songId);
+        const cacheReads = [
+          readCachedApiJson<Song>(`/api/songs/${encodeURIComponent(route.songId)}`, activeUserId),
+          route.playlistId
+            ? readCachedApiJson<Playlist>(`/api/playlists/${encodeURIComponent(route.playlistId)}`, activeUserId)
+            : Promise.resolve(null),
+        ] as const;
+        const [cachedSong, cachedPlaylist] = await Promise.all(cacheReads);
+        const hasCachedSong = cachedSong?.id === route.songId;
+        const hasCachedPlaylist = Boolean(route.playlistId && cachedPlaylist?.id === route.playlistId);
+        const [song, playlist] = await Promise.all([
+          hasCachedSong ? Promise.resolve(cachedSong) : loadSongById(route.songId),
+          route.playlistId
+            ? hasCachedPlaylist ? Promise.resolve(cachedPlaylist) : loadPlaylistById(route.playlistId)
+            : Promise.resolve(null),
+        ]);
         if (!isCurrentRoute()) return;
         if (!song) {
           setActiveView("library");
           return;
         }
         setSelectedSong(song);
-        if (route.playlistId) {
-          const playlist = await loadPlaylistById(route.playlistId);
-          if (!isCurrentRoute()) return;
-          if (playlist) {
-            setSelectedPlaylist(playlist);
-          }
-        }
+        setSelectedPlaylist(playlist?.id === route.playlistId ? playlist : null);
         if (route.view === "song_segment_editor" && route.returnView) {
           setSongEditorReturnView(route.returnView);
         }
         setActiveView(route.view);
+        if (hasCachedSong) {
+          void loadSongById(route.songId).then((freshSong) => {
+            if (freshSong?.id === route.songId && isCurrentRoute() && window.location.hash === hash) {
+              setSelectedSong(freshSong);
+            }
+          });
+        }
+        if (hasCachedPlaylist && route.playlistId) {
+          void loadPlaylistById(route.playlistId).then((freshPlaylist) => {
+            if (freshPlaylist?.id === route.playlistId && isCurrentRoute() && window.location.hash === hash) {
+              setSelectedPlaylist(freshPlaylist);
+            }
+          });
+        }
       }
     } finally {
       if (hashRouteRevisionRef.current === routeRevision) {
         isApplyingHashRouteRef.current = false;
       }
     }
-  }, [loadPlaylistById, loadSongById]);
+  }, [activeUserId, loadPlaylistById, loadSongById]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1738,6 +1816,35 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
       </div>
     </div>
   ) : null;
+
+  if (!hashRoutingReady) {
+    return (
+      <main className="min-h-screen bg-gray-50 p-4" data-testid="app-route-loading" aria-busy="true">
+        <div className="mx-auto max-w-4xl">
+          <UnifiedHeader title={appTitle} />
+          <nav className="mb-6 flex gap-0 overflow-x-auto border-b border-gray-300" aria-label="Main sections">
+            <button type="button" data-testid="playlists-tab" onClick={() => chooseStartupView("playlists")} className="shrink-0 px-4 py-3 font-medium text-gray-600 hover:text-gray-900">
+              Playlists
+            </button>
+            <button type="button" data-testid="library-tab" onClick={() => chooseStartupView("library")} className="shrink-0 px-4 py-3 font-medium text-gray-600 hover:text-gray-900">
+              Library
+            </button>
+            <button type="button" data-testid="shared-tab" onClick={() => chooseStartupView("shared")} className="shrink-0 px-4 py-3 font-medium text-gray-600 hover:text-gray-900">
+              Shared
+            </button>
+            {isSignedIn ? (
+              <button type="button" data-testid="exercise-tab" onClick={() => chooseStartupView("exercise")} className="shrink-0 px-4 py-3 font-medium text-gray-600 hover:text-gray-900">
+                Exercise
+              </button>
+            ) : null}
+          </nav>
+          <p role="status" className="rounded-lg border border-gray-200 bg-white px-4 py-5 text-sm text-gray-600">
+            Restoring your last screen…
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   if (activeView === "song_practice" && selectedSong) {
     const session = makeSession({ songId: selectedSong.id });

@@ -36,7 +36,7 @@ function sortPlaylists(list: PlaylistListItem[], sortMode: PlaylistSortMode) {
     const aDate = a.eventDate ?? '';
     const bDate = b.eventDate ?? '';
     if (aDate || bDate) {
-      return (bDate ? 1 : 0) - (aDate ? 1 : 0) || bDate.localeCompare(aDate) || a.name.localeCompare(b.name);
+      return (bDate ? 1 : 0) - (aDate ? 1 : 0) || aDate.localeCompare(bDate) || a.name.localeCompare(b.name);
     }
     return b.createdAt.localeCompare(a.createdAt) || a.name.localeCompare(b.name);
   });

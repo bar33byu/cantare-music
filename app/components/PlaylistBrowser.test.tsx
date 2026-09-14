@@ -55,7 +55,7 @@ describe('PlaylistBrowser', () => {
     });
   });
 
-  it('sorts playlists by performance date by default', async () => {
+  it('sorts playlists by performance date from soonest to latest by default', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -70,11 +70,11 @@ describe('PlaylistBrowser', () => {
     render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
     await waitFor(() => expect(screen.getByTestId('playlist-row-pl-may')).toBeInTheDocument());
 
-    const mayRow = screen.getByTestId('playlist-row-pl-may');
     const aprilRow = screen.getByTestId('playlist-row-pl-apr');
+    const mayRow = screen.getByTestId('playlist-row-pl-may');
     const undatedRow = screen.getByTestId('playlist-row-pl-undated');
-    expect(mayRow.compareDocumentPosition(aprilRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(aprilRow.compareDocumentPosition(undatedRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(aprilRow.compareDocumentPosition(mayRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(mayRow.compareDocumentPosition(undatedRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByTestId('playlist-sort-mode')).toHaveValue('performanceDate');
   });
 
