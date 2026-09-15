@@ -38,11 +38,6 @@ function resolveHeaderOrCookieUserId(request: NextRequest | Request): string {
   return DEFAULT_USER_ID;
 }
 
-export function resolveRequestUserId(request: NextRequest | Request): string {
-  void logImpersonatedMutation(request);
-  return resolveHeaderOrCookieUserId(request);
-}
-
 function resolveGuestHeaderOrCookieUserId(request: NextRequest | Request): string {
   const candidate = resolveHeaderOrCookieUserId(request);
   return candidate === DEFAULT_USER_ID || isAnonymousUserId(candidate) ? candidate : DEFAULT_USER_ID;

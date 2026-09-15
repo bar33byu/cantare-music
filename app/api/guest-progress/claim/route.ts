@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { formatError } from "../../_errors";
 import { claimGuestProgressForUser } from "../../../../db/queries";
 import { resolveRequestUser } from "../../_user";
 
 const claimHeaders = {
   "Cache-Control": "private, no-store",
 };
-
-function formatError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unknown server error";
-  const shouldExpose =
-    process.env.NODE_ENV === "development" ||
-    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === "true";
-
-  return shouldExpose ? { error: message } : { error: "Internal server error" };
-}
 
 export async function POST(request: NextRequest) {
   try {

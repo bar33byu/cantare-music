@@ -1,34 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  getDefaultNewSegmentPlacement,
   getPlaybackAnchoredNewSegmentPlacement,
   inferTimelineOrder,
 } from './segmentTiming';
-
-describe('getDefaultNewSegmentPlacement', () => {
-  it('uses playback position when there are no visible segments', () => {
-    const placement = getDefaultNewSegmentPlacement([], 12000);
-    expect(placement).toEqual({ startMs: 12000, endMs: 32000 });
-  });
-
-  it('falls back to zero playback when there are no segments and playback is undefined', () => {
-    const placement = getDefaultNewSegmentPlacement([], undefined);
-    expect(placement).toEqual({ startMs: 0, endMs: 20000 });
-  });
-
-  it('starts 500ms after the last visible segment end', () => {
-    const placement = getDefaultNewSegmentPlacement([
-      { id: 'seg-1', startMs: 0, endMs: 20_000 },
-      { id: 'seg-2', startMs: 30_000, endMs: 45_000 },
-    ]);
-    expect(placement).toEqual({ startMs: 45_500, endMs: 65_500 });
-  });
-
-  it('clamps invalid duration input and enforces minimum segment duration', () => {
-    const placement = getDefaultNewSegmentPlacement([], 3000, Number.NaN, -10);
-    expect(placement).toEqual({ startMs: 3000, endMs: 23000 });
-  });
-});
 
 describe('inferTimelineOrder', () => {
   it('keeps already sorted segments in order and assigns sequential order', () => {

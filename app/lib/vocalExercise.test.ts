@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   alignContextToMetronome,
-  generateTranspositionPath,
-  getContextMetronomeBeats,
   getExercisePitchRange,
   midiNoteName,
   parseVocalExerciseMidi,
@@ -72,27 +70,9 @@ describe("vocal exercise utilities", () => {
     expect(getExercisePitchRange(exercise)).toEqual({ low: 60, high: 67 });
   });
 
-  it("starts centrally, reaches both limits, and returns to its start", () => {
-    expect(generateTranspositionPath(exercise, { low: 57, high: 70 }))
-      .toEqual([0, 1, 2, 3, 2, 1, 0, -1, -2, -3, -2, -1, 0]);
-  });
-
-  it("returns no path when the exercise cannot fit", () => {
-    expect(generateTranspositionPath(exercise, { low: 61, high: 65 })).toEqual([]);
-  });
-
   it("reclassifies notes when the sing marker moves", () => {
     const updated = setExerciseStartBeat(exercise, 5);
     expect(updated.events.map((event) => event.region)).toEqual(["context", "context", "exercise"]);
-  });
-
-  it("generates metronome beats only before the exercise region", () => {
-    expect(getContextMetronomeBeats(exercise)).toEqual([0, 1, 2, 3]);
-    expect(getContextMetronomeBeats({
-      ...exercise,
-      exerciseStartBeat: 1.5,
-      timeSignature: { numerator: 6, denominator: 8 },
-    })).toEqual([0, 0.5, 1]);
   });
 
   it("aligns context arpeggios without repeating the singing pattern", () => {

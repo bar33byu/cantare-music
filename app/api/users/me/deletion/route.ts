@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { formatError } from "../../../_errors";
 import {
   cancelUserAccountDeletion,
   getUserAccountDeletionStatus,
@@ -7,15 +8,6 @@ import {
 } from "../../../../../db/queries";
 import { getAccountDeletionScheduleDates } from "../../../../lib/accountDeletion";
 import { resolveRequestContext } from "../../../_user";
-
-function formatError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unknown server error";
-  const shouldExpose =
-    process.env.NODE_ENV === "development" ||
-    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === "true";
-
-  return shouldExpose ? { error: message } : { error: "Internal server error" };
-}
 
 function ensureSelfManagedAccount(context: Awaited<ReturnType<typeof resolveRequestContext>>) {
   if (!context.effectiveUser?.email?.trim()) {

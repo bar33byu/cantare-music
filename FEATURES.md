@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Cantare is now in the Version 3 line. Version 2 established the single-user practice foundation: segment practice, Part and Blend audio, playlists, Listen/Focus/Auto Drill modes, and MIDI-guided tap practice. Version 3 adds account-aware libraries, sharing, imports, and faster rehearsal-capture workflows.
+Cantare is now in the Version 3 line. Version 2 established the single-user practice foundation: segment practice, Part and Blend audio, playlists, Songs, Hands Free, Listen, and MIDI-guided tap practice. Focus playlist mode was retired in Version 5.1.0; weak segments can be reviewed in Songs or drilled in Hands Free. Version 3 adds account-aware libraries, sharing, imports, and faster rehearsal-capture workflows.
 
 The near-term priority is stabilization: keep the current workflows reliable on desktop and mobile, improve fit-and-finish, and avoid expanding into larger collaboration features until sharing and draft recordings feel solid.
 
@@ -24,11 +24,11 @@ The near-term priority is stabilization: keep the current workflows reliable on 
 - [x] Add upload and replacement flows for both audio versions
 - [x] Rename practice-facing audio choices to Part and Blend
 - [x] Add audio version toggle in song practice
-- [x] Persist preferred audio version and use it across Songs, Focus, Auto Drill, and Listen modes when available
+- [x] Persist preferred audio version and use it across Songs, Hands Free, and Listen modes when available
 - [x] Fall back gracefully when a song only has one audio version
 - [x] Show separate Part and Blend asset status in song and playlist cards
 
-## Version 2.2: Playlist and Focus Practice
+## Version 2.2: Playlist and Focus Practice (Focus retired in Version 5.1.0)
 
 - [x] Add playlist creation and editing
 - [x] Show playlist-level knowledge and asset summaries

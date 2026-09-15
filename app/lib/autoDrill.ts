@@ -32,23 +32,3 @@ export function shouldRepeatAutoDrillSegment(
   const targetRepeats = Math.min(getAutoDrillTargetPasses(rating) - 1, maxRepeats);
   return repeatCount < targetRepeats;
 }
-
-export function getNextAutoDrillStateAfterRating(options: {
-  rating: MemoryRating;
-  repeatCount: number;
-  currentIndex: number;
-  queueLength: number;
-  maxRepeats?: number;
-}): AutoDrillState {
-  if (
-    shouldRepeatAutoDrillSegment(
-      options.rating,
-      options.repeatCount,
-      options.maxRepeats ?? DEFAULT_MAX_AUTO_REPEATS
-    )
-  ) {
-    return "repeating";
-  }
-
-  return options.currentIndex >= options.queueLength - 1 ? "complete" : "announcing";
-}

@@ -3,10 +3,8 @@ import {
   DEFAULT_CONTOUR_SAME_DEAD_ZONE,
   buildContourDirectionEvents,
   classifyContourDirection,
-  compareContourAttempt,
   compareContourAttemptDetailed,
   compareContourAttemptStable,
-  computeContourNoteHeatMap,
 } from './contourPractice';
 
 describe('contourPractice', () => {
@@ -38,7 +36,7 @@ describe('contourPractice', () => {
   });
 
   it('does not match when the attempt is outside the time tolerance window', () => {
-    const result = compareContourAttempt(
+    const result = compareContourAttemptDetailed(
       [
         { id: 'a1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
         { id: 'a2', timeOffsetMs: 600, durationMs: 100, lane: 0.6 },
@@ -58,7 +56,7 @@ describe('contourPractice', () => {
   });
 
   it('penalizes wrong direction even when timing is close', () => {
-    const result = compareContourAttempt(
+    const result = compareContourAttemptDetailed(
       [
         { id: 'a1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
         { id: 'a2', timeOffsetMs: 500, durationMs: 100, lane: 0.7 },
@@ -249,36 +247,5 @@ describe('contourPractice', () => {
     expect(result.matchedEvents).toBe(9);
     expect(result.totalEvents).toBe(19);
     expect(result.score).toBeCloseTo(9 / 19);
-  });
-
-  it('computes note heat from recent whole-segment practice sessions', () => {
-    const heatMap = computeContourNoteHeatMap(
-      [
-        { id: 'a1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
-        { id: 'a2', timeOffsetMs: 100, durationMs: 100, lane: 0.8 },
-        { id: 'a3', timeOffsetMs: 200, durationMs: 100, lane: 0.8 },
-        { id: 'a4', timeOffsetMs: 300, durationMs: 100, lane: 0.2 },
-      ],
-      [
-        [
-          { id: 'u1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
-          { id: 'u2', timeOffsetMs: 100, durationMs: 100, lane: 0.8 },
-          { id: 'u3', timeOffsetMs: 200, durationMs: 100, lane: 0.8 },
-          { id: 'u4', timeOffsetMs: 300, durationMs: 100, lane: 0.2 },
-        ],
-        [
-          { id: 'v1', timeOffsetMs: 0, durationMs: 100, lane: 0.2 },
-          { id: 'v2', timeOffsetMs: 100, durationMs: 100, lane: 0.8 },
-          { id: 'v3', timeOffsetMs: 200, durationMs: 100, lane: 0.2 },
-          { id: 'v4', timeOffsetMs: 300, durationMs: 100, lane: 0.2 },
-        ],
-      ]
-    );
-
-    expect(heatMap).toEqual({
-      a2: { sessionCount: 2, missCount: 0, missRate: 0 },
-      a3: { sessionCount: 2, missCount: 1, missRate: 0.5 },
-      a4: { sessionCount: 2, missCount: 1, missRate: 0.5 },
-    });
   });
 });

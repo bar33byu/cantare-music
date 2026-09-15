@@ -1,4 +1,5 @@
 import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { formatError } from "../../../_errors";
 import { NextRequest, NextResponse } from "next/server";
 import {
   createMidiSource,
@@ -21,15 +22,6 @@ const DEFAULT_CLEANUP_SETTINGS: MidiCleanupSettings = {
   simultaneousThresholdMs: 30,
 };
 const ALLOWED_EXTENSIONS = [".mid", ".midi"];
-
-function formatError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unknown server error";
-  const shouldExpose =
-    process.env.NODE_ENV === "development" ||
-    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === "true";
-
-  return shouldExpose ? { error: message } : { error: "Internal server error" };
-}
 
 function isMidiFilename(filename: string): boolean {
   const lower = filename.toLowerCase();

@@ -173,7 +173,3 @@ export function parseVocalExerciseSeedBundle(value: unknown, createdAt = new Dat
 
   return { exercises, collection };
 }
-
-export function parseVocalExerciseSeed(value: unknown, createdAt = new Date().toISOString()): VocalExercise[] {
-  return parseVocalExerciseSeedBundle(value, createdAt).exercises;
-}

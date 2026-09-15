@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeKnowledgeScore, computePlaylistKnowledge, getSegmentKnowledgePercent } from './knowledgeUtils';
-import { makeSong, makeSegment, makeSession, makeRating } from './factories';
+import { makeSong, makeSegment, makeSession, makeRating } from '../../test/factories';
 
 describe('getSegmentKnowledgePercent', () => {
   it('returns rating * 20', () => {

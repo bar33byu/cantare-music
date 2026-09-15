@@ -10,20 +10,10 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { InferSelectModel, sql } from "drizzle-orm";
+import type { PitchContourNote, SongPitchContourNote } from "../shared/domainTypes";
 
-export interface SegmentPitchContourPoint {
-  id: string;
-  timeOffsetMs: number;
-  lane: number;
-  durationMs: number;
-}
-
-export interface SongPitchContourPoint {
-  id: string;
-  absoluteMs: number;
-  lane: number;
-  durationMs: number;
-}
+export type SegmentPitchContourPoint = PitchContourNote;
+export type SongPitchContourPoint = SongPitchContourNote;
 
 export interface RawMidiNoteData {
   index: number;

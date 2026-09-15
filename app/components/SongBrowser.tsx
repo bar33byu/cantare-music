@@ -3,9 +3,10 @@
 import { useCallback, useState, useEffect, useMemo } from 'react';
 import { getMasteryColor } from '../lib/masteryColors';
 import { buildUserScopedCacheKey, readCachedJson, writeCachedJson } from '../lib/localJsonCache';
-import { compareNaturalText } from '../lib/naturalSort';
+import { sortSongs, type SongSortKey, type SongSortState } from '../lib/songSort';
 import { withUserIdHeader } from '../lib/userContext';
 import { SongReadinessIcons } from './SongReadinessIcons';
+import { SongSortMenu } from './SongSortMenu';
 
 interface SongListItem {
   id: string;
@@ -57,12 +58,10 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
     midiContour: false,
   });
 
-  type SortKey = 'alphabetical' | 'date-added' | 'date-practiced' | 'memory-score';
-  interface SortState { key: SortKey; asc: boolean }
   const SORT_STORAGE_KEY = 'song-browser-sort';
-  const DEFAULT_SORT: SortState = { key: 'date-practiced', asc: false };
+  const DEFAULT_SORT: SongSortState = { key: 'date-practiced', asc: false };
 
-  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
+  const [sort, setSort] = useState<SongSortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const cacheKey = useMemo(() => buildUserScopedCacheKey('songs', userId), [userId]);
 
@@ -81,30 +80,22 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           typeof parsed === 'object' &&
           'key' in parsed &&
           'asc' in parsed &&
-          ['alphabetical', 'date-added', 'date-practiced'].includes((parsed as SortState).key) &&
-          typeof (parsed as SortState).asc === 'boolean'
+          ['alphabetical', 'date-added', 'date-practiced'].includes((parsed as SongSortState).key) &&
+          typeof (parsed as SongSortState).asc === 'boolean'
         ) {
-          setSort(parsed as SortState);
+          setSort(parsed as SongSortState);
         }
       }
     } catch { /* ignore */ }
   }, []);
 
-  const updateSort = (next: SortState) => {
+  const updateSort = (next: SongSortState) => {
     setSort(next);
     try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
   };
 
-  // Per-key labels for the compact button and menu items
-  const sortKeyLabel: Record<SortKey, string> = {
-    alphabetical: 'Alphabetical',
-    'date-added': 'Date Added',
-    'date-practiced': 'Last Practiced',
-    'memory-score': 'Memory Score',
-  };
-
   // Directional labels: index 0 = descending, index 1 = ascending
-  const sortDirLabel: Record<SortKey, [string, string]> = {
+  const sortDirLabel: Record<SongSortKey, [string, string]> = {
     alphabetical: ['Z–A', 'A–Z'],
     'date-added':   ['Newest', 'Oldest'],
     'date-practiced': ['Recent', 'Longest ago'],
@@ -112,7 +103,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
   };
 
   // Default direction when switching to a new key: asc for alpha, desc for everything else
-  const defaultAscForKey = (key: SortKey) => key === 'alphabetical';
+  const defaultAscForKey = (key: SongSortKey) => key === 'alphabetical';
 
   const displayedSongs = useMemo(() => {
     let result = songs;
@@ -133,30 +124,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
       });
     }
 
-    const dir = sort.asc ? 1 : -1;
-    return [...result].sort((a, b) => {
-      switch (sort.key) {
-        case 'alphabetical':
-          return dir * compareNaturalText(a.title, b.title);
-        case 'date-added':
-          return dir * (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
-        case 'date-practiced': {
-          const aTime = a.lastPracticedAt ?? '';
-          const bTime = b.lastPracticedAt ?? '';
-          if (!aTime && !bTime) return 0;
-          if (!aTime) return dir;
-          if (!bTime) return -dir;
-          return dir * aTime.localeCompare(bTime);
-        }
-        case 'memory-score': {
-          const aScore = a.masteryPercent ?? 0;
-          const bScore = b.masteryPercent ?? 0;
-          return dir * (aScore - bScore);
-        }
-        default:
-          return 0;
-      }
-    });
+    return sortSongs(result, sort);
   }, [songs, filterText, missingFilters, sort]);
 
   const fetchSongs = useCallback(async () => {
@@ -375,58 +343,15 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
             ))}
           </div>
         ) : null}
-        <div className="relative ml-auto">
-          <button
-            type="button"
-            data-testid="song-browser-sort-toggle"
-            onClick={() => setShowSortMenu((prev) => !prev)}
-            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm text-gray-500 hover:bg-gray-100"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <line x1="8" y1="6" x2="21" y2="6" />
-              <line x1="8" y1="12" x2="21" y2="12" />
-              <line x1="8" y1="18" x2="21" y2="18" />
-              <polyline points="3 6 4 7 6 5" />
-              <polyline points="3 12 4 13 6 11" />
-              <polyline points="3 18 4 19 6 17" />
-            </svg>
-            {sortDirLabel[sort.key][sort.asc ? 1 : 0]}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-          {showSortMenu && (
-            <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-gray-200 bg-white shadow-lg">
-              {(['alphabetical', 'date-added', 'date-practiced', 'memory-score'] as const).map((key) => {
-                const isActive = sort.key === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    data-testid={`song-browser-sort-${key}`}
-                    onClick={() => {
-                      const newAsc = isActive ? !sort.asc : defaultAscForKey(key);
-                      updateSort({ key, asc: newAsc });
-                      setShowSortMenu(false);
-                    }}
-                    className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg hover:bg-gray-50 ${
-                      isActive ? 'font-semibold text-blue-600' : 'text-gray-700'
-                    }`}
-                  >
-                    {sortKeyLabel[key]}
-                    {isActive && (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                        {sort.asc
-                          ? <polyline points="18 15 12 9 6 15" />
-                          : <polyline points="6 9 12 15 18 9" />}
-                      </svg>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <SongSortMenu
+          sort={sort}
+          isOpen={showSortMenu}
+          testIdPrefix="song-browser-sort"
+          directionLabels={sortDirLabel}
+          defaultAscForKey={defaultAscForKey}
+          onOpenChange={setShowSortMenu}
+          onSortChange={updateSort}
+        />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="song-browser-grid">

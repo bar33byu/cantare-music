@@ -40,12 +40,6 @@ export interface StableContourMatchResult extends ContourMatchDetailedResult {
   answerEventStatuses: Array<'matched' | 'mismatched' | 'unattempted'>;
 }
 
-export interface ContourNoteHeatStat {
-  sessionCount: number;
-  missCount: number;
-  missRate: number;
-}
-
 export const DEFAULT_CONTOUR_SAME_DEAD_ZONE = 0.035;
 
 const DEFAULT_MATCH_OPTIONS: ContourMatchOptions = {
@@ -196,19 +190,6 @@ export function buildContourDirectionEvents(
   return events;
 }
 
-export function compareContourAttempt(
-  answerKey: PitchContourNote[],
-  attempt: PitchContourNote[],
-  options: Partial<ContourMatchOptions> = {}
-): ContourMatchResult {
-  const detailed = compareContourAttemptDetailed(answerKey, attempt, options);
-  return {
-    matchedEvents: detailed.matchedEvents,
-    totalEvents: detailed.totalEvents,
-    score: detailed.score,
-  };
-}
-
 export function compareContourAttemptDetailed(
   answerKey: PitchContourNote[],
   attempt: PitchContourNote[],
@@ -254,53 +235,4 @@ export function compareContourAttemptStable(
   const attemptEvents = buildContourDirectionEvents(sortedAttempt, effective);
 
   return scoreContourAttemptByTime(answerEvents, attemptEvents, sortedAttempt, effective);
-}
-
-export function computeContourNoteHeatMap(
-  answerKey: PitchContourNote[],
-  attempts: PitchContourNote[][],
-  options: Partial<ContourMatchOptions> = {}
-): Record<string, ContourNoteHeatStat> {
-  const sortedAnswer = [...answerKey].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-  if (sortedAnswer.length < 2) {
-    return {};
-  }
-
-  const noteIds = sortedAnswer.slice(1).map((note) => note.id);
-  const totals = new Map<string, { sessionCount: number; missCount: number }>(
-    noteIds.map((noteId) => [noteId, { sessionCount: 0, missCount: 0 }])
-  );
-
-  for (const attempt of attempts) {
-    if (attempt.length < 2) {
-      continue;
-    }
-
-    const match = compareContourAttemptStable(sortedAnswer, attempt, options);
-    for (let answerEventIndex = 0; answerEventIndex < match.answerEventStatuses.length; answerEventIndex += 1) {
-      const noteId = sortedAnswer[answerEventIndex + 1]?.id;
-      if (!noteId) {
-        continue;
-      }
-      const aggregate = totals.get(noteId);
-      if (!aggregate) {
-        continue;
-      }
-      aggregate.sessionCount += 1;
-      if (match.answerEventStatuses[answerEventIndex] !== 'matched') {
-        aggregate.missCount += 1;
-      }
-    }
-  }
-
-  return Object.fromEntries(
-    [...totals.entries()].map(([noteId, aggregate]) => [
-      noteId,
-      {
-        sessionCount: aggregate.sessionCount,
-        missCount: aggregate.missCount,
-        missRate: aggregate.sessionCount === 0 ? 0 : aggregate.missCount / aggregate.sessionCount,
-      },
-    ])
-  );
 }

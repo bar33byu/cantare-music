@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { formatError } from "../../../_errors";
 import { getPlaylistById, getRatingsForSong } from '../../../../../db/queries';
 import { computePlaylistKnowledge } from '../../../../lib/knowledgeUtils';
 import type { Song } from '../../../../types';
@@ -8,15 +9,6 @@ const userScopedHeaders = {
   'Cache-Control': 'private, no-store',
   Vary: 'X-User-ID',
 };
-
-function formatError(error: unknown) {
-  const message = error instanceof Error ? error.message : 'Unknown server error';
-  const shouldExpose =
-    process.env.NODE_ENV === 'development' ||
-    process.env.NEXT_PUBLIC_DEBUG_API_ERRORS === 'true';
-
-  return shouldExpose ? { error: message } : { error: 'Internal server error' };
-}
 
 export async function GET(
   request: NextRequest,

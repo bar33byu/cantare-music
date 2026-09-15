@@ -94,10 +94,3 @@ export function createPublicUsernameFromName(name: string): string {
   }
   return `user-${Math.random().toString(36).slice(2, 8)}`;
 }
-
-export function createUserIdFromName(name: string): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${normalizeUserId(name)}-${Math.random().toString(36).slice(2, 12)}`;
-}

@@ -95,7 +95,3 @@ export function sessionReducer(
       return state;
   }
 }
-
-export function setSongId(songId: string): SessionAction {
-  return { type: 'SET_CURRENT_SONG', songId };
-}

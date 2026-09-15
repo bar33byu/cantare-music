@@ -179,6 +179,7 @@ describe('Home page', () => {
     practiceViewMock.mockReset();
     playlistBrowserMock.mockReset();
     contourReferenceViewMock.mockReset();
+    Object.defineProperty(window, 'caches', { configurable: true, value: undefined });
     window.history.replaceState(null, '', '/');
     window.localStorage.clear();
     global.fetch = vi.fn().mockResolvedValue({
@@ -305,6 +306,91 @@ describe('Home page', () => {
 
     expect(await screen.findByTestId('mock-playlist-browser')).toBeInTheDocument();
     expect(screen.queryByTestId('mock-select-song')).not.toBeInTheDocument();
+  });
+
+  it('does not flash playlists while restoring a saved song route', async () => {
+    window.history.replaceState(null, '', '/#view=song_practice&song=song-1');
+    let finishSongRequest: ((response: Response) => void) | undefined;
+    global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      if (String(input) === '/api/songs/song-1') {
+        return new Promise<Response>((resolve) => {
+          finishSongRequest = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as Response);
+    }) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    expect(screen.getByTestId('app-route-loading')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-playlist-browser')).not.toBeInTheDocument();
+    await waitFor(() => expect(finishSongRequest).toBeDefined());
+    await act(async () => {
+      finishSongRequest?.({
+        ok: true,
+        json: async () => ({
+          id: 'song-1',
+          title: 'Song One',
+          artist: 'Artist One',
+          audioUrl: 'https://example.com/one.mp3',
+          segments: [],
+          createdAt: '2025-01-01T00:00:00.000Z',
+        }),
+      } as Response);
+    });
+
+    expect(screen.getByTestId('mock-practice-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-playlist-browser')).not.toBeInTheDocument();
+  });
+
+  it('opens a cached song immediately and refreshes it in the background', async () => {
+    window.history.replaceState(null, '', '/#view=song_practice&song=song-1');
+    const cachedSong = {
+      id: 'song-1',
+      title: 'Song One',
+      artist: 'Artist One',
+      audioUrl: 'https://example.com/one.mp3',
+      segments: [],
+      createdAt: '2025-01-01T00:00:00.000Z',
+    };
+    const cache = {
+      match: vi.fn(async (request: Request) => new URL(request.url).pathname === '/api/songs/song-1'
+        ? { ok: true, json: async () => cachedSong } as Response
+        : undefined),
+    };
+    Object.defineProperty(window, 'caches', {
+      configurable: true,
+      value: {
+        keys: async () => ['cantare-api-v3'],
+        open: async () => cache,
+      } as unknown as CacheStorage,
+    });
+
+    let finishSongRequest: ((response: Response) => void) | undefined;
+    global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      if (String(input) === '/api/songs/song-1') {
+        return new Promise<Response>((resolve) => {
+          finishSongRequest = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as Response);
+    }) as unknown as typeof fetch;
+
+    render(<Home />);
+
+    expect(await screen.findByTestId('mock-practice-view')).toHaveTextContent('Segments: 0');
+    expect(screen.queryByTestId('mock-playlist-browser')).not.toBeInTheDocument();
+    await act(async () => {
+      finishSongRequest?.({
+        ok: true,
+        json: async () => ({ ...cachedSong, segments: [{ id: 'seg-1' }] }),
+      } as Response);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-practice-view')).toHaveTextContent('Segments: 1');
+    });
+    expect(cache.match).toHaveBeenCalled();
   });
 
   it('does not let a slow startup route replace a screen the user navigated to', async () => {
