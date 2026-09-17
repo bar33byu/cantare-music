@@ -25,6 +25,7 @@ const SORT_STORAGE_KEY = 'playlist-practice-sort';
 const MODE_EXPLAINER_STORAGE_KEY_PREFIX = 'playlist-practice-mode-explainer:';
 const DEFAULT_SORT: SongSortState = { key: 'date-practiced', asc: false };
 const AUTO_DRILL_PREROLL_MS = 500;
+const AUTO_DRILL_COMPLETION_REDIRECT_DELAY_MS = 500;
 const HANDS_FREE_LABEL = 'Hands Free';
 const AUTO_DRILL_PERMISSION_WARNING =
   'Automatic audio is blocked on this device. Tap Play once to continue.';
@@ -736,6 +737,19 @@ export function PlaylistPracticeView({
     jumpAutoDrillSegment(autoDrillIndex + 1, 'next');
   }, [autoDrillIndex, jumpAutoDrillSegment]);
 
+  const handleNextAutoDrillSong = useCallback(() => {
+    if (!currentAutoDrillItem || practiceMode !== 'auto-drill' || autoDrillState === 'idle' || autoDrillState === 'complete') {
+      return;
+    }
+
+    const nextSongIndex = autoDrillQueue.findIndex(
+      (item, index) => index > autoDrillIndex && item.song.id !== currentAutoDrillItem.song.id
+    );
+    if (nextSongIndex >= 0) {
+      jumpAutoDrillSegment(nextSongIndex, 'next');
+    }
+  }, [autoDrillIndex, autoDrillQueue, autoDrillState, currentAutoDrillItem, jumpAutoDrillSegment, practiceMode]);
+
   const handleAutoDrillPlaybackComplete = useCallback(() => {
     if (
       practiceMode !== 'auto-drill' ||
@@ -885,6 +899,10 @@ export function PlaylistPracticeView({
     if (autoDrillState === 'complete') {
       autoDrillRunIdRef.current += 1;
       setAutoDrillMessage('Playlist complete.');
+      if (autoDrillQueue.length > 0) {
+        const redirectTimer = window.setTimeout(stopAutoDrill, AUTO_DRILL_COMPLETION_REDIRECT_DELAY_MS);
+        return () => window.clearTimeout(redirectTimer);
+      }
       return;
     }
 
@@ -933,7 +951,7 @@ export function PlaylistPracticeView({
     return () => {
       cancelled = true;
     };
-  }, [autoDrillIndex, autoDrillState, autoDrillTransition, currentAutoDrillItem, practiceMode]);
+  }, [autoDrillIndex, autoDrillQueue.length, autoDrillState, autoDrillTransition, currentAutoDrillItem, practiceMode, stopAutoDrill]);
 
   useEffect(() => {
     try {
@@ -1373,6 +1391,8 @@ export function PlaylistPracticeView({
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel={HANDS_FREE_LABEL}
+                    onBreadcrumbRootClick={stopAutoDrill}
+                    onNextSong={handleNextAutoDrillSong}
                     segmentPrerollMs={autoDrillTransition === 'continuous' ? 0 : AUTO_DRILL_PREROLL_MS}
                     preferredAudioVersion={preferredAudioVersion}
                     onPreferredAudioVersionChange={onPreferredAudioVersionChange}

@@ -880,6 +880,9 @@ describe('PlaylistPracticeView', () => {
       expect(screen.getByTestId('auto-drill-live')).toHaveTextContent('Playlist complete.');
     });
     await waitFor(() => {
+      expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument();
+    });
+    await waitFor(() => {
       expect(fetchMock.mock.calls.some((call) => {
         const [input, init] = call;
         const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;

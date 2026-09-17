@@ -16,6 +16,7 @@ import { SongBrowser } from "./components/SongBrowser";
 import { SegmentEditor } from "./components/SegmentEditor";
 import { SongContourReferenceView } from "./components/SongContourReferenceView";
 import { makeSession } from "./lib/factories";
+import { sortSongs, SONG_SORT_KEYS, type SongSortState } from "./lib/songSort";
 import {
   clearGuestProgress,
   getGuestProgressSummary,
@@ -68,6 +69,27 @@ interface HashRouteState {
   songId?: string;
   playlistId?: string;
   returnView?: SongEditorReturnView;
+}
+
+const PLAYLIST_SORT_STORAGE_KEY = "playlist-practice-sort";
+const DEFAULT_PLAYLIST_SORT: SongSortState = { key: "date-practiced", asc: false };
+
+function readPlaylistSort(): SongSortState {
+  if (typeof window === "undefined") {
+    return DEFAULT_PLAYLIST_SORT;
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PLAYLIST_SORT_STORAGE_KEY) ?? "null") as Partial<SongSortState> | null;
+    const key = parsed?.key;
+    if (key && SONG_SORT_KEYS.includes(key) && typeof parsed?.asc === "boolean") {
+      return key === "memory-score" ? { key, asc: true } : { key, asc: parsed.asc };
+    }
+  } catch {
+    // Ignore malformed persisted sorting preferences.
+  }
+
+  return DEFAULT_PLAYLIST_SORT;
 }
 
 interface UserSettings {
@@ -1438,6 +1460,31 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     }
   }, [request]);
 
+  const handleNextPlaylistSong = useCallback(async () => {
+    if (!selectedPlaylist || !selectedSong) {
+      return;
+    }
+
+    const orderedSongs = sortSongs(selectedPlaylist.songs, readPlaylistSort());
+    const currentIndex = orderedSongs.findIndex((song) => song.id === selectedSong.id);
+    const nextSong = currentIndex >= 0 ? orderedSongs[currentIndex + 1] : undefined;
+    if (!nextSong) {
+      return;
+    }
+
+    setSelectedSong(nextSong);
+    setActiveView("song_practice");
+
+    if (playlistPracticeReadOnly) {
+      return;
+    }
+
+    const fullSong = await loadSongById(nextSong.id);
+    if (fullSong) {
+      setSelectedSong((current) => current?.id === nextSong.id ? fullSong : current);
+    }
+  }, [loadSongById, playlistPracticeReadOnly, selectedPlaylist, selectedSong]);
+
   const loadPlaylistById = useCallback(async (playlistId: string): Promise<Playlist | null> => {
     try {
       const response = await request(`/api/playlists/${playlistId}`);
@@ -1877,6 +1924,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             initialSession={session}
             breadcrumbRootLabel={breadcrumbRootLabel}
             onBreadcrumbRootClick={handleBreadcrumbRootClick}
+            onNextSong={handleNextPlaylistSong}
             segmentPrerollMs={userSettings.segmentPrerollMs}
             preferredAudioVersion={userSettings.preferredAudioVersion}
             onPreferredAudioVersionChange={(version) => {

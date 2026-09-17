@@ -58,6 +58,7 @@ interface PracticeViewProps {
   onRatingsSaved?: (ratings: SessionState["ratings"]) => void;
   breadcrumbRootLabel?: string;
   onBreadcrumbRootClick?: () => void;
+  onNextSong?: () => void;
   onEditSongClick?: () => void;
   onOpenContourReferenceClick?: () => void;
   segmentPrerollMs?: number;
@@ -340,6 +341,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   onRatingsSaved,
   breadcrumbRootLabel,
   onBreadcrumbRootClick,
+  onNextSong,
   onEditSongClick,
   onOpenContourReferenceClick,
   segmentPrerollMs = 500,
@@ -2134,6 +2136,24 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         }
       }
 
+      if (!event.repeat && (event.key === "c" || event.key === "C") && hasContourReferenceData) {
+        event.preventDefault();
+        requestPracticeControlChange("contour");
+        return;
+      }
+
+      if (!event.repeat && (event.key === "y" || event.key === "Y") && onBreadcrumbRootClick) {
+        event.preventDefault();
+        onBreadcrumbRootClick();
+        return;
+      }
+
+      if (!event.repeat && (event.key === "p" || event.key === "P") && onNextSong) {
+        event.preventDefault();
+        onNextSong();
+        return;
+      }
+
       if (event.key === " ") {
         event.preventDefault();
         handleTogglePlay();
@@ -2210,7 +2230,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, isTapPracticeMode, ratingKeysEnabled, recordKeyboardTap]);
+}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, hasContourReferenceData, isTapPracticeMode, onBreadcrumbRootClick, onNextSong, ratingKeysEnabled, recordKeyboardTap, requestPracticeControlChange]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
