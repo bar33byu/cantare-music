@@ -284,7 +284,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
   });
 
-  it('plays from the listen transport without auto-starting on mode entry', async () => {
+  it('opens the full lyric player without auto-starting on mode entry', async () => {
     const play = vi.fn();
     const pause = vi.fn();
     const seek = vi.fn();
@@ -324,21 +324,23 @@ describe('PlaylistPracticeView', () => {
       <PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /listen/i }));
+    fireEvent.click(screen.getByTestId('playlist-mode-listen'));
 
     expect(play).not.toHaveBeenCalled();
+    expect(screen.getByTestId('playlist-listen-full-display')).toBeInTheDocument();
+    expect(screen.getByTestId('segment-lyric-text')).toHaveTextContent('Alpha line');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Play playlist' }));
+    fireEvent.click(screen.getByTestId('audio-play-pause'));
 
     expect(play).toHaveBeenCalledTimes(1);
-    expect(play).toHaveBeenCalledWith(0, 0);
+    expect(play).toHaveBeenCalledWith(0, 12000);
 
     rerender(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
     expect(play).toHaveBeenCalledTimes(1);
   });
 
-  it('treats songs without audio as zero-length in listen mode and continues', async () => {
+  it('skips songs without audio before starting the full lyric player', async () => {
     const play = vi.fn();
 
     vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation((audioUrl: string) => ({
@@ -382,17 +384,16 @@ describe('PlaylistPracticeView', () => {
 
     render(<PlaylistPracticeView playlist={mixedPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /listen/i }));
-
-    expect(screen.getByRole('heading', { name: 'Alpha' })).toBeInTheDocument();
-    expect(screen.getByText('1 of 2')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Play playlist' }));
+    fireEvent.click(screen.getByTestId('playlist-mode-listen'));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Beta' })).toBeInTheDocument();
-      expect(play).toHaveBeenCalledWith(0, 0);
+      expect(screen.getByTestId('song-title')).toHaveTextContent('Beta');
+      expect(screen.getByTestId('segment-lyric-text')).toHaveTextContent('Beta line');
     });
+
+    fireEvent.click(screen.getByTestId('audio-play-pause'));
+
+    expect(play).toHaveBeenCalledWith(0, 12000);
   });
 
   it('advances to the next playable song when the current song ends', async () => {
@@ -434,18 +435,27 @@ describe('PlaylistPracticeView', () => {
 
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
 
-    const view = render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+    const onExit = vi.fn();
+    const view = render(<PlaylistPracticeView playlist={playlist} userId="user-1" onExit={onExit} onSelectSong={() => undefined} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /listen/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Play playlist' }));
+    fireEvent.click(screen.getByTestId('playlist-mode-listen'));
+    fireEvent.click(screen.getByTestId('audio-play-pause'));
 
-    expect(screen.getByRole('heading', { name: 'Alpha' })).toBeInTheDocument();
+    expect(screen.getByTestId('song-title')).toHaveTextContent('Alpha');
 
     endedCount = 1;
-    view.rerender(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+    view.rerender(<PlaylistPracticeView playlist={playlist} userId="user-2" onExit={onExit} onSelectSong={() => undefined} />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Beta' })).toBeInTheDocument();
+      expect(screen.getByTestId('song-title')).toHaveTextContent('Beta');
+      expect(play).toHaveBeenLastCalledWith(0, Number.POSITIVE_INFINITY);
+    });
+
+    endedCount = 2;
+    view.rerender(<PlaylistPracticeView playlist={playlist} userId="user-3" onExit={onExit} onSelectSong={() => undefined} />);
+
+    await waitFor(() => {
+      expect(onExit).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -514,11 +524,15 @@ describe('PlaylistPracticeView', () => {
 
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
 
-    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+    const firstView = render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-listen'));
 
     await waitFor(() => {
-      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://example.com/alpha.mp3');
+      expect(useAudioPlayerSpy.mock.calls.some(([audioUrl]) => audioUrl === 'https://example.com/alpha.mp3')).toBe(true);
     });
+
+    firstView.unmount();
 
     const r2Playlist: Playlist = {
       ...playlist,
@@ -532,8 +546,10 @@ describe('PlaylistPracticeView', () => {
 
     render(<PlaylistPracticeView playlist={r2Playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
+    fireEvent.click(screen.getByTestId('playlist-mode-listen'));
+
     await waitFor(() => {
-      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://pub-example.r2.dev/audio/song-1/test.mp3');
+      expect(useAudioPlayerSpy.mock.calls.some(([audioUrl]) => audioUrl === 'https://pub-example.r2.dev/audio/song-1/test.mp3')).toBe(true);
     });
   });
 
@@ -561,16 +577,13 @@ describe('PlaylistPracticeView', () => {
       />
     );
 
-    await waitFor(() => {
-      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://example.com/alpha-blend.mp3');
-    });
-
     fireEvent.click(screen.getByTestId('playlist-mode-listen'));
-    fireEvent.click(screen.getByLabelText('Next song'));
 
     await waitFor(() => {
-      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://example.com/beta.mp3');
+      expect(useAudioPlayerSpy.mock.calls.some(([audioUrl]) => audioUrl === 'https://example.com/alpha-blend.mp3')).toBe(true);
     });
+
+    expect(screen.getByTestId('playlist-listen-full-display')).toBeInTheDocument();
   });
 
   it('keeps listen playback position when switching between part and blend audio', async () => {
@@ -630,6 +643,7 @@ describe('PlaylistPracticeView', () => {
     const view = render(
       <PlaylistPracticeView
         playlist={mixedAudioPlaylist}
+        userId="user-1"
         preferredAudioVersion={preferredAudioVersion}
         onPreferredAudioVersionChange={onPreferredAudioVersionChange}
         onExit={() => undefined}
@@ -638,12 +652,13 @@ describe('PlaylistPracticeView', () => {
     );
 
     fireEvent.click(screen.getByTestId('playlist-mode-listen'));
-    fireEvent.click(screen.getByRole('button', { name: 'Play playlist' }));
-    expect(play).toHaveBeenCalledWith(0, 0);
+    fireEvent.click(screen.getByTestId('audio-play-pause'));
+    expect(play).toHaveBeenCalledWith(0, 12000);
 
     view.rerender(
       <PlaylistPracticeView
         playlist={mixedAudioPlaylist}
+        userId="user-2"
         preferredAudioVersion={preferredAudioVersion}
         onPreferredAudioVersionChange={onPreferredAudioVersionChange}
         onExit={() => undefined}
@@ -651,8 +666,8 @@ describe('PlaylistPracticeView', () => {
       />
     );
 
-    fireEvent.click(screen.getByTestId('playlist-audio-preference-blend'));
-    expect(pause).toHaveBeenCalled();
+    window.localStorage.setItem('practice-control-explainer:blend', 'seen');
+    fireEvent.click(screen.getByTestId('practice-audio-version-blend'));
     expect(onPreferredAudioVersionChange).toHaveBeenCalledWith('blend');
 
     view.rerender(
@@ -666,9 +681,9 @@ describe('PlaylistPracticeView', () => {
     );
 
     await waitFor(() => {
-      expect(useAudioPlayerSpy).toHaveBeenCalledWith('https://example.com/alpha-blend.mp3');
+      expect(useAudioPlayerSpy.mock.calls.some(([audioUrl]) => audioUrl === 'https://example.com/alpha-blend.mp3')).toBe(true);
       expect(seek).toHaveBeenCalledWith(4200);
-      expect(play).toHaveBeenLastCalledWith(4200, 0);
+      expect(play).toHaveBeenLastCalledWith(4200, 12000);
     });
   });
 
@@ -715,6 +730,8 @@ describe('PlaylistPracticeView', () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 67 }) }) as unknown as typeof fetch;
 
     render(<PlaylistPracticeView playlist={fallbackPlaylist} onExit={() => undefined} onSelectSong={() => undefined} />);
+
+    fireEvent.click(screen.getByTestId('playlist-mode-listen'));
 
     await waitFor(() => {
       const args = useAudioPlayerSpy.mock.calls.map((call) => String(call[0]));
