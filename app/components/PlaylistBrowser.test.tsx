@@ -149,6 +149,36 @@ describe('PlaylistBrowser', () => {
     });
   });
 
+  it('filters archived playlists by event year', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ playlists: [basePlaylist] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          playlists: [
+            { ...basePlaylist, id: 'pl-2026', name: '2026 Set', eventDate: '2026-04-04', isRetired: true },
+            { ...basePlaylist, id: 'pl-2025', name: '2025 Set', eventDate: '2025-05-04', isRetired: true },
+          ],
+        }),
+      });
+
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+    await waitFor(() => expect(screen.getByTestId('playlist-row-pl-1')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('toggle-archived-button'));
+    await waitFor(() => expect(screen.getByTestId('archived-year-filters')).toBeInTheDocument());
+
+    expect(screen.getByTestId('archived-year-2026')).toHaveTextContent('2026 (1)');
+    expect(screen.getByTestId('archived-year-2025')).toHaveTextContent('2025 (1)');
+    fireEvent.click(screen.getByTestId('archived-year-2025'));
+
+    expect(screen.getByTestId('playlist-row-pl-2025')).toBeInTheDocument();
+    expect(screen.queryByTestId('playlist-row-pl-2026')).not.toBeInTheDocument();
+  });
+
   it('retired playlists render with italic style', async () => {
     mockFetch.mockResolvedValue({
       ok: true,

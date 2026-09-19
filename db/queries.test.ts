@@ -154,6 +154,20 @@ describe("practice stats helpers", () => {
     expect(summary.exerciseBreakdown.map((exercise) => exercise.exerciseId)).toEqual(["warmup-1", "warmup-2", "warmup-3"]);
     expect(summary.exerciseBreakdown[2]).toEqual(expect.objectContaining({ sessionCount: 0, totalSeconds: 0 }));
   });
+
+  it("summarizes performed playlist history by event year", async () => {
+    const { buildHistoricalPerformanceSummary } = await getQueries();
+    expect(buildHistoricalPerformanceSummary([
+      { songId: "song-1", playlistId: "playlist-2026", playlistEventDate: "2026-04-04", playlistPerformanceStatus: "Performed", playlistIsRetired: true },
+      { songId: "song-2", playlistId: "playlist-2026", playlistEventDate: "2026-04-04", playlistPerformanceStatus: "Performed", playlistIsRetired: true },
+      { songId: "song-1", playlistId: "playlist-2025", playlistEventDate: "2025-05-04", playlistPerformanceStatus: "Performed", playlistIsRetired: true },
+      { songId: "song-3", playlistId: "playlist-2025", playlistEventDate: "2025-05-04", playlistPerformanceStatus: "Performed", playlistIsRetired: true },
+      { songId: "song-4", playlistId: "not-performed", playlistEventDate: "2025-06-01", playlistPerformanceStatus: "Recorded", playlistIsRetired: true },
+    ])).toEqual([
+      { year: "2026", playlistCount: 1, songPlacements: 2, uniqueSongs: 2 },
+      { year: "2025", playlistCount: 1, songPlacements: 2, uniqueSongs: 2 },
+    ]);
+  });
 });
 
 // Lazily import queries AFTER mock is set up

@@ -369,6 +369,7 @@ export interface PracticeStatsSummary {
   playlists: {
     totalPlaylists: number;
     performedPlaylists: number;
+    performanceByYear: Array<{ year: string; playlistCount: number; songPlacements: number; uniqueSongs: number }>;
     songsInAnyPlaylist: number;
     songsNotInAnyPlaylist: number;
     totalSongPlacements: number;
@@ -4216,6 +4217,45 @@ export function buildWarmupPracticeSummary(
   };
 }
 
+export function buildHistoricalPerformanceSummary(
+  rows: Array<{
+    songId: string;
+    playlistId: string;
+    playlistEventDate: string | null;
+    playlistPerformanceStatus: string | null;
+    playlistIsRetired: boolean;
+  }>,
+): Array<{ year: string; playlistCount: number; songPlacements: number; uniqueSongs: number }> {
+  const byYear = new Map<string, { playlistIds: Set<string>; songIds: Set<string>; songPlacements: number }>();
+
+  for (const row of rows) {
+    if (!row.playlistIsRetired || row.playlistPerformanceStatus !== "Performed") {
+      continue;
+    }
+    const year = row.playlistEventDate && /^\d{4}-\d{2}-\d{2}$/.test(row.playlistEventDate)
+      ? row.playlistEventDate.slice(0, 4)
+      : "Undated";
+    const summary = byYear.get(year) ?? { playlistIds: new Set<string>(), songIds: new Set<string>(), songPlacements: 0 };
+    summary.playlistIds.add(row.playlistId);
+    summary.songIds.add(row.songId);
+    summary.songPlacements += 1;
+    byYear.set(year, summary);
+  }
+
+  return Array.from(byYear.entries())
+    .map(([year, summary]) => ({
+      year,
+      playlistCount: summary.playlistIds.size,
+      songPlacements: summary.songPlacements,
+      uniqueSongs: summary.songIds.size,
+    }))
+    .sort((a, b) => {
+      if (a.year === "Undated") return 1;
+      if (b.year === "Undated") return -1;
+      return b.year.localeCompare(a.year);
+    });
+}
+
 export async function getPracticeStatsSummary(
   userId: string = DEFAULT_QUERY_USER_ID,
   now: Date = new Date(),
@@ -4350,6 +4390,7 @@ export async function getPracticeStatsSummary(
     }))
     .sort((a, b) => b.performanceCount - a.performanceCount || a.title.localeCompare(b.title))
     .slice(0, 8);
+  const performanceByYear = buildHistoricalPerformanceSummary(playlistRows);
 
   return {
     userId,
@@ -4394,6 +4435,7 @@ export async function getPracticeStatsSummary(
     playlists: {
       totalPlaylists,
       performedPlaylists: performedPlaylistIds.size,
+      performanceByYear,
       songsInAnyPlaylist,
       songsNotInAnyPlaylist: Math.max(0, songStats.length - songsInAnyPlaylist),
       totalSongPlacements: playlistRows.length,
