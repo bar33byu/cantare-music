@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildUserScopedCacheKey, readCachedJson, writeCachedJson } from '../lib/localJsonCache';
 import { withUserIdHeader } from '../lib/userContext';
 import type { Playlist } from '../types';
@@ -24,6 +24,7 @@ type PlaylistListItem = {
 
 type PlaylistPerformanceStatus = 'Performed' | 'Recorded' | 'Absent' | 'Sick' | 'Canceled';
 type PlaylistSortMode = 'performanceDate' | 'name';
+type ArchivedYearFilter = 'all' | string;
 
 const PLAYLIST_PERFORMANCE_STATUSES: PlaylistPerformanceStatus[] = ['Performed', 'Recorded', 'Absent', 'Sick', 'Canceled'];
 
@@ -114,6 +115,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [archivedYearFilter, setArchivedYearFilter] = useState<ArchivedYearFilter>('all');
   const [sortMode, setSortMode] = useState<PlaylistSortMode>('performanceDate');
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -303,6 +305,20 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
     await fetchPlaylists(showArchived);
   };
 
+  const archivedYearOptions = useMemo(() => Array.from(new Set(
+    playlists
+      .filter((playlist) => playlist.isRetired && playlist.eventDate)
+      .map((playlist) => playlist.eventDate!.slice(0, 4))
+      .filter((year) => /^\d{4}$/.test(year))
+  )).sort((a, b) => b.localeCompare(a)), [playlists]);
+
+  const visiblePlaylists = useMemo(() => {
+    if (!showArchived || archivedYearFilter === 'all' || !archivedYearOptions.includes(archivedYearFilter)) {
+      return playlists;
+    }
+    return playlists.filter((playlist) => playlist.eventDate?.startsWith(`${archivedYearFilter}-`));
+  }, [archivedYearFilter, archivedYearOptions, playlists, showArchived]);
+
   return (
     <section data-testid="playlist-browser" className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -316,7 +332,10 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
         <button
           data-testid="toggle-archived-button"
           className="rounded border border-indigo-300 px-4 py-2 text-indigo-700"
-          onClick={() => setShowArchived((v) => !v)}
+          onClick={() => {
+            setShowArchived((v) => !v);
+            setArchivedYearFilter('all');
+          }}
         >
           {showArchived ? 'Hide Archived' : 'Show Archived'}
         </button>
@@ -333,6 +352,37 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
           </select>
         </label>
       </div>
+
+      {showArchived && archivedYearOptions.length > 0 ? (
+        <div data-testid="archived-year-filters" className="flex flex-wrap items-center gap-2" aria-label="Archived playlist years">
+          <span className="mr-1 text-sm font-medium text-gray-600">Year</span>
+          <button
+            type="button"
+            data-testid="archived-year-all"
+            aria-pressed={archivedYearFilter === 'all'}
+            onClick={() => setArchivedYearFilter('all')}
+            className={`rounded-full border px-3 py-1 text-sm font-semibold ${archivedYearFilter === 'all' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 bg-white text-gray-700 hover:border-indigo-300 hover:text-indigo-700'}`}
+          >
+            All years
+          </button>
+          {archivedYearOptions.map((year) => {
+            const yearCount = playlists.filter((playlist) => playlist.isRetired && playlist.eventDate?.startsWith(`${year}-`)).length;
+            const isSelected = archivedYearFilter === year;
+            return (
+              <button
+                key={year}
+                type="button"
+                data-testid={`archived-year-${year}`}
+                aria-pressed={isSelected}
+                onClick={() => setArchivedYearFilter(year)}
+                className={`rounded-full border px-3 py-1 text-sm font-semibold ${isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 bg-white text-gray-700 hover:border-indigo-300 hover:text-indigo-700'}`}
+              >
+                {year} <span className={isSelected ? 'text-indigo-100' : 'text-gray-500'}>({yearCount})</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {showCreate ? (
         <div data-testid="new-playlist-form" className="rounded border border-gray-200 bg-white p-4">
@@ -380,7 +430,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
         </div>
       ) : (
         <div data-testid="playlist-list" className="space-y-3">
-          {playlists.map((playlist) => {
+          {visiblePlaylists.map((playlist) => {
             const retiredClass = playlist.isRetired ? 'text-gray-500 italic' : '';
             const playlistPayload = { ...playlist, songs: playlist.songs ?? [] } as Playlist;
             const knowledgePercent = Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { Playlist } from '../types';
 import { getMasteryGradientColor } from '../lib/masteryColors';
@@ -8,7 +8,6 @@ import { sortSongs, type SongSortKey, type SongSortState } from '../lib/songSort
 import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
 import { prefetchAudioFile } from '../lib/audioPrefetch';
 import { SongReadinessIcons } from './SongReadinessIcons';
-import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import PracticeView, { type ProgressStorageMode } from './PracticeView';
 import { getGuestSongRatings } from '../lib/guestProgress';
 import { withUserIdHeader } from '../lib/userContext';
@@ -25,6 +24,7 @@ const SORT_STORAGE_KEY = 'playlist-practice-sort';
 const MODE_EXPLAINER_STORAGE_KEY_PREFIX = 'playlist-practice-mode-explainer:';
 const DEFAULT_SORT: SongSortState = { key: 'date-practiced', asc: false };
 const AUTO_DRILL_PREROLL_MS = 500;
+const AUTO_DRILL_COMPLETION_REDIRECT_DELAY_MS = 500;
 const HANDS_FREE_LABEL = 'Hands Free';
 const AUTO_DRILL_PERMISSION_WARNING =
   'Automatic audio is blocked on this device. Tap Play once to continue.';
@@ -165,13 +165,6 @@ function getLocalSongPracticeSummary(
   };
 }
 
-function formatMs(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
 interface PlaylistPracticeViewProps {
   playlist: Playlist;
   userId?: string;
@@ -218,10 +211,9 @@ export function PlaylistPracticeView({
   const [autoDrillCompletedPasses, setAutoDrillCompletedPasses] = useState<Record<string, number>>({});
   const [autoDrillRunRatings, setAutoDrillRunRatings] = useState<Record<string, MemoryRating>>({});
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
-  const [isListenPlaying, setIsListenPlaying] = useState(false);
+  const [listenAutoPlayToken, setListenAutoPlayToken] = useState(0);
+  const [listenPlaybackWarning, setListenPlaybackWarning] = useState<string | null>(null);
   const [ratingsBySongId, setRatingsBySongId] = useState<Record<string, SegmentRating[]>>({});
-  const listenStartedSongIdRef = useRef<string | null>(null);
-  const pendingListenAudioSwitchRef = useRef<{ songId: string; currentMs: number; wasPlaying: boolean } | null>(null);
   const autoDrillRunIdRef = useRef(0);
   const [autoDrillTransition, setAutoDrillTransition] = useState<'full' | 'quick' | 'previous' | 'again' | 'continuous'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
@@ -441,9 +433,6 @@ export function PlaylistPracticeView({
 
   const listenQueue = displayedSongs;
   const currentSong = listenQueue[currentSongIndex];
-  const playbackSong = mode === 'auto' ? undefined : currentSong;
-  const currentSongId = playbackSong?.id;
-  const hasCurrentSongAudio = Boolean(resolvePreferredAudioUrl(playbackSong, preferredAudioVersion));
   const findNextPlayableIndex = useCallback((startIndex: number) => {
     for (let index = Math.max(0, startIndex); index < listenQueue.length; index += 1) {
       if (resolvePreferredAudioUrl(listenQueue[index], preferredAudioVersion)) {
@@ -452,134 +441,37 @@ export function PlaylistPracticeView({
     }
     return -1;
   }, [listenQueue, preferredAudioVersion]);
-  const playbackAudioUrl = useMemo(
-    () => toPlayableAudioUrl(resolvePreferredAudioUrl(playbackSong, preferredAudioVersion)),
-    [playbackSong, preferredAudioVersion]
-  );
-  const audioPlayer = useAudioPlayer(playbackAudioUrl);
-  const {
-    endedCount: playbackEndedCount = 0,
-    pause: pauseAudio,
-    play: playAudio,
-  } = audioPlayer;
-  const requestPlay = useCallback((startMs: number, endMs: number) => {
-    playAudio(startMs, endMs);
-  }, [playAudio]);
 
   useEffect(() => {
-    if (mode !== 'listen') {
-      setIsListenPlaying(false);
-      listenStartedSongIdRef.current = null;
-      pendingListenAudioSwitchRef.current = null;
+    if (mode !== 'listen' || !currentSong || resolvePreferredAudioUrl(currentSong, preferredAudioVersion)) {
       return;
     }
 
-    setCurrentSongIndex((prev) => Math.min(prev, Math.max(listenQueue.length - 1, 0)));
-  }, [listenQueue.length, mode]);
+    const nextPlayableIndex = findNextPlayableIndex(currentSongIndex);
+    if (nextPlayableIndex >= 0 && nextPlayableIndex !== currentSongIndex) {
+      setCurrentSongIndex(nextPlayableIndex);
+    }
+  }, [currentSong, currentSongIndex, findNextPlayableIndex, mode, preferredAudioVersion]);
 
-  useLayoutEffect(() => {
-    const pendingSwitch = pendingListenAudioSwitchRef.current;
-    if (!pendingSwitch || mode !== 'listen' || currentSongId !== pendingSwitch.songId) {
-      return;
+  const listenPracticeSession = useMemo<SessionState | null>(() => {
+    if (!currentSong) {
+      return null;
     }
 
-    pendingListenAudioSwitchRef.current = null;
-    listenStartedSongIdRef.current = currentSongId;
-    audioPlayer.seek(pendingSwitch.currentMs);
-    if (pendingSwitch.wasPlaying) {
-      setIsListenPlaying(true);
-      requestPlay(pendingSwitch.currentMs, 0);
-    }
-  }, [audioPlayer, currentSongId, mode, playbackAudioUrl, requestPlay]);
-
-  useLayoutEffect(() => {
-    if (mode !== 'listen' || !isListenPlaying || !currentSongId) {
-      return;
-    }
-
-    if (pendingListenAudioSwitchRef.current?.songId === currentSongId) {
-      return;
-    }
-
-    if (!hasCurrentSongAudio) {
-      listenStartedSongIdRef.current = currentSongId;
-      const nextPlayableIndex = findNextPlayableIndex(currentSongIndex + 1);
-      if (nextPlayableIndex === -1) {
-        setIsListenPlaying(false);
-        listenStartedSongIdRef.current = null;
-      } else {
-        setCurrentSongIndex(nextPlayableIndex);
-      }
-      return;
-    }
-
-    if (listenStartedSongIdRef.current === currentSongId) {
-      return;
-    }
-
-    listenStartedSongIdRef.current = currentSongId;
-    requestPlay(0, 0);
-  }, [
-    currentSongId,
-    currentSongIndex,
-    findNextPlayableIndex,
-    hasCurrentSongAudio,
-    isListenPlaying,
-    mode,
-    requestPlay,
-  ]);
-
-  useEffect(() => {
-    if (mode !== 'listen' || !isListenPlaying || playbackEndedCount <= 0) {
-      return;
-    }
-
-    const nextPlayableIndex = findNextPlayableIndex(currentSongIndex + 1);
-    if (nextPlayableIndex === -1) {
-      setIsListenPlaying(false);
-      listenStartedSongIdRef.current = null;
-      pauseAudio();
-      return;
-    }
-
-    setCurrentSongIndex(nextPlayableIndex);
-  }, [currentSongIndex, findNextPlayableIndex, isListenPlaying, mode, pauseAudio, playbackEndedCount]);
-
-  const handleListenPlayPause = () => {
-    if (audioPlayer.isPlaying || isListenPlaying) {
-      setIsListenPlaying(false);
-      listenStartedSongIdRef.current = null;
-      pauseAudio();
-      return;
-    }
-
-    const startIndex = hasCurrentSongAudio ? currentSongIndex : findNextPlayableIndex(currentSongIndex);
-    if (startIndex === -1) {
-      return;
-    }
-
-    if (startIndex !== currentSongIndex) {
-      setCurrentSongIndex(startIndex);
-    }
-    listenStartedSongIdRef.current = null;
-    setIsListenPlaying(true);
-  };
+    return {
+      id: `playlist-listen-${playlist.id}-${currentSong.id}`,
+      songId: currentSong.id,
+      currentSongId: currentSong.id,
+      currentSegmentIndex: 0,
+      isLocked: false,
+      ratings: [],
+      startedAt: new Date().toISOString(),
+    };
+  }, [currentSong, playlist.id]);
 
   const handlePlaylistAudioPreferenceChange = (nextVersion: PreferredAudioVersion) => {
     if (nextVersion === preferredAudioVersion) {
       return;
-    }
-
-    if (mode === 'listen' && currentSongId && hasCurrentSongAudio) {
-      const currentMs = Number.isFinite(audioPlayer.currentMs) ? Math.max(0, audioPlayer.currentMs) : 0;
-      const durationMs = Number.isFinite(audioPlayer.durationMs) ? audioPlayer.durationMs : 0;
-      pendingListenAudioSwitchRef.current = {
-        songId: currentSongId,
-        currentMs: durationMs > 0 && currentMs >= durationMs ? 0 : currentMs,
-        wasPlaying: audioPlayer.isPlaying || isListenPlaying,
-      };
-      listenStartedSongIdRef.current = null;
-      pauseAudio();
     }
 
     flushSync(() => {
@@ -587,17 +479,21 @@ export function PlaylistPracticeView({
     });
   };
 
-  const handleNextSong = () => {
-    if (currentSongIndex < listenQueue.length - 1) {
-      setCurrentSongIndex(prev => prev + 1);
+  const handleListenPlaybackComplete = useCallback(() => {
+    const nextPlayableIndex = findNextPlayableIndex(currentSongIndex + 1);
+    if (nextPlayableIndex === -1) {
+      onExit();
+      return;
     }
-  };
 
-  const handlePrevSong = () => {
-    if (currentSongIndex > 0) {
-      setCurrentSongIndex(prev => prev - 1);
-    }
-  };
+    setCurrentSongIndex(nextPlayableIndex);
+    setListenPlaybackWarning(null);
+    setListenAutoPlayToken((previous) => previous + 1);
+  }, [currentSongIndex, findNextPlayableIndex, onExit]);
+
+  const handleListenPlaybackBlocked = useCallback((message: string | null) => {
+    setListenPlaybackWarning(getAutoDrillPlaybackWarning(message));
+  }, []);
 
   const stopAutoDrill = useCallback(() => {
     autoDrillRunIdRef.current += 1;
@@ -634,8 +530,17 @@ export function PlaylistPracticeView({
       setAutoDrillState('idle');
     }
 
+    if (nextMode === 'listen') {
+      setListenAutoPlayToken(0);
+      setListenPlaybackWarning(null);
+      const firstPlayableIndex = findNextPlayableIndex(currentSongIndex);
+      if (firstPlayableIndex >= 0) {
+        setCurrentSongIndex(firstPlayableIndex);
+      }
+    }
+
     setMode(nextMode);
-  }, [practiceMode, startAutoDrill]);
+  }, [currentSongIndex, findNextPlayableIndex, practiceMode, startAutoDrill]);
 
   const requestModeChange = useCallback((nextMode: PlaylistMode) => {
     if ((nextMode === 'listen' || nextMode === 'auto') && !hasSeenModeExplainer(nextMode)) {
@@ -735,6 +640,19 @@ export function PlaylistPracticeView({
   const handleNextAutoDrillSegment = useCallback(() => {
     jumpAutoDrillSegment(autoDrillIndex + 1, 'next');
   }, [autoDrillIndex, jumpAutoDrillSegment]);
+
+  const handleNextAutoDrillSong = useCallback(() => {
+    if (!currentAutoDrillItem || practiceMode !== 'auto-drill' || autoDrillState === 'idle' || autoDrillState === 'complete') {
+      return;
+    }
+
+    const nextSongIndex = autoDrillQueue.findIndex(
+      (item, index) => index > autoDrillIndex && item.song.id !== currentAutoDrillItem.song.id
+    );
+    if (nextSongIndex >= 0) {
+      jumpAutoDrillSegment(nextSongIndex, 'next');
+    }
+  }, [autoDrillIndex, autoDrillQueue, autoDrillState, currentAutoDrillItem, jumpAutoDrillSegment, practiceMode]);
 
   const handleAutoDrillPlaybackComplete = useCallback(() => {
     if (
@@ -885,6 +803,10 @@ export function PlaylistPracticeView({
     if (autoDrillState === 'complete') {
       autoDrillRunIdRef.current += 1;
       setAutoDrillMessage('Playlist complete.');
+      if (autoDrillQueue.length > 0) {
+        const redirectTimer = window.setTimeout(stopAutoDrill, AUTO_DRILL_COMPLETION_REDIRECT_DELAY_MS);
+        return () => window.clearTimeout(redirectTimer);
+      }
       return;
     }
 
@@ -933,7 +855,7 @@ export function PlaylistPracticeView({
     return () => {
       cancelled = true;
     };
-  }, [autoDrillIndex, autoDrillState, autoDrillTransition, currentAutoDrillItem, practiceMode]);
+  }, [autoDrillIndex, autoDrillQueue.length, autoDrillState, autoDrillTransition, currentAutoDrillItem, practiceMode, stopAutoDrill]);
 
   useEffect(() => {
     try {
@@ -1140,31 +1062,33 @@ export function PlaylistPracticeView({
               </button>
             ))}
           </div>
-          <div
-            className="inline-flex h-10 shrink-0 rounded border border-slate-300 bg-white p-0.5"
-            data-testid="playlist-audio-preference-toggle"
-            title="Default audio version"
-          >
-            {([
-              ['part', 'Part'],
-              ['blend', 'Blend'],
-            ] as const).map(([version, label]) => (
-              <button
-                key={version}
-                type="button"
-                data-testid={`playlist-audio-preference-${version}`}
-                aria-pressed={preferredAudioVersion === version}
-                onClick={() => handlePlaylistAudioPreferenceChange(version)}
-                className={`rounded px-2.5 text-xs font-semibold sm:px-3 sm:text-sm ${
-                  preferredAudioVersion === version
-                    ? 'bg-slate-800 text-white'
-                    : 'text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {mode !== 'listen' ? (
+            <div
+              className="inline-flex h-10 shrink-0 rounded border border-slate-300 bg-white p-0.5"
+              data-testid="playlist-audio-preference-toggle"
+              title="Default audio version"
+            >
+              {([
+                ['part', 'Part'],
+                ['blend', 'Blend'],
+              ] as const).map(([version, label]) => (
+                <button
+                  key={version}
+                  type="button"
+                  data-testid={`playlist-audio-preference-${version}`}
+                  aria-pressed={preferredAudioVersion === version}
+                  onClick={() => handlePlaylistAudioPreferenceChange(version)}
+                  className={`rounded px-2.5 text-xs font-semibold sm:px-3 sm:text-sm ${
+                    preferredAudioVersion === version
+                      ? 'bg-slate-800 text-white'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {onManage ? (
             <button
               data-testid="playlist-practice-manage"
@@ -1373,6 +1297,8 @@ export function PlaylistPracticeView({
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel={HANDS_FREE_LABEL}
+                    onBreadcrumbRootClick={stopAutoDrill}
+                    onNextSong={handleNextAutoDrillSong}
                     segmentPrerollMs={autoDrillTransition === 'continuous' ? 0 : AUTO_DRILL_PREROLL_MS}
                     preferredAudioVersion={preferredAudioVersion}
                     onPreferredAudioVersionChange={onPreferredAudioVersionChange}
@@ -1402,68 +1328,39 @@ export function PlaylistPracticeView({
       )}
 
       {mode === 'listen' && currentSong && (
-        <div className="space-y-4">
-          <div className="text-center">
-            <h3 className="text-2xl font-semibold text-gray-900">{currentSong.title}</h3>
-            {currentSong.artist && <p className="text-gray-600">{currentSong.artist}</p>}
-            <p className="text-sm text-gray-500">{currentSongIndex + 1} of {listenQueue.length}</p>
-          </div>
-          <div className="flex justify-center gap-4">
-            <button
-              type="button"
-              aria-label="Previous song"
-              onClick={handlePrevSong}
-              disabled={currentSongIndex === 0}
-              className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
+        <div data-testid="playlist-listen-full-display" className="space-y-2">
+          {listenPlaybackWarning ? (
+            <div
+              data-testid="playlist-listen-playback-warning"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800"
             >
-              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              aria-label={audioPlayer.isPlaying || isListenPlaying ? "Pause playlist" : "Play playlist"}
-              onClick={handleListenPlayPause}
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700"
-            >
-              {audioPlayer.isPlaying || isListenPlaying ? (
-                <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 3l14 9-14 9V3z" />
-                </svg>
-              )}
-            </button>
-            <button
-              type="button"
-              aria-label="Next song"
-              onClick={handleNextSong}
-              disabled={currentSongIndex === listenQueue.length - 1}
-              className="flex h-12 w-12 items-center justify-center rounded-full border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
-            >
-              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-          </div>
-          <div className="mx-auto max-w-md">
-            <div className="relative">
-              <input
-                type="range"
-                min="0"
-                max={audioPlayer.durationMs}
-                value={audioPlayer.currentMs}
-                onChange={(e) => audioPlayer.seek(Number(e.target.value))}
-                className="w-full"
-              />
-              <div className="flex justify-between text-sm text-gray-500 mt-1">
-                <span>{formatMs(audioPlayer.currentMs)}</span>
-                <span>{formatMs(audioPlayer.durationMs)}</span>
-              </div>
+              {listenPlaybackWarning}
             </div>
-          </div>
+          ) : null}
+          {listenPracticeSession ? (
+            <PracticeView
+              key={`playlist-listen-${currentSong.id}`}
+              song={currentSong}
+              userId={userId}
+              persistProgress={persistProgress}
+              progressStorage={progressStorage}
+              readOnlyDataUserId={readOnlyDataUserId}
+              sharedPlaylistToken={sharedPlaylistToken}
+              initialSession={listenPracticeSession}
+              breadcrumbRootLabel="Playlists"
+              onBreadcrumbRootClick={onExit}
+              preferredAudioVersion={preferredAudioVersion}
+              onPreferredAudioVersionChange={onPreferredAudioVersionChange}
+              collapseLyricLineBreaks={collapseLyricLineBreaks}
+              lyricSize="large"
+              playScope="song"
+              autoPlayToken={listenAutoPlayToken}
+              onSongPlaybackComplete={handleListenPlaybackComplete}
+              onAutoPlayBlocked={handleListenPlaybackBlocked}
+              practiceTimeTrackingEnabled={progressStorage !== 'none'}
+              practiceTimeSource="playlist-listen"
+            />
+          ) : null}
         </div>
       )}
 

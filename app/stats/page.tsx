@@ -266,6 +266,42 @@ export default async function StatsPage({
           </div>
         </section>
 
+        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-bold text-slate-950">Historical performances</h2>
+              <p className="mt-1 text-sm text-slate-600">Archived playlists marked Performed, grouped by event year.</p>
+            </div>
+            <p className="text-sm font-semibold text-indigo-700">{stats.playlists.performedPlaylists} performed playlists</p>
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-left text-sm">
+              <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
+                <tr>
+                  <th className="border-b border-slate-200 py-2 pr-3">Year</th>
+                  <th className="border-b border-slate-200 py-2 pr-3 text-right">Playlists</th>
+                  <th className="border-b border-slate-200 py-2 pr-3 text-right">Song placements</th>
+                  <th className="border-b border-slate-200 py-2 text-right">Unique songs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.playlists.performanceByYear.length > 0 ? stats.playlists.performanceByYear.map((year) => (
+                  <tr key={year.year}>
+                    <td className="border-b border-slate-100 py-2 pr-3 font-semibold text-slate-900">{year.year}</td>
+                    <td className="border-b border-slate-100 py-2 pr-3 text-right font-semibold tabular-nums">{year.playlistCount}</td>
+                    <td className="border-b border-slate-100 py-2 pr-3 text-right font-semibold tabular-nums">{year.songPlacements}</td>
+                    <td className="border-b border-slate-100 py-2 text-right font-semibold tabular-nums">{year.uniqueSongs}</td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td className="py-5 text-slate-600" colSpan={4}>Historical performance totals will appear after playlists are marked Performed.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <section className="mt-6 grid gap-4 xl:grid-cols-2">
           <BucketChart
             title={`Song Activity by ${range === 30 ? "Day" : range === 90 ? "Week" : "Month"}`}

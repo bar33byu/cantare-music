@@ -533,6 +533,35 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "true");
   });
 
+  it("supports contour, playlist, and next-song keyboard shortcuts", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+    const onBreadcrumbRootClick = vi.fn();
+    const onNextSong = vi.fn();
+    const song = { ...makeSong(1), pitchContourNotes: [] };
+    render(
+      <PracticeView
+        song={song}
+        initialSession={makeSession(song)}
+        onBreadcrumbRootClick={onBreadcrumbRootClick}
+        onNextSong={onNextSong}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "c" });
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-show-contour-map", "true");
+    });
+
+    fireEvent.keyDown(window, { key: "y" });
+    fireEvent.keyDown(window, { key: "p" });
+    expect(onBreadcrumbRootClick).toHaveBeenCalledTimes(1);
+    expect(onNextSong).toHaveBeenCalledTimes(1);
+  });
+
   it("forwards the requested lyric size to the segment card", async () => {
     const song = makeSong();
     render(<PracticeView song={song} initialSession={makeSession(song)} lyricSize="large" />);

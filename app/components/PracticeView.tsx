@@ -58,6 +58,7 @@ interface PracticeViewProps {
   onRatingsSaved?: (ratings: SessionState["ratings"]) => void;
   breadcrumbRootLabel?: string;
   onBreadcrumbRootClick?: () => void;
+  onNextSong?: () => void;
   onEditSongClick?: () => void;
   onOpenContourReferenceClick?: () => void;
   segmentPrerollMs?: number;
@@ -75,6 +76,7 @@ interface PracticeViewProps {
   showSegmentNavigationControls?: boolean;
   ratingKeysEnabled?: boolean;
   onSegmentPlaybackComplete?: () => void;
+  onSongPlaybackComplete?: () => void;
   onRatingSubmitted?: (rating: MemoryRating) => void;
   onAutoPlayBlocked?: (message: string | null) => void;
   onPrevSegment?: (options?: { wasPlaying: boolean }) => void;
@@ -340,6 +342,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   onRatingsSaved,
   breadcrumbRootLabel,
   onBreadcrumbRootClick,
+  onNextSong,
   onEditSongClick,
   onOpenContourReferenceClick,
   segmentPrerollMs = 500,
@@ -357,6 +360,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   showSegmentNavigationControls = !reducedControls,
   ratingKeysEnabled = true,
   onSegmentPlaybackComplete,
+  onSongPlaybackComplete,
   onRatingSubmitted,
   onAutoPlayBlocked,
   onPrevSegment,
@@ -451,6 +455,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     wasPlaying: boolean;
   } | null>(null);
   const onSegmentPlaybackCompleteRef = React.useRef(onSegmentPlaybackComplete);
+  const onSongPlaybackCompleteRef = React.useRef(onSongPlaybackComplete);
   const playScopeRef = React.useRef(playScope);
   const {
     isPlaying,
@@ -672,11 +677,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [onSegmentPlaybackComplete]);
 
   React.useEffect(() => {
+    onSongPlaybackCompleteRef.current = onSongPlaybackComplete;
+  }, [onSongPlaybackComplete]);
+
+  React.useEffect(() => {
     playbackErrorRef.current = playbackError;
   }, [playbackError]);
 
   React.useEffect(() => {
-    if (!playbackError || autoPlayToken <= 0 || playScope !== "segment") {
+    if (!playbackError || autoPlayToken <= 0) {
       return;
     }
 
@@ -1981,18 +1990,22 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       ? Math.max(0, Math.min(song.segments.length - 1, initialSession.currentSegmentIndex))
       : session.currentSegmentIndex;
 
-    if (!autoPlayOnMount || playScope !== "segment" || !currentSegment || targetIndex !== session.currentSegmentIndex) {
+    if (!autoPlayOnMount || (playScope === "segment" && (!currentSegment || targetIndex !== session.currentSegmentIndex))) {
       return;
     }
 
-    const autoPlayKey = `${activeAudioUrl}:${currentSegment.id}`;
+    const autoPlayKey = `${activeAudioUrl}:${playScope === "segment" ? currentSegment?.id ?? "" : "song"}`;
     if (autoPlayHandledKeyRef.current === autoPlayKey) {
       return;
     }
 
     autoPlayHandledKeyRef.current = autoPlayKey;
     pausedByUserRef.current = false;
-    startTapPracticePlayback(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs, {
+    const startMs = playScope === "segment" && currentSegment ? getSegmentStartWithPreroll(currentSegment.startMs) : 0;
+    const endMs = playScope === "segment" && currentSegment
+      ? currentSegment.endMs
+      : Number.POSITIVE_INFINITY;
+    startTapPracticePlayback(startMs, endMs, {
       resetTapRun: isGuidedPracticeMode,
     });
   }, [
@@ -2017,9 +2030,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (
       autoPlayToken <= 0 ||
       autoPlayTokenHandledRef.current === autoPlayToken ||
-      playScope !== "segment" ||
-      !currentSegment ||
-      targetIndex !== session.currentSegmentIndex
+      (playScope === "segment" && (!currentSegment || targetIndex !== session.currentSegmentIndex))
     ) {
       return;
     }
@@ -2027,14 +2038,21 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     autoPlayTokenHandledRef.current = autoPlayToken;
     playbackCompleteNotifiedRef.current = null;
     pausedByUserRef.current = false;
-    startTapPracticePlayback(getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs, {
+    const startMs = playScope === "segment" && currentSegment ? getSegmentStartWithPreroll(currentSegment.startMs) : 0;
+    const endMs = playScope === "segment" && currentSegment
+      ? currentSegment.endMs
+      : Number.POSITIVE_INFINITY;
+    startTapPracticePlayback(startMs, endMs, {
       resetTapRun: isGuidedPracticeMode,
     });
 
     const blockedCheckTimer = window.setTimeout(() => {
       const state = playbackStateRef.current;
       const reportedCurrentTokenError = autoPlayErrorReportedRef.current?.startsWith(`${autoPlayToken}:`) ?? false;
-      if (!state.isPlaying && state.currentSegment?.id === currentSegment.id && !reportedCurrentTokenError) {
+      const isExpectedPlaybackState = playScope === "segment"
+        ? state.currentSegment?.id === currentSegment?.id
+        : state.currentSegment !== undefined;
+      if (!state.isPlaying && isExpectedPlaybackState && !reportedCurrentTokenError) {
         onAutoPlayBlocked?.(playbackErrorRef.current ?? "Your browser blocked automatic audio. Press Play once to continue Hands Free.");
       }
     }, 1200);
@@ -2134,6 +2152,24 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         }
       }
 
+      if (!event.repeat && (event.key === "c" || event.key === "C") && hasContourReferenceData) {
+        event.preventDefault();
+        requestPracticeControlChange("contour");
+        return;
+      }
+
+      if (!event.repeat && (event.key === "y" || event.key === "Y") && onBreadcrumbRootClick) {
+        event.preventDefault();
+        onBreadcrumbRootClick();
+        return;
+      }
+
+      if (!event.repeat && (event.key === "p" || event.key === "P") && onNextSong) {
+        event.preventDefault();
+        onNextSong();
+        return;
+      }
+
       if (event.key === " ") {
         event.preventDefault();
         handleTogglePlay();
@@ -2210,7 +2246,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, isTapPracticeMode, ratingKeysEnabled, recordKeyboardTap]);
+}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleToggleLoop, handleTogglePlay, hasContourReferenceData, isTapPracticeMode, onBreadcrumbRootClick, onNextSong, ratingKeysEnabled, recordKeyboardTap, requestPracticeControlChange]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
@@ -2308,6 +2344,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     lastHandledEndedCountRef.current = endedCount;
+    if (playScope === "song") {
+      onSongPlaybackCompleteRef.current?.();
+      return;
+    }
+
     if (!onSegmentPlaybackComplete || !currentSegment || playScope !== "segment") {
       return;
     }
