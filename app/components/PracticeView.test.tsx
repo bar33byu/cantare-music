@@ -442,6 +442,8 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-top-bar")).toBeInTheDocument();
     expect(screen.getByTestId("practice-main")).toBeInTheDocument();
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-scroll-region").className).toContain("overflow-y-auto");
+    expect(screen.getByTestId("practice-main").className).toContain("min-h-dvh");
   });
 
   it("shows audio download progress while Hands Free is buffering", async () => {

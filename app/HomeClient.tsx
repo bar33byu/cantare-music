@@ -1912,35 +1912,33 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
     };
 
     return (
-      <div className="min-h-screen bg-gray-50 p-4">
+      <div className="min-h-0 bg-gray-50">
         {impersonationBanner}
         {guestClaimPrompt}
-        <div className="max-w-4xl mx-auto">
-          <PracticeView
-            song={selectedSong}
-            userId={activeUserId}
-            persistProgress={!playlistPracticeReadOnly}
-            readOnlyDataUserId={playlistPracticeReadOnly ? selectedPlaylist?.owner?.id : undefined}
-            initialSession={session}
-            breadcrumbRootLabel={breadcrumbRootLabel}
-            onBreadcrumbRootClick={handleBreadcrumbRootClick}
-            onNextSong={handleNextPlaylistSong}
-            segmentPrerollMs={userSettings.segmentPrerollMs}
-            preferredAudioVersion={userSettings.preferredAudioVersion}
-            onPreferredAudioVersionChange={(version) => {
-              setUserSettings((previous) => ({ ...previous, preferredAudioVersion: version }));
-            }}
-            onEditSongClick={() => {
-              setSongEditorReturnView("song_practice");
-              setActiveView("song_segment_editor");
-            }}
-            onOpenContourReferenceClick={() => {
-              setActiveView("song_contour_reference");
-            }}
-            practiceTimeTrackingEnabled={!playlistPracticeReadOnly}
-            practiceTimeSource="song"
-          />
-        </div>
+        <PracticeView
+          song={selectedSong}
+          userId={activeUserId}
+          persistProgress={!playlistPracticeReadOnly}
+          readOnlyDataUserId={playlistPracticeReadOnly ? selectedPlaylist?.owner?.id : undefined}
+          initialSession={session}
+          breadcrumbRootLabel={breadcrumbRootLabel}
+          onBreadcrumbRootClick={handleBreadcrumbRootClick}
+          onNextSong={handleNextPlaylistSong}
+          segmentPrerollMs={userSettings.segmentPrerollMs}
+          preferredAudioVersion={userSettings.preferredAudioVersion}
+          onPreferredAudioVersionChange={(version) => {
+            setUserSettings((previous) => ({ ...previous, preferredAudioVersion: version }));
+          }}
+          onEditSongClick={() => {
+            setSongEditorReturnView("song_practice");
+            setActiveView("song_segment_editor");
+          }}
+          onOpenContourReferenceClick={() => {
+            setActiveView("song_contour_reference");
+          }}
+          practiceTimeTrackingEnabled={!playlistPracticeReadOnly}
+          practiceTimeSource="song"
+        />
       </div>
     );
   }

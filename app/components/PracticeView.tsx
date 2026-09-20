@@ -2666,7 +2666,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   return (
     <div
       data-testid="practice-layout"
-      className="relative flex h-dvh flex-col overflow-hidden bg-gray-50"
+      className="relative flex h-dvh min-h-0 flex-col overflow-hidden bg-gray-50"
     >
       {accuracyToast?.visible ? (
         <div
@@ -2676,6 +2676,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           {accuracyToast.text}
         </div>
       ) : null}
+      <div
+        data-testid="practice-scroll-region"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
       <header ref={practiceHeaderRef} data-testid="practice-header" className={isGuidedPracticeMode ? "sr-only" : "px-4 pb-1 pt-3 md:px-8"}>
         <div className="flex items-start justify-between gap-3">
           {breadcrumbRootLabel ? (
@@ -2861,7 +2865,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         className={
           isCompactLandscapeLayout
             ? "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] grid-rows-[auto_minmax(0,1fr)] gap-3 px-3 pb-3 pt-2"
-            : "flex min-h-0 flex-1 flex-col"
+            : isGuidedPracticeMode
+              ? "flex min-h-0 flex-1 flex-col"
+              : "flex min-h-0 flex-col"
         }
       >
 
@@ -2988,7 +2994,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       <main
         data-testid="practice-main"
-        className={`flex flex-1 flex-col items-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 min-h-0 overflow-y-auto px-1 pt-0" : "px-2 pt-1 sm:px-3 sm:pt-2 md:px-8"} ${isGuidedPracticeMode ? "min-h-0 overflow-y-auto" : isCompactLandscapeLayout ? "" : "overflow-y-auto"}`}
+        className={`flex flex-1 flex-col items-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 min-h-0 overflow-y-auto px-1 pt-0" : "min-h-dvh px-2 pt-1 sm:px-3 sm:pt-2 md:px-8"} ${isGuidedPracticeMode ? "min-h-0 overflow-y-auto" : isCompactLandscapeLayout ? "" : "overflow-visible"}`}
         style={isCompactLandscapeLayout ? undefined : {
           paddingBottom: reducedControls
             ? "calc(3.75rem + env(safe-area-inset-bottom))"
@@ -3366,6 +3372,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             reducedControls={reducedControls}
           />
       </section>
+      </div>
       </div>
     </div>
   );
