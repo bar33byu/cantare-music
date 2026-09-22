@@ -198,6 +198,39 @@ describe("SegmentCard", () => {
     getComputedStyleSpy.mockRestore();
   });
 
+  it("grows short lyrics to use available card height up to their size cap", async () => {
+    const getComputedStyleSpy = vi
+      .spyOn(window, "getComputedStyle")
+      .mockImplementation((element) => ({
+        fontSize:
+          element === document.documentElement
+            ? "16px"
+            : (element as HTMLElement).style.fontSize.endsWith("px")
+              ? (element as HTMLElement).style.fontSize
+              : "32px",
+      } as CSSStyleDeclaration));
+
+    render(<SegmentCard {...defaultProps} lyricSize="large" />);
+
+    const container = screen.getByTestId("segment-lyric-scroll-container");
+    const lyric = screen.getByTestId("segment-lyric-text");
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 260 });
+    Object.defineProperty(lyric, "scrollHeight", {
+      configurable: true,
+      get: () => Number.parseFloat((lyric as HTMLElement).style.fontSize || "32") * 4,
+    });
+
+    fireEvent(window, new Event("resize"));
+
+    await waitFor(() => {
+      const fontSize = Number.parseFloat((lyric as HTMLElement).style.fontSize);
+      expect(fontSize).toBeGreaterThan(32);
+      expect(fontSize).toBeLessThanOrEqual(66);
+    });
+
+    getComputedStyleSpy.mockRestore();
+  });
+
   it("keeps lyric scrollbar visible on larger screens", () => {
     render(<SegmentCard {...defaultProps} />);
     const container = screen.getByTestId("segment-lyric-scroll-container");

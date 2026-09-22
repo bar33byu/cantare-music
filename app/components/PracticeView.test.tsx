@@ -443,7 +443,8 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-main")).toBeInTheDocument();
     expect(screen.getByTestId("practice-transport")).toBeInTheDocument();
     expect(screen.getByTestId("practice-scroll-region").className).toContain("overflow-y-auto");
-    expect(screen.getByTestId("practice-main").className).toContain("min-h-dvh");
+    expect(screen.getByTestId("practice-main").className).toContain("min-h-0");
+    expect(screen.getByTestId("practice-shell").className).toContain("flex-1");
   });
 
   it("shows audio download progress while Hands Free is buffering", async () => {
@@ -573,11 +574,21 @@ describe("PracticeView", () => {
     });
   });
 
+  it("uses the large lyric size for regular song practice by default", async () => {
+    const song = makeSong();
+    render(<PracticeView song={song} initialSession={makeSession(song)} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-lyric-size", "large");
+    });
+  });
+
   it("keeps the regular practice card stretchable and the side navigation compact on narrow screens", async () => {
     const song = makeSong();
     await renderAndWaitForRatings(song);
 
     expect(screen.getByTestId("practice-focus").className).toContain("items-stretch");
+    expect(screen.getByTestId("practice-shell").className).toContain("flex-1");
     expect(screen.getByTestId("practice-prev-segment").className).toContain("w-8");
     expect(screen.getByTestId("practice-next-segment").className).toContain("w-8");
     expect(screen.getByTestId("mock-segment-card").parentElement?.className).toContain("flex-1");
