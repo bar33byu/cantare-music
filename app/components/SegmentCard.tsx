@@ -43,6 +43,21 @@ function getAdaptiveLyricFontSize(text: string, lyricSize: "default" | "large"):
   return `clamp(${LYRIC_FONT_MIN_REM}rem, 2.7vw, 1.5rem)`;
 }
 
+function getMaximumLyricFontSizePx(text: string, lyricSize: "default" | "large", rootFontSizePx: number): number {
+  const length = text.trim().length;
+
+  if (lyricSize === "large") {
+    if (length <= 80) return 4.5 * rootFontSizePx;
+    if (length <= 180) return 3.5 * rootFontSizePx;
+    if (length <= 320) return 2.5 * rootFontSizePx;
+  }
+
+  if (length <= 80) return LYRIC_FONT_MAX_REM * rootFontSizePx;
+  if (length <= 180) return 2 * rootFontSizePx;
+  if (length <= 320) return 1.75 * rootFontSizePx;
+  return 1.5 * rootFontSizePx;
+}
+
 interface SegmentCardProps {
   segment: Segment;
   currentRating?: MemoryRating;
@@ -212,17 +227,28 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
 
       const rootFontSizePx = getRootFontSizePx();
       const minSizePx = LYRIC_FONT_MIN_REM * rootFontSizePx;
+      const maxSizePx = Math.max(
+        startingSizePx,
+        getMaximumLyricFontSizePx(lyricText, lyricSize, rootFontSizePx)
+      );
       const fitsAtCurrentSize = paragraph.scrollHeight <= availableHeight + LYRIC_FIT_TOLERANCE_PX;
 
-      if (fitsAtCurrentSize || startingSizePx <= minSizePx) {
-        const nextSize = fitsAtCurrentSize ? lyricFontSize : `${minSizePx}px`;
-        setFittedLyricFontSize((current) => (current === nextSize ? current : nextSize));
+      if (!fitsAtCurrentSize && startingSizePx <= minSizePx) {
+        setFittedLyricFontSize(`${minSizePx}px`);
         return;
       }
 
-      let low = minSizePx;
-      let high = startingSizePx;
-      let best = minSizePx;
+      let low = fitsAtCurrentSize ? startingSizePx : minSizePx;
+      let high = fitsAtCurrentSize ? maxSizePx : startingSizePx;
+      let best = fitsAtCurrentSize ? startingSizePx : minSizePx;
+
+      if (fitsAtCurrentSize) {
+        paragraph.style.fontSize = `${maxSizePx}px`;
+        if (paragraph.scrollHeight <= availableHeight + LYRIC_FIT_TOLERANCE_PX) {
+          setFittedLyricFontSize(`${maxSizePx}px`);
+          return;
+        }
+      }
 
       for (let i = 0; i < 8; i += 1) {
         const candidate = (low + high) / 2;
@@ -291,7 +317,7 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
         window.cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [hasLyrics, lyricFontSize, lyricText, lyricVisibilityMode, showContourMap]);
+  }, [hasLyrics, lyricFontSize, lyricSize, lyricText, lyricVisibilityMode, showContourMap]);
 
   React.useLayoutEffect(() => {
     const container = lyricScrollRef.current;

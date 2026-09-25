@@ -351,7 +351,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   readOnlyDataUserId,
   sharedPlaylistToken,
   collapseLyricLineBreaks = false,
-  lyricSize = "default",
+  lyricSize = "large",
   defaultLooping = false,
   playScope = "song",
   autoPlayOnMount = false,
@@ -2678,7 +2678,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       ) : null}
       <div
         data-testid="practice-scroll-region"
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
       >
       <header ref={practiceHeaderRef} data-testid="practice-header" className={isGuidedPracticeMode ? "sr-only" : "px-4 pb-1 pt-3 md:px-8"}>
         <div className="flex items-start justify-between gap-3">
@@ -2867,7 +2867,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             ? "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] grid-rows-[auto_minmax(0,1fr)] gap-3 px-3 pb-3 pt-2"
             : isGuidedPracticeMode
               ? "flex min-h-0 flex-1 flex-col"
-              : "flex min-h-0 flex-col"
+              : "flex min-h-0 flex-1 flex-col"
         }
       >
 
@@ -2994,14 +2994,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
       <main
         data-testid="practice-main"
-        className={`flex flex-1 flex-col items-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 min-h-0 overflow-y-auto px-1 pt-0" : "min-h-dvh px-2 pt-1 sm:px-3 sm:pt-2 md:px-8"} ${isGuidedPracticeMode ? "min-h-0 overflow-y-auto" : isCompactLandscapeLayout ? "" : "overflow-visible"}`}
+        className={`flex min-h-0 flex-1 flex-col items-center ${isCompactLandscapeLayout ? "col-start-1 row-span-2 row-start-1 overflow-y-auto px-1 pt-0" : "px-2 pt-1 sm:px-3 sm:pt-2 md:px-8"} ${isGuidedPracticeMode ? "overflow-y-auto" : isCompactLandscapeLayout ? "" : "overflow-visible"}`}
         style={isCompactLandscapeLayout ? undefined : {
           paddingBottom: reducedControls
             ? "calc(3.75rem + env(safe-area-inset-bottom))"
             : "calc(var(--player-height) + env(safe-area-inset-bottom) + 8px)",
         }}
       >
-        <section data-testid="practice-focus" className={`flex min-h-full w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isGuidedPracticeMode ? "max-w-4xl items-start" : isCompactLandscapeLayout ? "items-stretch max-w-none" : "items-stretch max-w-3xl"}`}>
+        <section data-testid="practice-focus" className={`flex min-h-0 flex-1 w-full justify-center gap-1.5 sm:gap-2 md:gap-3 ${isGuidedPracticeMode ? "max-w-4xl items-start" : isCompactLandscapeLayout ? "items-stretch max-w-none" : "items-stretch max-w-3xl"}`}>
           {!isGuidedPracticeMode && showSegmentNavigationControls ? (
             <button
               type="button"
