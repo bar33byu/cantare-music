@@ -445,6 +445,22 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("practice-scroll-region").className).toContain("overflow-y-auto");
     expect(screen.getByTestId("practice-main").className).toContain("min-h-0");
     expect(screen.getByTestId("practice-shell").className).toContain("flex-1");
+    expect(screen.getByTestId("practice-transport").className).not.toContain("fixed");
+    expect(screen.getByTestId("practice-transport").className).toContain("shrink-0");
+    expect(screen.getByTestId("practice-main")).toHaveStyle({ paddingBottom: "0.5rem" });
+  });
+
+  it("keeps embedded practice transports fixed while standalone practice stays in flow", async () => {
+    const song = makeSong();
+    render(<PracticeView song={song} initialSession={makeSession(song)} embedded reducedControls />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("practice-transport").className).toContain("fixed");
+    });
+
+    expect(screen.getByTestId("practice-main")).toHaveStyle({
+      paddingBottom: "calc(3.75rem + env(safe-area-inset-bottom))",
+    });
   });
 
   it("shows audio download progress while Hands Free is buffering", async () => {

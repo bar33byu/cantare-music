@@ -1288,6 +1288,7 @@ export function PlaylistPracticeView({
               {autoDrillPracticeSession ? (
                 <div className="min-h-0" data-testid="auto-drill-practice-surface">
                   <PracticeView
+                    embedded
                     song={currentAutoDrillItem.song}
                     userId={userId}
                     persistProgress={persistProgress}
