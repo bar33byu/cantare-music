@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Playlist } from '../types';
 import * as audioPlayerHook from '../hooks/useAudioPlayer';
-import { getAutoDrillPlaybackWarning, PlaylistPracticeView } from './PlaylistPracticeView';
+import { getAutoDrillPlaybackWarning, getLastPerformedLabel, PlaylistPracticeView } from './PlaylistPracticeView';
 
 const playlist: Playlist = {
   id: 'playlist-1',
@@ -65,6 +65,17 @@ describe('PlaylistPracticeView', () => {
       configurable: true,
       value: true,
     });
+  });
+
+  it('formats performed recency with the month and year', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-26T12:00:00.000Z'));
+    try {
+      expect(getLastPerformedLabel('2026-03-15T00:00:00.000Z')).toBe('Last performed 6 months ago (Mar. 2026)');
+      expect(getLastPerformedLabel(null)).toBe('Never performed');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows playlist name, knowledge score, and song cards', async () => {
@@ -242,9 +253,9 @@ describe('PlaylistPracticeView', () => {
 
     expect(screen.getByTestId('playlist-practice-song-song-2-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio missing');
     expect(screen.getByTestId('playlist-practice-song-song-2-readiness-blend-audio')).toHaveAttribute('aria-label', 'Blend audio missing');
-    expect(screen.getByTestId('playlist-practice-song-song-2-readiness-segments')).toHaveAttribute('aria-label', 'Sections present');
+    expect(screen.getByTestId('playlist-practice-song-song-2-readiness-segments')).toHaveAttribute('aria-label', 'Lyrics and sections present');
     expect(screen.getByTestId('playlist-practice-song-song-3-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio present');
-    expect(screen.getByTestId('playlist-practice-song-song-3-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
+    expect(screen.getByTestId('playlist-practice-song-song-3-readiness-segments')).toHaveAttribute('aria-label', 'Lyrics and sections missing');
   });
 
   it('shows blend-only audio separately in readiness', async () => {
@@ -281,7 +292,7 @@ describe('PlaylistPracticeView', () => {
 
     expect(screen.getByTestId('playlist-practice-song-song-1-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio missing');
     expect(screen.getByTestId('playlist-practice-song-song-1-readiness-blend-audio')).toHaveAttribute('aria-label', 'Blend audio missing');
-    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
+    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Lyrics and sections missing');
   });
 
   it('opens the full lyric player without auto-starting on mode entry', async () => {
@@ -509,11 +520,11 @@ describe('PlaylistPracticeView', () => {
     render(<PlaylistPracticeView playlist={stalePlaylist} userId="user-1" onExit={() => undefined} onSelectSong={() => undefined} />);
 
     expect(screen.getByTestId('playlist-practice-song-song-1-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio missing');
-    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
+    expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Lyrics and sections missing');
 
     await waitFor(() => {
       expect(screen.getByTestId('playlist-practice-song-song-1-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio present');
-      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections present');
+      expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Lyrics and sections present');
     });
 
     expect(cache.put).toHaveBeenCalled();

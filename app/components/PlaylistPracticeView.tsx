@@ -117,10 +117,12 @@ export function getAutoDrillPlaybackWarning(message: string | null): string | nu
   return isPlaybackPermissionBlockMessage(message) ? AUTO_DRILL_PERMISSION_WARNING : message;
 }
 
-function getLastPracticedLabel(value?: string | null): string {
-  if (!value) return 'Not practiced yet';
+const SHORT_MONTH_NAMES = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'] as const;
+
+function getRelativeTimeLabel(value?: string | null): string | null {
+  if (!value) return null;
   const ms = Date.parse(value);
-  if (Number.isNaN(ms)) return 'Not practiced yet';
+  if (Number.isNaN(ms)) return null;
   const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
   const units: Array<{ unit: Intl.RelativeTimeFormatUnit; seconds: number }> = [
     { unit: 'year', seconds: 31536000 },
@@ -132,9 +134,29 @@ function getLastPracticedLabel(value?: string | null): string {
   ];
   const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'always' });
   for (const { unit, seconds } of units) {
-    if (elapsed >= seconds) return `Last practiced ${rtf.format(-Math.floor(elapsed / seconds), unit)}`;
+    if (elapsed >= seconds) return rtf.format(-Math.floor(elapsed / seconds), unit);
   }
-  return 'Last practiced just now';
+  return 'just now';
+}
+
+function getLastPracticedLabel(value?: string | null): string {
+  const relative = getRelativeTimeLabel(value);
+  if (!relative) return 'Not practiced yet';
+  return relative.startsWith('Last practiced ') ? relative : `Last practiced ${relative}`;
+}
+
+function getMonthYearLabel(value: string): string | null {
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return null;
+  const date = new Date(ms);
+  return `${SHORT_MONTH_NAMES[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+export function getLastPerformedLabel(value?: string | null): string {
+  const relative = getRelativeTimeLabel(value);
+  const monthYear = value ? getMonthYearLabel(value) : null;
+  if (!relative || !monthYear) return 'Never performed';
+  return `Last performed ${relative} (${monthYear})`;
 }
 
 function getLocalSongPracticeSummary(
@@ -1165,6 +1187,7 @@ export function PlaylistPracticeView({
               const hasBlendAudio = Boolean(song.alternateAudioUrl?.trim());
               const hasSegments = song.segments.length > 0;
               const hasMidiContour = Boolean(song.hasMidiContour);
+              const lastPerformedLabel = getLastPerformedLabel(song.lastPerformedAt);
               return (
                 <div
                   key={song.id}
@@ -1199,7 +1222,6 @@ export function PlaylistPracticeView({
                   </div>
 
                   <h3 className="text-xl font-semibold text-gray-900 mb-2">{song.title}</h3>
-                  {song.artist ? <p className="text-gray-600 mb-2">{song.artist}</p> : null}
                   <div className="absolute bottom-3 right-3">
                     <SongReadinessIcons
                       hasPartAudio={hasPartAudio}
@@ -1209,7 +1231,17 @@ export function PlaylistPracticeView({
                       testIdPrefix={`playlist-practice-song-${song.id}`}
                     />
                   </div>
-                  <p className="text-xs text-gray-500 mt-2">{getLastPracticedLabel(song.lastPracticedAt)}</p>
+                  <div className="mt-3 space-y-1 border-t border-gray-100 pt-2 pr-32">
+                    <p className="text-xs text-gray-500" data-testid={`playlist-practice-last-practiced-${song.id}`}>
+                      {getLastPracticedLabel(song.lastPracticedAt)}
+                    </p>
+                    <p
+                      className={`text-xs ${lastPerformedLabel === 'Never performed' ? 'text-gray-500' : 'text-indigo-700'}`}
+                      data-testid={`playlist-practice-last-performed-${song.id}`}
+                    >
+                      {lastPerformedLabel}
+                    </p>
+                  </div>
                 </div>
               );
             })}

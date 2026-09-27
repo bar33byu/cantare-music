@@ -48,8 +48,10 @@ export function SongReadinessIcons({ hasPartAudio, hasBlendAudio, hasSegments, h
         testId={testIdPrefix ? `${testIdPrefix}-readiness-part-audio` : undefined}
       >
         <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-          <path d="M15 9a5 5 0 0 1 0 6" />
+          <rect x="9" y="2" width="6" height="11" rx="3" />
+          <path d="M5 10a7 7 0 0 0 14 0" />
+          <path d="M12 17v4" />
+          <path d="M8 21h8" />
         </svg>
       </ReadinessDot>
 
@@ -59,32 +61,37 @@ export function SongReadinessIcons({ hasPartAudio, hasBlendAudio, hasSegments, h
         testId={testIdPrefix ? `${testIdPrefix}-readiness-blend-audio` : undefined}
       >
         <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M4 8h5l5 8h6" />
-          <path d="M4 16h5l5-8h6" />
-          <path d="M18 5l3 3-3 3" />
-          <path d="M18 13l3 3-3 3" />
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
       </ReadinessDot>
 
       <ReadinessDot
         enabled={hasSegments}
-        title={hasSegments ? 'Sections present' : 'Sections missing'}
+        title={hasSegments ? 'Lyrics and sections present' : 'Lyrics and sections missing'}
         testId={testIdPrefix ? `${testIdPrefix}-readiness-segments` : undefined}
       >
         <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <line x1="4" y1="6" x2="20" y2="6" />
-          <line x1="4" y1="12" x2="20" y2="12" />
-          <line x1="4" y1="18" x2="20" y2="18" />
+          <path d="M5 5h2" />
+          <path d="M5 12h2" />
+          <path d="M5 19h2" />
+          <path d="M10 5h9" />
+          <path d="M10 12h9" />
+          <path d="M10 19h9" />
         </svg>
       </ReadinessDot>
 
       <ReadinessDot
         enabled={hasMidiContour}
-        title={hasMidiContour ? 'MIDI contour present' : 'MIDI contour missing'}
+        title={hasMidiContour ? 'MIDI melodic contour present' : 'MIDI melodic contour missing'}
         testId={testIdPrefix ? `${testIdPrefix}-readiness-midi-contour` : undefined}
       >
         <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M4 14c1.5 0 1.5-4 3-4s1.5 8 3 8 1.5-12 3-12 1.5 8 3 8 1.5-4 3-4" />
+          <path d="M4 19V5" />
+          <path d="M4 19h16" />
+          <path d="m6 15 3-4 3 2 4-6 2 2" />
         </svg>
       </ReadinessDot>
     </div>

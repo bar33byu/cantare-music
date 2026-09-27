@@ -83,10 +83,10 @@ describe('SongBrowser', () => {
     expect(screen.getByTestId('song-mastery-fill-song-1')).toHaveStyle({ width: '72%' });
     expect(screen.getByTestId('song-item-song-1-readiness-part-audio')).toHaveAttribute('aria-label', 'Part audio present');
     expect(screen.getByTestId('song-item-song-1-readiness-blend-audio')).toHaveAttribute('aria-label', 'Blend audio present');
-    expect(screen.getByTestId('song-item-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Sections present');
-    expect(screen.getByTestId('song-item-song-1-readiness-midi-contour')).toHaveAttribute('aria-label', 'MIDI contour present');
+    expect(screen.getByTestId('song-item-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Lyrics and sections present');
+    expect(screen.getByTestId('song-item-song-1-readiness-midi-contour')).toHaveAttribute('aria-label', 'MIDI melodic contour present');
     expect(screen.getByTestId('song-item-song-2-readiness-blend-audio')).toHaveAttribute('aria-label', 'Blend audio missing');
-    expect(screen.getByTestId('song-item-song-2-readiness-segments')).toHaveAttribute('aria-label', 'Sections missing');
+    expect(screen.getByTestId('song-item-song-2-readiness-segments')).toHaveAttribute('aria-label', 'Lyrics and sections missing');
   });
 
   it('shows error state when fetch fails', async () => {
