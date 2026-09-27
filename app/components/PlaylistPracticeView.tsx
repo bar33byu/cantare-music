@@ -1222,16 +1222,7 @@ export function PlaylistPracticeView({
                   </div>
 
                   <h3 className="text-xl font-semibold text-gray-900 mb-2">{song.title}</h3>
-                  <div className="absolute bottom-3 right-3">
-                    <SongReadinessIcons
-                      hasPartAudio={hasPartAudio}
-                      hasBlendAudio={hasBlendAudio}
-                      hasSegments={hasSegments}
-                      hasMidiContour={hasMidiContour}
-                      testIdPrefix={`playlist-practice-song-${song.id}`}
-                    />
-                  </div>
-                  <div className="mt-3 space-y-1 border-t border-gray-100 pt-2 pr-32">
+                  <div className="mt-3 space-y-1 border-t border-gray-100 pt-2">
                     <p className="text-xs text-gray-500" data-testid={`playlist-practice-last-practiced-${song.id}`}>
                       {getLastPracticedLabel(song.lastPracticedAt)}
                     </p>
@@ -1241,6 +1232,15 @@ export function PlaylistPracticeView({
                     >
                       {lastPerformedLabel}
                     </p>
+                    <div className="mt-2 flex justify-end">
+                      <SongReadinessIcons
+                        hasPartAudio={hasPartAudio}
+                        hasBlendAudio={hasBlendAudio}
+                        hasSegments={hasSegments}
+                        hasMidiContour={hasMidiContour}
+                        testIdPrefix={`playlist-practice-song-${song.id}`}
+                      />
+                    </div>
                   </div>
                 </div>
               );
