@@ -55,6 +55,7 @@ export interface Song {
   segments: Segment[];
   createdAt: string;
   lastPracticedAt?: string | null;
+  lastPerformedAt?: string | null;
   updatedAt?: string;
 }
 

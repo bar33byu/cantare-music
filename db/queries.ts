@@ -415,6 +415,7 @@ export interface PlaylistSongItem {
   position: number;
   masteryPercent: number;
   lastPracticedAt?: string | null;
+  lastPerformedAt?: string | null;
 }
 
 export interface PlaylistDetail {
@@ -1591,6 +1592,47 @@ export async function getLatestRatingTimeBySongIds(
   return bySong;
 }
 
+export async function getLastPerformedAtBySongIds(
+  songIds: string[],
+  userId: string = DEFAULT_QUERY_USER_ID
+): Promise<Record<string, string>> {
+  const uniqueSongIds = Array.from(new Set(songIds));
+  const bySong: Record<string, string> = {};
+  if (uniqueSongIds.length === 0) {
+    return bySong;
+  }
+
+  const rows = await db()
+    .select({
+      songId: playlistSongs.songId,
+      eventDate: playlists.eventDate,
+    })
+    .from(playlistSongs)
+    .innerJoin(playlists, eq(playlistSongs.playlistId, playlists.id))
+    .innerJoin(songs, eq(playlistSongs.songId, songs.id))
+    .where(and(
+      eq(playlists.userId, userId),
+      eq(playlists.performanceStatus, "Performed"),
+      eq(songs.userId, userId),
+      inArray(playlistSongs.songId, uniqueSongIds),
+    ));
+
+  for (const row of rows) {
+    if (!row.eventDate) {
+      continue;
+    }
+
+    const candidateTime = Date.parse(`${row.eventDate}T00:00:00Z`);
+    const previousDate = bySong[row.songId];
+    const previousTime = previousDate ? Date.parse(`${previousDate}T00:00:00Z`) : Number.NaN;
+    if (!Number.isNaN(candidateTime) && (Number.isNaN(previousTime) || candidateTime > previousTime)) {
+      bySong[row.songId] = row.eventDate;
+    }
+  }
+
+  return bySong;
+}
+
 async function getLatestRatingsBySegmentIds(
   segmentIds: string[],
   userId: string = DEFAULT_QUERY_USER_ID
@@ -2658,7 +2700,8 @@ export async function getAllPlaylists(
 
 export async function getPlaylistById(
   id: string,
-  userId: string = DEFAULT_QUERY_USER_ID
+  userId: string = DEFAULT_QUERY_USER_ID,
+  options: { includePerformanceHistory?: boolean } = {}
 ): Promise<PlaylistDetail | null> {
   const playlistRows = await db()
     .select()
@@ -2691,12 +2734,15 @@ export async function getPlaylistById(
     .orderBy(asc(playlistSongs.position));
 
   const songIds = linkedSongs.map((s) => s.songId);
-  const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts, midiContourEntries] = await Promise.all([
+  const [segmentsBySong, masteryBySong, latestRatingTimes, ratingCounts, midiContourEntries, lastPerformedAtBySong] = await Promise.all([
     getSegmentsBySongIds(songIds),
     getSongKnowledgeBySongIds(songIds, playlist.userId),
     getLatestRatingTimeBySongIds(songIds, playlist.userId),
     getRatingCountBySongIds(songIds, playlist.userId),
     getMidiContourStatusBySongIds(songIds, playlist.userId),
+    options.includePerformanceHistory === false
+      ? Promise.resolve({} as Record<string, string>)
+      : getLastPerformedAtBySongIds(songIds, playlist.userId),
   ]);
 
   const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow) => ({
@@ -2719,6 +2765,7 @@ export async function getPlaylistById(
       : latestRatingTimes[songRow.songId]
         ? toIso(latestRatingTimes[songRow.songId])
         : null,
+    lastPerformedAt: lastPerformedAtBySong[songRow.songId] ?? null,
   }));
 
   return {
@@ -2895,7 +2942,7 @@ export async function getPublicPlaylistById(id: string, viewerUserId?: string): 
     return null;
   }
 
-  const detail = await getPlaylistById(row.playlist.id, row.playlist.userId);
+  const detail = await getPlaylistById(row.playlist.id, row.playlist.userId, { includePerformanceHistory: false });
   if (!detail?.isPublic) {
     return null;
   }
@@ -2932,7 +2979,7 @@ export async function getSharedPlaylistByToken(token: string): Promise<SharedPla
     return null;
   }
 
-  const detail = await getPlaylistById(row.playlist.id, row.playlist.userId);
+  const detail = await getPlaylistById(row.playlist.id, row.playlist.userId, { includePerformanceHistory: false });
   if (!detail || detail.shareToken !== token) {
     return null;
   }
