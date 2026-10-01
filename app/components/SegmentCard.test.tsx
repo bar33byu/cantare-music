@@ -144,18 +144,60 @@ describe("SegmentCard", () => {
     expect(screen.queryByTestId("lock-toggle")).not.toBeInTheDocument();
   });
 
-  it("allows very long lyrics to shrink down to 0.95rem", () => {
+  it("uses a readable large size for very long lyrics", () => {
     const veryLongLyrics = "a".repeat(321);
     render(
       <SegmentCard
         {...defaultProps}
         segment={{ ...mockSegment, lyricText: veryLongLyrics }}
+        lyricSize="large"
       />
     );
 
     expect(screen.getByTestId("segment-lyric-text")).toHaveStyle({
-      fontSize: "clamp(0.95rem, 2.7vw, 1.5rem)",
+      fontSize: "clamp(1.25rem, 3vw, 2.25rem)",
     });
+  });
+
+  it("keeps large lyrics at their readable size when they overflow", async () => {
+    const getComputedStyleSpy = vi
+      .spyOn(window, "getComputedStyle")
+      .mockImplementation((element) => ({
+        fontSize:
+          element === document.documentElement
+            ? "16px"
+            : (element as HTMLElement).style.fontSize.endsWith("px")
+              ? (element as HTMLElement).style.fontSize
+              : "32px",
+      } as CSSStyleDeclaration));
+
+    render(
+      <SegmentCard
+        {...defaultProps}
+        lyricSize="large"
+        segment={{ ...mockSegment, lyricText: "This lyric wraps into enough lines that the large starting size should remain scrollable." }}
+      />
+    );
+
+    const container = screen.getByTestId("segment-lyric-scroll-container");
+    const lyric = screen.getByTestId("segment-lyric-text");
+
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(lyric, "scrollHeight", {
+      configurable: true,
+      get: () => Number.parseFloat((lyric as HTMLElement).style.fontSize || "32") * 10,
+    });
+
+    fireEvent(window, new Event("resize"));
+
+    await waitFor(() => {
+      expect(lyric.scrollHeight).toBeGreaterThan(container.clientHeight);
+    });
+
+    getComputedStyleSpy.mockRestore();
   });
 
   it("shrinks lyrics based on measured rendered height when the length bucket is too large", async () => {
