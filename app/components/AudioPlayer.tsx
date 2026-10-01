@@ -39,6 +39,7 @@ interface AudioPlayerProps {
   lyricModeLabel?: string;
   onToggleLyricMode?: () => void;
   reducedControls?: boolean;
+  showTimelineWhenReduced?: boolean;
 }
 
 type ReachabilityState = {
@@ -105,6 +106,7 @@ export function AudioPlayer({
   lyricModeLabel,
   onToggleLyricMode,
   reducedControls = false,
+  showTimelineWhenReduced = false,
 }: AudioPlayerProps) {
   const [reachability, setReachability] = useState<ReachabilityState>({
     status: "idle",
@@ -123,6 +125,8 @@ export function AudioPlayer({
     lastAckAt: "n/a",
   });
   const audioKey = useMemo(() => getAudioKeyFromPublicUrl(audioUrl), [audioUrl]);
+  const showTimeline = !reducedControls || showTimelineWhenReduced;
+  const showReducedPlaybackControls = !reducedControls || !showTimelineWhenReduced || !isPlaying;
 
   const checkReachability = useCallback(async () => {
     if (!audioKey) {
@@ -267,7 +271,7 @@ export function AudioPlayer({
           <p className="mt-0.5 break-words text-xs text-rose-700">{playbackError}</p>
         </div>
       ) : null}
-      <div className="flex items-center justify-center gap-2">
+      {showReducedPlaybackControls ? <div className="flex items-center justify-center gap-2">
         {!reducedControls ? (
           <button
             type="button"
@@ -358,10 +362,10 @@ export function AudioPlayer({
             </button>
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
-      {!reducedControls ? (
-      <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+      {showTimeline ? (
+      <div className={reducedControls ? "px-0" : "rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm"}>
         <div
           data-testid="audio-unified-timeline"
           className="relative mb-2 h-6 cursor-pointer"

@@ -103,6 +103,23 @@ describe("AudioPlayer", () => {
     expect(screen.getByTestId("audio-segment-window")).toBeInTheDocument();
   });
 
+  it("renders the full-piece timeline with reduced controls when requested", () => {
+    render(<AudioPlayer {...defaultProps} reducedControls showTimelineWhenReduced />);
+
+    expect(screen.getByTestId("audio-unified-timeline")).toBeInTheDocument();
+    expect(screen.getByTestId("audio-piece-mastery-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("audio-play-pause")).toBeInTheDocument();
+    expect(screen.queryByTestId("audio-skip-back")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("audio-loop-toggle")).not.toBeInTheDocument();
+  });
+
+  it("keeps only the timeline visible while reduced playback is active", () => {
+    render(<AudioPlayer {...defaultProps} isPlaying reducedControls showTimelineWhenReduced />);
+
+    expect(screen.getByTestId("audio-unified-timeline")).toBeInTheDocument();
+    expect(screen.queryByTestId("audio-play-pause")).not.toBeInTheDocument();
+  });
+
   it("renders all segment markers and highlights the active one", () => {
     render(
       <AudioPlayer
