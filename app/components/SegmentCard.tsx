@@ -26,6 +26,8 @@ function getAdaptiveLyricFontSize(text: string, lyricSize: "default" | "large"):
     if (length <= 320) {
       return "clamp(1.2rem, 4vw, 2.5rem)";
     }
+
+    return "clamp(1.25rem, 3vw, 2.25rem)";
   }
 
   if (length <= 80) {
@@ -50,6 +52,8 @@ function getMaximumLyricFontSizePx(text: string, lyricSize: "default" | "large",
     if (length <= 80) return 4.5 * rootFontSizePx;
     if (length <= 180) return 3.5 * rootFontSizePx;
     if (length <= 320) return 2.5 * rootFontSizePx;
+
+    return 2.25 * rootFontSizePx;
   }
 
   if (length <= 80) return LYRIC_FONT_MAX_REM * rootFontSizePx;
@@ -235,6 +239,14 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
 
       if (!fitsAtCurrentSize && startingSizePx <= minSizePx) {
         setFittedLyricFontSize(`${minSizePx}px`);
+        return;
+      }
+
+      // Large lyrics are intentionally allowed to overflow the viewport. The
+      // lyric panel follows playback, so shrinking the text until everything
+      // fits makes longer passages harder to read and disables that benefit.
+      if (!fitsAtCurrentSize && lyricSize === "large") {
+        setFittedLyricFontSize((current) => (current === lyricFontSize ? current : lyricFontSize));
         return;
       }
 

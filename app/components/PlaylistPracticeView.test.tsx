@@ -295,10 +295,16 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-1-readiness-segments')).toHaveAttribute('aria-label', 'Lyrics and sections missing');
   });
 
-  it('opens the full lyric player without auto-starting on mode entry', async () => {
+  it('opens the full lyric player, starts playback, and uses the Hands Free viewport on mode entry', async () => {
     const play = vi.fn();
     const pause = vi.fn();
     const seek = vi.fn();
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
 
     vi.spyOn(audioPlayerHook, 'useAudioPlayer').mockImplementation(() => ({
       isPlaying: false,
@@ -337,18 +343,25 @@ describe('PlaylistPracticeView', () => {
 
     fireEvent.click(screen.getByTestId('playlist-mode-listen'));
 
-    expect(play).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(play).toHaveBeenCalledWith(0, Number.POSITIVE_INFINITY);
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    });
     expect(screen.getByTestId('playlist-listen-full-display')).toBeInTheDocument();
     expect(screen.getByTestId('segment-lyric-text')).toHaveTextContent('Alpha line');
 
     fireEvent.click(screen.getByTestId('audio-play-pause'));
 
-    expect(play).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledTimes(2);
     expect(play).toHaveBeenCalledWith(0, 12000);
 
     rerender(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={() => undefined} />);
 
-    expect(play).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledTimes(2);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: originalScrollIntoView,
+    });
   });
 
   it('skips songs without audio before starting the full lyric player', async () => {
@@ -663,8 +676,9 @@ describe('PlaylistPracticeView', () => {
     );
 
     fireEvent.click(screen.getByTestId('playlist-mode-listen'));
-    fireEvent.click(screen.getByTestId('audio-play-pause'));
-    expect(play).toHaveBeenCalledWith(0, 12000);
+    await waitFor(() => {
+      expect(play).toHaveBeenCalledWith(0, Number.POSITIVE_INFINITY);
+    });
 
     view.rerender(
       <PlaylistPracticeView
@@ -1733,6 +1747,7 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('auto-drill-practice-surface').className).toContain('min-h-0');
     expect(screen.getByTestId('auto-drill-practice-surface').className).not.toContain('min-h-[720px]');
     expect(screen.getByTestId('segment-lyric-text')).toHaveStyle({ fontSize: 'clamp(2rem, 7vw, 4.5rem)' });
+    expect(screen.getByTestId('audio-unified-timeline')).toBeInTheDocument();
     expect(screen.getByTestId('practice-main')).toHaveStyle({
       paddingBottom: 'calc(3.75rem + env(safe-area-inset-bottom))',
     });

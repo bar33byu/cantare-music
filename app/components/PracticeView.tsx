@@ -3376,6 +3376,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             lyricModeLabel={LYRIC_MODE_LABELS[lyricVisibilityMode]}
             onToggleLyricMode={() => setLyricVisibilityMode((previous) => getNextLyricMode(previous))}
             reducedControls={reducedControls}
+            showTimelineWhenReduced={handsFreeViewport}
           />
       </section>
       </div>

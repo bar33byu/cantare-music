@@ -553,7 +553,7 @@ export function PlaylistPracticeView({
     }
 
     if (nextMode === 'listen') {
-      setListenAutoPlayToken(0);
+      setListenAutoPlayToken((previous) => previous + 1);
       setListenPlaybackWarning(null);
       const firstPlayableIndex = findNextPlayableIndex(currentSongIndex);
       if (firstPlayableIndex >= 0) {
@@ -1392,6 +1392,7 @@ export function PlaylistPracticeView({
               onAutoPlayBlocked={handleListenPlaybackBlocked}
               practiceTimeTrackingEnabled={progressStorage !== 'none'}
               practiceTimeSource="playlist-listen"
+              handsFreeViewport
             />
           ) : null}
         </div>

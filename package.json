@@ -1,6 +1,6 @@
 {
   "name": "cantare-music",
-  "version": "5.3.1",
+  "version": "5.4.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
