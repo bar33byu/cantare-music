@@ -282,7 +282,7 @@ describe("SegmentCard", () => {
     expect(container.className).not.toContain("md:[scrollbar-width:none]");
   });
 
-  it("finishes scrolling overflowing lyrics with ten percent of playback remaining", () => {
+  it("finishes scrolling overflowing lyrics with twenty percent of playback remaining", () => {
     const view = render(<SegmentCard {...defaultProps} playbackMs={8000} />);
     const container = screen.getByTestId("segment-lyric-scroll-container");
 
@@ -292,9 +292,9 @@ describe("SegmentCard", () => {
     });
 
     view.rerender(<SegmentCard {...defaultProps} playbackMs={16000} />);
-    expect(container.scrollTop).toBeCloseTo(222.22, 1);
+    expect(container.scrollTop).toBeCloseTo(250, 1);
 
-    view.rerender(<SegmentCard {...defaultProps} playbackMs={28800} />);
+    view.rerender(<SegmentCard {...defaultProps} playbackMs={25600} />);
     expect(container.scrollTop).toBe(400);
   });
 
