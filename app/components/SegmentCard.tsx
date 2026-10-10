@@ -9,7 +9,7 @@ const LYRIC_FONT_MAX_REM = 2.25; // 36px
 const LARGE_LYRIC_FONT_MAX_REM = 4.5; // 72px
 const LYRIC_FONT_MIN_REM = 0.95; // 15.2px
 const LYRIC_FIT_TOLERANCE_PX = 1;
-const LYRIC_SCROLL_COMPLETE_PROGRESS = 0.9;
+const LYRIC_SCROLL_COMPLETE_PROGRESS = 0.8;
 
 function getAdaptiveLyricFontSize(text: string, lyricSize: "default" | "large"): string {
   const length = text.trim().length;
