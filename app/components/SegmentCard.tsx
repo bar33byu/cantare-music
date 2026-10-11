@@ -6,7 +6,7 @@ import RatingBar from "./RatingBar";
 import { PitchContourThumbnail } from "./PitchContourThumbnail";
 
 const LYRIC_FONT_MAX_REM = 2.25; // 36px
-const LARGE_LYRIC_FONT_MAX_REM = 4.5; // 72px
+const LARGE_LYRIC_FONT_MAX_REM = 3; // 48px
 const LYRIC_FONT_MIN_REM = 0.95; // 15.2px
 const LYRIC_FIT_TOLERANCE_PX = 1;
 const LYRIC_SCROLL_COMPLETE_PROGRESS = 0.8;
@@ -16,11 +16,11 @@ function getAdaptiveLyricFontSize(text: string, lyricSize: "default" | "large"):
 
   if (lyricSize === "large") {
     if (length <= 80) {
-      return `clamp(2rem, 7vw, ${LARGE_LYRIC_FONT_MAX_REM}rem)`;
+      return `clamp(1.75rem, 5vw, ${LARGE_LYRIC_FONT_MAX_REM}rem)`;
     }
 
     if (length <= 180) {
-      return "clamp(1.6rem, 5.5vw, 3.5rem)";
+      return "clamp(1.5rem, 4.5vw, 2.75rem)";
     }
 
     if (length <= 320) {
@@ -49,8 +49,8 @@ function getMaximumLyricFontSizePx(text: string, lyricSize: "default" | "large",
   const length = text.trim().length;
 
   if (lyricSize === "large") {
-    if (length <= 80) return 4.5 * rootFontSizePx;
-    if (length <= 180) return 3.5 * rootFontSizePx;
+    if (length <= 80) return 3 * rootFontSizePx;
+    if (length <= 180) return 2.75 * rootFontSizePx;
     if (length <= 320) return 2.5 * rootFontSizePx;
 
     return 2.25 * rootFontSizePx;
