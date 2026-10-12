@@ -27,11 +27,11 @@ describe("SegmentCard", () => {
     expect(screen.getByTestId("segment-lyric-text")).toHaveTextContent("Some lyrics here");
   });
 
-  it("allows short lyrics to grow larger on spacious practice surfaces", () => {
+  it("allows short lyrics to grow modestly larger on spacious practice surfaces", () => {
     render(<SegmentCard {...defaultProps} lyricSize="large" />);
 
     expect(screen.getByTestId("segment-lyric-text")).toHaveStyle({
-      fontSize: "clamp(2rem, 7vw, 4.5rem)",
+      fontSize: "clamp(1.75rem, 5vw, 3rem)",
     });
   });
 
