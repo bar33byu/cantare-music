@@ -19,6 +19,7 @@ export const metadata: Metadata = {
   description: "Practice songs by segment, track confidence ratings, and rehearse playlists for performance.",
   icons: {
     icon: "/favicon.png",
+    apple: { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
   },
 };
 
