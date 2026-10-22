@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getOrphanedAudioKeys, deleteOrphanedAudioKey } from '../../../../db/queries';
+import { getOrphanedAudioKeys, deleteOrphanedAudioKey, isStorageKeyReferenced } from '../../../../db/queries';
 import { deleteObject } from '../../../../lib/r2';
 import { resolveEffectiveRequestUserId } from '../../_user';
 
@@ -19,10 +19,16 @@ export async function POST(request: NextRequest) {
   try {
     const userId = await resolveEffectiveRequestUserId(request);
     const rows = await getOrphanedAudioKeys(userId);
-    const results: { id: string; audioKey: string; status: 'deleted' | 'failed'; error?: string }[] = [];
+    const results: { id: string; audioKey: string; status: 'deleted' | 'failed' | 'skipped'; error?: string }[] = [];
 
     for (const row of rows) {
       try {
+        // Orphan records are retry candidates, not proof that a file is unused.
+        // Check all users' references and preserve the queue entry for later.
+        if (await isStorageKeyReferenced(row.audioKey)) {
+          results.push({ id: row.id, audioKey: row.audioKey, status: 'skipped' });
+          continue;
+        }
         await deleteObject(row.audioKey);
         await deleteOrphanedAudioKey(row.id, userId);
         results.push({ id: row.id, audioKey: row.audioKey, status: 'deleted' });
