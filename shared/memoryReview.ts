@@ -28,3 +28,18 @@ export function pendingMemoryReviewSegments(state: MemoryReviewState | null | un
   return state.segments.filter(segment => ratings.some(rating => rating.segmentId === segment.segmentId
     && Date.parse(rating.ratedAt) === Date.parse(segment.ratedAt))).map(segment => segment.segmentId);
 }
+
+
+/** A recorded rehearsal or performance completes the song-level reminder. */
+export function hasRehearsedSinceMemoryReview(
+  state: MemoryReviewState | null | undefined,
+  activity: Array<string | Date | null | undefined>,
+  now = new Date(),
+): boolean {
+  if (!state) return false;
+  const startedAt = Date.parse(state.startedAt);
+  return activity.some(value => {
+    const time = value ? new Date(value).getTime() : NaN;
+    return time >= startedAt && time <= now.getTime();
+  });
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isMemoryReviewDue, memoryReviewCutoff, pendingMemoryReviewSegments } from './memoryReview';
+import { hasRehearsedSinceMemoryReview, isMemoryReviewDue, memoryReviewCutoff, pendingMemoryReviewSegments } from './memoryReview';
 
 const now = new Date('2026-05-31T12:00:00Z');
 describe('memorization review', () => {
@@ -25,5 +25,17 @@ describe('memorization review', () => {
       { segmentId: 'a', ratedAt: now.toISOString() }, { segmentId: 'b', ratedAt: '2025-01-01' },
     ])).toEqual(['b']);
     expect(pendingMemoryReviewSegments({ ...state, undone: true }, state.segments)).toEqual([]);
+  });
+});
+
+describe('completing a memorization reminder', () => {
+  const state = { startedAt: '2026-05-01T12:00:00Z', segments: [{ segmentId: 'a', ratedAt: '2025-01-01' }] };
+  it('clears after a rehearsal or performance without changing segment ratings', () => {
+    expect(hasRehearsedSinceMemoryReview(state, ['2026-05-02'], now)).toBe(true);
+    expect(pendingMemoryReviewSegments(state, state.segments)).toEqual(['a']);
+  });
+  it('does not clear for earlier activity, opening a song, or a future event', () => {
+    expect(hasRehearsedSinceMemoryReview(state, ['2026-04-30', null, '2027-01-01'], now)).toBe(false);
+    expect(hasRehearsedSinceMemoryReview(null, ['2026-05-02'], now)).toBe(false);
   });
 });

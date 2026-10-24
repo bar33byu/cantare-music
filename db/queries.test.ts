@@ -1380,9 +1380,9 @@ describe("shared playlist refresh comparison", () => {
 describe("memorization review mutations", () => {
   const now = new Date("2026-10-24T12:00:00Z");
   const old = new Date("2026-01-01T12:00:00Z");
-  function queueStatus(state: unknown = null, rating = 5, performed: string | null = null) {
+  function queueStatus(state: unknown = null, rating = 5, performed: string | null = null, practicedAt = old) {
     // getSong; score-group song; performance history (parallel); segments; siblings; ratings.
-    selectSpy.mockReturnValueOnce(makeChain([{ id: "song-1", userId: "user-1", lastPracticedAt: old, memoryReview: state }]))
+    selectSpy.mockReturnValueOnce(makeChain([{ id: "song-1", userId: "user-1", lastPracticedAt: practicedAt, memoryReview: state }]))
       .mockReturnValueOnce(makeChain([{ id: "song-1" }]))
       .mockReturnValueOnce(makeChain(performed ? [{ songId: "song-1", eventDate: performed }] : []))
       .mockReturnValueOnce(makeChain([{ id: "seg-1", songId: "song-1" }]))
@@ -1424,4 +1424,18 @@ describe("memorization review mutations", () => {
     const query = new PgDialect().sqlToQuery(executeSpy.mock.calls[0][0]);
     expect(query.sql).toContain("(false)");
   });
+  it("clears the reminder after rehearsal on both status reload and playlist/library reads", async () => {
+    const { getMemoryReviewStatus, getMemoryReviewFlags } = await getQueries();
+    const state = { startedAt: "2026-10-23T12:00:00Z", segments: [{ segmentId: "seg-1", ratedAt: old.toISOString() }] };
+    queueStatus(state, 4, null, now);
+    const status = await getMemoryReviewStatus("song-1", "user-1", now);
+    expect(status?.needsReview).toBe(false);
+    expect(status?.reviewed).toBe(true);
+    expect(status?.ratings[0].rating).toBe(4);
+    // The list badge uses the same persisted rehearsal date after a full reload.
+    selectSpy.mockReturnValueOnce(makeChain([{ segmentId: "seg-1", ratedAt: old }]));
+    expect(await getMemoryReviewFlags([{ id: "song-1", memoryReview: state, lastPracticedAt: now }], "user-1", {}, {}, now)).toEqual({ "song-1": false });
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
 });

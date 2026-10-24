@@ -1,5 +1,5 @@
 import { alias } from "drizzle-orm/pg-core";
-import { isMemoryReviewDue, pendingMemoryReviewSegments } from "../shared/memoryReview";
+import { hasRehearsedSinceMemoryReview, isMemoryReviewDue, pendingMemoryReviewSegments } from "../shared/memoryReview";
 import { eq, asc, desc, inArray, and, count, lte, sql, isNull, isNotNull, ne, or } from "drizzle-orm";
 import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, songPracticeSessions, midiSources, midiAlignments, vocalExercises, vocalExerciseCollections, vocalExerciseCollectionItems, vocalExercisePracticeSessions, userVocalRanges } from "./schema";
@@ -4532,7 +4532,8 @@ export async function getMemoryReviewStatus(songId: string, userId: string, now 
   ]);
   const due = isMemoryReviewDue([song.lastPracticedAt, performed[songId], ...ratings.map(r => r.ratedAt)], song.memoryReview, now);
   const pendingSegmentIds = pendingMemoryReviewSegments(song.memoryReview, ratings);
-  return { due, pendingSegmentIds, needsReview: due || pendingSegmentIds.length > 0, ratings, state: song.memoryReview, lastPracticedAt: song.lastPracticedAt };
+  const reviewed = hasRehearsedSinceMemoryReview(song.memoryReview, [song.lastPracticedAt, performed[songId]], now);
+  return { due, pendingSegmentIds, reviewed, needsReview: due || (pendingSegmentIds.length > 0 && !reviewed), ratings, state: song.memoryReview, lastPracticedAt: song.lastPracticedAt };
 }
 
 export async function updateMemoryReview(songId: string, userId: string, undo = false, now = new Date()) {
@@ -4595,6 +4596,7 @@ export async function getMemoryReviewFlags(
   return Object.fromEntries(rows.map(song => {
     const due = isMemoryReviewDue([song.lastPracticedAt, latestRatings[song.id], performed[song.id]], song.memoryReview, now);
     const pending = pendingMemoryReviewSegments(song.memoryReview, ratings).length > 0;
-    return [song.id, due || pending];
+    const reviewed = hasRehearsedSinceMemoryReview(song.memoryReview, [song.lastPracticedAt, performed[song.id]], now);
+    return [song.id, due || (pending && !reviewed)];
   }));
 }

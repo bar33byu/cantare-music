@@ -410,6 +410,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [transitionDirection, setTransitionDirection] = React.useState<"forward" | "backward">("forward");
   const [transitionToken, setTransitionToken] = React.useState(0);
   const [memoryReview, setMemoryReview] = React.useState<MemoryReviewState | null>(null);
+  const [memoryReviewCompleted, setMemoryReviewCompleted] = React.useState(false);
   const [memoryReviewBusy, setMemoryReviewBusy] = React.useState(false);
   const [memoryReviewNotice, setMemoryReviewNotice] = React.useState(false);
   const [memoryReviewError, setMemoryReviewError] = React.useState<string | null>(null);
@@ -970,6 +971,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (!response.ok) {
       throw new Error(`Failed to save ratings (${response.status})`);
     }
+    setMemoryReviewCompleted(true);
+    setMemoryReviewNotice(false);
     onRatingsSaved?.(sessionRatings);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("ratingsUpdated"));
@@ -1192,6 +1195,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     memoryReviewStartedRef.current = false;
     memoryReviewCheckedRef.current = false;
     setMemoryReview(null);
+    setMemoryReviewCompleted(false);
     setMemoryReviewBusy(false);
     setMemoryReviewNotice(false);
     setMemoryReviewError(null);
@@ -1200,7 +1204,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       void request(`/api/songs/${song.id}/memory-review`).then(async response => {
         if (!response.ok) return;
         const payload = await response.json();
-        if (!cancelled && !memoryReviewStartedRef.current) setMemoryReview(payload.state ?? null);
+        if (!cancelled && !memoryReviewStartedRef.current) {
+          setMemoryReview(payload.state ?? null);
+          setMemoryReviewCompleted(Boolean(payload.reviewed));
+        }
       }).catch(() => {});
     }
     return () => { cancelled = true; };
@@ -1216,10 +1223,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     try {
       const response = await request(`/api/songs/${targetSongId}/memory-review`, { method: undo ? "DELETE" : "POST" });
       if (!response.ok) throw new Error("Review could not be saved");
-      const payload = await response.json() as { state?: MemoryReviewState; changed?: boolean; ratings?: SessionState["ratings"] };
+      const payload = await response.json() as { state?: MemoryReviewState; changed?: boolean; reviewed?: boolean; ratings?: SessionState["ratings"] };
       if (previousSongIdRef.current !== targetSongId) return;
       memoryReviewCheckedRef.current = true;
       setMemoryReview(payload.state ?? null);
+      setMemoryReviewCompleted(Boolean(payload.reviewed));
       if (typeof payload.changed === "boolean" && Array.isArray(payload.ratings)) {
         // Preserve unsaved edits, including ratings entered while offline or
         // during this request, while accepting the server's automatic reset.
@@ -1273,8 +1281,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (!accountProgressEnabled) {
       return;
     }
-    void request(`/api/songs/${song.id}/practice`, { method: "POST" }).catch(() => {
-      practicedRecordedRef.current = false;
+    const targetSongId = song.id;
+    void request(`/api/songs/${targetSongId}/practice`, { method: "POST" }).then(response => {
+      if (!response.ok) throw new Error("Could not record practice");
+      if (previousSongIdRef.current !== targetSongId) return;
+      setMemoryReviewCompleted(true);
+      setMemoryReviewNotice(false);
+      window.dispatchEvent(new Event("ratingsUpdated"));
+    }).catch(() => {
+      if (previousSongIdRef.current === targetSongId) practicedRecordedRef.current = false;
     });
   }, [accountProgressEnabled, progressStorage, request, song.id, userId]);
 
@@ -2768,7 +2783,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         data-testid="practice-scroll-region"
         className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
       >
-      {accountProgressEnabled && (memoryReviewNotice || memoryReviewError || pendingMemoryReviewSegments(memoryReview, session.ratings).length > 0) && (
+      {accountProgressEnabled && (memoryReviewError || (!memoryReviewCompleted && (memoryReviewNotice || pendingMemoryReviewSegments(memoryReview, session.ratings).length > 0))) && (
         <div role="status" className="mx-4 my-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           {memoryReviewError ? <>{memoryReviewError} <button type="button" disabled={memoryReviewBusy} className="underline" onClick={() => void applyMemoryReview(memoryReviewRetryUndoRef.current)}>Retry</button></> : <>
             {memoryReviewNotice && <p>You haven’t rehearsed or performed this song in over three months. Your 5-rated segments are now 4s so you can reconfirm them.</p>}
