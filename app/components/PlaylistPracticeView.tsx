@@ -1225,6 +1225,7 @@ export function PlaylistPracticeView({
                   <div className="mt-3 space-y-1 border-t border-gray-100 pt-2">
                     <p className="text-xs text-gray-500" data-testid={`playlist-practice-last-practiced-${song.id}`}>
                       {getLastPracticedLabel(song.lastPracticedAt)}
+                      {song.memoryReviewDue && <span className="ml-2 font-medium text-amber-700">Memorization review due</span>}
                     </p>
                     <p
                       className={`text-xs ${lastPerformedLabel === 'Never performed' ? 'text-gray-500' : 'text-indigo-700'}`}

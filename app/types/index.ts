@@ -54,6 +54,7 @@ export interface Song {
   archivedDraftRecordings?: DraftRecording[];
   segments: Segment[];
   createdAt: string;
+  memoryReviewDue?: boolean;
   lastPracticedAt?: string | null;
   lastPerformedAt?: string | null;
   updatedAt?: string;

@@ -15,6 +15,7 @@ interface SongListItem {
   audioKey?: string;
   alternateAudioKey?: string | null;
   createdAt: string;
+  memoryReviewDue?: boolean;
   lastPracticedAt?: string | null;
   masteryPercent?: number;
   hasAudio?: boolean;
@@ -404,6 +405,7 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
             <p className="text-xs text-gray-500 mt-2" data-testid={`song-last-practiced-${song.id}`}>
               {getLastPracticedLabel(song.lastPracticedAt)}
             </p>
+            {song.memoryReviewDue && <p className="mt-2 text-xs font-medium text-amber-700">Memorization review due</p>}
             {selectedSongId === song.id && (
               <div className="mt-2 text-sm text-blue-600 font-medium" data-testid={`song-selected-${song.id}`}>
                 Currently Selected

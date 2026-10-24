@@ -923,7 +923,7 @@ describe('PlaylistPracticeView', () => {
     });
     await waitFor(() => {
       expect(screen.getByTestId('playlist-practice-song-song-1')).toBeInTheDocument();
-    });
+    }, { timeout: 2000 }); // Includes the rating save, review check, and completion redirect.
     await waitFor(() => {
       expect(fetchMock.mock.calls.some((call) => {
         const [input, init] = call;
