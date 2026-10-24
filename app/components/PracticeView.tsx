@@ -2771,7 +2771,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       {accountProgressEnabled && (memoryReviewNotice || memoryReviewError || pendingMemoryReviewSegments(memoryReview, session.ratings).length > 0) && (
         <div role="status" className="mx-4 my-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           {memoryReviewError ? <>{memoryReviewError} <button type="button" disabled={memoryReviewBusy} className="underline" onClick={() => void applyMemoryReview(memoryReviewRetryUndoRef.current)}>Retry</button></> : <>
-            {memoryReviewNotice && <p>You haven’t rehearsed or performed this song in over three months. Your 5-rated segments are now 4s so you can reconfirm them.</p>}
+            {memoryReviewNotice && <p>You havenâ€™t rehearsed or performed this song in over three months. Your 5-rated segments are now 4s so you can reconfirm them.</p>}
             {pendingMemoryReviewSegments(memoryReview, session.ratings).length > 0 && <p>Memorization review due: {pendingMemoryReviewSegments(memoryReview, session.ratings).length} segments to check. Rate each after singing it from memory.</p>}
             {memoryReviewNotice && <button type="button" disabled={memoryReviewBusy} className="mt-1 underline" onClick={() => void applyMemoryReview(true)}>Undo rating reset</button>}
           </>}
