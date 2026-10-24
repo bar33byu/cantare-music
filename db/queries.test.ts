@@ -1375,3 +1375,67 @@ describe("shared playlist refresh comparison", () => {
     )).toBe(true);
   });
 });
+
+
+describe("memorization review mutations", () => {
+  const now = new Date("2026-10-24T12:00:00Z");
+  const old = new Date("2026-01-01T12:00:00Z");
+  function queueStatus(state: unknown = null, rating = 5, performed: string | null = null, practicedAt = old) {
+    // getSong; score-group song; performance history (parallel); segments; siblings; ratings.
+    selectSpy.mockReturnValueOnce(makeChain([{ id: "song-1", userId: "user-1", lastPracticedAt: practicedAt, memoryReview: state }]))
+      .mockReturnValueOnce(makeChain([{ id: "song-1" }]))
+      .mockReturnValueOnce(makeChain(performed ? [{ songId: "song-1", eventDate: performed }] : []))
+      .mockReturnValueOnce(makeChain([{ id: "seg-1", songId: "song-1" }]))
+      .mockReturnValueOnce(makeChain([{ id: "seg-1" }]))
+      .mockReturnValueOnce(makeChain([{ id: "r-1", segmentId: "seg-1", rating, ratedAt: old }]));
+  }
+  it("does not mutate ratings after a recent performance", async () => {
+    const { updateMemoryReview } = await getQueries();
+    queueStatus(null, 5, "2026-10-01");
+    expect((await updateMemoryReview("song-1", "user-1", false, now))?.changed).toBe(false);
+    expect(executeSpy).not.toHaveBeenCalled();
+  });
+  it("atomically downgrades only untouched fives without changing practice or rating timestamps", async () => {
+    const { updateMemoryReview } = await getQueries();
+    queueStatus();
+    queueStatus({ startedAt: now.toISOString(), segments: [{ segmentId: "seg-1", ratedAt: old.toISOString() }] }, 4);
+    executeSpy.mockResolvedValue({ rows: [{ id: "song-1" }] });
+    const result = await updateMemoryReview("song-1", "user-1", false, now);
+    expect(result?.changed).toBe(true);
+    expect(result?.pendingSegmentIds).toEqual(["seg-1"]);
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const query = new PgDialect().sqlToQuery(executeSpy.mock.calls[0][0]);
+    expect(query.sql).toContain("WITH claimed AS");
+    expect(query.sql).toContain("memory_review IS NOT DISTINCT FROM");
+    expect(query.sql).not.toContain("SET last_practiced_at");
+    expect(query.sql).not.toContain("SET rated_at");
+    expect(query.params).toContain(4);
+    expect(query.params).toContain(5);
+  });
+  it("does not undo a segment that has been re-rated", async () => {
+    const { updateMemoryReview } = await getQueries();
+    const state = { startedAt: now.toISOString(), segments: [{ segmentId: "seg-1", ratedAt: "2025-01-01" }] };
+    queueStatus(state, 4);
+    queueStatus({ ...state, undone: true }, 4);
+    executeSpy.mockResolvedValue({ rows: [{ id: "song-1" }] });
+    const result = await updateMemoryReview("song-1", "user-1", true, now);
+    expect(result?.changed).toBe(false);
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const query = new PgDialect().sqlToQuery(executeSpy.mock.calls[0][0]);
+    expect(query.sql).toContain("(false)");
+  });
+  it("clears the reminder after rehearsal on both status reload and playlist/library reads", async () => {
+    const { getMemoryReviewStatus, getMemoryReviewFlags } = await getQueries();
+    const state = { startedAt: "2026-10-23T12:00:00Z", segments: [{ segmentId: "seg-1", ratedAt: old.toISOString() }] };
+    queueStatus(state, 4, null, now);
+    const status = await getMemoryReviewStatus("song-1", "user-1", now);
+    expect(status?.needsReview).toBe(false);
+    expect(status?.reviewed).toBe(true);
+    expect(status?.ratings[0].rating).toBe(4);
+    // The list badge uses the same persisted rehearsal date after a full reload.
+    selectSpy.mockReturnValueOnce(makeChain([{ segmentId: "seg-1", ratedAt: old }]));
+    expect(await getMemoryReviewFlags([{ id: "song-1", memoryReview: state, lastPracticedAt: now }], "user-1", {}, {}, now)).toEqual({ "song-1": false });
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+});

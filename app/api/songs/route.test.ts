@@ -11,6 +11,8 @@ vi.mock('../../../db/index', () => ({
 
 vi.mock('../../../db/queries', () => ({
   getAllSongs: vi.fn(),
+  getMemoryReviewFlags: vi.fn().mockResolvedValue({}),
+  getLastPerformedAtBySongIds: vi.fn().mockResolvedValue({}),
   getLatestRatingTimeBySongIds: vi.fn(),
   getSongKnowledgeBySongIds: vi.fn(),
   getSegmentsBySongIds: vi.fn(),

@@ -1,6 +1,7 @@
+import { isMemoryReviewDue } from "../../../../../shared/memoryReview";
 import { NextRequest, NextResponse } from 'next/server';
 import { formatError } from "../../../_errors";
-import { getRatingsForSong, getSongById, getSegmentsBySongId, saveRatings, markSongPracticed } from '../../../../../db/queries';
+import { getRatingsForSong, getSongById, getSegmentsBySongId, saveRatings, markSongPracticed, updateMemoryReview } from '../../../../../db/queries';
 import { resolveEffectiveRequestUserId } from '../../../_user';
 
 const userScopedHeaders = {
@@ -77,12 +78,20 @@ export async function POST(
       }
     }
 
+    // Offline edits may arrive before a practice-start request. Apply any overdue
+    // reset before recording that rehearsal so it cannot erase the inactivity gap.
+    const review = !song.lastPracticedAt || isMemoryReviewDue([song.lastPracticedAt], song.memoryReview)
+      ? await updateMemoryReview(id, userId) : null;
+    const reviewState = review?.state ?? song.memoryReview;
+
     await saveRatings(
       id,
       userId,
       ratings.map((item) => ({
         segmentId: item.segmentId,
-        rating: item.rating,
+        rating: item.rating === 5 && reviewState && !reviewState.undone
+          && reviewState.segments.some(segment => segment.segmentId === item.segmentId
+            && Date.parse(segment.ratedAt) === Date.parse(item.ratedAt)) ? 4 : item.rating,
         ratedAt: new Date(item.ratedAt),
       }))
     );

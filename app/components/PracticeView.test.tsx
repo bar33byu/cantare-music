@@ -3161,14 +3161,14 @@ describe("PracticeView", () => {
 
     // Wait for initial GET — only that one call should exist
     await waitFor(() => expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/ratings`));
-    const callsAfterLoad = mockFetch.mock.calls.length;
+    expect(mockFetch.mock.calls.some(([url, init]) => String(url).endsWith("/ratings") && init?.method === "POST")).toBe(false);
 
     // Rate a segment
     fireEvent.click(screen.getByTestId("rate-btn")); // rate 4
 
     // Wait for the debounced POST (debounce is 400ms)
     await waitFor(() => {
-      expect(mockFetch.mock.calls.length).toBeGreaterThan(callsAfterLoad);
+      expect(mockFetch.mock.calls.some(([url, init]) => String(url).endsWith("/ratings") && init?.method === "POST")).toBe(true);
     }, { timeout: 2000 });
 
     expect(mockFetch).toHaveBeenLastCalledWith(
@@ -3179,4 +3179,61 @@ describe("PracticeView", () => {
       })
     );
   });
+  it("resets stale fives on playback, supports undo, and does not reset again on replay", async () => {
+    const song = makeSong(1);
+    const original = { id: "old", segmentId: song.segments[0].id, rating: 5, ratedAt: "2025-01-01T00:00:00.000Z" };
+    const state = { startedAt: "2026-10-24T12:00:00.000Z", segments: [{ segmentId: original.segmentId, ratedAt: original.ratedAt }] };
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/memory-review") && init?.method === "POST") return makeFetchResponse({ changed: true, state, ratings: [{ ...original, rating: 4 }] });
+      if (url.endsWith("/memory-review") && init?.method === "DELETE") return makeFetchResponse({ changed: true, state: { ...state, undone: true }, ratings: [original] });
+      if (url.endsWith("/ratings")) return makeFetchResponse({ ratings: [original] });
+      return makeFetchResponse({});
+    });
+    const playback = mockUseAudioPlayer.getMockImplementation()!();
+    mockUseAudioPlayer.mockImplementation(() => playback);
+    const session = makeSession(song);
+    const view = render(<PracticeView song={song} initialSession={session} />);
+    await waitFor(() => expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("5"));
+    expect(mockFetch.mock.calls.some(([url, init]) => String(url).endsWith("/memory-review") && init?.method === "POST")).toBe(false);
+    playback.isPlaying = true;
+    view.rerender(<PracticeView song={song} initialSession={session} />);
+    await waitFor(() => expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("4"));
+    expect(screen.getByText(/1 segments to check/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Undo rating reset" }));
+    await waitFor(() => expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("5"));
+    expect(screen.queryByText(/segments to check/)).not.toBeInTheDocument();
+    playback.isPlaying = false;
+    view.rerender(<PracticeView song={song} initialSession={session} />);
+    playback.isPlaying = true;
+    view.rerender(<PracticeView song={song} initialSession={session} />);
+    expect(mockFetch.mock.calls.filter(([url, init]) => String(url).endsWith("/memory-review") && init?.method === "POST")).toHaveLength(1);
+    expect(mockFetch.mock.calls.some(([url, init]) => String(url).endsWith("/ratings") && init?.method === "POST")).toBe(false);
+  });
+
+  it("dismisses the review notice as soon as a rehearsal is recorded without restoring fives", async () => {
+    const song = makeSong(1);
+    const rating = { id: "old", segmentId: song.segments[0].id, rating: 4, ratedAt: "2025-01-01T00:00:00.000Z" };
+    const state = { startedAt: new Date().toISOString(), segments: [{ segmentId: rating.segmentId, ratedAt: rating.ratedAt }] };
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/memory-review")) return makeFetchResponse({ changed: false, state, ratings: [rating], reviewed: false });
+      if (url.endsWith("/ratings")) return makeFetchResponse({ ratings: [rating] });
+      return makeFetchResponse({});
+    });
+    const playback = { ...mockUseAudioPlayer.getMockImplementation()!(), isPlaying: true };
+    mockUseAudioPlayer.mockImplementation(() => playback);
+    const session = makeSession(song);
+    const view = render(<PracticeView song={song} initialSession={session} />);
+    await waitFor(() => expect(screen.getByText(/segments to check/)).toBeInTheDocument());
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11000);
+    try {
+      playback.isPlaying = false;
+      view.rerender(<PracticeView song={song} initialSession={session} />);
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledWith(`/api/songs/${song.id}/practice`, { method: "POST" }));
+      await waitFor(() => expect(screen.queryByText(/segments to check/)).not.toBeInTheDocument());
+      expect(screen.getByTestId("mock-current-rating")).toHaveTextContent("4");
+    } finally { clock.mockRestore(); }
+  });
+
 });

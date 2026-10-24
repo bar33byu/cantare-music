@@ -1,5 +1,6 @@
 "use client";
 
+import { pendingMemoryReviewSegments, type MemoryReviewState } from "../../shared/memoryReview";
 import React, { useEffect, useMemo, useReducer } from "react";
 import { flushSync } from "react-dom";
 import { Song, MemoryRating, PitchContourNote, ContourNoteHeatStat } from "../types/index";
@@ -408,6 +409,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const latestRatingsRef = React.useRef(session.ratings);
   const [transitionDirection, setTransitionDirection] = React.useState<"forward" | "backward">("forward");
   const [transitionToken, setTransitionToken] = React.useState(0);
+  const [memoryReview, setMemoryReview] = React.useState<MemoryReviewState | null>(null);
+  const [memoryReviewCompleted, setMemoryReviewCompleted] = React.useState(false);
+  const [memoryReviewBusy, setMemoryReviewBusy] = React.useState(false);
+  const [memoryReviewNotice, setMemoryReviewNotice] = React.useState(false);
+  const [memoryReviewError, setMemoryReviewError] = React.useState<string | null>(null);
+  const memoryReviewStartedRef = React.useRef(false);
+  const memoryReviewRetryUndoRef = React.useRef(false);
+  const memoryReviewCheckedRef = React.useRef(false);
   const [ratingsLoading, setRatingsLoading] = React.useState(true);
   const [ratingsError, setRatingsError] = React.useState<string | null>(null);
   const [lyricVisibilityMode, setLyricVisibilityMode] = React.useState<LyricVisibilityMode>("full");
@@ -962,6 +971,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (!response.ok) {
       throw new Error(`Failed to save ratings (${response.status})`);
     }
+    setMemoryReviewCompleted(true);
+    setMemoryReviewNotice(false);
     onRatingsSaved?.(sessionRatings);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("ratingsUpdated"));
@@ -1180,8 +1191,82 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     playbackStartedAtRef.current = now;
   }, []);
 
+  useEffect(() => {
+    memoryReviewStartedRef.current = false;
+    memoryReviewCheckedRef.current = false;
+    setMemoryReview(null);
+    setMemoryReviewCompleted(false);
+    setMemoryReviewBusy(false);
+    setMemoryReviewNotice(false);
+    setMemoryReviewError(null);
+    let cancelled = false;
+    if (accountProgressEnabled) {
+      void request(`/api/songs/${song.id}/memory-review`).then(async response => {
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!cancelled && !memoryReviewStartedRef.current) {
+          setMemoryReview(payload.state ?? null);
+          setMemoryReviewCompleted(Boolean(payload.reviewed));
+        }
+      }).catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [accountProgressEnabled, request, song.id]);
+
+  const applyMemoryReview = React.useCallback(async (undo = false) => {
+    const targetSongId = song.id;
+    memoryReviewRetryUndoRef.current = undo;
+    let savedBefore: SessionState["ratings"] = [];
+    try { savedBefore = JSON.parse(lastSavedRatingsRef.current); } catch { /* Initial load has no saved snapshot. */ }
+    setMemoryReviewBusy(true);
+    setMemoryReviewError(null);
+    try {
+      const response = await request(`/api/songs/${targetSongId}/memory-review`, { method: undo ? "DELETE" : "POST" });
+      if (!response.ok) throw new Error("Review could not be saved");
+      const payload = await response.json() as { state?: MemoryReviewState; changed?: boolean; reviewed?: boolean; ratings?: SessionState["ratings"] };
+      if (previousSongIdRef.current !== targetSongId) return;
+      memoryReviewCheckedRef.current = true;
+      setMemoryReview(payload.state ?? null);
+      setMemoryReviewCompleted(Boolean(payload.reviewed));
+      if (typeof payload.changed === "boolean" && Array.isArray(payload.ratings)) {
+        // Preserve unsaved edits, including ratings entered while offline or
+        // during this request, while accepting the server's automatic reset.
+        const current = latestRatingsRef.current;
+        const isUnsaved = (rating: SessionState["ratings"][number]) => {
+          const saved = savedBefore.find(r => r.segmentId === rating.segmentId);
+          return !saved || saved.ratedAt !== rating.ratedAt || saved.rating !== rating.rating;
+        };
+        const merged = payload.ratings.flatMap(rating => {
+          const local = current.find(r => r.segmentId === rating.segmentId);
+          if (!local && savedBefore.some(r => r.segmentId === rating.segmentId)) return [];
+          return [local && isUnsaved(local) ? local : rating];
+        });
+        for (const rating of current) {
+          if (!merged.some(r => r.segmentId === rating.segmentId) && isUnsaved(rating)) merged.push(rating);
+        }
+        lastSavedRatingsRef.current = JSON.stringify(payload.ratings);
+        if (JSON.stringify(current) !== JSON.stringify(merged)) {
+          dispatch({ type: "LOAD_RATINGS", ratings: merged });
+          onRatingsSaved?.(merged);
+          window.dispatchEvent(new Event("ratingsUpdated"));
+        }
+      }
+      setMemoryReviewNotice(!undo && Boolean(payload.changed));
+    } catch {
+      if (previousSongIdRef.current === targetSongId) setMemoryReviewError("Could not update the memorization review. Retry when connected.");
+    } finally {
+      if (previousSongIdRef.current === targetSongId) setMemoryReviewBusy(false);
+    }
+  }, [onRatingsSaved, request, song.id]);
+
+  useEffect(() => {
+    if (!accountProgressEnabled || !isPlaying || ratingsLoading || memoryReviewStartedRef.current) return;
+    memoryReviewStartedRef.current = true;
+    void applyMemoryReview();
+  }, [accountProgressEnabled, applyMemoryReview, isPlaying, ratingsLoading]);
+
   const markPracticedIfNeeded = React.useCallback(() => {
-    if (progressStorage === "none") {
+    if (progressStorage === "none" || (accountProgressEnabled && !memoryReviewCheckedRef.current)) {
       return;
     }
     if (practicedRecordedRef.current) {
@@ -1196,8 +1281,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (!accountProgressEnabled) {
       return;
     }
-    void request(`/api/songs/${song.id}/practice`, { method: "POST" }).catch(() => {
-      practicedRecordedRef.current = false;
+    const targetSongId = song.id;
+    void request(`/api/songs/${targetSongId}/practice`, { method: "POST" }).then(response => {
+      if (!response.ok) throw new Error("Could not record practice");
+      if (previousSongIdRef.current !== targetSongId) return;
+      setMemoryReviewCompleted(true);
+      setMemoryReviewNotice(false);
+      window.dispatchEvent(new Event("ratingsUpdated"));
+    }).catch(() => {
+      if (previousSongIdRef.current === targetSongId) practicedRecordedRef.current = false;
     });
   }, [accountProgressEnabled, progressStorage, request, song.id, userId]);
 
@@ -1233,7 +1325,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [flushPlayedTime, isPlaying, markPracticedIfNeeded]);
+  }, [flushPlayedTime, isPlaying, markPracticedIfNeeded, memoryReviewBusy]);
 
   useEffect(() => {
     const measureTitleOverflow = () => {
@@ -2094,6 +2186,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (!currentSegment) {
       return;
     }
+    if (accountProgressEnabled && !memoryReviewStartedRef.current && !ratingsLoading) {
+      memoryReviewStartedRef.current = true;
+      void applyMemoryReview();
+    }
     if (rating === 1 && currentRating === 1) {
       dispatch({ type: "CLEAR_SEGMENT_RATING", segmentId: currentSegment.id });
       onRatingSubmitted?.(rating);
@@ -2101,7 +2197,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
     dispatch({ type: "RATE_SEGMENT", segmentId: currentSegment.id, rating });
     onRatingSubmitted?.(rating);
-  }, [currentSegment, currentRating, onRatingSubmitted]);
+  }, [accountProgressEnabled, applyMemoryReview, currentSegment, currentRating, onRatingSubmitted, ratingsLoading]);
 
   const handleDebugPlayTest = () => {
     setTransportDebug((previous) => ({
@@ -2549,11 +2645,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!ratingsEnabled || ratingsLoading || lastSavedRatingsRef.current === "unloaded") {
+    if (!ratingsEnabled || ratingsLoading || memoryReviewBusy || lastSavedRatingsRef.current === "unloaded") {
       return;
     }
     const snapshot = JSON.stringify(session.ratings);
     if (snapshot === lastSavedRatingsRef.current) {
+      return;
+    }
+    if (accountProgressEnabled && memoryReviewStartedRef.current && !memoryReviewCheckedRef.current) {
+      // Keep offline edits recoverable even if the review service is unavailable.
+      enqueueOfflineRatings(snapshot);
       return;
     }
     if (localProgressEnabled) {
@@ -2579,7 +2680,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         });
     }, 400);
     return () => clearTimeout(timer);
-  }, [clearOfflineRatingsQueue, enqueueOfflineRatings, localProgressEnabled, onRatingsSaved, postRatingsSnapshot, ratingsEnabled, ratingsLoading, session.ratings, song.id, userId]);
+  }, [accountProgressEnabled, memoryReviewBusy, clearOfflineRatingsQueue, enqueueOfflineRatings, localProgressEnabled, onRatingsSaved, postRatingsSnapshot, ratingsEnabled, ratingsLoading, session.ratings, song.id, userId]);
 
   useEffect(() => {
     void flushOfflineRatingsIfPossible();
@@ -2682,6 +2783,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         data-testid="practice-scroll-region"
         className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
       >
+      {accountProgressEnabled && (memoryReviewError || (!memoryReviewCompleted && (memoryReviewNotice || pendingMemoryReviewSegments(memoryReview, session.ratings).length > 0))) && (
+        <div role="status" className="mx-4 my-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          {memoryReviewError ? <>{memoryReviewError} <button type="button" disabled={memoryReviewBusy} className="underline" onClick={() => void applyMemoryReview(memoryReviewRetryUndoRef.current)}>Retry</button></> : <>
+            {memoryReviewNotice && <p>You haven’t rehearsed or performed this song in over three months. Your 5-rated segments are now 4s so you can reconfirm them.</p>}
+            {pendingMemoryReviewSegments(memoryReview, session.ratings).length > 0 && <p>Memorization review due: {pendingMemoryReviewSegments(memoryReview, session.ratings).length} segments to check. Rate each after singing it from memory.</p>}
+            {memoryReviewNotice && <button type="button" disabled={memoryReviewBusy} className="mt-1 underline" onClick={() => void applyMemoryReview(true)}>Undo rating reset</button>}
+          </>}
+        </div>
+      )}
       <header ref={practiceHeaderRef} data-testid="practice-header" className={isGuidedPracticeMode ? "sr-only" : "px-4 pb-1 pt-3 md:px-8"}>
         <div className="flex items-start justify-between gap-3">
           {breadcrumbRootLabel ? (

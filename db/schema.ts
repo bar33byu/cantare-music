@@ -147,6 +147,7 @@ export const songs = pgTable(
       .default(sql`'[]'::jsonb`),
     createdAt: timestamp("created_at").defaultNow(),
     lastPracticedAt: timestamp("last_practiced_at"),
+    memoryReview: jsonb("memory_review").$type<import("../shared/memoryReview").MemoryReviewState>(),
   },
   (table) => ({
     userIdIdx: index("idx_songs_user_id").on(table.userId),
@@ -479,8 +480,9 @@ export type UserRow = InferSelectModel<typeof users>;
 export type MagicLinkTokenRow = InferSelectModel<typeof magicLinkTokens>;
 export type UserSessionRow = InferSelectModel<typeof userSessions>;
 export type AuditLogRow = InferSelectModel<typeof auditLogs>;
-export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId" | "audioTrimStartMs" | "audioTrimEndMs"> & {
+export type SongRow = Omit<InferSelectModel<typeof songs>, "sourceSongId" | "audioTrimStartMs" | "audioTrimEndMs" | "memoryReview"> & {
   sourceSongId?: string | null;
+  memoryReview?: import("../shared/memoryReview").MemoryReviewState | null;
   audioTrimStartMs?: number | null;
   audioTrimEndMs?: number | null;
 };

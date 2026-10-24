@@ -1,3 +1,5 @@
+import { alias } from "drizzle-orm/pg-core";
+import { hasRehearsedSinceMemoryReview, isMemoryReviewDue, pendingMemoryReviewSegments } from "../shared/memoryReview";
 import { eq, asc, desc, inArray, and, count, lte, sql, isNull, isNotNull, ne, or } from "drizzle-orm";
 import { db } from "./index";
 import { songs, segments, practiceRatings, playlists, playlistSongs, orphanedAudioKeys, draftRecordings, users, magicLinkTokens, userSessions, auditLogs, tapPracticeSessions, tapPracticeTaps, songPracticeSessions, midiSources, midiAlignments, vocalExercises, vocalExerciseCollections, vocalExerciseCollectionItems, vocalExercisePracticeSessions, userVocalRanges } from "./schema";
@@ -414,6 +416,7 @@ export interface PlaylistSongItem {
   updatedAt?: string;
   position: number;
   masteryPercent: number;
+  memoryReviewDue?: boolean;
   lastPracticedAt?: string | null;
   lastPerformedAt?: string | null;
 }
@@ -2726,6 +2729,7 @@ export async function getPlaylistById(
       pitchContourNotes: songs.pitchContourNotes,
       createdAt: songs.createdAt,
       lastPracticedAt: songs.lastPracticedAt,
+      memoryReview: songs.memoryReview,
       sourceSongId: songs.sourceSongId,
     })
     .from(playlistSongs)
@@ -2745,8 +2749,11 @@ export async function getPlaylistById(
       : getLastPerformedAtBySongIds(songIds, playlist.userId),
   ]);
 
+  const reviewBySong = await getMemoryReviewFlags(linkedSongs.map(song => ({ ...song, id: song.songId })), playlist.userId, latestRatingTimes, lastPerformedAtBySong);
+
   const songsWithSegments: PlaylistSongItem[] = linkedSongs.map((songRow) => ({
     id: songRow.songId,
+    memoryReviewDue: reviewBySong[songRow.songId],
     sourceSongId: songRow.sourceSongId,
     title: songRow.title,
     artist: songRow.artist ?? undefined,
@@ -4513,4 +4520,83 @@ export async function saveUserVocalRange(userId: string, range: PersistedVocalRa
     })
     .returning({ low: userVocalRanges.lowMidi, high: userVocalRanges.highMidi });
   return rows[0];
+}
+
+
+/** Review mutations preserve ratedAt and lastPracticedAt: they are not rehearsals. */
+export async function getMemoryReviewStatus(songId: string, userId: string, now = new Date()) {
+  const song = await getSongById(songId, userId);
+  if (!song) return null;
+  const [ratings, performed] = await Promise.all([
+    getRatingsForSong(songId, userId), getLastPerformedAtBySongIds([songId], userId),
+  ]);
+  const due = isMemoryReviewDue([song.lastPracticedAt, performed[songId], ...ratings.map(r => r.ratedAt)], song.memoryReview, now);
+  const pendingSegmentIds = pendingMemoryReviewSegments(song.memoryReview, ratings);
+  const reviewed = hasRehearsedSinceMemoryReview(song.memoryReview, [song.lastPracticedAt, performed[songId]], now);
+  return { due, pendingSegmentIds, reviewed, needsReview: due || (pendingSegmentIds.length > 0 && !reviewed), ratings, state: song.memoryReview, lastPracticedAt: song.lastPracticedAt };
+}
+
+export async function updateMemoryReview(songId: string, userId: string, undo = false, now = new Date()) {
+  const status = await getMemoryReviewStatus(songId, userId, now);
+  if (!status) return null;
+  if (undo ? !status.state || status.state.undone : !status.due) return { ...status, changed: false };
+  const candidates = status.ratings.filter(r => undo
+    ? r.rating === 4 && status.pendingSegmentIds.includes(r.segmentId)
+    : r.rating === 5);
+  const state = undo ? { ...status.state!, undone: true } : {
+    startedAt: now.toISOString(),
+    segments: [...candidates.map(r => ({ segmentId: r.segmentId, ratedAt: r.ratedAt })),
+      ...(status.state?.segments.filter(r => status.pendingSegmentIds.includes(r.segmentId)) ?? [])],
+  };
+  // Claim this cycle and change only untouched rating rows in one atomic statement.
+  // A second tab with the same state cannot claim the cycle again.
+  const oldState = status.state ? sql`${JSON.stringify(status.state)}::jsonb` : sql`NULL::jsonb`;
+  const matches = candidates.length ? sql.join(candidates.map(r =>
+    sql`(practice_ratings.id = ${r.id} AND practice_ratings.rated_at = ${r.ratedAt}::timestamp)`), sql` OR `) : sql`false`;
+  const result = await db().execute(sql`
+    WITH claimed AS (
+      UPDATE songs SET memory_review = ${JSON.stringify(state)}::jsonb
+      WHERE id = ${songId} AND user_id = ${userId}
+        AND memory_review IS NOT DISTINCT FROM ${oldState}
+        AND last_practiced_at IS NOT DISTINCT FROM ${status.lastPracticedAt?.toISOString() ?? null}::timestamp
+      RETURNING id
+    ), changed AS (
+      UPDATE practice_ratings SET rating = ${undo ? 5 : 4}
+      WHERE user_id = ${userId} AND rating = ${undo ? 4 : 5}
+        AND (${matches}) AND EXISTS (SELECT 1 FROM claimed)
+      RETURNING id
+    ) SELECT id FROM claimed
+  `);
+  const refreshed = await getMemoryReviewStatus(songId, userId, now);
+  return { ...refreshed!, changed: result.rows.length > 0 && candidates.length > 0 };
+}
+
+
+export async function getMemoryReviewFlags(
+  rows: Array<{ id: string; lastPracticedAt?: Date | string | null; memoryReview?: import('../shared/memoryReview').MemoryReviewState | null }>,
+  userId: string, latestRatings: Record<string, Date>, performed: Record<string, string>, now = new Date(),
+): Promise<Record<string, boolean>> {
+  const pendingIds = Array.from(new Set(rows.flatMap(song => song.memoryReview && !song.memoryReview.undone
+    ? song.memoryReview.segments.map(segment => segment.segmentId) : [])));
+  const reviewSegments = alias(segments, "review_segments");
+  // One query for pending segments across the library, including imported copies
+  // that share score identities. Never treat an automatic reset as a new rating.
+  const pendingRatings = pendingIds.length ? await db().select({
+    segmentId: reviewSegments.id, ratedAt: practiceRatings.ratedAt,
+  }).from(practiceRatings)
+    .innerJoin(segments, eq(practiceRatings.segmentId, segments.id))
+    .innerJoin(reviewSegments, sql`COALESCE(${reviewSegments.sourceSegmentId}, ${reviewSegments.id}) = COALESCE(${segments.sourceSegmentId}, ${segments.id})`)
+    .where(and(eq(practiceRatings.userId, userId), inArray(reviewSegments.id, pendingIds)))
+    .orderBy(desc(practiceRatings.ratedAt)) : [];
+  const latestBySegment = new Map<string, { segmentId: string; ratedAt: string }>();
+  for (const rating of pendingRatings) {
+    if (!latestBySegment.has(rating.segmentId)) latestBySegment.set(rating.segmentId, { ...rating, ratedAt: rating.ratedAt.toISOString() });
+  }
+  const ratings = Array.from(latestBySegment.values());
+  return Object.fromEntries(rows.map(song => {
+    const due = isMemoryReviewDue([song.lastPracticedAt, latestRatings[song.id], performed[song.id]], song.memoryReview, now);
+    const pending = pendingMemoryReviewSegments(song.memoryReview, ratings).length > 0;
+    const reviewed = hasRehearsedSinceMemoryReview(song.memoryReview, [song.lastPracticedAt, performed[song.id]], now);
+    return [song.id, due || (pending && !reviewed)];
+  }));
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { formatError } from "../_errors";
-import { getAllSongs, createSong, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getMidiContourStatusBySongIds, getSegmentsBySongIds } from '../../../db/queries';
+import { getAllSongs, createSong, getMemoryReviewFlags, getLastPerformedAtBySongIds, getLatestRatingTimeBySongIds, getSongKnowledgeBySongIds, getMidiContourStatusBySongIds, getSegmentsBySongIds } from '../../../db/queries';
 import { resolveEffectiveRequestUserId } from '../_user';
 
 function toIsoString(value: unknown): string | null {
@@ -35,9 +35,13 @@ export async function GET(request: NextRequest) {
       getMidiContourStatusBySongIds(songIds, userId),
     ]);
 
+    const performed = await getLastPerformedAtBySongIds(songIds, userId);
+    const reviewBySong = await getMemoryReviewFlags(songs, userId, ratingFallbackBySongId, performed);
+
     return NextResponse.json(
       songs.map((song) => ({
         ...song,
+        memoryReviewDue: reviewBySong[song.id],
         pitchContourNotes: [],
         createdAt: toIsoString(song.createdAt) ?? new Date(0).toISOString(),
         lastPracticedAt: toIsoString(song.lastPracticedAt ?? ratingFallbackBySongId[song.id] ?? null),
