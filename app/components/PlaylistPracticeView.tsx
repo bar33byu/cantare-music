@@ -222,6 +222,8 @@ export function PlaylistPracticeView({
   const [playlistScore, setPlaylistScore] = useState(0);
   const [sort, setSort] = useState<SongSortState>(DEFAULT_SORT);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
+  const songCardsRef = useRef(new Map<string, HTMLDivElement>());
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const [mode, setMode] = useState<PlaylistMode>('practice');
   const [practiceMode, setPracticeMode] = useState<PracticeMode>('manual');
@@ -452,6 +454,35 @@ export function PlaylistPracticeView({
       startedAt: new Date().toISOString(),
     };
   }, [currentAutoDrillItem, playlist.id, ratingsBySongId]);
+
+  const selectedSong = displayedSongs.find((song) => song.id === selectedSongId) ?? displayedSongs[0];
+
+  useEffect(() => {
+    if (mode !== 'practice' || modeExplainer || showSortMenu) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (
+        target.isContentEditable || target.closest('input, textarea, select, [role="dialog"]')
+      )) return;
+      const key = event.key.toLowerCase();
+      if (!selectedSong || !['j', 'k', 'l'].includes(key)) return;
+      event.preventDefault();
+      if (key === 'k') {
+        onSelectSong(selectedSong);
+        return;
+      }
+      const index = displayedSongs.findIndex((song) => song.id === selectedSong.id);
+      const nextIndex = Math.max(0, Math.min(displayedSongs.length - 1, index + (key === 'j' ? -1 : 1)));
+      const nextSong = displayedSongs[nextIndex];
+      setSelectedSongId(nextSong.id);
+      songCardsRef.current.get(nextSong.id)?.focus({ preventScroll: true });
+      songCardsRef.current.get(nextSong.id)?.scrollIntoView?.({ block: 'nearest' });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [displayedSongs, mode, modeExplainer, onSelectSong, selectedSong, showSortMenu]);
 
   const listenQueue = displayedSongs;
   const currentSong = listenQueue[currentSongIndex];
@@ -1178,6 +1209,7 @@ export function PlaylistPracticeView({
             />
           </div>
 
+          <p className="text-xs text-gray-500">J / L: previous / next song · K: practice selected song</p>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="playlist-song-grid">
             {displayedSongs.map((song) => {
               const mastery = Math.max(0, Math.min(100, Math.round(song.masteryPercent ?? 0)));
@@ -1192,7 +1224,19 @@ export function PlaylistPracticeView({
                 <div
                   key={song.id}
                   data-testid={`playlist-practice-song-${song.id}`}
-                  className="relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent"
+                  ref={(node) => { if (node) songCardsRef.current.set(song.id, node); else songCardsRef.current.delete(song.id); }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Practice ${song.title}`}
+                  aria-current={selectedSong?.id === song.id ? 'true' : undefined}
+                  onFocus={() => setSelectedSongId(song.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelectSong(song);
+                    }
+                  }}
+                  className={`relative bg-white p-6 pt-10 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 ${selectedSong?.id === song.id ? 'border-indigo-500' : 'border-transparent'}`}
                   onClick={() => onSelectSong(song)}
                 >
                   <div className="absolute inset-x-0 top-0 h-6 rounded-t-lg border-b border-black/5 bg-gray-100">

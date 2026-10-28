@@ -67,6 +67,30 @@ describe('PlaylistPracticeView', () => {
     });
   });
 
+  it('selects songs in displayed order with J/L and opens with K', () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ score: 0 }) }) as unknown as typeof fetch;
+    const onSelectSong = vi.fn();
+    render(<PlaylistPracticeView playlist={playlist} onExit={() => undefined} onSelectSong={onSelectSong} revalidatePlaylist={false} />);
+    const first = screen.getByTestId('playlist-practice-song-song-1');
+    const second = screen.getByTestId('playlist-practice-song-song-2');
+    expect(first).toHaveAttribute('aria-current', 'true');
+    fireEvent.keyDown(window, { key: 'j' });
+    expect(first).toHaveAttribute('aria-current', 'true');
+    fireEvent.keyDown(window, { key: 'l', ctrlKey: true });
+    expect(first).toHaveAttribute('aria-current', 'true');
+    fireEvent.keyDown(window, { key: 'l' });
+    expect(second).toHaveAttribute('aria-current', 'true');
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(window, { key: 'l' });
+    fireEvent.keyDown(window, { key: 'k', repeat: true });
+    expect(onSelectSong).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'k' });
+    expect(onSelectSong).toHaveBeenLastCalledWith(playlist.songs[1]);
+    fireEvent.keyDown(window, { key: 'j' });
+    fireEvent.keyDown(window, { key: 'k' });
+    expect(onSelectSong).toHaveBeenLastCalledWith(playlist.songs[0]);
+  });
+
   it('formats performed recency with the month and year', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-26T12:00:00.000Z'));
