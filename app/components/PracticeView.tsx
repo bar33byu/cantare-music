@@ -2268,6 +2268,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
 
+      if (!event.repeat && event.key.toLowerCase() === "i") {
+        event.preventDefault();
+        setLyricVisibilityMode(getNextLyricMode);
+        return;
+      }
+
       if (event.key === " ") {
         event.preventDefault();
         handleTogglePlay();

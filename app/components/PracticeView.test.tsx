@@ -1044,6 +1044,24 @@ describe("PracticeView", () => {
     expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-lyric-mode", "full");
   });
 
+  it("cycles lyrics with I and ignores repeats, modifiers, and text fields", async () => {
+    await renderAndWaitForRatings(makeSong());
+    const card = screen.getByTestId("mock-segment-card");
+    fireEvent.keyDown(window, { key: "i", repeat: true });
+    fireEvent.keyDown(window, { key: "i", ctrlKey: true });
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: "i" });
+    input.remove();
+    expect(card).toHaveAttribute("data-lyric-mode", "full");
+    fireEvent.keyDown(window, { key: "i" });
+    expect(card).toHaveAttribute("data-lyric-mode", "hint");
+    fireEvent.keyDown(window, { key: "I" });
+    expect(card).toHaveAttribute("data-lyric-mode", "hidden");
+    fireEvent.keyDown(window, { key: "i" });
+    expect(card).toHaveAttribute("data-lyric-mode", "full");
+  });
+
   it("renders breadcrumb in the title position when provided", async () => {
     const song = makeSong();
     const onBreadcrumbRootClick = vi.fn();

@@ -355,6 +355,8 @@ export function AudioPlayer({
               type="button"
               data-testid="audio-lyric-visibility-toggle"
               aria-label="Toggle lyric visibility"
+              aria-keyshortcuts="i"
+              title="Cycle lyric visibility (I)"
               onClick={onToggleLyricMode}
               className="h-9 rounded-xl border border-slate-300 bg-slate-50 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
             >
