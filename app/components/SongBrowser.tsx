@@ -280,14 +280,13 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2">
+      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white/95 py-2 backdrop-blur supports-[backdrop-filter]:bg-white/85">
         <button
           type="button"
           data-testid="song-browser-filter-toggle"
           onClick={() => {
             setShowFilter((prev) => !prev);
             if (showFilter) {
-              setFilterText('');
               setMissingFilters({
                 partAudio: false,
                 blendAudio: false,
@@ -304,19 +303,19 @@ export function SongBrowser({ onSelectSong, onDeleteSong, selectedSongId, refres
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
             <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
           </svg>
-          Filter
+          Filters
         </button>
+        <input
+          type="search"
+          data-testid="song-browser-filter-input"
+          aria-label="Search songs"
+          value={filterText}
+          onChange={(e) => setFilterText(e.target.value)}
+          placeholder="Search titles..."
+          className="order-first min-w-0 flex-1 basis-full rounded border border-gray-300 px-3 py-2 text-base focus:border-blue-400 focus:outline-none sm:order-none sm:basis-auto sm:py-1.5 sm:text-sm"
+        />
         {showFilter ? (
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-            <input
-              type="text"
-              data-testid="song-browser-filter-input"
-              value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
-              placeholder="Search titles..."
-              autoFocus
-              className="min-w-[12rem] flex-1 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-400 focus:outline-none"
-            />
+          <div className="flex min-w-0 basis-full flex-1 flex-wrap items-center gap-2">
             {([
               ['partAudio', 'Missing part audio'],
               ['blendAudio', 'Missing blend audio'],
