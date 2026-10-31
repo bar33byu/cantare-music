@@ -410,6 +410,8 @@ function ExerciseWorkspace({ userId, isAdmin }: { userId: string; isAdmin: boole
             Play set ({enabledExercises.length})
           </button>
           <button type="button" onClick={() => persistSelection(new Set(exercises.map((exercise) => exercise.id)))} className="rounded-lg border border-indigo-300 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Select all</button>
+          <button type="button" onClick={() => persistSelection(new Set(exercises.filter((_, index) => index % 2 === 0).map((exercise) => exercise.id)))} className="rounded-lg border border-indigo-300 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Select odd</button>
+          <button type="button" onClick={() => persistSelection(new Set(exercises.filter((_, index) => index % 2 === 1).map((exercise) => exercise.id)))} className="rounded-lg border border-indigo-300 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Select even</button>
           <button type="button" onClick={() => persistSelection(new Set())} className="rounded-lg border border-indigo-300 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Clear set</button>
         </div>
       </header>
