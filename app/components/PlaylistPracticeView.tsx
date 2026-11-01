@@ -364,7 +364,7 @@ export function PlaylistPracticeView({
       return;
     }
 
-    if (mode !== 'auto') {
+    if (mode === 'listen') {
       return;
     }
 
