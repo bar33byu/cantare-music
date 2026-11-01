@@ -3008,7 +3008,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         ) : !isGuidedPracticeMode ? (
           <KnowledgeBar percent={knowledgeScore.overall} />
         ) : null}
-        <div className={isGuidedPracticeMode ? "flex flex-wrap items-center gap-1.5" : "mt-1.5 flex items-center gap-2"}>
+        <div className={isGuidedPracticeMode ? "flex flex-wrap items-center gap-1.5" : "mt-1.5 flex flex-wrap items-center gap-2"}>
           {hasBothAudioVersions ? (
             <div
               className="inline-flex rounded-full border border-indigo-300 bg-white p-0.5"
@@ -3060,6 +3060,40 @@ const PracticeView: React.FC<PracticeViewProps> = ({
             >
               {isSingPracticeMode ? "Exit Sing" : "Sing"}
             </button>
+          ) : null}
+          {!isCompactLandscapeLayout ? (
+            <div
+              data-testid="practice-keyboard-shortcuts"
+              aria-label="Keyboard shortcuts"
+              className="ml-auto hidden max-w-[44rem] flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px] leading-4 text-slate-500 2xl:flex"
+            >
+              {isTapPracticeMode ? (
+                <>
+                  <span><kbd className="font-semibold text-slate-700">Z–/</kbd> tap notes</span>
+                  <span><kbd className="font-semibold text-slate-700">A–&apos;</kbd> tap notes</span>
+                  <span><kbd className="font-semibold text-slate-700">Q–\</kbd> tap notes</span>
+                  <span><kbd className="font-semibold text-slate-700">9 / 0</kbd> previous / next section</span>
+                  <span><kbd className="font-semibold text-slate-700">Space</kbd> play / pause</span>
+                  <span><kbd className="font-semibold text-slate-700">← / →</kbd> seek 5 sec</span>
+                  <span><kbd className="font-semibold text-slate-700">PageUp / PageDown</kbd> previous / next section</span>
+                  {ratingKeysEnabled ? <span><kbd className="font-semibold text-slate-700">1–5</kbd> rate section</span> : null}
+                </>
+              ) : (
+                <>
+                  <span><kbd className="font-semibold text-slate-700">Space / K</kbd> play / pause</span>
+                  <span><kbd className="font-semibold text-slate-700">← / →</kbd> seek 5 sec</span>
+                  <span><kbd className="font-semibold text-slate-700">J / L</kbd> seek 5 sec</span>
+                  <span><kbd className="font-semibold text-slate-700">Shift+J / L</kbd> seek 15 sec</span>
+                  <span><kbd className="font-semibold text-slate-700">U / O · PageUp / PageDown</kbd> previous / next section</span>
+                  <span><kbd className="font-semibold text-slate-700">I</kbd> cycle lyrics</span>
+                  <span><kbd className="font-semibold text-slate-700">R</kbd> loop</span>
+                  {hasContourReferenceData ? <span><kbd className="font-semibold text-slate-700">C</kbd> contour</span> : null}
+                  {ratingKeysEnabled ? <span><kbd className="font-semibold text-slate-700">1–5</kbd> rate section</span> : null}
+                  {onBreadcrumbRootClick ? <span><kbd className="font-semibold text-slate-700">Y</kbd> back to list</span> : null}
+                  {onNextSong ? <span><kbd className="font-semibold text-slate-700">P</kbd> next song</span> : null}
+                </>
+              )}
+            </div>
           ) : null}
         </div>
         {ratingsError ? (

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildUserScopedCacheKey, readCachedJson, writeCachedJson } from '../lib/localJsonCache';
 import { withUserIdHeader } from '../lib/userContext';
 import type { Playlist } from '../types';
+import { getMasteryColor } from '../lib/masteryColors';
 
 type PlaylistListItem = {
   id: string;
@@ -18,6 +19,7 @@ type PlaylistListItem = {
   createdAt: string;
   songCount: number;
   knowledgePercent?: number;
+  ratingDistribution?: [number, number, number, number, number];
   healthStats?: PlaylistHealthStats;
   songs?: Playlist['songs'];
 };
@@ -434,6 +436,8 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
             const retiredClass = playlist.isRetired ? 'text-gray-500 italic' : '';
             const playlistPayload = { ...playlist, songs: playlist.songs ?? [] } as Playlist;
             const knowledgePercent = Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100);
+            const ratingDistribution = playlist.ratingDistribution ?? [0, 0, 0, 0, 0];
+            const maxRatingCount = Math.max(...ratingDistribution, 1);
             const stats = statsByPlaylist[playlist.id] ?? EMPTY_PLAYLIST_STATS;
             const totalSongs = Math.max(playlist.songCount ?? 0, 0);
             const healthMetrics = [
@@ -534,6 +538,24 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                   </button>
 
                   <div className="relative">
+                    <div
+                      className="mb-2 flex h-9 items-end justify-end gap-0.5"
+                      role="img"
+                      aria-label={`Segment ratings: ${ratingDistribution.map((count, index) => `score ${index + 1}: ${count}`).join(', ')}`}
+                      data-testid={`playlist-rating-distribution-${playlist.id}`}
+                    >
+                      {ratingDistribution.map((count, index) => (
+                        <div
+                          key={index}
+                          title={`Score ${index + 1}: ${count} ${count === 1 ? 'segment' : 'segments'}`}
+                          className="w-2 rounded-t-sm"
+                          style={{
+                            height: `${Math.max(count > 0 ? 3 : 1, (count / maxRatingCount) * 36)}px`,
+                            backgroundColor: getMasteryColor((index + 1) * 20),
+                          }}
+                        />
+                      ))}
+                    </div>
                     <div className="mb-1 text-right text-2xl font-bold leading-none text-indigo-800" aria-hidden="true">
                       {knowledgePercent}%
                     </div>

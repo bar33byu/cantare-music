@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { Playlist } from '../types';
-import { getMasteryGradientColor } from '../lib/masteryColors';
+import { getMasteryColor, getMasteryGradientColor } from '../lib/masteryColors';
 import { sortSongs, type SongSortKey, type SongSortState } from '../lib/songSort';
 import { resolvePreferredAudioUrl, toPlayableAudioUrl, type PreferredAudioVersion } from '../lib/audioUrls';
 import { prefetchAudioFile } from '../lib/audioPrefetch';
@@ -185,6 +185,21 @@ function getLocalSongPracticeSummary(
     masteryPercent: totalSegments > 0 ? Math.round(scoreTotal / totalSegments) : 0,
     lastPracticedAt: latestRatedAt,
   };
+}
+
+function getSongRatingDistribution(ratings: SegmentRating[]): [number, number, number, number, number] {
+  const latestBySegment = new Map<string, SegmentRating>();
+  for (const rating of ratings) {
+    const previous = latestBySegment.get(rating.segmentId);
+    if (!previous || Date.parse(rating.ratedAt) > Date.parse(previous.ratedAt)) {
+      latestBySegment.set(rating.segmentId, rating);
+    }
+  }
+  const distribution: [number, number, number, number, number] = [0, 0, 0, 0, 0];
+  for (const rating of latestBySegment.values()) {
+    if (rating.rating >= 1 && rating.rating <= 5) distribution[rating.rating - 1] += 1;
+  }
+  return distribution;
 }
 
 interface PlaylistPracticeViewProps {
@@ -1220,6 +1235,8 @@ export function PlaylistPracticeView({
               const hasSegments = song.segments.length > 0;
               const hasMidiContour = Boolean(song.hasMidiContour);
               const lastPerformedLabel = getLastPerformedLabel(song.lastPerformedAt);
+              const ratingDistribution = getSongRatingDistribution(ratingsBySongId[song.id] ?? []);
+              const maxRatingCount = Math.max(...ratingDistribution, 1);
               return (
                 <div
                   key={song.id}
@@ -1265,7 +1282,25 @@ export function PlaylistPracticeView({
                     ) : null}
                   </div>
 
-                  <h3 className="text-xl font-semibold text-gray-900 mb-2">{song.title}</h3>
+                  <div
+                    className="absolute right-3 top-8 flex h-8 items-end gap-0.5"
+                    role="img"
+                    aria-label={`Segment ratings: ${ratingDistribution.map((count, index) => `score ${index + 1}: ${count}`).join(', ')}`}
+                    data-testid={`playlist-practice-rating-distribution-${song.id}`}
+                  >
+                    {ratingDistribution.map((count, index) => (
+                      <div
+                        key={index}
+                        title={`Score ${index + 1}: ${count} ${count === 1 ? 'segment' : 'segments'}`}
+                        className="w-1.5 rounded-t-sm"
+                        style={{
+                          height: `${Math.max(count > 0 ? 3 : 1, (count / maxRatingCount) * 32)}px`,
+                          backgroundColor: getMasteryColor((index + 1) * 20),
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <h3 className="mb-2 pr-12 text-xl font-semibold text-gray-900">{song.title}</h3>
                   <div className="mt-3 space-y-1 border-t border-gray-100 pt-2">
                     <p className="text-xs text-gray-500" data-testid={`playlist-practice-last-practiced-${song.id}`}>
                       {getLastPracticedLabel(song.lastPracticedAt)}

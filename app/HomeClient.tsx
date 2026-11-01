@@ -2503,6 +2503,14 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
 
         {activeView === "library" ? (
           <>
+            <SongBrowser
+              key={`songs:${activeUserId}:${refreshTrigger}`}
+              onSelectSong={handleSelectSong}
+              onDeleteSong={handleSongDeleted}
+              selectedSongId={selectedSong?.id || null}
+              refreshTrigger={refreshTrigger}
+              userId={activeUserId}
+            />
             <div className="mb-4 flex flex-wrap items-center gap-3">
               <button
                 type="button"
@@ -2517,14 +2525,6 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
               request={request}
               userId={activeUserId}
               refreshTrigger={refreshTrigger}
-            />
-            <SongBrowser
-              key={`songs:${activeUserId}:${refreshTrigger}`}
-              onSelectSong={handleSelectSong}
-              onDeleteSong={handleSongDeleted}
-              selectedSongId={selectedSong?.id || null}
-              refreshTrigger={refreshTrigger}
-              userId={activeUserId}
             />
           </>
         ) : null}
