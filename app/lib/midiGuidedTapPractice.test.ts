@@ -192,6 +192,43 @@ describe("midiGuidedTapPractice", () => {
     expect(score.scorePercent).toBe(100);
   });
 
+  it("scores contour direction across different interval sizes and repeated notes", () => {
+    const pitches = [60, 62, 67, 65, 65, 72];
+    const notes = cleanMidiNotes(pitches.map((pitch, index) => raw(index, pitch, index, 0.8)), { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(pitches.length, pitches.map((_, i) => 5 + i)));
+    const key = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 11000 });
+    const score = scoreTapAttemptAgainstMidiKey(key, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 400, direction: "up" },
+      { timeOffsetMs: 1100, direction: "up" },
+      { timeOffsetMs: 1700, direction: "down" },
+      { timeOffsetMs: 2400, direction: "same" },
+      { timeOffsetMs: 5100, direction: "up" },
+    ], 0);
+
+    expect(score.contourAccuracyPercent).toBe(100);
+    expect(score.coveragePercent).toBe(100);
+    expect(score.insufficientData).toBe(false);
+  });
+
+  it("reports a complete but directionally incorrect contour as incorrect", () => {
+    const pitches = [60, 62, 64, 60, 60];
+    const notes = cleanMidiNotes(pitches.map((pitch, index) => raw(index, pitch, index, 0.8)), { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(pitches.length, pitches.map((_, i) => 5 + i)));
+    const key = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 10000 });
+    const score = scoreTapAttemptAgainstMidiKey(key, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 400, direction: "down" },
+      { timeOffsetMs: 800, direction: "down" },
+      { timeOffsetMs: 1200, direction: "up" },
+      { timeOffsetMs: 1600, direction: "up" },
+    ], 0);
+
+    expect(score.contourAccuracyPercent).toBeLessThan(100);
+    expect(score.coveragePercent).toBe(100);
+    expect(score.insufficientData).toBe(false);
+  });
+
   it("ignores timing when directionally correct taps are closest to the expected MIDI notes", () => {
     const notes: CleanedMidiNote[] = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
     const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
@@ -205,7 +242,7 @@ describe("midiGuidedTapPractice", () => {
     expect(score.details.map((detail) => detail.status)).toEqual(["matched", "matched"]);
   });
 
-  it("penalizes extra taps and recovers on later closest MIDI notes", () => {
+  it("aligns around an extra tap and reports its coverage separately", () => {
     const notes: CleanedMidiNote[] = cleanMidiNotes([
       raw(0, 60, 0, 1),
       raw(1, 62, 1, 1),
@@ -220,18 +257,20 @@ describe("midiGuidedTapPractice", () => {
       { timeOffsetMs: 2000, direction: "down" },
     ], 0);
 
-    expect(score.scorePercent).toBe(75);
+    expect(score.scorePercent).toBe(100);
+    expect(score.coveragePercent).toBe(100);
     expect(score.extraTaps).toBe(1);
     expect(score.details.map((detail) => detail.status)).toEqual(["matched", "matched", "matched", "extra"]);
   });
 
-  it("penalizes skipped MIDI notes in the contour score", () => {
+  it("reports insufficient evidence when only the starting tap was detected", () => {
     const notes: CleanedMidiNote[] = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
     const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
     const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
     const score = scoreTapAttemptAgainstMidiKey(segmentKey, [{ timeOffsetMs: 0, direction: "same" }], 400);
 
-    expect(score.scorePercent).toBe(50);
+    expect(score.insufficientData).toBe(true);
+    expect(score.coveragePercent).toBe(0);
     expect(score.details.map((detail) => detail.status)).toEqual(["matched", "missing"]);
   });
 
@@ -257,7 +296,7 @@ describe("midiGuidedTapPractice", () => {
     });
   });
 
-  it("uses timing only to choose ordered assignments, not to decide correctness", () => {
+  it("matches movements without using tap timing to decide correctness", () => {
     const notes = cleanMidiNotes([
       raw(0, 60, 0, 1),
       raw(1, 62, 1, 1),
@@ -273,10 +312,10 @@ describe("midiGuidedTapPractice", () => {
 
     expect(score.scorePercent).toBe(100);
     expect(score.details.map((detail) => detail.status)).toEqual(["matched", "matched", "matched"]);
-    expect(score.details.map((detail) => detail.timingDeltaMs)).toEqual([900, 900, 900]);
+    expect(score.coveragePercent).toBe(100);
   });
 
-  it("keeps live partial scoring on the answer-key prefix despite a large timing shift", () => {
+  it("does not report accuracy for a one-tap partial attempt", () => {
     const notes = cleanMidiNotes([raw(0, 60, 0, 1), raw(1, 62, 1, 1)], { shortNoteThresholdMs: 0 }).cleanedNotes;
     const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(2, [5, 6]));
     const segmentKey = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 7000 });
@@ -284,11 +323,63 @@ describe("midiGuidedTapPractice", () => {
       { id: "late-first-tap", timeOffsetMs: 900, direction: "same" },
     ], 0);
 
-    expect(score.scorePercent).toBe(50);
+    expect(score.insufficientData).toBe(true);
+    expect(score.scorePercent).toBe(0);
     expect(score.details).toEqual([
       expect.objectContaining({ index: 0, status: "matched", actual: expect.objectContaining({ id: "late-first-tap" }) }),
       expect.objectContaining({ index: 1, status: "missing" }),
     ]);
+  });
+
+  it("matches a partial contour without treating half coverage as a rhythm error", () => {
+    const notes = cleanMidiNotes([
+      raw(0, 60, 0, 1), raw(1, 62, 1, 1), raw(2, 64, 2, 1), raw(3, 60, 3, 1), raw(4, 59, 4, 1),
+    ], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(5, [5, 6, 7, 8, 9]));
+    const key = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 10000 });
+    const score = scoreTapAttemptAgainstMidiKey(key, [
+      { timeOffsetMs: 2000, direction: "same" },
+      { timeOffsetMs: 2500, direction: "down" },
+      { timeOffsetMs: 3000, direction: "down" },
+    ], 0);
+
+    expect(score.contourAccuracyPercent).toBe(100);
+    expect(score.coveragePercent).toBeLessThan(100);
+    expect(score.insufficientData).toBe(false);
+  });
+
+  it("does not turn a favorable sparse substring into evidence of mastery", () => {
+    const pitches = [60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82];
+    const notes = cleanMidiNotes(pitches.map((pitch, index) => raw(index, pitch, index, 0.8)), { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(pitches.length, pitches.map((_, i) => 5 + i)));
+    const key = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 17000 });
+    const score = scoreTapAttemptAgainstMidiKey(key, [
+      { timeOffsetMs: 8000, direction: "same" },
+      { timeOffsetMs: 8500, direction: "up" },
+      { timeOffsetMs: 9000, direction: "up" },
+    ], 0);
+
+    expect(score.contourAccuracyPercent).toBe(100);
+    expect(score.coveragePercent).toBeLessThan(25);
+    expect(score.insufficientData).toBe(true);
+  });
+
+  it("aligns around a missing middle movement without shifting later correctness", () => {
+    const notes = cleanMidiNotes([
+      raw(0, 60, 0, 1), raw(1, 62, 1, 1), raw(2, 64, 2, 1), raw(3, 60, 3, 1), raw(4, 59, 4, 1),
+    ], { shortNoteThresholdMs: 0 }).cleanedNotes;
+    const whole = deriveWholeSongAnswerKey("song-1", "midi-1", notes, completeAlignment(5, [5, 6, 7, 8, 9]));
+    const key = deriveSegmentAnswerKey(whole!, { id: "seg-1", startMs: 5000, endMs: 10000 });
+    const score = scoreTapAttemptAgainstMidiKey(key, [
+      { timeOffsetMs: 0, direction: "same" },
+      { timeOffsetMs: 500, direction: "up" },
+      { timeOffsetMs: 1500, direction: "down" },
+      { timeOffsetMs: 2000, direction: "down" },
+    ], 0);
+
+    expect(score.contourAccuracyPercent).toBe(100);
+    expect(score.details.filter((detail) => detail.status === "matched")).toHaveLength(4);
+    expect(score.coveragePercent).toBeLessThan(100);
   });
 
   it("does not treat an unassigned answer note as correct heat-map evidence", () => {
