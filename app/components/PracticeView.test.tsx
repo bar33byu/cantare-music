@@ -1490,6 +1490,9 @@ describe("PracticeView", () => {
 
     await waitFor(() => expect(screen.getByTestId("practice-auto-score")).toBeInTheDocument());
     expect(screen.getByTestId("practice-tap-feedback")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-tap-contour-comparison")).toBeInTheDocument();
+    expect(screen.getAllByTestId("practice-review-attempt-dot")).toHaveLength(2);
+    expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
     expect(screen.getByTestId("practice-hear-part")).toBeInTheDocument();
     expect(screen.getByTestId("practice-try-again")).toBeInTheDocument();
 

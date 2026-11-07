@@ -257,9 +257,10 @@ describe("midiGuidedTapPractice", () => {
       { timeOffsetMs: 2000, direction: "down" },
     ], 0);
 
-    expect(score.scorePercent).toBe(100);
+    expect(score.scorePercent).toBe(67);
     expect(score.coveragePercent).toBe(100);
     expect(score.extraTaps).toBe(1);
+    expect(score.matchedTaps).toBe(2);
     expect(score.details.map((detail) => detail.status)).toEqual(["matched", "matched", "matched", "extra"]);
   });
 

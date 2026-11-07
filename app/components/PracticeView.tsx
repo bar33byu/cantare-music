@@ -820,6 +820,81 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       TAP_MATCH_OPTIONS
     );
   }, [currentAttemptNotes, currentCardContourNotes, currentSegment, enhancedTapScore]);
+  const tapContourComparison = useMemo(() => {
+    if (!currentMidiSegmentAnswerKey || !enhancedTapScore || currentMidiSegmentAnswerKey.taps.length === 0) {
+      return null;
+    }
+
+    const referenceTaps = currentMidiSegmentAnswerKey.taps;
+    const attemptTaps = toDirectionTaps(currentAttemptNotes);
+    const getContourLevels = (taps: DirectionTap[]) => {
+      let level = 0;
+      return taps.map((tap, index) => {
+        if (index > 0) {
+          level += tap.direction === "up" ? 1 : tap.direction === "down" ? -1 : 0;
+        }
+        return level;
+      });
+    };
+    const referenceLevels = getContourLevels(referenceTaps);
+    const attemptLevels = getContourLevels(attemptTaps);
+    const assignedIndexByTapId = new Map<string, number>();
+    for (const detail of enhancedTapScore.details) {
+      if (detail.expected && detail.actual?.id) {
+        assignedIndexByTapId.set(detail.actual.id, detail.index);
+      }
+    }
+
+    const attemptReferenceIndexes = attemptTaps.map((tap) => (
+      tap.id ? assignedIndexByTapId.get(tap.id) : undefined
+    ));
+    const mappedAttemptIndexes = attemptTaps.map((tap, index) => {
+      const mappedIndex = attemptReferenceIndexes[index];
+      if (typeof mappedIndex === "number") return mappedIndex;
+
+      let previousIndex = index - 1;
+      while (previousIndex >= 0 && typeof attemptReferenceIndexes[previousIndex] !== "number") previousIndex -= 1;
+      let nextIndex = index + 1;
+      while (nextIndex < attemptTaps.length && typeof attemptReferenceIndexes[nextIndex] !== "number") nextIndex += 1;
+
+      if (previousIndex >= 0 && nextIndex < attemptTaps.length) {
+        const previous = attemptReferenceIndexes[previousIndex] as number;
+        const next = attemptReferenceIndexes[nextIndex] as number;
+        return previous + ((next - previous) * (index - previousIndex)) / (nextIndex - previousIndex);
+      }
+      if (previousIndex >= 0) {
+        return Math.min(referenceTaps.length - 1, (attemptReferenceIndexes[previousIndex] as number) + index - previousIndex);
+      }
+      if (nextIndex < attemptTaps.length) {
+        return Math.max(0, (attemptReferenceIndexes[nextIndex] as number) - (nextIndex - index));
+      }
+      return attemptTaps.length <= 1
+        ? 0
+        : (index / (attemptTaps.length - 1)) * (referenceTaps.length - 1);
+    });
+
+    const allLevels = [...referenceLevels, ...attemptLevels];
+    const minLevel = Math.min(...allLevels, 0);
+    const maxLevel = Math.max(...allLevels, 0);
+    const levelY = (level: number, rowTop: number) => {
+      const normalized = maxLevel === minLevel ? 0.5 : (level - minLevel) / (maxLevel - minLevel);
+      return rowTop + 22 - normalized * 18;
+    };
+    const xForIndex = (index: number) => referenceTaps.length <= 1
+      ? 50
+      : 6 + (Math.max(0, Math.min(referenceTaps.length - 1, index)) / (referenceTaps.length - 1)) * 88;
+
+    return {
+      reference: referenceLevels.map((level, index) => ({ x: xForIndex(index), y: levelY(level, 2) })),
+      attempt: attemptLevels.map((level, index) => ({
+        x: xForIndex(mappedAttemptIndexes[index]),
+        y: levelY(level, 49),
+        id: currentAttemptNotes[index]?.id ?? `attempt-${index}`,
+        status: currentSegmentMatch?.attemptNoteStatuses[currentAttemptNotes[index]?.id ?? ""] ?? "mismatched",
+      })),
+      columns: referenceTaps.map((_, index) => xForIndex(index)),
+    };
+  }, [currentAttemptNotes, currentMidiSegmentAnswerKey, currentSegmentMatch, enhancedTapScore]);
   const currentMidiContourHeatMap = useMemo<Record<string, ContourNoteHeatStat>>(() => {
     if (!currentSegment) {
       return {};
@@ -3203,6 +3278,54 @@ const PracticeView: React.FC<PracticeViewProps> = ({
               </p>
               <p className="mt-0.5 text-[10px] text-slate-500">Green = matched direction · Red = different or unmatched tap</p>
             </div>
+            {tapContourComparison ? (
+              <div data-testid="practice-tap-contour-comparison" className="basis-full w-full max-w-md rounded-lg border border-slate-100 bg-slate-50/70 px-2.5 py-2">
+                <div className="flex items-stretch gap-2">
+                  <div className="flex h-24 shrink-0 flex-col justify-around text-[10px] font-semibold leading-tight text-slate-500">
+                    <span>MIDI</span>
+                    <span>Your<br />taps</span>
+                  </div>
+                  <svg viewBox="0 0 100 84" preserveAspectRatio="none" role="img" aria-label="Compact comparison of the MIDI contour and your tapped contour" className="h-24 min-w-0 flex-1 overflow-visible">
+                    {tapContourComparison.columns.map((x, index) => (
+                      <line key={`comparison-column-${index}`} x1={x} x2={x} y1="2" y2="75" stroke="rgb(203 213 225)" strokeWidth="0.35" strokeDasharray="1 2" />
+                    ))}
+                    <line x1="4" x2="96" y1="26" y2="26" stroke="rgb(203 213 225)" strokeWidth="0.5" />
+                    <line x1="4" x2="96" y1="73" y2="73" stroke="rgb(203 213 225)" strokeWidth="0.5" />
+                    <polyline
+                      points={tapContourComparison.reference.map((point) => `${point.x},${point.y}`).join(" ")}
+                      fill="none"
+                      stroke="rgb(79 70 229)"
+                      strokeWidth="1.6"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                    />
+                    {tapContourComparison.reference.map((point, index) => (
+                      <circle key={`comparison-reference-${index}`} cx={point.x} cy={point.y} r="1.65" fill="rgb(79 70 229)" />
+                    ))}
+                    <polyline
+                      points={tapContourComparison.attempt.map((point) => `${point.x},${point.y}`).join(" ")}
+                      fill="none"
+                      stroke="rgb(71 85 105)"
+                      strokeWidth="1.6"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                    />
+                    {tapContourComparison.attempt.map((point) => (
+                      <circle
+                        key={`comparison-attempt-${point.id}`}
+                        data-testid="practice-review-attempt-dot"
+                        cx={point.x}
+                        cy={point.y}
+                        r="2.1"
+                        fill={point.status === "matched" ? "rgb(22 163 74)" : "rgb(220 38 38)"}
+                        stroke="white"
+                        strokeWidth="0.55"
+                      />
+                    ))}
+                  </svg>
+                </div>
+              </div>
+            ) : null}
             {tapPracticePhase === "reviewing" ? (
               <>
                 <button type="button" data-testid="practice-hear-part" onClick={handleHearMyPart} disabled={!hasStraightAudio} className="rounded-full border border-indigo-200 bg-white px-3 py-1.5 font-semibold text-indigo-800 disabled:opacity-45">
@@ -3333,7 +3456,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                           </g>
                         );
                       })}
-                      {(isTapPracticeMode ? currentAttemptNotes : currentCardContourNotes.filter((_, index) => pitchPractice.score?.details.some((detail) => detail.index === index))).map((note) => {
+                      {(isTapPracticeMode
+                        ? (tapPracticePhase === "reviewing" || tapPracticePhase === "listening" ? [] : currentAttemptNotes)
+                        : currentCardContourNotes.filter((_, index) => pitchPractice.score?.details.some((detail) => detail.index === index))
+                      ).map((note) => {
                         const x = getRollX(note.timeOffsetMs);
                         if (x < -5 || x > 105) {
                           return null;

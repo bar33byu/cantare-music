@@ -607,7 +607,8 @@ export function scoreTapAttemptAgainstMidiKey(
 
   const totalTaps = expectedMovements.length;
   const extraTaps = Math.max(0, actualMovements.length - assignedActual.size);
-  const contourAccuracyPercent = assignedMovementCount === 0 ? 0 : Math.round((matchedTaps / assignedMovementCount) * 100);
+  const scoredMovementCount = assignedMovementCount + extraTaps;
+  const contourAccuracyPercent = scoredMovementCount === 0 ? 0 : Math.round((matchedTaps / scoredMovementCount) * 100);
   const coveragePercent = totalTaps === 0 ? 0 : Math.round((assignedMovementCount / totalTaps) * 100);
   const insufficientData = assignedMovementCount < 2 || coveragePercent < 25;
   return {
