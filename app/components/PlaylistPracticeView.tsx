@@ -187,7 +187,7 @@ function getLocalSongPracticeSummary(
   };
 }
 
-function getSongRatingDistribution(ratings: SegmentRating[]): [number, number, number, number, number] {
+function getSongRatingDistribution(ratings: SegmentRating[], segmentIds: string[]): [number, number, number, number, number, number] {
   const latestBySegment = new Map<string, SegmentRating>();
   for (const rating of ratings) {
     const previous = latestBySegment.get(rating.segmentId);
@@ -195,9 +195,12 @@ function getSongRatingDistribution(ratings: SegmentRating[]): [number, number, n
       latestBySegment.set(rating.segmentId, rating);
     }
   }
-  const distribution: [number, number, number, number, number] = [0, 0, 0, 0, 0];
+  const validSegmentIds = new Set(segmentIds);
+  const distribution: [number, number, number, number, number, number] = [validSegmentIds.size, 0, 0, 0, 0, 0];
   for (const rating of latestBySegment.values()) {
-    if (rating.rating >= 1 && rating.rating <= 5) distribution[rating.rating - 1] += 1;
+    if (!validSegmentIds.has(rating.segmentId) || rating.rating < 1 || rating.rating > 5) continue;
+    distribution[0] -= 1;
+    distribution[rating.rating] += 1;
   }
   return distribution;
 }
@@ -1235,7 +1238,7 @@ export function PlaylistPracticeView({
               const hasSegments = song.segments.length > 0;
               const hasMidiContour = Boolean(song.hasMidiContour);
               const lastPerformedLabel = getLastPerformedLabel(song.lastPerformedAt);
-              const ratingDistribution = getSongRatingDistribution(ratingsBySongId[song.id] ?? []);
+              const ratingDistribution = getSongRatingDistribution(ratingsBySongId[song.id] ?? [], song.segments.map((segment) => segment.id));
               const maxRatingCount = Math.max(...ratingDistribution, 1);
               return (
                 <div
@@ -1285,17 +1288,17 @@ export function PlaylistPracticeView({
                   <div
                     className="absolute right-3 top-8 flex h-8 items-end gap-0.5"
                     role="img"
-                    aria-label={`Segment ratings: ${ratingDistribution.map((count, index) => `score ${index + 1}: ${count}`).join(', ')}`}
+                    aria-label={`Segment ratings: ${ratingDistribution.map((count, index) => `score ${index}: ${count}`).join(', ')}`}
                     data-testid={`playlist-practice-rating-distribution-${song.id}`}
                   >
                     {ratingDistribution.map((count, index) => (
                       <div
                         key={index}
-                        title={`Score ${index + 1}: ${count} ${count === 1 ? 'segment' : 'segments'}`}
+                        title={`Score ${index}: ${count} ${count === 1 ? 'segment' : 'segments'}`}
                         className="w-1.5 rounded-t-sm"
                         style={{
                           height: `${Math.max(count > 0 ? 3 : 1, (count / maxRatingCount) * 32)}px`,
-                          backgroundColor: getMasteryColor((index + 1) * 20),
+                          backgroundColor: getMasteryColor(index * 20),
                         }}
                       />
                     ))}
