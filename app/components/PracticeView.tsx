@@ -2089,10 +2089,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [currentSegment, handleAudioVersionChange, hasBlendAudio, song.id, startTapPracticePlayback]);
 
   const handleNextTapSegment = React.useCallback(() => {
-    if (session.currentSegmentIndex < song.segments.length - 1) {
-      jumpToSegment(session.currentSegmentIndex + 1);
-    }
-  }, [jumpToSegment, session.currentSegmentIndex, song.segments.length]);
+    const nextSegment = song.segments[session.currentSegmentIndex + 1];
+    if (!nextSegment) return;
+    jumpToSegment(session.currentSegmentIndex + 1);
+    startTapPracticePlayback(nextSegment.startMs, nextSegment.endMs, { resetTapRun: true, targetPhase: "attempting" });
+  }, [jumpToSegment, session.currentSegmentIndex, song.segments, startTapPracticePlayback]);
 
   const handleTogglePlay = React.useCallback(() => {
     setTransportDebug((previous) => ({
