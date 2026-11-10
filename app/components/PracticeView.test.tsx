@@ -53,7 +53,6 @@ vi.mock("./SegmentCard", () => ({
     lyricSize,
     showContourMap,
     contourHeatMap,
-    recentTapAttempt,
     showRatingControls,
   }: {
     segment: { id: string; label: string };
@@ -63,16 +62,6 @@ vi.mock("./SegmentCard", () => ({
     lyricSize?: "default" | "large";
     showContourMap?: boolean;
     contourHeatMap?: Record<string, unknown>;
-    recentTapAttempt?: {
-      segmentId: string;
-      segmentLabel: string;
-      segmentDurationMs: number;
-      scorePercent: number;
-      matchedTaps: number;
-      totalEvents: number;
-      missedTaps: number;
-      extraTaps: number;
-    } | null;
     showRatingControls?: boolean;
   }) => (
     <div
@@ -82,12 +71,6 @@ vi.mock("./SegmentCard", () => ({
       data-lyric-size={lyricSize}
       data-show-contour-map={showContourMap ? "true" : "false"}
       data-contour-heat-count={Object.keys(contourHeatMap ?? {}).length}
-      data-recent-tap-segment={recentTapAttempt?.segmentId}
-      data-recent-tap-score={recentTapAttempt?.scorePercent}
-      data-recent-tap-matched={recentTapAttempt?.matchedTaps}
-      data-recent-tap-total={recentTapAttempt?.totalEvents}
-      data-recent-tap-missed={recentTapAttempt?.missedTaps}
-      data-recent-tap-extra={recentTapAttempt?.extraTaps}
       data-show-rating-controls={showRatingControls ? "true" : "false"}
       data-contour-heat-miss-total={Object.values(contourHeatMap ?? {}).reduce<number>((total, value) => {
         const missCount = typeof value === "object" && value && "missCount" in value
@@ -2218,7 +2201,7 @@ describe("PracticeView", () => {
     });
   });
 
-  it("keeps a scored snapshot when tap playback reaches a new segment start", async () => {
+  it("clears partial tap dots when playback advances to a new segment", async () => {
     const playbackState = {
       isPlaying: false,
       isReady: true,
@@ -2275,62 +2258,6 @@ describe("PracticeView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-segment-id", "seg-1");
       expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
-      expect(screen.getByTestId("mock-segment-card")).not.toHaveAttribute("data-recent-tap-segment");
-    });
-
-    expect(window.localStorage.getItem(`cantare:recent-tap-attempt:${song.id}`)).toBeNull();
-  });
-
-  it("restores a recent Tap attempt saved less than an hour ago", async () => {
-    const song = makeSong(1);
-    const completedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    window.localStorage.setItem(`cantare:recent-tap-attempt:${song.id}`, JSON.stringify({
-      songId: song.id,
-      segmentId: "seg-0",
-      segmentLabel: "Verse 1",
-      segmentDurationMs: 4000,
-      completedAt,
-      expiresAt: Date.parse(completedAt) + 60 * 60 * 1000,
-      scorePercent: 50,
-      matchedTaps: 1,
-      totalEvents: 2,
-      missedTaps: 1,
-      extraTaps: 0,
-      notes: [{ id: "midi-contour-seg-0-1", timeOffsetMs: 0, durationMs: 100, lane: 0 }],
-      noteResults: { "midi-contour-seg-0-1": "matched" },
-    }));
-
-    await renderAndWaitForRatings(song);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-recent-tap-segment", "seg-0");
-      expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-recent-tap-score", "50");
-    });
-  });
-
-  it("removes a recent Tap attempt after its one-hour lifetime", async () => {
-    const song = makeSong(1);
-    window.localStorage.setItem(`cantare:recent-tap-attempt:${song.id}`, JSON.stringify({
-      songId: song.id,
-      segmentId: "seg-0",
-      segmentLabel: "Verse 1",
-      segmentDurationMs: 4000,
-      completedAt: new Date(Date.now() - 60 * 60 * 1000 - 1).toISOString(),
-      expiresAt: Date.now() - 1,
-      scorePercent: 50,
-      matchedTaps: 1,
-      totalEvents: 2,
-      missedTaps: 1,
-      extraTaps: 0,
-      notes: [{ id: "midi-contour-seg-0-1", timeOffsetMs: 0, durationMs: 100, lane: 0 }],
-      noteResults: { "midi-contour-seg-0-1": "matched" },
-    }));
-
-    await renderAndWaitForRatings(song);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("mock-segment-card")).not.toHaveAttribute("data-recent-tap-segment");
-      expect(window.localStorage.getItem(`cantare:recent-tap-attempt:${song.id}`)).toBeNull();
     });
   });
 
