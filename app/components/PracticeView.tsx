@@ -2590,12 +2590,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [autoPlayToken, currentSegment, endedCount, isTapPracticeMode, onSegmentPlaybackComplete, playScope]);
 
   React.useEffect(() => {
-    if (endedCount <= tapPracticeStartEndedCountRef.current || isPlaying || !isTapPracticeMode || !currentSegment || currentMs < currentSegment.endMs - 50) return;
+    if (endedCount <= tapPracticeStartEndedCountRef.current || isPlaying || !isTapPracticeMode || !currentSegment) return;
     if (tapPracticePhase !== "attempting" && tapPracticePhase !== "listening") return;
     activeTapCaptureRef.current = null;
     if (tapPracticePhase === "attempting") recordCurrentMidiContourAttempt();
     setTapPracticePhase("reviewing");
-  }, [currentMs, currentSegment, endedCount, isPlaying, isTapPracticeMode, recordCurrentMidiContourAttempt, tapPracticePhase]);
+  }, [currentSegment, endedCount, isPlaying, isTapPracticeMode, recordCurrentMidiContourAttempt, tapPracticePhase]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;

@@ -1484,7 +1484,7 @@ describe("PracticeView", () => {
     expect(screen.getAllByTestId("practice-attempt-dot")[0]).toHaveAttribute("fill", "rgb(100 116 139)");
 
     playbackState.isPlaying = false;
-    playbackState.currentMs = song.segments[0].endMs;
+    playbackState.currentMs = song.segments[0].endMs - 100;
     playbackState.endedCount = 1;
     view.rerender(<PracticeView song={song} initialSession={makeSession(song)} />);
 
