@@ -521,151 +521,104 @@ export function scoreTapAttemptAgainstMidiKey(
   timeToleranceMs: number
 ): TapScoreResult {
   void timeToleranceMs;
-  const totalTaps = segmentKey.taps.length;
-  const details: TapScoreResult["details"] = [];
-  const assignments = new Map<number, { tap: DirectionTap; attemptIndex: number }>();
-  const assignedAttemptIndexes = new Set<number>();
-  let matchedTaps = 0;
-
   const sortedAttemptTaps = [...attemptTaps].sort((a, b) => a.timeOffsetMs - b.timeOffsetMs);
-  type AlignmentOperation = "match" | "skip-expected" | "skip-actual";
-  interface AlignmentCell {
-    matchedPairs: number;
-    timingDistanceMs: number;
-    previousExpectedIndex: number;
-    previousAttemptIndex: number;
-    operation: AlignmentOperation | null;
-  }
-
-  const alignment: Array<Array<AlignmentCell | null>> = Array.from(
-    { length: totalTaps + 1 },
-    () => Array.from({ length: sortedAttemptTaps.length + 1 }, () => null)
-  );
-  alignment[0][0] = {
-    matchedPairs: 0,
-    timingDistanceMs: 0,
-    previousExpectedIndex: -1,
-    previousAttemptIndex: -1,
-    operation: null,
-  };
-
-  const operationPriority: Record<AlignmentOperation, number> = {
-    match: 0,
-    "skip-actual": 1,
-    "skip-expected": 2,
-  };
-  const updateCell = (
-    expectedIndex: number,
-    attemptIndex: number,
-    candidate: AlignmentCell
-  ) => {
-    const existing = alignment[expectedIndex][attemptIndex];
-    const candidatePriority = candidate.operation ? operationPriority[candidate.operation] : 3;
-    const existingPriority = existing?.operation ? operationPriority[existing.operation] : 3;
-    if (
-      !existing ||
-      candidate.matchedPairs > existing.matchedPairs ||
-      (
-        candidate.matchedPairs === existing.matchedPairs &&
-        (
-          candidate.timingDistanceMs < existing.timingDistanceMs ||
-          (
-            candidate.timingDistanceMs === existing.timingDistanceMs &&
-            candidatePriority < existingPriority
-          )
-        )
+  // The first tap establishes a starting point; only movement between later taps
+  // carries contour information. Align those movement sequences monotonically.
+  const expectedMovements = segmentKey.taps.slice(1);
+  const actualMovements = sortedAttemptTaps.slice(1);
+  // Prefer the largest ordered alignment, then correct directions. Timestamps
+  // only break otherwise equal alignments; they never change correctness.
+  type Operation = "match" | "skip-expected" | "skip-actual";
+  interface Cell { matchedPairs: number; value: number; timingDistance: number; previousExpected: number; previousActual: number; operation: Operation | null }
+  const rows = expectedMovements.length + 1;
+  const columns = actualMovements.length + 1;
+  const cells: Array<Array<Cell | null>> = Array.from({ length: rows }, () => Array(columns).fill(null));
+  cells[0][0] = { matchedPairs: 0, value: 0, timingDistance: 0, previousExpected: -1, previousActual: -1, operation: null };
+  const skipExpectedPenalty = -0.45;
+  const skipActualPenalty = -0.8;
+  const update = (row: number, column: number, candidate: Cell) => {
+    const existing = cells[row][column];
+    if (!existing || candidate.matchedPairs > existing.matchedPairs || (
+      candidate.matchedPairs === existing.matchedPairs && (
+        candidate.value > existing.value || (candidate.value === existing.value && candidate.timingDistance < existing.timingDistance)
       )
-    ) {
-      alignment[expectedIndex][attemptIndex] = candidate;
+    )) {
+      cells[row][column] = candidate;
     }
   };
-
-  for (let expectedIndex = 0; expectedIndex <= totalTaps; expectedIndex += 1) {
-    for (let attemptIndex = 0; attemptIndex <= sortedAttemptTaps.length; attemptIndex += 1) {
-      const cell = alignment[expectedIndex][attemptIndex];
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const cell = cells[row][column];
       if (!cell) continue;
-
-      if (expectedIndex < totalTaps) {
-        updateCell(expectedIndex + 1, attemptIndex, {
-          matchedPairs: cell.matchedPairs,
-          timingDistanceMs: cell.timingDistanceMs,
-          previousExpectedIndex: expectedIndex,
-          previousAttemptIndex: attemptIndex,
-          operation: "skip-expected",
-        });
-      }
-      if (attemptIndex < sortedAttemptTaps.length) {
-        updateCell(expectedIndex, attemptIndex + 1, {
-          matchedPairs: cell.matchedPairs,
-          timingDistanceMs: cell.timingDistanceMs,
-          previousExpectedIndex: expectedIndex,
-          previousAttemptIndex: attemptIndex,
-          operation: "skip-actual",
-        });
-      }
-      if (expectedIndex < totalTaps && attemptIndex < sortedAttemptTaps.length) {
-        updateCell(expectedIndex + 1, attemptIndex + 1, {
-          matchedPairs: cell.matchedPairs + 1,
-          timingDistanceMs: cell.timingDistanceMs + Math.abs(
-            segmentKey.taps[expectedIndex].timeOffsetMs - sortedAttemptTaps[attemptIndex].timeOffsetMs
-          ),
-          previousExpectedIndex: expectedIndex,
-          previousAttemptIndex: attemptIndex,
-          operation: "match",
+      if (row < expectedMovements.length) update(row + 1, column, {
+        matchedPairs: cell.matchedPairs, value: cell.value + skipExpectedPenalty, timingDistance: cell.timingDistance, previousExpected: row, previousActual: column, operation: "skip-expected",
+      });
+      if (column < actualMovements.length) update(row, column + 1, {
+        matchedPairs: cell.matchedPairs, value: cell.value + skipActualPenalty, timingDistance: cell.timingDistance, previousExpected: row, previousActual: column, operation: "skip-actual",
+      });
+      if (row < expectedMovements.length && column < actualMovements.length) {
+        const isCorrect = expectedMovements[row].direction === actualMovements[column].direction;
+        update(row + 1, column + 1, {
+          matchedPairs: cell.matchedPairs + 1, value: cell.value + (isCorrect ? 2 : -1),
+          timingDistance: cell.timingDistance + Math.abs(expectedMovements[row].timeOffsetMs - actualMovements[column].timeOffsetMs),
+          previousExpected: row, previousActual: column, operation: "match",
         });
       }
     }
   }
 
-  let expectedCursor = totalTaps;
-  let attemptCursor = sortedAttemptTaps.length;
-  while (expectedCursor > 0 || attemptCursor > 0) {
-    const cell = alignment[expectedCursor][attemptCursor];
-    if (!cell || !cell.operation) break;
+  const assignments = new Map<number, number>();
+  const assignedActual = new Set<number>();
+  let row = expectedMovements.length;
+  let column = actualMovements.length;
+  while (row > 0 || column > 0) {
+    const cell = cells[row][column];
+    if (!cell?.operation) break;
     if (cell.operation === "match") {
-      const expectedIndex = expectedCursor - 1;
-      const attemptIndex = attemptCursor - 1;
-      assignments.set(expectedIndex, { tap: sortedAttemptTaps[attemptIndex], attemptIndex });
-      assignedAttemptIndexes.add(attemptIndex);
+      assignments.set(row, column);
+      assignedActual.add(column);
     }
-    expectedCursor = cell.previousExpectedIndex;
-    attemptCursor = cell.previousAttemptIndex;
+    row = cell.previousExpected;
+    column = cell.previousActual;
   }
 
-  for (let index = 0; index < totalTaps; index += 1) {
+  const details: TapScoreResult["details"] = [];
+  const assignedMovementCount = assignments.size;
+  let matchedTaps = 0;
+  for (let index = 0; index < segmentKey.taps.length; index += 1) {
     const expected = segmentKey.taps[index];
-    const assignment = assignments.get(index);
-    if (!assignment) {
+    if (index === 0) {
+      details.push({ index, expected, ...(sortedAttemptTaps[0] ? { actual: sortedAttemptTaps[0] } : {}), status: sortedAttemptTaps[0] ? "matched" : "missing" });
+      continue;
+    }
+    const actualIndex = assignments.get(index);
+    if (actualIndex === undefined) {
       details.push({ index, expected, status: "missing" });
       continue;
     }
-
-    const actual = assignment.tap;
-    const timingDeltaMs = actual.timeOffsetMs - expected.timeOffsetMs;
-    let status: TapMissKind = "matched";
-    if (actual.direction !== expected.direction) {
-      status = "direction";
-    } else {
-      matchedTaps += 1;
-    }
-    details.push({ index, expected, actual, status, timingDeltaMs });
+    const actual = sortedAttemptTaps[actualIndex];
+    const status: TapMissKind = expected.direction === actual.direction ? "matched" : "direction";
+    if (status === "matched") matchedTaps += 1;
+    details.push({ index, expected, actual, status });
+  }
+  for (let index = 1; index < sortedAttemptTaps.length; index += 1) {
+    if (!assignedActual.has(index)) details.push({ index: segmentKey.taps.length + index, actual: sortedAttemptTaps[index], status: "extra" });
   }
 
-  for (let index = 0; index < sortedAttemptTaps.length; index += 1) {
-    if (!assignedAttemptIndexes.has(index)) {
-      details.push({ index: totalTaps + index, actual: sortedAttemptTaps[index], status: "extra" });
-    }
-  }
-
-  const extraTaps = Math.max(0, sortedAttemptTaps.length - assignedAttemptIndexes.size);
-  const scoredEventCount = totalTaps + extraTaps;
+  const totalTaps = expectedMovements.length;
+  const extraTaps = Math.max(0, actualMovements.length - assignedActual.size);
+  const scoredMovementCount = assignedMovementCount + extraTaps;
+  const contourAccuracyPercent = scoredMovementCount === 0 ? 0 : Math.round((matchedTaps / scoredMovementCount) * 100);
+  const coveragePercent = totalTaps === 0 ? 0 : Math.round((assignedMovementCount / totalTaps) * 100);
+  const insufficientData = assignedMovementCount < 2 || coveragePercent < 25;
   return {
     matchedTaps,
     totalTaps,
     extraTaps,
-    scorePercent: scoredEventCount === 0
-      ? 100
-      : Math.max(0, Math.min(100, Math.round((matchedTaps / scoredEventCount) * 100))),
+    scorePercent: contourAccuracyPercent,
+    contourAccuracyPercent,
+    coveragePercent,
+    insufficientData,
     details,
   };
 }
@@ -675,33 +628,7 @@ export function scoreTapAttemptProgressAgainstMidiKey(
   attemptTaps: DirectionTap[],
   timeToleranceMs: number
 ): TapScoreResult {
-  if (attemptTaps.length >= segmentKey.taps.length) {
-    return scoreTapAttemptAgainstMidiKey(segmentKey, attemptTaps, timeToleranceMs);
-  }
-
-  const attemptedPrefixLength = attemptTaps.length;
-  const prefixScore = scoreTapAttemptAgainstMidiKey({
-    ...segmentKey,
-    taps: segmentKey.taps.slice(0, attemptedPrefixLength),
-    notes: segmentKey.notes.slice(0, attemptedPrefixLength),
-  }, attemptTaps, timeToleranceMs);
-  const missingDetails: TapScoreResult["details"] = segmentKey.taps
-    .slice(attemptedPrefixLength)
-    .map((expected, offset) => ({
-      index: attemptedPrefixLength + offset,
-      expected,
-      status: "missing",
-    }));
-
-  return {
-    matchedTaps: prefixScore.matchedTaps,
-    totalTaps: segmentKey.taps.length,
-    extraTaps: 0,
-    scorePercent: segmentKey.taps.length === 0
-      ? 100
-      : Math.round((prefixScore.matchedTaps / segmentKey.taps.length) * 100),
-    details: [...prefixScore.details, ...missingDetails],
-  };
+  return scoreTapAttemptAgainstMidiKey(segmentKey, attemptTaps, timeToleranceMs);
 }
 
 export function buildMidiContourTapHeatMap(

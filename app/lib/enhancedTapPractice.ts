@@ -28,5 +28,11 @@ export interface TapScoreResult {
   totalTaps: number;
   extraTaps: number;
   scorePercent: number;
+  /** Percent of observed melodic movements whose direction matched. */
+  contourAccuracyPercent?: number;
+  /** Percent of reference melodic movements covered by detected input. */
+  coveragePercent?: number;
+  /** True when too little of the passage was observed to report accuracy. */
+  insufficientData?: boolean;
   details: TapScoreDetail[];
 }
