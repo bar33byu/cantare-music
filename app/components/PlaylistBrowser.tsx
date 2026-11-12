@@ -19,7 +19,7 @@ type PlaylistListItem = {
   createdAt: string;
   songCount: number;
   knowledgePercent?: number;
-  ratingDistribution?: [number, number, number, number, number];
+  ratingDistribution?: [number, number, number, number, number, number];
   healthStats?: PlaylistHealthStats;
   songs?: Playlist['songs'];
 };
@@ -147,7 +147,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
     fetchControllerRef.current?.abort();
     const controller = new AbortController();
     fetchControllerRef.current = controller;
-    const cacheKey = buildUserScopedCacheKey('playlists', userId, includeRetired ? 'retired' : 'active');
+    const cacheKey = buildUserScopedCacheKey('playlists-v2', userId, includeRetired ? 'retired' : 'active');
     const cached = readCachedJson<CachedPlaylistListPayload>(cacheKey);
     const hasCachedPlaylists = cached !== null && Array.isArray(cached.value.playlists);
     if (cached && hasCachedPlaylists) {
@@ -436,7 +436,7 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
             const retiredClass = playlist.isRetired ? 'text-gray-500 italic' : '';
             const playlistPayload = { ...playlist, songs: playlist.songs ?? [] } as Playlist;
             const knowledgePercent = Math.min(knowledgeByPlaylist[playlist.id] ?? 0, 100);
-            const ratingDistribution = playlist.ratingDistribution ?? [0, 0, 0, 0, 0];
+            const ratingDistribution = playlist.ratingDistribution ?? [0, 0, 0, 0, 0, 0];
             const maxRatingCount = Math.max(...ratingDistribution, 1);
             const stats = statsByPlaylist[playlist.id] ?? EMPTY_PLAYLIST_STATS;
             const totalSongs = Math.max(playlist.songCount ?? 0, 0);
@@ -541,17 +541,17 @@ export function PlaylistBrowser({ onSelectPlaylist, onManagePlaylist, userId, re
                     <div
                       className="mb-2 flex h-9 items-end justify-end gap-0.5"
                       role="img"
-                      aria-label={`Segment ratings: ${ratingDistribution.map((count, index) => `score ${index + 1}: ${count}`).join(', ')}`}
+                      aria-label={`Segment ratings: ${ratingDistribution.map((count, index) => `score ${index}: ${count}`).join(', ')}`}
                       data-testid={`playlist-rating-distribution-${playlist.id}`}
                     >
                       {ratingDistribution.map((count, index) => (
                         <div
                           key={index}
-                          title={`Score ${index + 1}: ${count} ${count === 1 ? 'segment' : 'segments'}`}
+                          title={`Score ${index}: ${count} ${count === 1 ? 'segment' : 'segments'}`}
                           className="w-2 rounded-t-sm"
                           style={{
                             height: `${Math.max(count > 0 ? 3 : 1, (count / maxRatingCount) * 36)}px`,
-                            backgroundColor: getMasteryColor((index + 1) * 20),
+                            backgroundColor: getMasteryColor(index * 20),
                           }}
                         />
                       ))}
