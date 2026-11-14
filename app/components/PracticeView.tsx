@@ -502,6 +502,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const tapWarningTimerRef = React.useRef<number | null>(null);
   const tapCountInIntervalRef = React.useRef<number | null>(null);
   const tapCountInTimeoutRef = React.useRef<number | null>(null);
+  const tapPracticeAttemptIdRef = React.useRef(0);
+  const completedTapPracticeAttemptIdRef = React.useRef(0);
   const loopHandledRef = React.useRef<string | null>(null);
   const autoPlayHandledKeyRef = React.useRef<string | null>(null);
   const autoPlayTokenHandledRef = React.useRef<number>(0);
@@ -1799,7 +1801,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     const segmentDurationMs = Math.max(1, currentSegment.endMs - currentSegment.startMs);
-    const latestOffsetMs = Math.min(segmentDurationMs, Math.max(0, Math.round(currentMs - currentSegment.startMs)));
+    const captureEndMs = getCurrentMs?.() ?? currentMs;
+    const latestOffsetMs = Math.min(segmentDurationMs, Math.max(0, Math.round(captureEndMs - currentSegment.startMs)));
     const minEndOffsetMs = Math.min(segmentDurationMs, capture.startOffsetMs + MIN_TAP_DURATION_MS);
     const endOffsetMs = Math.max(minEndOffsetMs, latestOffsetMs);
     if (endOffsetMs <= capture.startOffsetMs) {
@@ -1851,7 +1854,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     });
 
     activeTapCaptureRef.current = null;
-  }, [currentMs, currentSegment, queuePersistedTap, tapPracticePhase]);
+  }, [currentMs, currentSegment, getCurrentMs, queuePersistedTap, tapPracticePhase]);
 
   const recordKeyboardTap = React.useCallback((keyIndex: number, lane: number) => {
     if (!currentSegment || tapPracticePhase !== "attempting") {
@@ -1978,8 +1981,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }, 100);
     tapCountInTimeoutRef.current = window.setTimeout(() => {
       cancelTapPracticeCountIn();
-      if (isTapPracticeMode) setTapPracticePhase(options?.targetPhase ?? "attempting");
-      if (isTapPracticeMode) tapPracticeStartEndedCountRef.current = latestEndedCountRef.current;
+      if (isTapPracticeMode) {
+        const targetPhase = options?.targetPhase ?? "attempting";
+        setTapPracticePhase(targetPhase);
+        tapPracticeStartEndedCountRef.current = latestEndedCountRef.current;
+        if (targetPhase === "attempting") {
+          tapPracticeAttemptIdRef.current += 1;
+        }
+      }
       requestPlay(startMs, endMs);
     }, TAP_PRACTICE_COUNT_IN_MS);
   }, [cancelTapPracticeCountIn, isGuidedPracticeMode, isTapPracticeMode, requestPlay, resetTapPracticeRun]);
@@ -2537,12 +2546,21 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [autoPlayToken, currentSegment, endedCount, isTapPracticeMode, onSegmentPlaybackComplete, playScope]);
 
   React.useEffect(() => {
-    if (endedCount <= tapPracticeStartEndedCountRef.current || isPlaying || !isTapPracticeMode || !currentSegment) return;
+    if (!isTapPracticeMode || !currentSegment || isPlaying) return;
     if (tapPracticePhase !== "attempting" && tapPracticePhase !== "listening") return;
-    activeTapCaptureRef.current = null;
+    const playerReportedEnd = endedCount > tapPracticeStartEndedCountRef.current;
+    const playbackReachedSegmentEnd = currentMs >= currentSegment.endMs - 50;
+    if (!playerReportedEnd && !playbackReachedSegmentEnd) return;
+    if (tapPracticePhase === "attempting") {
+      if (completedTapPracticeAttemptIdRef.current === tapPracticeAttemptIdRef.current) return;
+      completedTapPracticeAttemptIdRef.current = tapPracticeAttemptIdRef.current;
+      finalizeTapCapture();
+    } else {
+      activeTapCaptureRef.current = null;
+    }
     if (tapPracticePhase === "attempting") recordCurrentMidiContourAttempt();
     setTapPracticePhase("reviewing");
-  }, [currentSegment, endedCount, isPlaying, isTapPracticeMode, recordCurrentMidiContourAttempt, tapPracticePhase]);
+  }, [currentMs, currentSegment, endedCount, finalizeTapCapture, isPlaying, isTapPracticeMode, recordCurrentMidiContourAttempt, tapPracticePhase]);
 
   useEffect(() => {
     const previousIndex = previousSegmentIndexRef.current;
