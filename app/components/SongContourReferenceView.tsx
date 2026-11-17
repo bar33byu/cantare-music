@@ -11,6 +11,7 @@ import { PitchContourThumbnail } from "./PitchContourThumbnail";
 interface SongContourReferenceViewProps {
   song: Song;
   userId?: string;
+  sharedPlaylistId?: string;
   breadcrumbLabel?: string;
   onBack: () => void;
 }
@@ -53,6 +54,7 @@ function getSegmentDurationMs(segment: Segment): number {
 export function SongContourReferenceView({
   song,
   userId,
+  sharedPlaylistId,
   breadcrumbLabel = "Practice",
   onBack,
 }: SongContourReferenceViewProps) {
@@ -75,7 +77,12 @@ export function SongContourReferenceView({
 
     const loadMidiStatus = async () => {
       try {
-        const response = await fetch(`/api/songs/${song.id}/midi`, withUserIdHeader({ cache: "no-store" }, userId));
+        const response = await fetch(
+          sharedPlaylistId
+            ? `/api/shared/playlists/${encodeURIComponent(sharedPlaylistId)}/songs/${encodeURIComponent(song.id)}/midi`
+            : `/api/songs/${song.id}/midi`,
+          withUserIdHeader({ cache: "no-store" }, userId)
+        );
         if (!response.ok) {
           throw new Error(`Failed to load MIDI contour (${response.status})`);
         }
@@ -121,7 +128,7 @@ export function SongContourReferenceView({
     return () => {
       cancelled = true;
     };
-  }, [song.id, userId]);
+  }, [sharedPlaylistId, song.id, userId]);
 
   const segmentRows = React.useMemo(
     () => song.segments.map((segment) => ({

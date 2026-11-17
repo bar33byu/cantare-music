@@ -55,6 +55,23 @@ describe('PlaylistBrowser', () => {
     });
   });
 
+  it('shows playlist rating counts from score zero through five', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ playlists: [{ ...basePlaylist, ratingDistribution: [4, 2, 1, 0, 3, 5] }] }),
+    });
+
+    render(<PlaylistBrowser onSelectPlaylist={onSelectPlaylist} onManagePlaylist={onManagePlaylist} />);
+
+    const chart = await screen.findByTestId('playlist-rating-distribution-pl-1');
+    expect(chart).toHaveAttribute(
+      'aria-label',
+      'Segment ratings: score 0: 4, score 1: 2, score 2: 1, score 3: 0, score 4: 3, score 5: 5'
+    );
+    expect(chart.children).toHaveLength(6);
+    expect(chart.children[0]).toHaveAttribute('title', 'Score 0: 4 segments');
+  });
+
   it('sorts playlists by performance date from soonest to latest by default', async () => {
     mockFetch.mockResolvedValue({
       ok: true,

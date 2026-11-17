@@ -1229,7 +1229,7 @@ describe("PracticeView", () => {
     expect(within(transport).getByTestId("mock-audio-player")).toBeInTheDocument();
   });
 
-  it("hides segment arrows and shows tap bar in tap practice mode", async () => {
+  it("shows segment navigation arrows and the tap bar in tap practice mode", async () => {
     mockPracticeFetchWithMidiAnswerKey();
 
     const song = makeSong(3);
@@ -1237,8 +1237,8 @@ describe("PracticeView", () => {
 
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
 
-    expect(screen.queryByTestId("practice-prev-segment")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("practice-next-segment")).not.toBeInTheDocument();
+    expect(screen.getByTestId("practice-prev-segment")).toBeInTheDocument();
+    expect(screen.getByTestId("practice-next-segment")).toBeInTheDocument();
     const tapBar = screen.getByTestId("practice-tap-bar");
     expect(tapBar).toHaveClass("tap-input-surface");
     expect(tapBar).toHaveClass("w-28");
@@ -1493,6 +1493,61 @@ describe("PracticeView", () => {
     expect(screen.queryByTestId("practice-auto-score")).not.toBeInTheDocument();
     expect(screen.queryAllByTestId("practice-attempt-dot")).toHaveLength(0);
     expect(screen.getByTestId("practice-attempt-status")).toBeInTheDocument();
+  });
+
+  it("starts tap capture on the first segment when Tap mode is entered before it begins", async () => {
+    const playbackState = {
+      isPlaying: true,
+      isReady: true,
+      currentMs: 1000,
+      durationMs: 12000,
+      endedCount: 0,
+      playbackError: null,
+      debugInfo: {},
+      play: mockPlay,
+      pause: mockPause,
+      seek: mockSeek,
+      setPlaybackEndMs: mockSetPlaybackEndMs,
+    };
+    mockUseAudioPlayer.mockReturnValue(playbackState);
+    mockPracticeFetchWithMidiAnswerKey();
+    const song = { ...makeSong(2), alternateAudioUrl: "https://cdn.example.com/audio/song-1/blend.mp3" };
+    song.segments[0] = { ...song.segments[0], startMs: 2000, endMs: 5000 };
+    song.segments[1] = { ...song.segments[1], startMs: 6000, endMs: 9000 };
+    const session = { ...makeSession(song), currentSegmentIndex: 1 };
+
+    await renderAndWaitForRatings(song, session);
+    await runTapPracticeCountIn(() => fireEvent.click(screen.getByTestId("practice-tap-mode-toggle")));
+
+    expect(mockPause).toHaveBeenCalled();
+    expect(mockSeek).toHaveBeenCalledWith(song.segments[0].startMs);
+    expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.alternateAudioUrl);
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-segment-id", "seg-0");
+    expect(mockPlay).toHaveBeenLastCalledWith(song.segments[0].startMs, song.segments[0].endMs);
+    expect(screen.getByTestId("practice-attempt-status")).toBeInTheDocument();
+
+    const tapBar = screen.getByTestId("practice-tap-bar");
+    vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, width: 64, height: 200, top: 0, left: 0, right: 64, bottom: 200, toJSON: () => ({}),
+    });
+    fireEvent.pointerDown(tapBar, { pointerId: 81, clientY: 150 });
+    fireEvent.pointerUp(tapBar, { pointerId: 81, clientY: 150 });
+    expect(screen.getAllByTestId("practice-attempt-dot")).toHaveLength(1);
+  });
+
+  it("shows previous and next segment navigation while Tap mode is ready", async () => {
+    mockPracticeFetchWithMidiAnswerKey();
+    const song = makeSong(3);
+    await renderAndWaitForRatings(song);
+    fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
+
+    expect(screen.getByTestId("practice-prev-segment")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("practice-next-segment"));
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-segment-id", "seg-1");
+    expect(mockSeek).toHaveBeenCalledWith(song.segments[1].startMs);
+
+    fireEvent.click(screen.getByTestId("practice-prev-segment"));
+    expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-segment-id", "seg-0");
   });
 
   it("shows a score after advancing to and completing the next tap-practice segment", async () => {

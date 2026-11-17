@@ -460,7 +460,7 @@ export interface PlaylistSummary {
   createdAt: string;
   songCount: number;
   knowledgePercent?: number;
-  ratingDistribution?: [number, number, number, number, number];
+  ratingDistribution?: [number, number, number, number, number, number];
   healthStats?: {
     songsWithPartAudio: number;
     songsWithBlendAudio: number;
@@ -2667,7 +2667,7 @@ export async function getAllPlaylists(
   const segmentsBySong = await getSegmentsBySongIds(songIds);
   const allSegmentIds = songIds.flatMap((songId) => (segmentsBySong[songId] ?? []).map((segment) => segment.id));
   const latestRatings = await getLatestRatingsBySegmentIds(allSegmentIds, userId);
-  const ratingDistributionByPlaylist = new Map<string, [number, number, number, number, number]>();
+  const ratingDistributionByPlaylist = new Map<string, [number, number, number, number, number, number]>();
 
   for (const linkedSong of linkedSongs) {
     const stats = statsByPlaylist.get(linkedSong.playlistId) ?? emptyPlaylistHealthStats();
@@ -2679,10 +2679,14 @@ export async function getAllPlaylists(
     }
 
     const segmentCount = segmentCountBySong.get(linkedSong.songId) ?? 0;
-    const distribution = ratingDistributionByPlaylist.get(linkedSong.playlistId) ?? [0, 0, 0, 0, 0];
+    const distribution = ratingDistributionByPlaylist.get(linkedSong.playlistId) ?? [0, 0, 0, 0, 0, 0];
+    distribution[0] += segmentCount;
     for (const segment of segmentsBySong[linkedSong.songId] ?? []) {
       const rating = latestRatings.get(segment.id);
-      if (rating) distribution[rating - 1] += 1;
+      if (rating) {
+        distribution[0] -= 1;
+        distribution[rating] += 1;
+      }
     }
     ratingDistributionByPlaylist.set(linkedSong.playlistId, distribution);
     if (segmentCount > 0) {
@@ -2708,7 +2712,7 @@ export async function getAllPlaylists(
       ...playlist,
       knowledgePercent: songCount > 0 ? Math.round((knowledgeNumeratorByPlaylist.get(playlist.id) ?? 0) / songCount) : 0,
       healthStats: statsByPlaylist.get(playlist.id) ?? emptyPlaylistHealthStats(),
-      ratingDistribution: ratingDistributionByPlaylist.get(playlist.id) ?? [0, 0, 0, 0, 0],
+      ratingDistribution: ratingDistributionByPlaylist.get(playlist.id) ?? [0, 0, 0, 0, 0, 0],
     };
   });
 }

@@ -1920,6 +1920,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
           userId={activeUserId}
           persistProgress={!playlistPracticeReadOnly}
           readOnlyDataUserId={playlistPracticeReadOnly ? selectedPlaylist?.owner?.id : undefined}
+          sharedPlaylistId={playlistPracticeReadOnly ? selectedPlaylist?.id : undefined}
           initialSession={session}
           breadcrumbRootLabel={breadcrumbRootLabel}
           onBreadcrumbRootClick={handleBreadcrumbRootClick}
@@ -1953,6 +1954,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
         <SongContourReferenceView
           song={selectedSong}
           userId={activeUserId}
+          sharedPlaylistId={playlistPracticeReadOnly ? selectedPlaylist?.id : undefined}
           breadcrumbLabel={breadcrumbLabel}
           onBack={() => {
             setActiveView("song_practice");
@@ -2066,6 +2068,7 @@ export default function Home({ buildInfo }: { buildInfo: BuildInfo }) {
             playlist={selectedPlaylist}
             userId={activeUserId}
             persistProgress={!playlistPracticeReadOnly}
+            sharedPlaylistId={playlistPracticeReadOnly ? selectedPlaylist.id : undefined}
             preferredAudioVersion={userSettings.preferredAudioVersion}
             onPreferredAudioVersionChange={(version) => {
               setUserSettings((previous) => ({ ...previous, preferredAudioVersion: version }));
