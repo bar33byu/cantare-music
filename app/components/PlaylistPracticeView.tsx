@@ -212,6 +212,7 @@ interface PlaylistPracticeViewProps {
   progressStorage?: ProgressStorageMode;
   revalidatePlaylist?: boolean;
   sharedPlaylistToken?: string;
+  sharedPlaylistId?: string;
   preferredAudioVersion?: PreferredAudioVersion;
   onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
   collapseLyricLineBreaks?: boolean;
@@ -229,6 +230,7 @@ export function PlaylistPracticeView({
   progressStorage: progressStorageOverride,
   revalidatePlaylist = true,
   sharedPlaylistToken,
+  sharedPlaylistId,
   preferredAudioVersion = 'part',
   onPreferredAudioVersionChange,
   collapseLyricLineBreaks = false,
@@ -1410,6 +1412,7 @@ export function PlaylistPracticeView({
                     progressStorage={progressStorage}
                     readOnlyDataUserId={readOnlyDataUserId}
                     sharedPlaylistToken={sharedPlaylistToken}
+                    sharedPlaylistId={sharedPlaylistId}
                     initialSession={autoDrillPracticeSession}
                     onRatingsSaved={handleAutoDrillRatingsSaved}
                     breadcrumbRootLabel={HANDS_FREE_LABEL}
@@ -1462,6 +1465,7 @@ export function PlaylistPracticeView({
               progressStorage={progressStorage}
               readOnlyDataUserId={readOnlyDataUserId}
               sharedPlaylistToken={sharedPlaylistToken}
+              sharedPlaylistId={sharedPlaylistId}
               initialSession={listenPracticeSession}
               breadcrumbRootLabel="Playlists"
               onBreadcrumbRootClick={onExit}

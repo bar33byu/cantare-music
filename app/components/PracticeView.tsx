@@ -67,6 +67,7 @@ interface PracticeViewProps {
   onPreferredAudioVersionChange?: (version: PreferredAudioVersion) => void;
   readOnlyDataUserId?: string;
   sharedPlaylistToken?: string;
+  sharedPlaylistId?: string;
   collapseLyricLineBreaks?: boolean;
   lyricSize?: "default" | "large";
   embedded?: boolean;
@@ -319,6 +320,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   onPreferredAudioVersionChange,
   readOnlyDataUserId,
   sharedPlaylistToken,
+  sharedPlaylistId,
   collapseLyricLineBreaks = false,
   lyricSize = "large",
   embedded = false,
@@ -2812,6 +2814,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
           accountProgressEnabled ? request(`/api/songs/${song.id}/tap-sessions`, { cache: "no-store" }) : Promise.resolve(null),
           sharedPlaylistToken
             ? fetch(`/api/share/playlists/${encodeURIComponent(sharedPlaylistToken)}/songs/${encodeURIComponent(song.id)}/midi`, { cache: "no-store" })
+            : sharedPlaylistId
+              ? fetch(`/api/shared/playlists/${encodeURIComponent(sharedPlaylistId)}/songs/${encodeURIComponent(song.id)}/midi`, { cache: "no-store" })
             : readOnlyDataRequest(`/api/songs/${song.id}/midi`, { cache: "no-store" }),
         ]);
         if (response && !response.ok) {
@@ -2844,7 +2848,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [accountProgressEnabled, readOnlyDataRequest, request, segmentTimingSignature, sharedPlaylistToken, song.hasMidiContour, song.id, song.pitchContourNotes, tapHeatMapRefreshToken, userId]);
+  }, [accountProgressEnabled, readOnlyDataRequest, request, segmentTimingSignature, sharedPlaylistId, sharedPlaylistToken, song.hasMidiContour, song.id, song.pitchContourNotes, tapHeatMapRefreshToken, userId]);
 
   const contourMapToggle = hasSegments && currentSegment && hasCardContourData ? (
     <button
