@@ -6,7 +6,7 @@ import {
   getSongById,
   listTapPracticeSessionsForSong,
 } from '../../../../../db/queries';
-import type { PracticeInputMethod, TapAudioVersion } from '../../../../lib/enhancedTapPractice';
+import type { TapAudioVersion } from '../../../../lib/enhancedTapPractice';
 import { resolveEffectiveRequestUserId } from '../../../_user';
 
 export async function GET(
@@ -47,19 +47,16 @@ export async function POST(
       segmentId?: unknown;
       audioVersion?: unknown;
       mode?: unknown;
-      inputMethod?: unknown;
     } | null;
     const segmentId = typeof body?.segmentId === 'string' && body.segmentId.length > 0 ? body.segmentId : undefined;
     const audioVersion: TapAudioVersion = body?.audioVersion === 'blend' ? 'blend' : 'straight';
     const mode = 'practice';
-    const inputMethod: PracticeInputMethod = body?.inputMethod === 'voice' ? 'voice' : 'tap';
 
     await deleteExpiredTapPracticeData(userId);
     const session = await createTapPracticeSession(id, userId, new Date(), {
       segmentId,
       audioVersion,
       mode,
-      ...(inputMethod === 'voice' ? { inputMethod } : {}),
     });
 
     return NextResponse.json({ session }, { status: 201 });
