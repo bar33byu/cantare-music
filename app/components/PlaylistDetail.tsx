@@ -1,6 +1,6 @@
 "use client";
 
-import { DragEvent, useCallback, useEffect, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { withUserIdHeader } from '../lib/userContext';
 import type { Playlist, PlaylistRefreshPreview, Song } from '../types';
 
@@ -17,6 +17,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const [songs, setSongs] = useState<Song[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [loading, setLoading] = useState(true);
   const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -43,6 +44,7 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [selectedRefreshSongIds, setSelectedRefreshSongIds] = useState<Set<string>>(new Set());
+  const songSearchInputRef = useRef<HTMLInputElement | null>(null);
 
   const withUserHeader = useCallback((init?: RequestInit): RequestInit | undefined => {
     return withUserIdHeader(init, userId);
@@ -88,18 +90,22 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     const data = (await response.json()) as Song[];
     setSongs(Array.isArray(data) ? data : []);
     setShowSuggestions(true);
+    setActiveSuggestionIndex(-1);
+    songSearchInputRef.current?.focus();
   };
 
   const closeSongPicker = () => {
     setPickerOpen(false);
     setShowSuggestions(false);
     setSearchQuery('');
+    setActiveSuggestionIndex(-1);
     setPickerError(null);
   };
 
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
     setShowSuggestions(true);
+    setActiveSuggestionIndex(-1);
     setPickerError(null);
   };
 
@@ -119,7 +125,9 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
     if (response.ok) {
       setSearchQuery('');
       setShowSuggestions(true);
+      setActiveSuggestionIndex(-1);
       setPickerError(null);
+      songSearchInputRef.current?.focus();
       await fetchPlaylist();
     } else {
       setPickerError('Unable to add that song right now.');
@@ -166,6 +174,8 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
       setSongs((previous) => [...previous, { ...createdSong, segments: createdSong.segments ?? [] }]);
       setSearchQuery('');
       setShowSuggestions(true);
+      setActiveSuggestionIndex(-1);
+      songSearchInputRef.current?.focus();
       await fetchPlaylist();
     } catch (error) {
       setPickerError(error instanceof Error ? error.message : 'Unable to create song right now.');
@@ -469,6 +479,8 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
         const artist = (song.artist || '').toLowerCase();
         return title.includes(query) || artist.includes(query);
       });
+  const selectableSongs = filteredSongs.filter((song) => !existingIds.has(song.id) && !addingSongIds.has(song.id));
+  const activeSuggestionId = selectableSongs[activeSuggestionIndex]?.id;
 
   const creatableTitle = searchQuery.trim();
   const exactExistingSong = songs.find((song) => song.title.trim().toLowerCase() === creatableTitle.toLowerCase());
@@ -738,8 +750,14 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
               <input
+                ref={songSearchInputRef}
                 data-testid="playlist-song-search"
                 type="text"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={showSuggestions && filteredSongs.length > 0}
+                aria-controls="playlist-song-suggestions"
+                aria-activedescendant={activeSuggestionId ? `playlist-song-suggestion-${activeSuggestionId}` : undefined}
                 placeholder="Search songs by title or artist..."
                 value={searchQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
@@ -748,23 +766,53 @@ export function PlaylistDetail({ playlistId, onBack, onPractice, onEditSong, use
                   if (event.key === 'Escape') {
                     event.preventDefault();
                     closeSongPicker();
+                    return;
+                  }
+                  if (event.key === 'ArrowDown' && showSuggestions && selectableSongs.length > 0) {
+                    event.preventDefault();
+                    setActiveSuggestionIndex((current) => Math.min(current + 1, selectableSongs.length - 1));
+                    return;
+                  }
+                  if (event.key === 'ArrowUp' && showSuggestions && selectableSongs.length > 0) {
+                    event.preventDefault();
+                    setActiveSuggestionIndex((current) => Math.max(current - 1, -1));
+                    return;
+                  }
+                  if (event.key === 'Enter' && showSuggestions && searchQuery.trim().length > 0) {
+                    const targetSong = filteredSongs.length === 1 && selectableSongs.length === 1
+                      ? selectableSongs[0]
+                      : selectableSongs[activeSuggestionIndex];
+                    if (targetSong) {
+                      event.preventDefault();
+                      void handleAddSongById(targetSong.id);
+                    }
                   }
                 }}
                 className="w-full rounded border border-gray-300 px-3 py-2"
               />
               {showSuggestions && filteredSongs.length > 0 && (
                 <ul
+                  id="playlist-song-suggestions"
+                  role="listbox"
                   data-testid="playlist-song-suggestions"
                   className="absolute top-full left-0 right-0 z-10 mt-1 max-h-48 overflow-y-auto rounded border border-gray-300 bg-white shadow-lg"
                 >
                   {filteredSongs.map((song) => (
                     <li
                       key={song.id}
+                      id={`playlist-song-suggestion-${song.id}`}
+                      role="option"
+                      aria-selected={song.id === activeSuggestionId}
+                      aria-disabled={existingIds.has(song.id) || addingSongIds.has(song.id)}
                       data-testid={`playlist-song-suggestion-${song.id}`}
                       onClick={() => void handleAddSongById(song.id)}
+                      onMouseEnter={() => {
+                        const index = selectableSongs.findIndex((candidate) => candidate.id === song.id);
+                        if (index >= 0) setActiveSuggestionIndex(index);
+                      }}
                       className={`cursor-pointer px-3 py-2 hover:bg-indigo-50 ${
-                        existingIds.has(song.id) || addingSongIds.has(song.id) ? 'opacity-50 cursor-not-allowed' : ''
-                      }`}
+                        song.id === activeSuggestionId ? 'bg-indigo-50' : ''
+                      } ${existingIds.has(song.id) || addingSongIds.has(song.id) ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       <div className="font-medium">{song.title}</div>
                       {song.artist ? <div className="text-sm text-gray-500">{song.artist}</div> : null}
