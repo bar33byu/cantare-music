@@ -113,11 +113,11 @@ describe("AudioPlayer", () => {
     expect(screen.queryByTestId("audio-loop-toggle")).not.toBeInTheDocument();
   });
 
-  it("keeps only the timeline visible while reduced playback is active", () => {
+  it("keeps play/pause available while reduced playback is active", () => {
     render(<AudioPlayer {...defaultProps} isPlaying reducedControls showTimelineWhenReduced />);
 
     expect(screen.getByTestId("audio-unified-timeline")).toBeInTheDocument();
-    expect(screen.queryByTestId("audio-play-pause")).not.toBeInTheDocument();
+    expect(screen.getByTestId("audio-play-pause")).toHaveAttribute("aria-label", "Pause");
   });
 
   it("renders all segment markers and highlights the active one", () => {
