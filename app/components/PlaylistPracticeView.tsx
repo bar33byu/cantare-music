@@ -1469,6 +1469,8 @@ export function PlaylistPracticeView({
               initialSession={listenPracticeSession}
               breadcrumbRootLabel="Playlists"
               onBreadcrumbRootClick={onExit}
+              onNextSong={handleListenPlaybackComplete}
+              canUseNextSong={findNextPlayableIndex(currentSongIndex + 1) >= 0}
               preferredAudioVersion={preferredAudioVersion}
               onPreferredAudioVersionChange={onPreferredAudioVersionChange}
               collapseLyricLineBreaks={collapseLyricLineBreaks}
