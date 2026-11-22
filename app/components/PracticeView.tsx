@@ -2457,6 +2457,30 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [autoPlayToken, currentSegment, endedCount, isTapPracticeMode, onSegmentPlaybackComplete, playScope]);
 
   React.useEffect(() => {
+    if (
+      autoPlayToken <= 0 ||
+      autoPlayTokenHandledRef.current !== autoPlayToken ||
+      isTapPracticeMode ||
+      playScope !== "segment" ||
+      !onSegmentPlaybackComplete ||
+      !currentSegment ||
+      isPlaying ||
+      pausedByUserRef.current ||
+      currentMs < currentSegment.endMs - 50
+    ) {
+      return;
+    }
+
+    const completionKey = `${currentSegment.id}:${autoPlayToken}:boundary-fallback`;
+    if (playbackCompleteNotifiedRef.current === completionKey) {
+      return;
+    }
+
+    playbackCompleteNotifiedRef.current = completionKey;
+    onSegmentPlaybackComplete();
+  }, [autoPlayToken, currentMs, currentSegment, isPlaying, isTapPracticeMode, onSegmentPlaybackComplete, playScope]);
+
+  React.useEffect(() => {
     if (!isTapPracticeMode || !currentSegment || isPlaying) return;
     if (tapPracticePhase !== "attempting" && tapPracticePhase !== "listening") return;
     const playerReportedEnd = endedCount > tapPracticeStartEndedCountRef.current;
