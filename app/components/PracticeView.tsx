@@ -414,7 +414,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const loopEffectMountedRef = React.useRef(false);
   // Snapshot of the current playback state readable in effects without adding each
   // value as a dep (used by the isLooping-change effect).
-  const playbackStateRef = React.useRef({ isPlaying: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
+  const playbackStateRef = React.useRef({ isPlaying: false, isBuffering: false, currentMs: 0, currentSegment: null as typeof currentSegment, durationMs: 0 });
   const [audioVersion, setAudioVersion] = React.useState<AudioVersion>(
     preferredAudioVersion === "blend" ? "blend" : "straight"
   );
@@ -1055,7 +1055,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [effectiveSegmentPrerollMs]);
 
   // Keep snapshot up-to-date every render (before effects run).
-  playbackStateRef.current = { isPlaying, currentMs, currentSegment, durationMs };
+  playbackStateRef.current = { isPlaying, isBuffering, currentMs, currentSegment, durationMs };
 
   useEffect(() => {
     // On song change, avoid forcing an initial jump to the first section start.
@@ -2134,18 +2134,40 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       resetTapRun: isTapPracticeMode,
     });
 
+    const autoplayRetryTimer = window.setTimeout(() => {
+      const state = playbackStateRef.current;
+      const isExpectedPlaybackState = playScope === "segment"
+        ? state.currentSegment?.id === currentSegment?.id
+        : state.currentSegment !== undefined;
+      if (
+        autoPlayTokenHandledRef.current !== autoPlayToken ||
+        pausedByUserRef.current ||
+        state.isPlaying ||
+        state.isBuffering ||
+        !isExpectedPlaybackState ||
+        playbackErrorRef.current
+      ) {
+        return;
+      }
+
+      startTapPracticePlayback(startMs, endMs, {
+        resetTapRun: isTapPracticeMode,
+      });
+    }, 500);
+
     const blockedCheckTimer = window.setTimeout(() => {
       const state = playbackStateRef.current;
       const reportedCurrentTokenError = autoPlayErrorReportedRef.current?.startsWith(`${autoPlayToken}:`) ?? false;
       const isExpectedPlaybackState = playScope === "segment"
         ? state.currentSegment?.id === currentSegment?.id
         : state.currentSegment !== undefined;
-      if (!state.isPlaying && isExpectedPlaybackState && !reportedCurrentTokenError) {
+      if (!state.isPlaying && !state.isBuffering && isExpectedPlaybackState && !reportedCurrentTokenError) {
         onAutoPlayBlocked?.(playbackErrorRef.current ?? "Your browser blocked automatic audio. Press Play once to continue Hands Free.");
       }
     }, 1200);
 
     return () => {
+      window.clearTimeout(autoplayRetryTimer);
       window.clearTimeout(blockedCheckTimer);
     };
   }, [
