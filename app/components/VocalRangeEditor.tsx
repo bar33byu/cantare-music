@@ -10,7 +10,7 @@ import {
   MIN_PITCH_CONFIDENCE,
   updateAdaptiveNoiseGate,
   type AdaptiveNoiseGateState,
-} from "../lib/pitchPractice";
+} from "../lib/pitchDetection";
 
 const DEFAULT_RANGE: VocalRange = { low: 45, high: 64 };
 const KEYBOARD_LOW = 36;
