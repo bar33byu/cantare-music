@@ -649,7 +649,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     [currentMidiSegmentAnswerKey]
   );
   const currentCardContourNotes = currentMidiPitchContourNotes;
-  const hasCardContourData = currentCardContourNotes.length > 0;
   const currentDerivedAnswerKey = useMemo(
     () => {
       if (!currentSegment) {
@@ -2726,7 +2725,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     };
   }, [accountProgressEnabled, readOnlyDataRequest, request, segmentTimingSignature, sharedPlaylistId, sharedPlaylistToken, song.hasMidiContour, song.id, song.pitchContourNotes, tapHeatMapRefreshToken, userId]);
 
-  const contourMapToggle = hasSegments && currentSegment && hasCardContourData ? (
+  const contourMapToggle = hasSegments && currentSegment && hasContourReferenceData ? (
     <button
       type="button"
       data-testid="practice-card-contour-toggle"
@@ -3240,7 +3239,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
                     lyricVisibilityMode={lyricVisibilityMode}
                     lyricSize={lyricSize}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
-                    showContourMap={showCardContourMap && hasCardContourData}
+                    showContourMap={showCardContourMap}
                     contourHeatMap={currentMidiContourHeatMap}
                     showRatingControls={!isCompactLandscapeLayout}
                   />

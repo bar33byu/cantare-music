@@ -386,17 +386,25 @@ const SegmentCard: React.FC<SegmentCardProps> = ({
 
       {showContourMap ? (
         <div className="mb-2.5 sm:mb-3" data-testid="segment-card-contour-map">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Recent average</p>
-          <PitchContourThumbnail
-            notes={segment.pitchContourNotes ?? []}
-            segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
-            noteHeatMap={contourHeatMap}
-            activeTimeMs={
-              playbackMs !== undefined && playbackMs >= segment.startMs && playbackMs < segment.endMs
-                ? playbackMs - segment.startMs
-                : undefined
-            }
-          />
+          {(segment.pitchContourNotes?.length ?? 0) > 0 ? (
+            <>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Recent average</p>
+              <PitchContourThumbnail
+                notes={segment.pitchContourNotes ?? []}
+                segmentDurationMs={Math.max(1, segment.endMs - segment.startMs)}
+                noteHeatMap={contourHeatMap}
+                activeTimeMs={
+                  playbackMs !== undefined && playbackMs >= segment.startMs && playbackMs < segment.endMs
+                    ? playbackMs - segment.startMs
+                    : undefined
+                }
+              />
+            </>
+          ) : (
+            <p className="rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
+              No aligned contour notes are available for this segment. Check MIDI alignment in song settings.
+            </p>
+          )}
           {Object.values(contourHeatMap ?? {}).some((stat) => stat.sessionCount > 0) ? (
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-medium text-slate-500" aria-label="Tap transition color legend">
               <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-indigo-600" />Under 3 tries</span>
