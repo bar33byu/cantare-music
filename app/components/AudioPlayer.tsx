@@ -246,6 +246,7 @@ export function AudioPlayer({
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
     onSeekSong(Math.round(ratio * safeDurationMs));
   }, [onSeekSong, safeDurationMs]);
+  const isCompactHandsFreeLayout = reducedControls && showTimelineWhenReduced;
 
   if (!audioUrl) {
     return (
@@ -259,7 +260,10 @@ export function AudioPlayer({
   }
 
   return (
-    <div data-testid="audio-player" className="space-y-2">
+    <div
+      data-testid="audio-player"
+      className={isCompactHandsFreeLayout ? "grid grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-3" : "space-y-2"}
+    >
       {playbackError ? (
         <div
           role="alert"
@@ -270,7 +274,7 @@ export function AudioPlayer({
           <p className="mt-0.5 break-words text-xs text-rose-700">{playbackError}</p>
         </div>
       ) : null}
-      <div className="flex items-center justify-center gap-2">
+      <div className={`flex items-center justify-center gap-2 ${isCompactHandsFreeLayout ? "col-start-1 row-start-1" : ""}`}>
         {!reducedControls ? (
           <button
             type="button"
@@ -295,7 +299,7 @@ export function AudioPlayer({
           onClick={handlePlayPauseClick}
           aria-label={isPlaying ? "Pause" : "Play"}
           data-testid="audio-play-pause"
-          className="flex h-9 w-[72px] items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+          className={`flex h-9 items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 ${isCompactHandsFreeLayout ? "w-10" : "w-[72px]"}`}
         >
           {isPlaying ? (
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
@@ -366,7 +370,7 @@ export function AudioPlayer({
       </div>
 
       {showTimeline ? (
-      <div className={reducedControls ? "px-0" : "rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm"}>
+      <div className={`${reducedControls ? "px-0" : "rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm"} ${isCompactHandsFreeLayout ? "col-start-2 row-start-1 min-w-0" : ""}`}>
         <div
           data-testid="audio-unified-timeline"
           className="relative mb-2 h-6 cursor-pointer"

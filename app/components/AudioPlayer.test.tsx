@@ -113,11 +113,13 @@ describe("AudioPlayer", () => {
     expect(screen.queryByTestId("audio-loop-toggle")).not.toBeInTheDocument();
   });
 
-  it("keeps play/pause available while reduced playback is active", () => {
+  it("keeps play/pause beside the timeline while reduced playback is active", () => {
     render(<AudioPlayer {...defaultProps} isPlaying reducedControls showTimelineWhenReduced />);
 
     expect(screen.getByTestId("audio-unified-timeline")).toBeInTheDocument();
     expect(screen.getByTestId("audio-play-pause")).toHaveAttribute("aria-label", "Pause");
+    expect(screen.getByTestId("audio-play-pause").parentElement).toHaveClass("col-start-1");
+    expect(screen.getByTestId("audio-unified-timeline").parentElement).toHaveClass("col-start-2");
   });
 
   it("renders all segment markers and highlights the active one", () => {
