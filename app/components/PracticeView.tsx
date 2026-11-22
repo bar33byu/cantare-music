@@ -85,6 +85,7 @@ interface PracticeViewProps {
   onNextSegment?: (options?: { wasPlaying: boolean }) => void;
   canUsePrevSegment?: boolean;
   canUseNextSegment?: boolean;
+  canUseNextSong?: boolean;
   practiceTimeTrackingEnabled?: boolean;
   practiceTimeSource?: string;
   handsFreeViewport?: boolean;
@@ -333,6 +334,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   onNextSegment,
   canUsePrevSegment: canUsePrevSegmentOverride,
   canUseNextSegment: canUseNextSegmentOverride,
+  canUseNextSong,
   practiceTimeTrackingEnabled = false,
   practiceTimeSource = "song",
   handsFreeViewport = false,
@@ -525,7 +527,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     ? currentMs > currentSegment.startMs + PREV_SEGMENT_GO_BACK_THRESHOLD_MS
     : false;
   const canUsePrevSegment = canUsePrevSegmentOverride ?? (hasSegments && (!isFirst || canRestartCurrentSegment));
-  const canUseNextSegment = canUseNextSegmentOverride ?? (hasSegments && !isLast);
+  const canUseNextSegment = canUseNextSegmentOverride ?? (
+    hasSegments && (!isLast || (Boolean(onNextSong) && canUseNextSong !== false))
+  );
   const isCompactLandscapeLayout = (
     !isTapPracticeMode &&
     viewportSize.width > viewportSize.height &&
@@ -1553,6 +1557,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     const activeIndex = segmentIndexRef.current;
     if (activeIndex >= song.segments.length - 1) {
+      onNextSong?.();
       return;
     }
 
@@ -1563,7 +1568,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       lastActionAt: new Date().toISOString(),
     }));
     jumpToSegment(activeIndex + 1, { preventBackwardWhilePlaying: !isLooping });
-  }, [currentMs, hasSegments, isLooping, isPlaying, jumpToSegment, onNextSegment, song.segments]);
+  }, [currentMs, hasSegments, isLooping, isPlaying, jumpToSegment, onNextSegment, onNextSong, song.segments]);
 
   const handleToggleLoop = React.useCallback(() => {
     if (!isLooping) {
@@ -2455,6 +2460,30 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     playbackCompleteNotifiedRef.current = completionKey;
     onSegmentPlaybackComplete();
   }, [autoPlayToken, currentSegment, endedCount, isTapPracticeMode, onSegmentPlaybackComplete, playScope]);
+
+  React.useEffect(() => {
+    if (
+      autoPlayToken <= 0 ||
+      autoPlayTokenHandledRef.current !== autoPlayToken ||
+      isTapPracticeMode ||
+      playScope !== "segment" ||
+      !onSegmentPlaybackComplete ||
+      !currentSegment ||
+      isPlaying ||
+      pausedByUserRef.current ||
+      currentMs < currentSegment.endMs - 50
+    ) {
+      return;
+    }
+
+    const completionKey = `${currentSegment.id}:${autoPlayToken}:boundary-fallback`;
+    if (playbackCompleteNotifiedRef.current === completionKey) {
+      return;
+    }
+
+    playbackCompleteNotifiedRef.current = completionKey;
+    onSegmentPlaybackComplete();
+  }, [autoPlayToken, currentMs, currentSegment, isPlaying, isTapPracticeMode, onSegmentPlaybackComplete, playScope]);
 
   React.useEffect(() => {
     if (!isTapPracticeMode || !currentSegment || isPlaying) return;
