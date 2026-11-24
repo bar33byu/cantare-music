@@ -124,6 +124,9 @@ export function useAudioPlayer(
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playRequestIdRef = useRef(0);
   const endMsRef = useRef<number>(0);
+  const activeRangeStartMsRef = useRef(0);
+  const rangePlaybackStartedRef = useRef(false);
+  const rangeEndHandledRef = useRef(false);
   const pendingSeekMsRef = useRef<number | null>(null);
   const pendingPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
   const playbackRateRef = useRef(1);
@@ -234,6 +237,9 @@ export function useAudioPlayer(
     lastErrorRef.current = null;
     setPlaybackError(null);
     pendingSeekMsRef.current = startMs;
+    activeRangeStartMsRef.current = startMs;
+    rangePlaybackStartedRef.current = Math.abs(audio.currentTime * 1000 - startMs) <= 80 && !audio.seeking;
+    rangeEndHandledRef.current = false;
     endMsRef.current = Number.isFinite(endMs) ? endMs : 0;
     if (audio.readyState === 0) {
       audio.load?.();
@@ -327,10 +333,19 @@ export function useAudioPlayer(
     const handleTimeUpdate = () => {
       const ms = audio.currentTime * 1000;
       setCurrentMs(ms);
-      if (endMsRef.current > 0 && ms >= endMsRef.current) {
+      if (
+        !rangePlaybackStartedRef.current &&
+        !audio.seeking &&
+        Math.abs(ms - activeRangeStartMsRef.current) <= 80
+      ) {
+        rangePlaybackStartedRef.current = true;
+      }
+      if (endMsRef.current > 0 && rangePlaybackStartedRef.current && ms >= endMsRef.current) {
         audio.pause();
         setIsPlaying(false);
         endMsRef.current = 0;
+        rangePlaybackStartedRef.current = false;
+        rangeEndHandledRef.current = true;
         setEndedCount((previous) => previous + 1);
         updateDebugInfo(audio, 'range-ended');
         optionsRef.current.onRangeEnd?.();
@@ -340,9 +355,26 @@ export function useAudioPlayer(
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => {
+      if (rangeEndHandledRef.current) {
+        rangeEndHandledRef.current = false;
+        updateDebugInfo(audio, 'ended-after-range');
+        return;
+      }
+      if (endMsRef.current > 0 && !rangePlaybackStartedRef.current) {
+        updateDebugInfo(audio, 'ended-before-range-start');
+        return;
+      }
+      endMsRef.current = 0;
+      rangePlaybackStartedRef.current = false;
       setIsPlaying(false);
       setEndedCount((previous) => previous + 1);
       updateDebugInfo(audio, 'ended');
+    };
+    const handleSeeked = () => {
+      const seekedMs = audio.currentTime * 1000;
+      if (Math.abs(seekedMs - activeRangeStartMsRef.current) <= 250) {
+        rangePlaybackStartedRef.current = true;
+      }
     };
     const handleCanPlay = () => {
       setIsReady(true);
@@ -413,6 +445,7 @@ export function useAudioPlayer(
     const handlePauseDebug = () => updateDebugInfo(audio, 'pause');
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('seeked', handleSeeked);
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
     audio.addEventListener('ended', handleEnded);
@@ -430,6 +463,7 @@ export function useAudioPlayer(
     return () => {
       playRequestIdRef.current += 1;
       audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('seeked', handleSeeked);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
       audio.removeEventListener('ended', handleEnded);
@@ -467,6 +501,9 @@ export function useAudioPlayer(
     setPlaybackError(null);
     setDebugInfo(makeDefaultDebugInfo(audioUrl));
     endMsRef.current = 0;
+    activeRangeStartMsRef.current = 0;
+    rangePlaybackStartedRef.current = false;
+    rangeEndHandledRef.current = false;
 
     const audio = audioRef.current;
     if (!audio) {
