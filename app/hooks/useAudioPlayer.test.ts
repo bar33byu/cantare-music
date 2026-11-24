@@ -15,6 +15,7 @@ const makeAudioStub = () => {
     playbackRate: 1,
     preload: 'none',
     readyState: 0,
+    paused: true,
     buffered,
     play: vi.fn().mockResolvedValue(undefined),
     pause: vi.fn(),
@@ -25,6 +26,8 @@ const makeAudioStub = () => {
     }),
     removeEventListener: vi.fn(),
     emit: (event: string) => {
+      if (event === 'play') stub.paused = false;
+      if (event === 'pause' || event === 'ended') stub.paused = true;
       (listeners[event] || []).forEach((cb) => cb());
     },
   };

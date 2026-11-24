@@ -91,7 +91,6 @@ interface AutoDrillQueueItem {
   segment: Segment;
   songIndex: number;
   segmentIndex: number;
-  latestRating?: SegmentRating;
 }
 
 function isPlaybackPermissionBlockMessage(message: string | null | undefined): boolean {
@@ -249,6 +248,7 @@ export function PlaylistPracticeView({
   const [practiceMode, setPracticeMode] = useState<PracticeMode>('manual');
   const [autoDrillState, setAutoDrillState] = useState<AutoDrillState>('idle');
   const [autoDrillIndex, setAutoDrillIndex] = useState(0);
+  const [autoDrillQueue, setAutoDrillQueue] = useState<AutoDrillQueueItem[]>([]);
   const [autoDrillPlayToken, setAutoDrillPlayToken] = useState(0);
   const [autoDrillMessage, setAutoDrillMessage] = useState(`${HANDS_FREE_LABEL} idle`);
   const [autoDrillPlaybackWarning, setAutoDrillPlaybackWarning] = useState<string | null>(null);
@@ -258,6 +258,7 @@ export function PlaylistPracticeView({
   const [listenAutoPlayToken, setListenAutoPlayToken] = useState(0);
   const [listenPlaybackWarning, setListenPlaybackWarning] = useState<string | null>(null);
   const [ratingsBySongId, setRatingsBySongId] = useState<Record<string, SegmentRating[]>>({});
+  const [ratingsLoadedForPlaylist, setRatingsLoadedForPlaylist] = useState<string | null>(null);
   const autoDrillRunIdRef = useRef(0);
   const [autoDrillTransition, setAutoDrillTransition] = useState<'full' | 'quick' | 'previous' | 'again' | 'continuous'>('full');
   const autoDrillHandledCompletionRef = useRef<string | null>(null);
@@ -366,6 +367,7 @@ export function PlaylistPracticeView({
       setRatingsBySongId(Object.fromEntries(
         livePlaylist.songs.map((song) => [song.id, getGuestSongRatings(song.id)] as const)
       ));
+      setRatingsLoadedForPlaylist(playlist.id);
       return;
     }
 
@@ -375,6 +377,7 @@ export function PlaylistPracticeView({
 
     if (songsWithSegments.length === 0 || progressStorage === 'none') {
       setRatingsBySongId({});
+      setRatingsLoadedForPlaylist(playlist.id);
       return;
     }
 
@@ -399,6 +402,8 @@ export function PlaylistPracticeView({
         }
       } catch {
         // Hands Free can still run when saved ratings are unavailable.
+      } finally {
+        if (!cancelled) setRatingsLoadedForPlaylist(playlist.id);
       }
     };
 
@@ -407,32 +412,25 @@ export function PlaylistPracticeView({
     return () => {
       cancelled = true;
     };
-  }, [livePlaylist.songs, localProgressEnabled, mode, progressStorage, refetchTrigger, userScopedHeaders]);
+  }, [livePlaylist.songs, localProgressEnabled, mode, playlist.id, progressStorage, refetchTrigger, userScopedHeaders]);
 
-  const autoDrillQueue = useMemo<AutoDrillQueueItem[]>(() => {
+  const availableAutoDrillQueue = useMemo<AutoDrillQueueItem[]>(() => {
     return displayedSongs.flatMap((song, songIndex) => {
       if (!resolvePreferredAudioUrl(song, preferredAudioVersion)) {
         return [];
       }
 
-      const ratings = ratingsBySongId[song.id] ?? [];
-      return [...song.segments]
-        .sort((a, b) => a.order - b.order || a.startMs - b.startMs)
-        .map((segment, segmentIndex) => {
-          const latestRating = ratings
-            .filter((rating) => rating.segmentId === segment.id)
-            .sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt))[0];
-          return {
-            id: `${song.id}:${segment.id}`,
-            song,
-            segment,
-            songIndex,
-            segmentIndex,
-            latestRating,
-          };
-        });
+      const segments = [...song.segments].sort((a, b) => a.order - b.order || a.startMs - b.startMs);
+      const orderedSong = { ...song, segments };
+      return segments.map((segment, segmentIndex) => ({
+        id: `${song.id}:${segment.id}`,
+        song: orderedSong,
+        segment,
+        songIndex,
+        segmentIndex,
+      }));
     });
-  }, [displayedSongs, preferredAudioVersion, ratingsBySongId]);
+  }, [displayedSongs, preferredAudioVersion]);
 
   const currentAutoDrillItem = autoDrillQueue[autoDrillIndex];
   const nextAutoDrillAudioUrl = useMemo(() => {
@@ -454,10 +452,6 @@ export function PlaylistPracticeView({
 
     void prefetchAudioFile(nextAutoDrillAudioUrl);
   }, [autoDrillState, nextAutoDrillAudioUrl, practiceMode]);
-
-  useEffect(() => {
-    setAutoDrillIndex((prev) => Math.min(prev, Math.max(autoDrillQueue.length - 1, 0)));
-  }, [autoDrillQueue.length]);
 
   const autoDrillPracticeSession = useMemo<SessionState | null>(() => {
     if (!currentAutoDrillItem) {
@@ -582,14 +576,15 @@ export function PlaylistPracticeView({
     autoDrillHandledCompletionRef.current = null;
     setMode('auto');
     setPracticeMode('auto-drill');
+    setAutoDrillQueue(availableAutoDrillQueue);
     setAutoDrillIndex(0);
     setAutoDrillCompletedPasses({});
     setAutoDrillRunRatings({});
     autoDrillAudioFallbackItemRef.current = null;
     setAutoDrillPlaybackWarning(null);
     setAutoDrillMessage(`${HANDS_FREE_LABEL} starting`);
-    setAutoDrillState(autoDrillQueue.length > 0 ? 'announcing' : 'complete');
-  }, [autoDrillQueue.length]);
+    setAutoDrillState(availableAutoDrillQueue.length > 0 ? 'announcing' : 'complete');
+  }, [availableAutoDrillQueue]);
 
   const activateMode = useCallback((nextMode: PlaylistMode) => {
     if (nextMode === 'auto') {
@@ -748,7 +743,10 @@ export function PlaylistPracticeView({
     autoDrillHandledCompletionRef.current = completionKey;
 
     const completedPasses = (autoDrillCompletedPasses[currentAutoDrillItem.id] ?? 0) + 1;
-    const activeRating = autoDrillRunRatings[currentAutoDrillItem.id] ?? currentAutoDrillItem.latestRating?.rating;
+    const savedRating = (ratingsBySongId[currentAutoDrillItem.song.id] ?? [])
+      .filter((rating) => rating.segmentId === currentAutoDrillItem.segment.id)
+      .sort((a, b) => Date.parse(b.ratedAt) - Date.parse(a.ratedAt))[0]?.rating;
+    const activeRating = autoDrillRunRatings[currentAutoDrillItem.id] ?? savedRating;
     const targetPasses = getAutoDrillTargetPasses(activeRating);
     const shouldReplaySegment = completedPasses < targetPasses;
 
@@ -776,6 +774,7 @@ export function PlaylistPracticeView({
     currentAutoDrillItem,
     practiceMode,
     autoDrillRunRatings,
+    ratingsBySongId,
   ]);
 
   const handleAutoDrillPlaybackBlocked = useCallback((message: string | null) => {
@@ -891,6 +890,7 @@ export function PlaylistPracticeView({
     if (autoDrillState !== 'announcing' && autoDrillState !== 'repeating') {
       return;
     }
+    if (accountProgressEnabled && ratingsLoadedForPlaylist !== playlist.id) return;
 
     const runId = autoDrillRunIdRef.current + 1;
     autoDrillRunIdRef.current = runId;
@@ -928,7 +928,7 @@ export function PlaylistPracticeView({
     return () => {
       cancelled = true;
     };
-  }, [autoDrillIndex, autoDrillQueue.length, autoDrillState, autoDrillTransition, currentAutoDrillItem, practiceMode, stopAutoDrill]);
+  }, [accountProgressEnabled, autoDrillIndex, autoDrillQueue.length, autoDrillState, autoDrillTransition, currentAutoDrillItem, playlist.id, practiceMode, ratingsLoadedForPlaylist, stopAutoDrill]);
 
   useEffect(() => {
     try {
@@ -1394,7 +1394,7 @@ export function PlaylistPracticeView({
                     data-testid="auto-drill-start"
                     aria-label={`Start ${HANDS_FREE_LABEL}`}
                     onClick={startAutoDrill}
-                    disabled={autoDrillQueue.length === 0}
+                    disabled={availableAutoDrillQueue.length === 0}
                     className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
                   >
                     Start
@@ -1418,13 +1418,15 @@ export function PlaylistPracticeView({
                     breadcrumbRootLabel={HANDS_FREE_LABEL}
                     onBreadcrumbRootClick={stopAutoDrill}
                     onNextSong={handleNextAutoDrillSong}
-                    segmentPrerollMs={autoDrillTransition === 'continuous' ? 0 : AUTO_DRILL_PREROLL_MS}
+                    segmentPrerollMs={autoDrillTransition === 'full' && currentAutoDrillItem.segmentIndex === 0
+                      ? currentAutoDrillItem.segment.startMs
+                      : autoDrillTransition === 'continuous' ? 0 : AUTO_DRILL_PREROLL_MS}
                     preferredAudioVersion={preferredAudioVersion}
                     onPreferredAudioVersionChange={onPreferredAudioVersionChange}
                     collapseLyricLineBreaks={collapseLyricLineBreaks}
                     lyricSize="large"
                     playScope="segment"
-                    autoPlayToken={autoDrillPlayToken}
+                    autoPlayToken={autoDrillState === 'playing' ? autoDrillPlayToken : 0}
                     reducedControls={practiceMode === 'auto-drill'}
                     showSegmentNavigationControls={practiceMode === 'auto-drill'}
                     ratingKeysEnabled={practiceMode === 'auto-drill'}

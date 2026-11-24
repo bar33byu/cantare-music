@@ -845,6 +845,142 @@ describe('PlaylistPracticeView', () => {
     expect(screen.getByTestId('playlist-practice-song-song-2')).toHaveTextContent('Not practiced yet');
   });
 
+  it('plays every Hands Free pass in playlist order with preroll and continues across songs', async () => {
+    const firstSong = {
+      ...playlist.songs[0],
+      segments: [5, 4, 3, 2, 1, undefined].map((_, index) => ({
+        ...playlist.songs[0].segments[0],
+        id: `hands-free-${index}`,
+        label: `Segment ${index + 1}`,
+        order: index,
+        startMs: 1000 + index * 3000,
+        endMs: 3000 + index * 3000,
+      })),
+    };
+    const secondSong = { ...playlist.songs[1], segments: [{ ...playlist.songs[1].segments[0], endMs: 2000 }] };
+    const savedPlaylist = { ...playlist, songs: [{ ...firstSong, segments: [...firstSong.segments].reverse() }, secondSong] };
+    const ratings = [5, 4, 3, 2, 1].map((rating, index) => ({
+      id: `rating-${index}`,
+      segmentId: firstSong.segments[index].id,
+      rating,
+      ratedAt: '2026-01-01T00:00:00.000Z',
+    }));
+    let loadRatings!: () => void;
+    const ratingsLoaded = new Promise<void>((resolve) => { loadRatings = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith('/ratings')) await ratingsLoaded;
+      const songRatings = url.includes('/song-1/') ? ratings : [{ ...ratings[0], segmentId: secondSong.segments[0].id }];
+      return new Response(JSON.stringify({ ratings: songRatings }), { status: 200 });
+    }));
+
+    const plays: Array<[string, number]> = [];
+    const audioInstances: TestAudio[] = [];
+    class TestAudio extends EventTarget {
+      src = '';
+      currentTime = 0;
+      duration = 18;
+      readyState = 4;
+      paused = true;
+      seeking = false;
+      ended = false;
+
+      constructor(src: string) {
+        super();
+        this.src = src;
+        audioInstances.push(this);
+      }
+
+      load() {
+        this.paused = true;
+        this.ended = false;
+      }
+
+      play() {
+        this.paused = false;
+        this.ended = false;
+        plays.push([this.src, Math.round(this.currentTime * 1000)]);
+        this.dispatchEvent(new Event('play'));
+        return Promise.resolve();
+      }
+
+      pause() {
+        this.paused = true;
+        this.dispatchEvent(new Event('pause'));
+      }
+    }
+    vi.stubGlobal('Audio', TestAudio);
+
+    const props = { revalidatePlaylist: false, onExit: vi.fn(), onSelectSong: vi.fn() };
+    const view = render(<PlaylistPracticeView {...props} playlist={savedPlaylist} />);
+    fireEvent.click(screen.getByTestId('playlist-mode-auto'));
+    expect(plays).toEqual([]);
+    await act(async () => { loadRatings(); });
+
+    const expected = [
+      [firstSong.audioUrl, 0, 3000],
+      [firstSong.audioUrl, 4000, 6000], [firstSong.audioUrl, 3500, 6000],
+      [firstSong.audioUrl, 6500, 9000], [firstSong.audioUrl, 6500, 9000], [firstSong.audioUrl, 6500, 9000],
+      [firstSong.audioUrl, 9500, 12000], [firstSong.audioUrl, 9500, 12000], [firstSong.audioUrl, 9500, 12000],
+      [firstSong.audioUrl, 12500, 15000], [firstSong.audioUrl, 12500, 15000], [firstSong.audioUrl, 12500, 15000],
+      [firstSong.audioUrl, 15500, 18000], [firstSong.audioUrl, 15500, 18000], [firstSong.audioUrl, 15500, 18000],
+      [secondSong.audioUrl, 0, 2000],
+    ] as const;
+
+    for (const [index, [src, startMs, endMs]] of expected.entries()) {
+      await waitFor(() => expect(plays).toHaveLength(index + 1));
+      expect(plays[index]).toEqual([src, startMs]);
+      expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+      const media = audioInstances[audioInstances.length - 1];
+
+      if (index === 2) {
+        // A refresh must not move the current segment to a different place in the run.
+        view.rerender(<PlaylistPracticeView {...props} playlist={{
+          ...savedPlaylist,
+          songs: [secondSong, firstSong],
+        }} />);
+        act(() => {
+          const start = media.currentTime;
+          media.seeking = true;
+          media.currentTime = endMs / 1000;
+          media.dispatchEvent(new Event('timeupdate'));
+          media.currentTime = start;
+          media.seeking = false;
+          media.dispatchEvent(new Event('pause')); // Queued by the previous pass.
+        });
+        expect(plays).toHaveLength(index + 1);
+        expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+      }
+
+      act(() => {
+        media.currentTime = (endMs - 100) / 1000;
+        media.dispatchEvent(new Event('timeupdate'));
+      });
+      expect(plays).toHaveLength(index + 1);
+      expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+
+      await act(async () => {
+        media.currentTime = endMs / 1000;
+        if (index === 14) {
+          media.ended = true;
+          media.paused = true;
+          media.dispatchEvent(new Event('ended'));
+        } else if (index === 3) {
+          // Some players report the boundary through a pause before a time update.
+          media.paused = true;
+          media.dispatchEvent(new Event('pause'));
+        } else {
+          media.dispatchEvent(new Event('timeupdate'));
+          media.dispatchEvent(new Event('ended')); // Late event must not count a second time.
+        }
+      });
+    }
+
+    expect(screen.getByTestId('auto-drill-live')).toHaveTextContent('Playlist complete.');
+    expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
+    expect(plays).toHaveLength(expected.length);
+  });
+
   it('plays unrated Auto Drill segments three times and advances on a high rating', async () => {
     const play = vi.fn();
     let latestAudioOptions: { onRangeEnd?: () => void } | undefined;
