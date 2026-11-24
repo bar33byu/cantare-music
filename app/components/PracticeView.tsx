@@ -389,6 +389,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const [isTapPracticeMode, setIsTapPracticeMode] = React.useState(false);
   const [tapPracticePhase, setTapPracticePhase] = React.useState<TapPracticePhase>("ready");
   const tapPracticeStartEndedCountRef = React.useRef(0);
+  const tapPracticePlaybackStartedRef = React.useRef(false);
   const [showCardContourMap, setShowCardContourMap] = React.useState(false);
   const [practiceControlExplainer, setPracticeControlExplainer] = React.useState<ExplainedPracticeControl | null>(null);
   const [tapSessionSummaries, setTapSessionSummaries] = React.useState<TapSessionSummaryPayload[]>([]);
@@ -477,7 +478,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   const hasContourReferenceData = (
     Object.values(midiSegmentAnswerKeys).some((key) => key.notes.length > 0) ||
     song.segments.some((segment) => (segment.pitchContourNotes?.length ?? 0) > 0) ||
-    (song.pitchContourNotes?.length ?? 0) > 0 ||
     Boolean(song.hasMidiContour)
   );
   const currentSegment = hasSegments ? song.segments[session.currentSegmentIndex] : null;
@@ -1876,6 +1876,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     cancelTapPracticeCountIn();
 
+    tapPracticePlaybackStartedRef.current = false;
     if (options?.resetTapRun) {
       resetTapPracticeRun();
     }
@@ -2477,8 +2478,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [endedCount, playScope]);
 
   React.useEffect(() => {
+    if (
+      isTapPracticeMode &&
+      (tapPracticePhase === "attempting" || tapPracticePhase === "listening") &&
+      isPlaying
+    ) {
+      tapPracticePlaybackStartedRef.current = true;
+    }
+  }, [isPlaying, isTapPracticeMode, tapPracticePhase]);
+
+  React.useEffect(() => {
     if (!isTapPracticeMode || !currentSegment || isPlaying) return;
     if (tapPracticePhase !== "attempting" && tapPracticePhase !== "listening") return;
+    if (!tapPracticePlaybackStartedRef.current) return;
     const playerReportedEnd = endedCount > tapPracticeStartEndedCountRef.current;
     const playbackReachedSegmentEnd = currentMs >= currentSegment.endMs - 50;
     if (!playerReportedEnd && !playbackReachedSegmentEnd) return;
@@ -2490,6 +2502,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       activeTapCaptureRef.current = null;
     }
     if (tapPracticePhase === "attempting") recordCurrentMidiContourAttempt();
+    tapPracticePlaybackStartedRef.current = false;
     setTapPracticePhase("reviewing");
   }, [currentMs, currentSegment, endedCount, finalizeTapCapture, isPlaying, isTapPracticeMode, recordCurrentMidiContourAttempt, tapPracticePhase]);
 

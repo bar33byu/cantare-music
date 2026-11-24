@@ -1262,6 +1262,13 @@ describe("PracticeView", () => {
     expect(segmentCard).toHaveAttribute("data-show-contour-map", "false");
   });
 
+  it("shows the contour map toggle for a MIDI song before segment alignment is available", async () => {
+    const song = { ...makeSong(1), hasMidiContour: true };
+    await renderAndWaitForRatings(song);
+
+    expect(screen.getByTestId("practice-card-contour-toggle")).toBeInTheDocument();
+  });
+
   it("shows the contour map toggle when only a MIDI answer key exists", async () => {
     mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -1398,6 +1405,8 @@ describe("PracticeView", () => {
     const view = await renderAndWaitForRatings(song);
     fireEvent.click(screen.getByTestId("practice-tap-mode-toggle"));
     await beginTapPracticeAttempt();
+    playbackState.isPlaying = true;
+    view.rerender(<PracticeView song={song} initialSession={makeSession(song)} />);
 
     const tapBar = screen.getByTestId("practice-tap-bar");
     vi.spyOn(tapBar, "getBoundingClientRect").mockReturnValue({
@@ -1442,7 +1451,10 @@ describe("PracticeView", () => {
     await runTapPracticeCountIn(() => fireEvent.click(screen.getByTestId("practice-hear-part")));
     expect(screen.getByTestId("mock-audio-player")).toHaveAttribute("data-audio-url", song.audioUrl);
     expect(mockPlay).toHaveBeenLastCalledWith(0, song.segments[0].endMs);
+    playbackState.isPlaying = true;
+    view.rerender(<PracticeView song={song} initialSession={makeSession(song)} />);
 
+    playbackState.isPlaying = false;
     playbackState.currentMs = song.segments[0].endMs;
     playbackState.endedCount = 2;
     view.rerender(<PracticeView song={song} initialSession={makeSession(song)} />);
@@ -1563,6 +1575,8 @@ describe("PracticeView", () => {
     };
 
     await beginTapPracticeAttempt();
+    playbackState.isPlaying = true;
+    view.rerender(<PracticeView song={song} initialSession={makeSession(song)} />);
     await tapSegment(0);
     playbackState.isPlaying = false;
     playbackState.currentMs = song.segments[0].endMs;
@@ -1574,6 +1588,8 @@ describe("PracticeView", () => {
     await waitFor(() => expect(screen.getByTestId("mock-segment-card")).toHaveAttribute("data-segment-id", "seg-1"));
     expect(screen.getByTestId("practice-attempt-status")).toBeInTheDocument();
 
+    playbackState.isPlaying = true;
+    view.rerender(<PracticeView song={song} initialSession={makeSession(song)} />);
     await tapSegment(10);
     playbackState.isPlaying = false;
     playbackState.currentMs = song.segments[1].endMs;
