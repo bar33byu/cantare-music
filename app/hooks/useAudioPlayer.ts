@@ -124,8 +124,6 @@ export function useAudioPlayer(
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playRequestIdRef = useRef(0);
   const endMsRef = useRef<number>(0);
-  const activeRangeStartMsRef = useRef(0);
-  const rangePlaybackStartedRef = useRef(false);
   const rangeEndHandledRef = useRef(false);
   const pendingSeekMsRef = useRef<number | null>(null);
   const pendingPlayRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
@@ -203,7 +201,7 @@ export function useAudioPlayer(
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     optionsRef.current = options;
   }, [options]);
 
@@ -237,8 +235,6 @@ export function useAudioPlayer(
     lastErrorRef.current = null;
     setPlaybackError(null);
     pendingSeekMsRef.current = startMs;
-    activeRangeStartMsRef.current = startMs;
-    rangePlaybackStartedRef.current = Math.abs(audio.currentTime * 1000 - startMs) <= 80 && !audio.seeking;
     rangeEndHandledRef.current = false;
     endMsRef.current = Number.isFinite(endMs) ? endMs : 0;
     if (audio.readyState === 0) {
@@ -265,6 +261,7 @@ export function useAudioPlayer(
             if (isStalePlayRequest()) {
               return;
             }
+            if (!audio.paused) setIsPlaying(true);
             setDebugInfo((previous) => ({
               ...previous,
               playResolved: (previous.playResolved ?? 0) + 1,
@@ -282,6 +279,7 @@ export function useAudioPlayer(
               setPlaybackError(message);
             }
             setIsPlaying(false);
+            setIsBuffering(false);
             setDebugInfo((previous) => ({
               ...previous,
               playRejected: (previous.playRejected ?? 0) + 1,
@@ -302,6 +300,7 @@ export function useAudioPlayer(
         setPlaybackError(message);
       }
       setIsPlaying(false);
+      setIsBuffering(false);
       setDebugInfo((previous) => ({
         ...previous,
         playRejected: (previous.playRejected ?? 0) + 1,
@@ -330,51 +329,34 @@ export function useAudioPlayer(
     audioRef.current = audio;
     updateDebugInfo(audio, 'audio-created');
 
-    const handleTimeUpdate = () => {
-      const ms = audio.currentTime * 1000;
-      setCurrentMs(ms);
-      if (
-        !rangePlaybackStartedRef.current &&
-        !audio.seeking &&
-        Math.abs(ms - activeRangeStartMsRef.current) <= 80
-      ) {
-        rangePlaybackStartedRef.current = true;
-      }
-      if (endMsRef.current > 0 && rangePlaybackStartedRef.current && ms >= endMsRef.current) {
-        audio.pause();
-        setIsPlaying(false);
-        endMsRef.current = 0;
-        rangePlaybackStartedRef.current = false;
-        rangeEndHandledRef.current = true;
-        setEndedCount((previous) => previous + 1);
-        updateDebugInfo(audio, 'range-ended');
-        optionsRef.current.onRangeEnd?.();
-      }
+    const finishPlayback = (naturalEnd: boolean) => {
+      const hadBoundary = endMsRef.current > 0;
+      endMsRef.current = 0;
+      rangeEndHandledRef.current = true;
+      if (!naturalEnd) audio.pause();
+      setIsPlaying(false);
+      setIsBuffering(false);
+      setEndedCount((previous) => previous + 1);
+      updateDebugInfo(audio, naturalEnd ? 'ended' : 'range-ended');
+      if (hadBoundary) optionsRef.current.onRangeEnd?.();
     };
 
-    const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
-    const handleEnded = () => {
-      if (rangeEndHandledRef.current) {
-        rangeEndHandledRef.current = false;
-        updateDebugInfo(audio, 'ended-after-range');
-        return;
-      }
-      if (endMsRef.current > 0 && !rangePlaybackStartedRef.current) {
-        updateDebugInfo(audio, 'ended-before-range-start');
-        return;
-      }
-      endMsRef.current = 0;
-      rangePlaybackStartedRef.current = false;
-      setIsPlaying(false);
-      setEndedCount((previous) => previous + 1);
-      updateDebugInfo(audio, 'ended');
+    const handleTimeUpdate = () => {
+      // Ignore old positions while the browser is still applying the new seek.
+      if (audio.seeking || pendingSeekMsRef.current !== null || rangeEndHandledRef.current) return;
+      const ms = audio.currentTime * 1000;
+      setCurrentMs(ms);
+      if (endMsRef.current > 0 && ms >= endMsRef.current) finishPlayback(false);
     };
-    const handleSeeked = () => {
-      const seekedMs = audio.currentTime * 1000;
-      if (Math.abs(seekedMs - activeRangeStartMsRef.current) <= 250) {
-        rangePlaybackStartedRef.current = true;
-      }
+
+    const syncPlaying = () => setIsPlaying(!audio.paused);
+    const handlePause = () => {
+      syncPlaying();
+      if (audio.paused) handleTimeUpdate();
+    };
+    const handleEnded = () => {
+      if (audio.ended === false || audio.seeking || pendingSeekMsRef.current !== null || rangeEndHandledRef.current) return;
+      finishPlayback(true);
     };
     const handleCanPlay = () => {
       setIsReady(true);
@@ -445,8 +427,8 @@ export function useAudioPlayer(
     const handlePauseDebug = () => updateDebugInfo(audio, 'pause');
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('seeked', handleSeeked);
-    audio.addEventListener('play', handlePlay);
+    audio.addEventListener('seeked', handleTimeUpdate);
+    audio.addEventListener('play', syncPlaying);
     audio.addEventListener('pause', handlePause);
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('canplay', handleCanPlay);
@@ -463,8 +445,8 @@ export function useAudioPlayer(
     return () => {
       playRequestIdRef.current += 1;
       audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('seeked', handleSeeked);
-      audio.removeEventListener('play', handlePlay);
+      audio.removeEventListener('seeked', handleTimeUpdate);
+      audio.removeEventListener('play', syncPlaying);
       audio.removeEventListener('pause', handlePause);
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('canplay', handleCanPlay);
@@ -497,12 +479,9 @@ export function useAudioPlayer(
     setIsPlaying(false);
     setCurrentMs(0);
     setDurationMs(0);
-    setEndedCount(0);
     setPlaybackError(null);
     setDebugInfo(makeDefaultDebugInfo(audioUrl));
     endMsRef.current = 0;
-    activeRangeStartMsRef.current = 0;
-    rangePlaybackStartedRef.current = false;
     rangeEndHandledRef.current = false;
 
     const audio = audioRef.current;
@@ -553,9 +532,13 @@ export function useAudioPlayer(
 
   const pause = useCallback(() => {
     const audio = audioRef.current;
+    playRequestIdRef.current += 1;
     pendingPlayRangeRef.current = null;
+    endMsRef.current = 0;
     if (!audio) return;
     audio.pause();
+    setIsPlaying(false);
+    setIsBuffering(false);
     updateDebugInfo(audio, 'pause-call');
   }, [updateDebugInfo]);
 

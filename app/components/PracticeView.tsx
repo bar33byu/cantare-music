@@ -429,9 +429,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     endMs: number;
     wasPlaying: boolean;
   } | null>(null);
-  const onSegmentPlaybackCompleteRef = React.useRef(onSegmentPlaybackComplete);
   const onSongPlaybackCompleteRef = React.useRef(onSongPlaybackComplete);
-  const playScopeRef = React.useRef(playScope);
   const {
     isPlaying,
     isReady,
@@ -449,9 +447,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     setPlaybackEndMs,
   } = useAudioPlayer(directPlaybackAudioUrl, undefined, {
     onRangeEnd: () => {
-      if (isTapPracticeMode) return;
-      if (playScopeRef.current === "segment") {
-        onSegmentPlaybackCompleteRef.current?.();
+      if (!isTapPracticeMode && playScope === "segment" && !pausedByUserRef.current) {
+        onSegmentPlaybackComplete?.();
       }
     },
   });
@@ -604,10 +601,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
   }, [persistPracticeSessionInterval, song.id]);
 
   React.useEffect(() => {
-    onSegmentPlaybackCompleteRef.current = onSegmentPlaybackComplete;
-  }, [onSegmentPlaybackComplete]);
-
-  React.useEffect(() => {
     onSongPlaybackCompleteRef.current = onSongPlaybackComplete;
   }, [onSongPlaybackComplete]);
 
@@ -628,10 +621,6 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     autoPlayErrorReportedRef.current = reportKey;
     onAutoPlayBlocked?.(playbackError);
   }, [autoPlayToken, onAutoPlayBlocked, playbackError, playScope]);
-
-  React.useEffect(() => {
-    playScopeRef.current = playScope;
-  }, [playScope]);
 
   React.useEffect(() => {
     latestRatingsRef.current = session.ratings;
@@ -1989,11 +1978,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     if ((playScope === "segment" || isTapPracticeMode) && currentSegment) {
+      const startMs = isTapPracticeMode ? currentSegment.startMs : getSegmentStartWithPreroll(currentSegment.startMs);
+      const resumeMs = getCurrentMs?.() ?? currentMs;
+      const canResume = pausedByUserRef.current && !isTapPracticeMode &&
+        resumeMs >= startMs && resumeMs < currentSegment.endMs;
       pausedByUserRef.current = false;
       const targetPhase = isTapPracticeMode && tapPracticePhase === "reviewing" && activeAudioVersion === "straight"
         ? "listening"
         : "attempting";
-      startTapPracticePlayback(isTapPracticeMode ? currentSegment.startMs : getSegmentStartWithPreroll(currentSegment.startMs), currentSegment.endMs, {
+      startTapPracticePlayback(canResume ? resumeMs : startMs, currentSegment.endMs, {
         resetTapRun: isTapPracticeMode && (
           targetPhase === "attempting" && (tapPracticePhase !== "attempting" || currentMs >= currentSegment.endMs - 50)
         ),
@@ -2016,6 +2009,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     currentMs,
     currentSegment,
     durationMs,
+    getCurrentMs,
     getSegmentStartWithPreroll,
     isLooping,
     isPlaying,
@@ -2037,6 +2031,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }));
     navigationGuardRef.current = null;
     cancelTapPracticeCountIn();
+    if (playScope === "segment" && onSegmentPlaybackComplete && currentSegment) {
+      seek(Math.max(getSegmentStartWithPreroll(currentSegment.startMs), Math.min(ms, currentSegment.endMs)));
+      return;
+    }
     const seeksToSegmentStart = currentSegment
       ? ms <= currentSegment.startMs + 50 && currentMs > currentSegment.startMs + 250
       : false;
@@ -2054,8 +2052,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     cancelTapPracticeCountIn,
     currentMs,
     currentSegment,
+    getSegmentStartWithPreroll,
     getSegmentIndexAtMs,
     isTapPracticeMode,
+    onSegmentPlaybackComplete,
+    playScope,
     resetTapPracticeRun,
     seek,
     session.currentSegmentIndex,
@@ -2118,6 +2119,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     if (
       autoPlayToken <= 0 ||
       autoPlayTokenHandledRef.current === autoPlayToken ||
+      session.currentSongId !== initialSession.currentSongId ||
       (playScope === "segment" && (!currentSegment || targetIndex !== session.currentSegmentIndex))
     ) {
       return;
@@ -2141,6 +2143,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         : state.currentSegment !== undefined;
       if (
         autoPlayTokenHandledRef.current !== autoPlayToken ||
+        playScope !== "segment" ||
+        !handsFreeViewport ||
+        isTapPracticeMode ||
         pausedByUserRef.current ||
         state.isPlaying ||
         state.isBuffering ||
@@ -2161,7 +2166,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
       const isExpectedPlaybackState = playScope === "segment"
         ? state.currentSegment?.id === currentSegment?.id
         : state.currentSegment !== undefined;
-      if (!state.isPlaying && !state.isBuffering && isExpectedPlaybackState && !reportedCurrentTokenError) {
+      if (!pausedByUserRef.current && !state.isPlaying && !state.isBuffering && isExpectedPlaybackState && !reportedCurrentTokenError) {
         onAutoPlayBlocked?.(playbackErrorRef.current ?? "Your browser blocked automatic audio. Press Play once to continue Hands Free.");
       }
     }, 1200);
@@ -2174,12 +2179,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     autoPlayToken,
     currentSegment,
     getSegmentStartWithPreroll,
+    handsFreeViewport,
     hasSegments,
     initialSession.currentSegmentIndex,
+    initialSession.currentSongId,
     isTapPracticeMode,
     onAutoPlayBlocked,
     playScope,
     session.currentSegmentIndex,
+    session.currentSongId,
     song.segments.length,
     startTapPracticePlayback,
   ]);
@@ -2356,7 +2364,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
         return;
       }
 
-      if (event.key === "r") {
+      if (event.key === "r" && !(playScope === "segment" && onSegmentPlaybackComplete)) {
         event.preventDefault();
         handleToggleLoop();
         return;
@@ -2370,7 +2378,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleTapSegmentNavigation, handleToggleLoop, handleTogglePlay, hasContourReferenceData, isTapPracticeMode, onBreadcrumbRootClick, onNextSong, ratingKeysEnabled, recordKeyboardTap, requestPracticeControlChange, session.currentSegmentIndex]);
+}, [handleNextSegment, handlePrevSegment, handleRateCurrentSegment, handleSkipBy, handleTapSegmentNavigation, handleToggleLoop, handleTogglePlay, hasContourReferenceData, isTapPracticeMode, onBreadcrumbRootClick, onNextSong, onSegmentPlaybackComplete, playScope, ratingKeysEnabled, recordKeyboardTap, requestPracticeControlChange, session.currentSegmentIndex]);
 
   // Keep playback running in place when loop mode is toggled: only change end boundary.
   useEffect(() => {
@@ -2465,47 +2473,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({
     }
 
     lastHandledEndedCountRef.current = endedCount;
-    if (playScope === "song") {
-      onSongPlaybackCompleteRef.current?.();
-      return;
-    }
-
-    if (isTapPracticeMode || !onSegmentPlaybackComplete || !currentSegment || playScope !== "segment") {
-      return;
-    }
-
-    const completionKey = `${currentSegment.id}:${autoPlayToken}:ended:${endedCount}`;
-    if (playbackCompleteNotifiedRef.current === completionKey) {
-      return;
-    }
-
-    playbackCompleteNotifiedRef.current = completionKey;
-    onSegmentPlaybackComplete();
-  }, [autoPlayToken, currentSegment, endedCount, isTapPracticeMode, onSegmentPlaybackComplete, playScope]);
-
-  React.useEffect(() => {
-    if (
-      autoPlayToken <= 0 ||
-      autoPlayTokenHandledRef.current !== autoPlayToken ||
-      isTapPracticeMode ||
-      playScope !== "segment" ||
-      !onSegmentPlaybackComplete ||
-      !currentSegment ||
-      isPlaying ||
-      pausedByUserRef.current ||
-      currentMs < currentSegment.endMs - 50
-    ) {
-      return;
-    }
-
-    const completionKey = `${currentSegment.id}:${autoPlayToken}:boundary-fallback`;
-    if (playbackCompleteNotifiedRef.current === completionKey) {
-      return;
-    }
-
-    playbackCompleteNotifiedRef.current = completionKey;
-    onSegmentPlaybackComplete();
-  }, [autoPlayToken, currentMs, currentSegment, isPlaying, isTapPracticeMode, onSegmentPlaybackComplete, playScope]);
+    if (playScope === "song") onSongPlaybackCompleteRef.current?.();
+  }, [endedCount, playScope]);
 
   React.useEffect(() => {
     if (!isTapPracticeMode || !currentSegment || isPlaying) return;
